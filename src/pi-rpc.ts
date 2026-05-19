@@ -14,6 +14,37 @@ export type PiRpcPromptResult = {
 	output: string;
 };
 
+export type PiRpcProgressEvent =
+	| { type: "started" }
+	| { type: "accepted" }
+	| { type: "tool"; toolName: string }
+	| { type: "assistant_delta"; delta: string }
+	| { type: "ui_request"; request: PiRpcUiRequest }
+	| { type: "ended" };
+
+export type PiRpcUiRequest = {
+	id: string;
+	method:
+		| "select"
+		| "confirm"
+		| "input"
+		| "editor"
+		| "notify"
+		| "setStatus"
+		| "setWidget"
+		| "setTitle"
+		| "set_editor_text";
+	title?: string;
+	message?: string;
+	options?: string[];
+	placeholder?: string;
+	prefill?: string;
+	statusKey?: string;
+	statusText?: string;
+	widgetKey?: string;
+	widgetLines?: string[];
+};
+
 type PendingPrompt = {
 	id: string;
 	resolve: (result: PiRpcPromptResult) => void;
@@ -35,6 +66,7 @@ export class PiRpcSession {
 		| undefined;
 	private starting = false;
 	private generation = 0;
+	private onProgress: ((event: PiRpcProgressEvent) => void) | undefined;
 
 	constructor(private options: PiRpcOptions) {}
 
@@ -50,9 +82,18 @@ export class PiRpcSession {
 		return Boolean(this.pending);
 	}
 
-	async prompt(message: string): Promise<PiRpcPromptResult> {
-		if (this.pending) throw new Error("Ya hay una tarea Pi corriendo.");
+	start(): void {
 		this.ensureStarted();
+	}
+
+	async prompt(
+		message: string,
+		onProgress?: (event: PiRpcProgressEvent) => void,
+	): Promise<PiRpcPromptResult> {
+		if (this.pending) throw new Error("Ya hay una tarea Pi corriendo.");
+		this.onProgress = onProgress;
+		this.ensureStarted();
+		this.emitProgress({ type: "started" });
 
 		const id = `telegram-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 		const text = buildPrompt(message, this.options.modePrefix);
@@ -63,9 +104,16 @@ export class PiRpcSession {
 				this.writeCommand({ id, type: "prompt", message: text });
 			} catch (error) {
 				this.pending = undefined;
+				this.onProgress = undefined;
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
 		});
+	}
+
+	answerUiRequest(value: unknown): boolean {
+		if (!this.child) return false;
+		this.writeCommand(value as Record<string, unknown>);
+		return true;
 	}
 
 	cancel(): boolean {
@@ -90,6 +138,7 @@ export class PiRpcSession {
 		this.pending = undefined;
 		this.pendingCommand?.reject(new Error(reason));
 		this.pendingCommand = undefined;
+		this.onProgress = undefined;
 		if (!child) return;
 		child.kill("SIGTERM");
 		setTimeout(() => {
@@ -209,11 +258,32 @@ export class PiRpcSession {
 			event.id === pending.id
 		) {
 			pending.accepted = Boolean(event.success);
+			if (event.success) this.emitProgress({ type: "accepted" });
 			if (!event.success)
 				this.finishPending(
 					false,
 					event.errorMessage || "Pi rechazó el prompt.",
 				);
+			return;
+		}
+
+		if (event.type === "extension_ui_request") {
+			this.emitProgress({
+				type: "ui_request",
+				request: {
+					id: event.id,
+					method: event.method,
+					title: event.title,
+					message: event.message,
+					options: event.options,
+					placeholder: event.placeholder,
+					prefill: event.prefill,
+					statusKey: event.statusKey,
+					statusText: event.statusText,
+					widgetKey: event.widgetKey,
+					widgetLines: event.widgetLines,
+				},
+			});
 			return;
 		}
 
@@ -223,16 +293,20 @@ export class PiRpcSession {
 			delta?.type === "text_delta" &&
 			this.pending
 		) {
-			this.pending.text += delta.delta ?? "";
+			const textDelta = delta.delta ?? "";
+			this.pending.text += textDelta;
+			if (textDelta) this.emitProgress({ type: "assistant_delta", delta: textDelta });
 			return;
 		}
 
 		if (event.type === "tool_execution_start" && this.pending) {
 			this.pending.text += `\n[tool:${event.toolName}] iniciando...\n`;
+			this.emitProgress({ type: "tool", toolName: event.toolName ?? "tool" });
 			return;
 		}
 
 		if (event.type === "agent_end" && this.pending) {
+			this.emitProgress({ type: "ended" });
 			this.finishPending(true, this.pending.text.trim() || "(sin salida)");
 		}
 	}
@@ -241,7 +315,12 @@ export class PiRpcSession {
 		const pending = this.pending;
 		if (!pending) return;
 		this.pending = undefined;
+		this.onProgress = undefined;
 		pending.resolve({ ok, output });
+	}
+
+	private emitProgress(event: PiRpcProgressEvent): void {
+		this.onProgress?.(event);
 	}
 
 	private failPending(error: Error): void {
@@ -253,6 +332,7 @@ export class PiRpcSession {
 		const pending = this.pending;
 		if (!pending) return;
 		this.pending = undefined;
+		this.onProgress = undefined;
 		pending.reject(error);
 	}
 }

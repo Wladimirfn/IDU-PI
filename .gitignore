@@ -48,3 +48,6 @@ desktop.ini
 .idea/
 .vscode/
 *.iml
+
+# Windows reserved accidental files
+NUL

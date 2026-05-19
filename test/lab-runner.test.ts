@@ -32,10 +32,16 @@ class FakeSession implements AgentSession {
 		public busy = false,
 		private output = "tests pass",
 	) {}
+	start(): void {
+		this.running = true;
+	}
 	async prompt(message: string): Promise<PiRpcPromptResult> {
 		this.running = true;
 		this.promptText = message;
 		return { ok: true, output: this.output };
+	}
+	answerUiRequest(): boolean {
+		return true;
 	}
 	cancel(): boolean {
 		this.cancelled = true;

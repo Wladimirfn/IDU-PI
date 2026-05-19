@@ -32,6 +32,7 @@ import {
 	saveSessionNames,
 	setSessionName,
 } from "./session-names.js";
+import type { PiRpcProgressEvent, PiRpcUiRequest } from "./pi-rpc.js";
 import { oneLine, summarizeSessionFile } from "./session-summary.js";
 import {
 	findRecentSessionsForCwd,
@@ -40,6 +41,12 @@ import {
 	resolveSessionPick,
 	type SessionPick,
 } from "./sessions.js";
+import {
+	formatUiRequestForTelegram,
+	isBlockingUiRequest,
+	parseServerCommand,
+	parseUiRequestAnswer,
+} from "./telegram-ui.js";
 
 const config = loadConfig();
 const bot = new Bot(config.telegramBotToken);
@@ -59,11 +66,13 @@ const agentRouter = new AgentRouter({
 });
 const labReportStore = new LabReportStore(config.agentWorkspaceRoot);
 let pendingLabRequest: { profileIndexes: number[] } | null = null;
+let pendingUiRequest: PiRpcUiRequest | null = null;
 let pendingAction:
 	| "addproject-path"
 	| "useproject-id"
 	| "select-session"
 	| "select-agent"
+	| "extension-ui"
 	| "select-lab-agent"
 	| "select-lab-duration"
 	| null = null;
@@ -422,31 +431,101 @@ async function runPrompt(ctx: Context, prompt: string): Promise<void> {
 	}
 
 	await ctx.reply(
-		`Agente activo: ${runtime.profile.label}\nProyecto target:\n${currentCwd}\nWorkspace:\n${runtime.cwd}\nModo workspace: ${runtime.workspaceKind}`,
+		`Orquestador trabajando: ${runtime.profile.label}\nProyecto target:\n${currentCwd}\nWorkspace:\n${runtime.cwd}\nModo workspace: ${runtime.workspaceKind}`,
 	);
 
+	let lastProgressAt = 0;
+	const progress = (event: PiRpcProgressEvent): void => {
+		if (event.type === "tool") {
+			const now = Date.now();
+			if (now - lastProgressAt > 1500) {
+				lastProgressAt = now;
+				void ctx.reply(`Subtrabajo: usando ${event.toolName}...`);
+			}
+			return;
+		}
+		if (event.type === "ui_request") {
+			if (isBlockingUiRequest(event.request)) {
+				pendingUiRequest = event.request;
+				pendingAction = "extension-ui";
+				void ctx.reply(formatUiRequestForTelegram(event.request));
+				return;
+			}
+			if (event.request.method === "notify") {
+				void ctx.reply(formatUiRequestForTelegram(event.request));
+			}
+			return;
+		}
+		if (event.type === "ended") {
+			void ctx.reply("Orquestador: cerrando respuesta y preparando resumen final...");
+		}
+	};
+
 	try {
-		const result = await agentRouter.prompt(prompt);
+		const result = await agentRouter.prompt(prompt, progress);
+		pendingUiRequest = null;
+		if (pendingAction === "extension-ui") pendingAction = null;
 		const prefix = result.ok ? "✅ Pi terminó" : "⚠️ Pi terminó con error";
 		await replyLong(ctx, `${prefix}\n\n${result.output}`);
 	} catch (error) {
+		pendingUiRequest = null;
+		if (pendingAction === "extension-ui") pendingAction = null;
 		const message = error instanceof Error ? error.message : String(error);
 		await ctx.reply(`Error inesperado: ${message}`);
 	}
 }
 
+function formatServerStatus(): string {
+	const runtime = agentRouter.activeRuntime();
+	return `Estado agente activo: ${runtime.session.busy ? "ocupado" : "libre"}\nRPC agente activo: ${runtime.session.running ? "iniciado" : "en espera"}\nPID bridge: ${process.pid}\nProyecto: ${activeProjectLabel()}\nAgente: ${runtime.profile.label} (${runtime.profile.id})\nProyecto target: ${currentCwd}\nWorkspace: ${runtime.cwd}\nModo workspace: ${runtime.workspaceKind}\nModo agente activo: ${runtime.modePrefix || "default"}`;
+}
+
 bot.command("help", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	await ctx.reply(
-		`Comandos:\n/projects - listar proyectos guardados\n/addproject <id> <ruta> - agregar proyecto\n/useproject <id> - cambiar proyecto activo\n/where - ver proyecto activo\n/trabajos - elegir trabajo reciente\n/ver T<n> - ver preview del trabajo\n/nametrabajo T<n> <nombre> - nombrar trabajo\n/resume T<n> - retomar trabajo listado\n/last - retomar último trabajo del proyecto activo\n/status - ver estado RPC\n/doctor - diagnosticar configuración local\n/agents - elegir agente/modelo\n/testlab [profundidad] - tests en agentes lab\n/testlab1 - explicar por qué agente 1 no usa lab\n/testlab2 [profundidad] - tests en agente 2\n/testlab3 [profundidad] - tests en agente 3\n/gentest_model_lab - elegir agente lab y profundidad\n/triagereports - evaluar reportes lab\n/reports - listar reportes lab\n/report <id> - ver/decidir reporte lab\n/syncreports - guardar decisiones aprobadas en Engram\n/resumen [n] - resumen del proyecto o trabajo\n/mem <query> - buscar contexto en Engram vía Pi\n/mode interactive|auto|clear - ajustar orquestación\n/cancel - cancelar tarea actual\n\nDespués de /trabajos usá T1, T2...; en otros menús seguí la instrucción visible.`,
+		`Comandos:\n/projects - listar proyectos guardados\n/addproject <id> <ruta> - agregar proyecto\n/useproject <id> - cambiar proyecto activo\n/where - ver proyecto activo\n/trabajos - elegir trabajo reciente\n/ver T<n> - ver preview del trabajo\n/nametrabajo T<n> <nombre> - nombrar trabajo\n/resume T<n> - retomar trabajo listado\n/last - retomar último trabajo del proyecto activo\n/status - ver estado RPC\n/server status|run|restart|off - controlar RPC activo\n/doctor - diagnosticar configuración local\n/agents - elegir agente/modelo\n/testlab [profundidad] - tests en agentes lab\n/testlab1 - explicar por qué agente 1 no usa lab\n/testlab2 [profundidad] - tests en agente 2\n/testlab3 [profundidad] - tests en agente 3\n/gentest_model_lab - elegir agente lab y profundidad\n/triagereports - evaluar reportes lab\n/reports - listar reportes lab\n/report <id> - ver/decidir reporte lab\n/syncreports - guardar decisiones aprobadas en Engram\n/resumen [n] - resumen del proyecto o trabajo\n/mem <query> - buscar contexto en Engram vía Pi\n/mode interactive|auto|clear - ajustar orquestación\n/cancel - cancelar tarea actual\n\nDespués de /trabajos usá T1, T2...; en otros menús seguí la instrucción visible.`,
 	);
 });
 
 bot.command("status", async (ctx) => {
 	if (!(await guard(ctx))) return;
-	const runtime = agentRouter.activeRuntime();
+	await ctx.reply(formatServerStatus());
+});
+
+bot.command("server", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const command = parseServerCommand(ctx.message?.text ?? "");
+	if (!command) {
+		await ctx.reply("Uso: /server status | run | restart | off");
+		return;
+	}
+	if (command === "status") {
+		await ctx.reply(formatServerStatus());
+		return;
+	}
+	if (command === "run") {
+		const runtime = agentRouter.startActive();
+		await ctx.reply(
+			`Servidor Pi activo iniciado/en espera.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
+		);
+		return;
+	}
+	if (command === "restart") {
+		const runtime = agentRouter.restartActive();
+		pendingUiRequest = null;
+		if (pendingAction === "extension-ui") pendingAction = null;
+		await ctx.reply(
+			`Servidor Pi reiniciado.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
+		);
+		return;
+	}
+	const stopped = agentRouter.stopActive();
+	pendingUiRequest = null;
+	if (pendingAction === "extension-ui") pendingAction = null;
 	await ctx.reply(
-		`Estado agente activo: ${runtime.session.busy ? "ocupado" : "libre"}\nRPC agente activo: ${runtime.session.running ? "iniciado" : "en espera"}\nPID bridge: ${process.pid}\nProyecto: ${activeProjectLabel()}\nAgente: ${runtime.profile.label} (${runtime.profile.id})\nProyecto target: ${currentCwd}\nWorkspace: ${runtime.cwd}\nModo workspace: ${runtime.workspaceKind}\nModo agente activo: ${runtime.modePrefix || "default"}`,
+		stopped
+			? "Servidor Pi activo detenido."
+			: "El servidor Pi activo ya estaba detenido.",
 	);
 });
 
@@ -860,6 +939,7 @@ bot.command("cancel", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	pendingAction = null;
 	pendingLabRequest = null;
+	pendingUiRequest = null;
 	const cancelledActive = agentRouter.cancelActive();
 	const cancelledLabs = agentRouter.cancelProfiles(
 		agentRouter.labProfiles().map((profile) => profile.id),
@@ -914,6 +994,28 @@ bot.on("message:text", async (ctx) => {
 			const message = error instanceof Error ? error.message : String(error);
 			await ctx.reply(message);
 		}
+		return;
+	}
+
+	if (pendingAction === "extension-ui") {
+		if (!pendingUiRequest) {
+			pendingAction = null;
+			await ctx.reply("No hay decisión pendiente. Mandá tu próximo mensaje normal.");
+			return;
+		}
+		const response = parseUiRequestAnswer(pendingUiRequest, text);
+		if (!response) {
+			await ctx.reply(formatUiRequestForTelegram(pendingUiRequest));
+			return;
+		}
+		const sent = agentRouter.answerActiveUiRequest(response);
+		if (!sent) {
+			await ctx.reply("No pude enviar la decisión porque el servidor Pi no está activo.");
+			return;
+		}
+		pendingUiRequest = null;
+		pendingAction = null;
+		await ctx.reply("Decisión enviada al orquestador.");
 		return;
 	}
 

@@ -1,86 +1,130 @@
 # Idu-pi
 
-Telegram bridge for controlling a local Pi coding-agent session from a private Telegram bot.
+Bridge de Telegram para controlar una sesión local de Pi desde un bot privado.
 
-## What it does
+## Qué hace
 
-- Accepts messages only from `ALLOWED_USER_ID`.
-- Sends prompts to a persistent Pi RPC session.
-- Returns Pi output to Telegram.
-- Supports project/session commands such as `/projects`, `/useproject`, `/trabajos`, `/ver`, `/resume`, `/last`, `/resumen`, `/mem`, `/agents`, and `/testlab`.
-- Keeps secrets and local runtime state outside Git.
+- Acepta mensajes sólo desde `ALLOWED_USER_ID`.
+- Envía prompts a una sesión persistente de Pi en modo RPC.
+- Devuelve la salida de Pi al chat de Telegram.
+- Permite elegir proyectos, agentes/modelos y trabajos recientes.
+- Puede reenviar decisiones interactivas de Pi, por ejemplo confirmaciones tipo “Allow guarded command?”.
+- Muestra mini reportes de avance mientras el orquestador trabaja.
+- Mantiene secretos y estado local fuera de Git.
 
-## Requirements
+## Requisitos
 
-- Node.js with Corepack enabled.
-- Pi CLI installed locally.
-- A Telegram bot token from BotFather.
-- Your numeric Telegram user id from `@userinfobot`.
+- Node.js con Corepack habilitado.
+- Pi CLI instalado localmente.
+- Token de bot creado con BotFather.
+- Tu id numérico de Telegram desde `@userinfobot`.
 
-## Quick setup on Windows
+## Instalación rápida en Windows
 
-First run:
+Primera configuración:
 
 ```text
 setup-pi-telegram-bridge.bat
 ```
 
-Normal start:
+Arranque normal:
 
 ```text
 start-pi-telegram-bridge.bat
 ```
 
-The startup script validates `.env`, installs dependencies if needed, builds the project, and starts the bot.
+El script de arranque valida `.env`, instala dependencias si faltan, compila el proyecto e inicia el bot.
 
-## Manual setup
+## Instalación manual
 
 ```bash
 corepack pnpm install
 cp .env.example .env
 ```
 
-Edit `.env` with your real local values:
+Editá `.env` con tus valores reales:
 
 ```env
-TELEGRAM_BOT_TOKEN=replace_with_botfather_token
+TELEGRAM_BOT_TOKEN=token_de_botfather
 ALLOWED_USER_ID=123456789
-DEFAULT_CWD=/absolute/path/to/your/project
-ALLOWED_ROOTS=/absolute/path/to/your/project
+DEFAULT_CWD=/ruta/absoluta/a/tu/proyecto
+ALLOWED_ROOTS=/ruta/absoluta/a/tu/proyecto
 PI_BIN=pi
 PI_EXTRA_ARGS=--no-skill-registry --no-lens
 PI_AGENT_PROFILES=default|Pi default
-AGENT_WORKSPACE_ROOT=/absolute/path/to/bridge-agents
+AGENT_WORKSPACE_ROOT=/ruta/absoluta/a/bridge-agents
 AGENT_WORKSPACE_MODE=clone
 ```
 
-Then run:
+Después ejecutá:
 
 ```bash
 corepack pnpm dev
 ```
 
-## Telegram usage
+## Uso en Telegram
 
 ```text
 /doctor
+/status
+/server status
+/server run
+/server restart
+/server off
 /agents
 /useproject
 /trabajos
 /ver T1
-/nametrabajo T1 maintenance
+/nametrabajo T1 mantenimiento
 /resume T1
 /resumen
 /mem login auth
 /mode interactive
-fix the tests in this project
+arreglá los tests de este proyecto
 ```
 
-`/trabajos` uses explicit work-session selectors like `T1`, `T2`, etc. Other menus may use their own numeric or id-based selectors.
+## Comandos principales
 
-## Test labs
+### `/trabajos`
 
-Lab agents run in clone workspaces. The default/direct profile is excluded from lab execution.
+Lista trabajos recientes del proyecto activo. Los trabajos usan selectores explícitos como `T1`, `T2`, etc. También podés responder `A`, `activo` o `esta sesión` para seguir con el agente activo.
+
+### `/server status|run|restart|off`
+
+Controla el servidor Pi RPC activo:
+
+- `/server status`: muestra estado del bridge, RPC, proyecto y agente activo.
+- `/server run`: inicia o deja listo el RPC activo sin mandar un prompt nuevo.
+- `/server restart`: reinicia el RPC activo.
+- `/server off`: detiene el RPC activo.
+
+Nota: si el proceso del bot de Telegram está completamente caído, no puede recibir comandos. Para auto-recuperación completa hace falta correrlo bajo un supervisor externo, por ejemplo un servicio de Windows o una tarea programada.
+
+### Decisiones interactivas
+
+Si Pi emite una solicitud de UI en RPC, el bridge la reenvía a Telegram. Ejemplos:
+
+- confirmación: respondé `sí` o `no`;
+- selección: respondé `U1`, `U2`, etc.;
+- texto libre: respondé con el texto solicitado.
+
+Esto cubre prompts de aprobación cuando Pi los expone como eventos RPC `extension_ui_request`.
+
+### Mini reportes de avance
+
+Mientras el orquestador trabaja, el bot puede enviar mensajes breves como:
+
+```text
+Orquestador trabajando: Pi default
+Subtrabajo: usando bash...
+Orquestador: cerrando respuesta y preparando resumen final...
+```
+
+La intención es dar visibilidad sin llenar el chat con cada token de salida.
+
+## Laboratorios de tests
+
+Los agentes lab corren en workspaces `clone`. El perfil default/direct queda excluido de ejecución lab.
 
 ```text
 /testlab quick
@@ -97,32 +141,32 @@ Lab agents run in clone workspaces. The default/direct profile is excluded from 
 /syncreports
 ```
 
-Valid depths: `quick`, `3tests`, `5tests`, `full`.
+Profundidades válidas: `quick`, `3tests`, `5tests`, `full`.
 
-## Agent profiles
+## Perfiles de agente/modelo
 
-Configure selectable Pi profiles with `PI_AGENT_PROFILES`:
+Configurá perfiles seleccionables de Pi con `PI_AGENT_PROFILES`:
 
 ```env
 PI_AGENT_PROFILES=default|Pi default;codex|GPT Codex|--model provider/model
 ```
 
-Format:
+Formato:
 
 ```text
-id|Visible label|optional extra args;other_id|Other label|optional args
+id|Nombre visible|argumentos extra opcionales;otro_id|Otro nombre|argumentos extra
 ```
 
-Each Pi profile keeps its own persistent RPC session per project.
+Cada perfil Pi mantiene su propia sesión RPC persistente por proyecto.
 
-## Security
+## Seguridad
 
-- Never commit `.env`.
-- Never commit bot tokens, API keys, local project registries, or runtime state.
-- Keep `ALLOWED_ROOTS` as narrow as possible.
-- Prefer `/mode interactive` for risky operations.
+- Nunca subas `.env`.
+- Nunca subas tokens de bot, API keys, registros locales de proyectos ni estado runtime.
+- Mantené `ALLOWED_ROOTS` lo más limitado posible.
+- Usá `/mode interactive` para operaciones riesgosas.
 
-## Development
+## Desarrollo
 
 ```bash
 corepack pnpm build

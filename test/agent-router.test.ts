@@ -9,13 +9,23 @@ class FakeSession implements AgentSession {
 	prompts: string[] = [];
 	cancelled = false;
 	stopped = false;
+	uiAnswers: unknown[] = [];
 
 	constructor(public cwd: string) {}
+
+	start(): void {
+		this.running = true;
+	}
 
 	async prompt(message: string): Promise<PiRpcPromptResult> {
 		this.running = true;
 		this.prompts.push(message);
 		return { ok: true, output: `ok:${message}` };
+	}
+
+	answerUiRequest(value: unknown): boolean {
+		this.uiAnswers.push(value);
+		return true;
 	}
 
 	cancel(): boolean {
@@ -161,4 +171,22 @@ test("existing clone runtime re-syncs workspace before reuse", () => {
 	router.activeRuntime();
 
 	assert.deepEqual(syncs, ["project-a:codex", "project-a:codex"]);
+});
+
+test("server lifecycle starts, restarts, stops, and answers active UI", () => {
+	const { router, created } = createRouter();
+
+	router.startActive();
+	assert.equal(created[0].session.running, true);
+
+	assert.equal(router.answerActiveUiRequest({ confirmed: true }), true);
+	assert.deepEqual(created[0].session.uiAnswers, [{ confirmed: true }]);
+
+	router.restartActive();
+	assert.equal(created[0].session.stopped, true);
+	assert.equal(created.length, 2);
+	assert.equal(created[1].session.running, true);
+
+	assert.equal(router.stopActive(), true);
+	assert.equal(created[1].session.stopped, true);
 });

@@ -5,6 +5,7 @@ import type { AgentProfile, AgentWorkspaceMode } from "./config.js";
 import {
 	PiRpcSession,
 	type PiRpcOptions,
+	type PiRpcProgressEvent,
 	type PiRpcPromptResult,
 } from "./pi-rpc.js";
 
@@ -12,7 +13,9 @@ export type AgentSession = {
 	readonly cwd: string;
 	readonly running: boolean;
 	readonly busy: boolean;
-	prompt(message: string): Promise<PiRpcPromptResult>;
+	start(): void;
+	prompt(message: string, onProgress?: (event: PiRpcProgressEvent) => void): Promise<PiRpcPromptResult>;
+	answerUiRequest(value: unknown): boolean;
 	cancel(): boolean;
 	stop(reason?: string): void;
 };
@@ -219,8 +222,33 @@ export class AgentRouter {
 		return profile;
 	}
 
-	async prompt(message: string): Promise<PiRpcPromptResult> {
-		return this.activeRuntime().session.prompt(message);
+	startActive(): AgentRuntime {
+		const runtime = this.activeRuntime();
+		runtime.session.start();
+		return runtime;
+	}
+
+	async prompt(
+		message: string,
+		onProgress?: (event: PiRpcProgressEvent) => void,
+	): Promise<PiRpcPromptResult> {
+		return this.activeRuntime().session.prompt(message, onProgress);
+	}
+
+	answerActiveUiRequest(value: unknown): boolean {
+		return this.activeRuntime().session.answerUiRequest(value);
+	}
+
+	restartActive(): AgentRuntime {
+		this.resetActiveSession();
+		return this.startActive();
+	}
+
+	stopActive(reason = "Servidor Pi detenido desde Telegram."): boolean {
+		const runtime = this.activeRuntime();
+		const hadRuntime = runtime.session.running || runtime.session.busy;
+		runtime.session.stop(reason);
+		return hadRuntime;
 	}
 
 	cancelActive(): boolean {
