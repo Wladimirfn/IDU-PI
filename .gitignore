@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build/test output
+dist/
+build/
+coverage/
+.nyc_output/
+test-results/
+.pi-lens/
+*.tsbuildinfo
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+credentials.json
+serviceAccountKey.json
+
+# Local runtime state
+data/
+.atl/
+.pi/
+openspec/
+
+# Local notes / generated plans
+plan.md
+false
+
+# Logs and temp files
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.temp
+*.cache
+*.swp
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.iml

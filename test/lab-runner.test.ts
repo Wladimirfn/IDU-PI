@@ -1,0 +1,126 @@
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
+import { AgentRouter, type AgentSession } from "../src/agent-router.js";
+import { parseLabDuration, runTestLab } from "../src/lab.js";
+import { LabReportStore } from "../src/lab-reports.js";
+import type { PiRpcOptions, PiRpcPromptResult } from "../src/pi-rpc.js";
+
+const tempRoots: string[] = [];
+
+function tempDir(): string {
+	const dir = mkdtempSync(join(tmpdir(), "pi-telegram-lab-runner-"));
+	tempRoots.push(dir);
+	return dir;
+}
+
+after(async () => {
+	await Promise.all(
+		tempRoots.map((dir) => rm(dir, { recursive: true, force: true })),
+	);
+});
+
+class FakeSession implements AgentSession {
+	running = false;
+	cancelled = false;
+	promptText = "";
+	constructor(
+		public cwd: string,
+		public busy = false,
+		private output = "tests pass",
+	) {}
+	async prompt(message: string): Promise<PiRpcPromptResult> {
+		this.running = true;
+		this.promptText = message;
+		return { ok: true, output: this.output };
+	}
+	cancel(): boolean {
+		this.cancelled = true;
+		return true;
+	}
+	stop(): void {}
+}
+
+const quickDepth = parseLabDuration("quick")!;
+
+function routerWithSession(
+	session: FakeSession,
+	workspaceKind: "direct" | "clone" = "clone",
+) {
+	const router = new AgentRouter({
+		piBin: "node",
+		basePiArgs: ["pi-cli.js"],
+		profiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "spark", label: "Spark", provider: "pi", piArgs: [] },
+		],
+		defaultProjectId: "p",
+		defaultCwd: "C:/p",
+		workspaceMode: workspaceKind === "clone" ? "clone" : "direct",
+		workspaceRoot: "C:/w",
+		resolveWorkspace: () => session.cwd,
+		createSession: (_options: PiRpcOptions) => session,
+	});
+	return router;
+}
+
+test("runTestLab persists completed report and prompt constraints", async () => {
+	const session = new FakeSession("C:/w/spark");
+	const store = new LabReportStore(tempDir());
+	const router = routerWithSession(session);
+	const profile = router.labProfiles()[0];
+
+	const record = await runTestLab({
+		router,
+		profile,
+		duration: quickDepth,
+		projectId: "p",
+		projectPath: "C:/p",
+		store,
+	});
+
+	assert.equal(record.status, "completed");
+	assert.match(session.promptText, /No hagas commit/);
+	assert.equal(store.get(record.id)?.rawOutput, "tests pass");
+});
+
+test("runTestLab skips busy agent and persists skipped report", async () => {
+	const session = new FakeSession("C:/w/spark", true);
+	const store = new LabReportStore(tempDir());
+	const router = routerWithSession(session);
+	const profile = router.labProfiles()[0];
+
+	const record = await runTestLab({
+		router,
+		profile,
+		duration: quickDepth,
+		projectId: "p",
+		projectPath: "C:/p",
+		store,
+	});
+
+	assert.equal(record.status, "skipped");
+	assert.match(record.summary, /ocupado/);
+});
+
+test("runTestLab skips direct workspace", async () => {
+	const session = new FakeSession("C:/p");
+	const store = new LabReportStore(tempDir());
+	const router = routerWithSession(session, "direct");
+	const profile = router.labProfiles()[0];
+
+	const record = await runTestLab({
+		router,
+		profile,
+		duration: quickDepth,
+		projectId: "p",
+		projectPath: "C:/p",
+		store,
+	});
+
+	assert.equal(record.status, "skipped");
+	assert.match(record.summary, /no usa workspace clone/);
+});
