@@ -242,6 +242,10 @@ export class AgentRouter {
 		return this.activeRuntime().session.answerUiRequest(value);
 	}
 
+	answerUiRequestForRuntime(runtime: AgentRuntime, value: unknown): boolean {
+		return runtime.session.answerUiRequest(value);
+	}
+
 	restartActive(): AgentRuntime {
 		this.resetActiveSession();
 		return this.startActive();

@@ -1,7 +1,11 @@
 import { Bot, type Context } from "grammy";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { AgentRouter, formatAgentProfiles } from "./agent-router.js";
+import {
+	AgentRouter,
+	formatAgentProfiles,
+	type AgentRuntime,
+} from "./agent-router.js";
 import { chunkTelegramText } from "./chunk.js";
 import { formatCommandCatalog, formatHelpText } from "./command-catalog.js";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
@@ -88,8 +92,10 @@ const agentRouter = new AgentRouter({
 const labReportStore = new LabReportStore(config.agentWorkspaceRoot);
 const taskQueue = new TaskQueue();
 let taskQueueGeneration = 0;
+let activePromptInFlight = false;
 let pendingLabRequest: { profileIndexes: number[] } | null = null;
 let pendingUiRequest: PiRpcUiRequest | null = null;
+let pendingUiRuntime: AgentRuntime | null = null;
 let pendingUiToken: string | null = null;
 let pendingUiCounter = 0;
 let pendingAction:
@@ -103,6 +109,13 @@ let pendingAction:
 	| null = null;
 let lastProjectChoices: string[] = [];
 let lastSessionPicks: SessionPick[] = [];
+
+function clearPendingUiRequest(): void {
+	pendingUiRequest = null;
+	pendingUiRuntime = null;
+	pendingUiToken = null;
+	if (pendingAction === "extension-ui") pendingAction = null;
+}
 
 function projectIdForCwd(path: string): string {
 	return registry.projects.find((project) => project.path === path)?.id ?? path;
@@ -477,14 +490,14 @@ async function runPrompt(
 	options: { fromQueue?: boolean } = {},
 ): Promise<void> {
 	const runtime = agentRouter.activeRuntime();
-	if (runtime.session.busy) {
+	if (activePromptInFlight || runtime.session.busy) {
 		if (isNaturalCancelRequest(prompt)) {
 			pendingAction = null;
 			pendingLabRequest = null;
-			pendingUiRequest = null;
-			pendingUiToken = null;
+			clearPendingUiRequest();
 			const queued = taskQueue.clear();
 			taskQueueGeneration++;
+			activePromptInFlight = false;
 			const cancelled = agentRouter.cancelActive();
 			await ctx.reply(
 				cancelled
@@ -503,9 +516,15 @@ async function runPrompt(
 		return;
 	}
 
+	activePromptInFlight = true;
+	const generation = taskQueueGeneration;
 	await ctx.reply(
 		`Orquestador trabajando: ${runtime.profile.label}\nProyecto target:\n${currentCwd}\nWorkspace:\n${runtime.cwd}\nModo workspace: ${runtime.workspaceKind}`,
 	);
+	if (generation !== taskQueueGeneration) {
+		activePromptInFlight = false;
+		return;
+	}
 
 	let lastProgressAt = 0;
 	const progress = (event: PiRpcProgressEvent): void => {
@@ -520,6 +539,7 @@ async function runPrompt(
 		if (event.type === "ui_request") {
 			if (isBlockingUiRequest(event.request)) {
 				pendingUiRequest = event.request;
+				pendingUiRuntime = runtime;
 				pendingUiToken = String(++pendingUiCounter);
 				pendingAction = "extension-ui";
 				void ctx.reply(formatUiRequestForTelegram(event.request), {
@@ -544,9 +564,7 @@ async function runPrompt(
 
 	try {
 		const result = await agentRouter.prompt(prompt, progress);
-		pendingUiRequest = null;
-		pendingUiToken = null;
-		if (pendingAction === "extension-ui") pendingAction = null;
+		clearPendingUiRequest();
 		const prefix = result.ok ? "✅ Pi terminó" : "⚠️ Pi terminó con error";
 		await replyLong(ctx, `${prefix}\n\n${result.output}`);
 		if (!options.fromQueue && taskQueue.size) {
@@ -555,11 +573,19 @@ async function runPrompt(
 			await drainTaskQueue(ctx, taskQueueGeneration);
 		}
 	} catch (error) {
-		pendingUiRequest = null;
-		pendingUiToken = null;
-		if (pendingAction === "extension-ui") pendingAction = null;
+		clearPendingUiRequest();
 		const message = error instanceof Error ? error.message : String(error);
-		await ctx.reply(`Error inesperado: ${message}`);
+		if (/Cancelado por el usuario/u.test(message)) {
+			await ctx.reply("Tarea cancelada.");
+		} else if (/Ya hay una tarea Pi corriendo/u.test(message)) {
+			await ctx.reply(
+				"Ya hay una tarea Pi corriendo. No inicié otra instancia; usá /cancel para detenerla o /queue para ver la cola.",
+			);
+		} else {
+			await ctx.reply(`Error inesperado: ${message}`);
+		}
+	} finally {
+		activePromptInFlight = false;
 	}
 }
 
@@ -574,7 +600,7 @@ function dashboardState() {
 		workspace: runtime.cwd,
 		workspaceKind: runtime.workspaceKind,
 		rpcRunning: runtime.session.running,
-		busy: runtime.session.busy,
+		busy: activePromptInFlight || runtime.session.busy,
 		modePrefix: runtime.modePrefix,
 		lastSessionCount: lastSessionPicks.length,
 	};
@@ -626,7 +652,7 @@ bot.command(["review", "fix_tests", "audit"], async (ctx) => {
 		await ctx.reply("Comando rápido no reconocido.");
 		return;
 	}
-	await runPrompt(ctx, prompt);
+	void runPrompt(ctx, prompt);
 });
 
 bot.command("safe_push", async (ctx) => {
@@ -647,7 +673,7 @@ bot.command("task", async (ctx) => {
 		await ctx.reply(formatTaskTemplateHelp());
 		return;
 	}
-	await runPrompt(ctx, prompt);
+	void runPrompt(ctx, prompt);
 });
 
 bot.command("server", async (ctx) => {
@@ -670,18 +696,14 @@ bot.command("server", async (ctx) => {
 	}
 	if (command === "restart") {
 		const runtime = agentRouter.restartActive();
-		pendingUiRequest = null;
-		pendingUiToken = null;
-		if (pendingAction === "extension-ui") pendingAction = null;
+		clearPendingUiRequest();
 		await ctx.reply(
 			`Servidor Pi reiniciado.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
 		);
 		return;
 	}
 	const stopped = agentRouter.stopActive();
-	pendingUiRequest = null;
-	pendingUiToken = null;
-	if (pendingAction === "extension-ui") pendingAction = null;
+	clearPendingUiRequest();
 	await ctx.reply(
 		stopped
 			? "Servidor Pi activo detenido."
@@ -1073,7 +1095,7 @@ bot.command("resumen", async (ctx) => {
 		await showSessionPreview(ctx, pick);
 		return;
 	}
-	await runPrompt(
+	void runPrompt(
 		ctx,
 		`Proyecto activo del bot: ${activeProjectLabel()}\n\nHacé un resumen breve de la sesión/proyecto actual: objetivo, decisiones, archivos relevantes, próximos pasos y riesgos. Si Engram está disponible, guardá un resumen de sesión o memoria relevante antes de responder. Si detectás otro proyecto distinto, avisá la discrepancia.`,
 	);
@@ -1086,7 +1108,7 @@ bot.command("mem", async (ctx) => {
 		await ctx.reply("Uso: /mem texto a buscar");
 		return;
 	}
-	await runPrompt(
+	void runPrompt(
 		ctx,
 		`Buscá en Engram memoria relevante sobre: ${query}. Resumí solo lo encontrado y decime si no hay resultados.`,
 	);
@@ -1134,10 +1156,10 @@ bot.command("cancel", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	pendingAction = null;
 	pendingLabRequest = null;
-	pendingUiRequest = null;
-	pendingUiToken = null;
+	clearPendingUiRequest();
 	taskQueue.clear();
 	taskQueueGeneration++;
+	activePromptInFlight = false;
 	const cancelledActive = agentRouter.cancelActive();
 	const cancelledLabs = agentRouter.cancelProfiles(
 		agentRouter.labProfiles().map((profile) => profile.id),
@@ -1162,6 +1184,7 @@ async function sendPendingUiResponse(
 ): Promise<boolean> {
 	if (!pendingUiRequest) {
 		pendingAction = null;
+		pendingUiRuntime = null;
 		pendingUiToken = null;
 		await ctx.reply(
 			"No hay decisión pendiente. Mandá tu próximo mensaje normal.",
@@ -1177,7 +1200,9 @@ async function sendPendingUiResponse(
 		});
 		return true;
 	}
-	const sent = agentRouter.answerActiveUiRequest(response);
+	const sent = pendingUiRuntime
+		? agentRouter.answerUiRequestForRuntime(pendingUiRuntime, response)
+		: agentRouter.answerActiveUiRequest(response);
 	if (!sent) {
 		await ctx.reply(
 			"No pude enviar la decisión porque el servidor Pi no está activo.",
@@ -1185,6 +1210,7 @@ async function sendPendingUiResponse(
 		return true;
 	}
 	pendingUiRequest = null;
+	pendingUiRuntime = null;
 	pendingUiToken = null;
 	pendingAction = null;
 	await ctx.reply("Decisión enviada al orquestador.");
@@ -1326,7 +1352,7 @@ bot.on("message:text", async (ctx) => {
 		return;
 	}
 
-	await runPrompt(ctx, text);
+	void runPrompt(ctx, text);
 });
 
 bot.catch((error) => {

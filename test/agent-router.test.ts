@@ -190,3 +190,19 @@ test("server lifecycle starts, restarts, stops, and answers active UI", () => {
 	assert.equal(router.stopActive(), true);
 	assert.equal(created[1].session.stopped, true);
 });
+
+test("answers UI requests on the runtime that created them", async () => {
+	const { router, created } = createRouter();
+
+	const defaultRuntime = router.activeRuntime();
+	await router.prompt("needs confirm");
+	router.select("codex");
+	await router.prompt("other active work");
+
+	assert.equal(
+		router.answerUiRequestForRuntime(defaultRuntime, { confirmed: true }),
+		true,
+	);
+	assert.deepEqual(created[0].session.uiAnswers, [{ confirmed: true }]);
+	assert.deepEqual(created[1].session.uiAnswers, []);
+});
