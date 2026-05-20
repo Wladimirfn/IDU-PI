@@ -33,6 +33,7 @@ import {
 	stripEngramNoise,
 	summarizeOutput,
 } from "./lab-reports.js";
+import { formatInitLabDbResult, initLabDb } from "./lab-db.js";
 import { findPiProcesses } from "./processes.js";
 import {
 	addProject,
@@ -615,6 +616,10 @@ function formatServerStatus(): string {
 	return `Estado agente activo: ${state.busy ? "ocupado" : "libre"}\nRPC agente activo: ${state.rpcRunning ? "iniciado" : "en espera"}\nPID bridge: ${state.bridgePid}\nProyecto: ${state.projectLabel}\nAgente: ${state.agentLabel} (${state.agentId})\nProyecto target: ${state.currentCwd}\nWorkspace: ${state.workspace}\nModo workspace: ${state.workspaceKind}\nModo agente activo: ${state.modePrefix || "default"}`;
 }
 
+function labDbPath(): string {
+	return join(config.agentWorkspaceRoot, "reports", "lab.db");
+}
+
 function sourceSkillsDir(): string | undefined {
 	const sourceProject = registry.projects.find(
 		(project) => project.id === "sistema_de_mantencion",
@@ -775,6 +780,10 @@ bot.command("config", async (ctx) => {
 		await replyLong(ctx, formatInitAssetsResult(initProjectAssets(currentCwd)));
 		return;
 	}
+	if (arg === "db_init") {
+		await replyLong(ctx, formatInitLabDbResult(initLabDb(labDbPath())));
+		return;
+	}
 	if (arg === "skills_sync") {
 		const source = sourceSkillsDir();
 		if (!source) {
@@ -787,7 +796,7 @@ bot.command("config", async (ctx) => {
 		return;
 	}
 	await ctx.reply(
-		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config skills_sync",
+		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config skills_sync | /config db_init",
 	);
 });
 

@@ -81,13 +81,14 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 	{
 		command: "config",
 		description: "Configuración guiada del proyecto",
-		help: "/config [doctor|init_workspace|init_assets|skills_sync] - configuración guiada del bridge/proyecto",
+		help: "/config [doctor|init_workspace|init_assets|skills_sync|db_init] - configuración guiada del bridge/proyecto",
 		usage: [
 			"/config",
 			"/config doctor",
 			"/config init_workspace",
 			"/config init_assets",
 			"/config skills_sync",
+			"/config db_init",
 		],
 	},
 	{

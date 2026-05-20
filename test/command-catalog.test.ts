@@ -10,7 +10,7 @@ import {
 test("formatHelpText includes primary Telegram commands", () => {
 	const text = formatHelpText();
 
-	assert.match(text, /\/config \[doctor\|init_workspace\|init_assets\|skills_sync\]/);
+	assert.match(text, /\/config \[doctor\|init_workspace\|init_assets\|skills_sync\|db_init\]/);
 	assert.match(text, /\/comandos/);
 	assert.match(text, /\/testlab \[profundidad\]/);
 });
