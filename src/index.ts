@@ -27,6 +27,10 @@ import {
 	setActiveProject,
 } from "./projects.js";
 import {
+	buildDashboardText,
+	buildQuickCommandPrompt,
+} from "./quick-commands.js";
+import {
 	getSessionName,
 	loadSessionNames,
 	saveSessionNames,
@@ -486,21 +490,54 @@ async function runPrompt(ctx: Context, prompt: string): Promise<void> {
 	}
 }
 
-function formatServerStatus(): string {
+function dashboardState() {
 	const runtime = agentRouter.activeRuntime();
-	return `Estado agente activo: ${runtime.session.busy ? "ocupado" : "libre"}\nRPC agente activo: ${runtime.session.running ? "iniciado" : "en espera"}\nPID bridge: ${process.pid}\nProyecto: ${activeProjectLabel()}\nAgente: ${runtime.profile.label} (${runtime.profile.id})\nProyecto target: ${currentCwd}\nWorkspace: ${runtime.cwd}\nModo workspace: ${runtime.workspaceKind}\nModo agente activo: ${runtime.modePrefix || "default"}`;
+	return {
+		bridgePid: process.pid,
+		projectLabel: activeProjectLabel(),
+		currentCwd,
+		agentLabel: runtime.profile.label,
+		agentId: runtime.profile.id,
+		workspace: runtime.cwd,
+		workspaceKind: runtime.workspaceKind,
+		rpcRunning: runtime.session.running,
+		busy: runtime.session.busy,
+		modePrefix: runtime.modePrefix,
+		lastSessionCount: lastSessionPicks.length,
+	};
+}
+
+function formatServerStatus(): string {
+	const state = dashboardState();
+	return `Estado agente activo: ${state.busy ? "ocupado" : "libre"}\nRPC agente activo: ${state.rpcRunning ? "iniciado" : "en espera"}\nPID bridge: ${state.bridgePid}\nProyecto: ${state.projectLabel}\nAgente: ${state.agentLabel} (${state.agentId})\nProyecto target: ${state.currentCwd}\nWorkspace: ${state.workspace}\nModo workspace: ${state.workspaceKind}\nModo agente activo: ${state.modePrefix || "default"}`;
 }
 
 bot.command("help", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	await ctx.reply(
-		`Comandos:\n/projects - listar proyectos guardados\n/addproject <id> <ruta> - agregar proyecto\n/useproject <id> - cambiar proyecto activo\n/where - ver proyecto activo\n/trabajos - elegir trabajo reciente\n/ver T<n> - ver preview del trabajo\n/nametrabajo T<n> <nombre> - nombrar trabajo\n/resume T<n> - retomar trabajo listado\n/last - retomar último trabajo del proyecto activo\n/status - ver estado RPC\n/server status|run|restart|off - controlar RPC activo\n/doctor - diagnosticar configuración local\n/agents - elegir agente/modelo\n/testlab [profundidad] - tests en agentes lab\n/testlab1 - explicar por qué agente 1 no usa lab\n/testlab2 [profundidad] - tests en agente 2\n/testlab3 [profundidad] - tests en agente 3\n/gentest_model_lab - elegir agente lab y profundidad\n/triagereports - evaluar reportes lab\n/reports - listar reportes lab\n/report <id> - ver/decidir reporte lab\n/syncreports - guardar decisiones aprobadas en Engram\n/resumen [n] - resumen del proyecto o trabajo\n/mem <query> - buscar contexto en Engram vía Pi\n/mode interactive|auto|clear - ajustar orquestación\n/cancel - cancelar tarea actual\n\nDespués de /trabajos usá T1, T2...; en otros menús seguí la instrucción visible.`,
+		`Comandos:\n/projects - listar proyectos guardados\n/addproject <id> <ruta> - agregar proyecto\n/useproject <id> - cambiar proyecto activo\n/where - ver proyecto activo\n/trabajos - elegir trabajo reciente\n/ver T<n> - ver preview del trabajo\n/nametrabajo T<n> <nombre> - nombrar trabajo\n/resume T<n> - retomar trabajo listado\n/last - retomar último trabajo del proyecto activo\n/status - ver estado RPC\n/dashboard - panel operativo\n/server status|run|restart|off - controlar RPC activo\n/review - revisar cambios\n/fix_tests - arreglar tests\n/audit - auditar repo\n/safe_push - checklist seguro antes de push\n/doctor - diagnosticar configuración local\n/agents - elegir agente/modelo\n/testlab [profundidad] - tests en agentes lab\n/testlab1 - explicar por qué agente 1 no usa lab\n/testlab2 [profundidad] - tests en agente 2\n/testlab3 [profundidad] - tests en agente 3\n/gentest_model_lab - elegir agente lab y profundidad\n/triagereports - evaluar reportes lab\n/reports - listar reportes lab\n/report <id> - ver/decidir reporte lab\n/syncreports - guardar decisiones aprobadas en Engram\n/resumen [n] - resumen del proyecto o trabajo\n/mem <query> - buscar contexto en Engram vía Pi\n/mode interactive|auto|clear - ajustar orquestación\n/cancel - cancelar tarea actual\n\nDespués de /trabajos usá T1, T2...; en otros menús seguí la instrucción visible.`,
 	);
 });
 
 bot.command("status", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	await ctx.reply(formatServerStatus());
+});
+
+bot.command("dashboard", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await ctx.reply(buildDashboardText(dashboardState()));
+});
+
+bot.command(["review", "fix_tests", "audit", "safe_push"], async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const command = ctx.message?.text.split(/\s+/u)[0]?.replace(/^\//u, "") ?? "";
+	const prompt = buildQuickCommandPrompt(command);
+	if (!prompt) {
+		await ctx.reply("Comando rápido no reconocido.");
+		return;
+	}
+	await runPrompt(ctx, prompt);
 });
 
 bot.command("server", async (ctx) => {

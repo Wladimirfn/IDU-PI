@@ -67,10 +67,15 @@ corepack pnpm dev
 ```text
 /doctor
 /status
+/dashboard
 /server status
 /server run
 /server restart
 /server off
+/review
+/fix_tests
+/audit
+/safe_push
 /agents
 /useproject
 /trabajos
@@ -88,6 +93,19 @@ arreglá los tests de este proyecto
 ### `/trabajos`
 
 Lista trabajos recientes del proyecto activo. Los trabajos usan selectores explícitos como `T1`, `T2`, etc. También podés responder `A`, `activo` o `esta sesión` para seguir con el agente activo.
+
+### `/dashboard`
+
+Muestra un panel operativo breve con estado del bridge, RPC, proyecto, agente, workspace y comandos sugeridos.
+
+### Comandos rápidos
+
+Estos comandos lanzan prompts operativos prearmados contra el orquestador activo:
+
+- `/review`: revisa cambios actuales sin commitear ni pushear.
+- `/fix_tests`: corre tests, identifica fallas y aplica fixes mínimos.
+- `/audit`: revisa preparación de repo público, secretos, artefactos y calidad.
+- `/safe_push`: checklist seguro antes de commit/push; pide confirmación antes de acciones irreversibles.
 
 ### `/server status|run|restart|off`
 
