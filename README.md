@@ -33,7 +33,13 @@ Arranque normal:
 start-pi-telegram-bridge.bat
 ```
 
-El script de arranque valida `.env`, instala dependencias si faltan, compila el proyecto e inicia el bot.
+Apagado manual:
+
+```text
+stop-pi-telegram-bridge.bat
+```
+
+El script de arranque valida `.env`, instala dependencias si faltan, compila el proyecto e inicia el bot. El script de apagado solo cierra bridges abiertos de este proyecto.
 
 ## Instalación manual
 
@@ -165,12 +171,12 @@ Si mandás mensajes mientras Pi está ocupado, Idu-pi los guarda en una cola FIF
 
 ### `/server status|run|restart|off`
 
-Controla el servidor Pi RPC activo:
+Controla el proceso bridge de Telegram:
 
 - `/server status`: muestra estado del bridge, RPC, proyecto y agente activo.
-- `/server run`: inicia o deja listo el RPC activo sin mandar un prompt nuevo.
-- `/server restart`: reinicia el RPC activo.
-- `/server off`: detiene el RPC activo.
+- `/server run`: abre una ventana CMD y ejecuta `scripts/start-bridge.ps1`.
+- `/server restart`: abre una ventana CMD y ejecuta `scripts/start-bridge.ps1`; ese script cierra bridges anteriores antes de iniciar.
+- `/server off`: responde por Telegram y luego abre una ventana CMD para ejecutar `scripts/stop-bridge.ps1`, que cierra bridges abiertos sin volver a iniciar.
 
 Nota: si el proceso del bot de Telegram está completamente caído, no puede recibir comandos. Para auto-recuperación completa usá el supervisor por tarea programada.
 

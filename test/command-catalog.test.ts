@@ -25,8 +25,10 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /corepack pnpm test/);
 	assert.match(text, /Batch directos/);
 	assert.match(text, /start-pi-telegram-bridge\.bat/);
+	assert.match(text, /stop-pi-telegram-bridge\.bat/);
 	assert.match(text, /PowerShell directos/);
 	assert.match(text, /scripts\/start-bridge\.ps1/);
+	assert.match(text, /scripts\/stop-bridge\.ps1/);
 });
 
 test("formatBotFatherCommands emits valid command-description lines", () => {

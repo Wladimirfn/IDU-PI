@@ -33,8 +33,8 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 	},
 	{
 		command: "server",
-		description: "Controlar RPC activo",
-		help: "/server status|run|restart|off - controlar RPC activo",
+		description: "Controlar bridge Telegram",
+		help: "/server status|run|restart|off - controlar bridge Telegram",
 		usage: ["/server status", "/server run", "/server restart", "/server off"],
 	},
 	{
@@ -282,6 +282,7 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 export const BATCH_COMMANDS: LocalCommandEntry[] = [
 	{ label: "Setup inicial", command: "setup-pi-telegram-bridge.bat" },
 	{ label: "Iniciar bridge", command: "start-pi-telegram-bridge.bat" },
+	{ label: "Apagar bridge", command: "stop-pi-telegram-bridge.bat" },
 	{ label: "Instalar tarea Windows", command: "install-idu-pi-task.bat" },
 	{ label: "Estado tarea Windows", command: "status-idu-pi-task.bat" },
 	{ label: "Desinstalar tarea Windows", command: "uninstall-idu-pi-task.bat" },
@@ -292,6 +293,11 @@ export const POWERSHELL_COMMANDS: LocalCommandEntry[] = [
 		label: "Iniciar bridge",
 		command:
 			"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-bridge.ps1",
+	},
+	{
+		label: "Apagar bridge",
+		command:
+			"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-bridge.ps1",
 	},
 	{
 		label: "Instalar tarea Windows",
