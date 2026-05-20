@@ -7,7 +7,11 @@ import {
 	type AgentRuntime,
 } from "./agent-router.js";
 import { chunkTelegramText } from "./chunk.js";
-import { formatCommandCatalog, formatHelpText } from "./command-catalog.js";
+import {
+	formatCommandCatalog,
+	formatHelpText,
+	telegramCommandsForApi,
+} from "./command-catalog.js";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import {
 	formatConfigDoctor,
@@ -784,6 +788,14 @@ bot.command("config", async (ctx) => {
 		await replyLong(ctx, formatInitLabDbResult(initLabDb(labDbPath())));
 		return;
 	}
+	if (arg === "sync_commands") {
+		const commands = telegramCommandsForApi();
+		await bot.api.setMyCommands(commands);
+		await ctx.reply(
+			`Comandos de Telegram actualizados: ${commands.length}. Abrí el menú de comandos del chat para verlos.`,
+		);
+		return;
+	}
 	if (arg === "skills_sync") {
 		const source = sourceSkillsDir();
 		if (!source) {
@@ -796,7 +808,7 @@ bot.command("config", async (ctx) => {
 		return;
 	}
 	await ctx.reply(
-		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config skills_sync | /config db_init",
+		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config skills_sync | /config db_init | /config sync_commands",
 	);
 });
 

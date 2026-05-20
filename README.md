@@ -149,6 +149,7 @@ Si falta el tipo o no es válido, el bot muestra ayuda breve.
 /config init_assets
 /config skills_sync
 /config db_init
+/config sync_commands
 ```
 
 `/config init_workspace` verifica/crea `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.
@@ -164,6 +165,8 @@ Si falta el tipo o no es válido, el bot muestra ayuda breve.
 `/config skills_sync` copia solo las skills necesarias para este bridge desde el proyecto fuente registrado `sistema_de_mantencion` y actualiza `.agents/skills/INDEX.md`.
 
 `/config db_init` crea o actualiza la base SQLite de laboratorio en `AGENT_WORKSPACE_ROOT/reports/lab.db`.
+
+`/config sync_commands` actualiza el menú de comandos de Telegram desde `src/command-catalog.ts` usando `setMyCommands`.
 
 No ejecuta MCP, no copia secretos, no commitea y no pushea.
 

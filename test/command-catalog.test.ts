@@ -4,13 +4,14 @@ import {
 	formatBotFatherCommands,
 	formatCommandCatalog,
 	formatHelpText,
+	telegramCommandsForApi,
 	TELEGRAM_COMMANDS,
 } from "../src/command-catalog.js";
 
 test("formatHelpText includes primary Telegram commands", () => {
 	const text = formatHelpText();
 
-	assert.match(text, /\/config \[doctor\|init_workspace\|init_assets\|skills_sync\|db_init\]/);
+	assert.match(text, /\/config \[doctor\|init_workspace\|init_assets\|skills_sync\|db_init\|sync_commands\]/);
 	assert.match(text, /\/comandos/);
 	assert.match(text, /\/testlab \[profundidad\]/);
 });
@@ -52,4 +53,20 @@ test("formatBotFatherCommands emits valid command-description lines", () => {
 test("telegram command catalog has unique commands", () => {
 	const commands = TELEGRAM_COMMANDS.map((entry) => entry.command);
 	assert.equal(new Set(commands).size, commands.length);
+});
+
+test("telegramCommandsForApi creates setMyCommands payload from catalog", () => {
+	const commands = telegramCommandsForApi();
+
+	assert.deepEqual(commands[0], {
+		command: TELEGRAM_COMMANDS[0].command,
+		description: TELEGRAM_COMMANDS[0].description,
+	});
+	assert.ok(commands.some((entry) => entry.command === "config"));
+	assert.equal(commands.length, TELEGRAM_COMMANDS.length);
+	for (const entry of commands) {
+		assert.match(entry.command, /^[a-z0-9_]{1,32}$/u);
+		assert.ok(entry.description.length >= 1);
+		assert.ok(entry.description.length <= 80);
+	}
 });
