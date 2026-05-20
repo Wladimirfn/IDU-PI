@@ -44,13 +44,62 @@ function flows(): ProjectFlows {
 		forbiddenTransitions: ["lab -> commit", "lab -> push"],
 		allowedTransitions: ["lab -> report"],
 		validationChecklist: ["corepack pnpm build", "corepack pnpm test"],
+		modules: [
+			{
+				id: "lab",
+				name: "Lab",
+				description: "Lab module.",
+				screens: ["lab-screen"],
+				dataStores: ["lab-store"],
+				connectedModules: [],
+			},
+		],
+		screens: [
+			{
+				id: "lab-screen",
+				path: "/lab",
+				module: "lab",
+				purpose: "Lab screen.",
+				uiElements: ["run-lab-button"],
+			},
+		],
+		uiElements: [
+			{
+				id: "run-lab-button",
+				type: "button",
+				selector: "#run-lab",
+				label: "Run lab",
+				expectedAction: "Runs lab.",
+			},
+		],
+		dataStores: [
+			{
+				id: "lab-store",
+				type: "json",
+				tables: ["reports"],
+				ownerModule: "lab",
+			},
+		],
 		flows: [
 			{
 				id: "agent-lab-review",
-				summary: "Labs review isolated workspaces.",
-				steps: ["run lab", "record report"],
+				name: "Agent lab review",
+				module: "lab",
+				trigger: "run lab",
+				steps: [
+					{
+						order: 1,
+						type: "ui_action",
+						from: "run-lab-button",
+						to: "lab-store",
+						description: "Run lab and record report.",
+					},
+				],
+				expectedResult: "Lab report recorded.",
+				testTargets: ["run-lab-button"],
 			},
 		],
+		moduleConnections: [],
 	};
 }
 
