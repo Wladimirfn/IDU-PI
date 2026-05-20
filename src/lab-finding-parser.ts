@@ -1,3 +1,8 @@
+import {
+	validateAgentLabReport,
+	type AgentLabFinding,
+	type AgentLabProposal,
+} from "./agentlab-contract.js";
 import type {
 	BugFindingInput,
 	FindingConfidence,
@@ -95,6 +100,15 @@ function findingsFromJson(
 	parsed: unknown,
 	context: LabFindingParserContext,
 ): ParsedLabFinding[] {
+	if (looksLikeAgentLabReport(parsed)) {
+		const result = validateAgentLabReport(parsed);
+		return result.ok
+			? result.report.findings.map((finding) =>
+					findingFromAgentLabReport(finding, context),
+				)
+			: [];
+	}
+
 	const root = asRecord(parsed);
 	const findingsValue = Array.isArray(parsed)
 		? parsed
@@ -112,6 +126,55 @@ function findingsFromJson(
 			),
 		)
 		.filter((finding): finding is ParsedLabFinding => Boolean(finding));
+}
+
+function looksLikeAgentLabReport(value: unknown): boolean {
+	const root = asRecord(value);
+	return Boolean(
+		root &&
+			"findings" in root &&
+			("role" in root ||
+				"summary" in root ||
+				looksLikeAgentLabFindings(root.findings)),
+	);
+}
+
+function looksLikeAgentLabFindings(value: unknown): boolean {
+	return (
+		Array.isArray(value) &&
+		value.some((item) => {
+			const finding = asRecord(item);
+			return Boolean(finding && "category" in finding);
+		})
+	);
+}
+
+function findingFromAgentLabReport(
+	finding: AgentLabFinding,
+	context: LabFindingParserContext,
+): ParsedLabFinding {
+	const affectedFiles = finding.affectedFiles ?? [];
+	return {
+		id: `${context.labRunId}-${slug(finding.title)}`,
+		projectId: context.projectId,
+		title: finding.title,
+		description: finding.description,
+		severity: finding.severity,
+		confidence: finding.confidence,
+		evidence: finding.evidence,
+		affectedFiles,
+		dedupeKey: dedupeKey(context, finding.title, affectedFiles),
+		...(finding.proposal
+			? { proposal: proposalFromAgentLab(finding.proposal) }
+			: {}),
+	};
+}
+
+function proposalFromAgentLab(proposal: AgentLabProposal): ParsedLabProposal {
+	return {
+		summary: proposal.summary,
+		details: proposal.steps.join("\n"),
+	};
 }
 
 function normalizeFinding(
