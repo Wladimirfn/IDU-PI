@@ -35,4 +35,5 @@ test("labPrompt includes lab safety constraints", () => {
 	assert.match(prompt, /No hagas push/);
 	assert.match(prompt, /workspace\/clon/);
 	assert.match(prompt, /máximo 3 comandos/);
+	assert.match(prompt, /corepack pnpm test/);
 });
