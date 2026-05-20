@@ -250,6 +250,17 @@ function looksLikePath(text: string): boolean {
 	return /^[a-zA-Z]:[\\/]/u.test(text.trim()) || text.trim().startsWith("/");
 }
 
+function isNaturalCancelRequest(text: string): boolean {
+	const normalized = text
+		.trim()
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/gu, "");
+	return /^(para|parate|detente|detenete|stop|cancel|cancela|cancelar|frena|frenate)\b/u.test(
+		normalized,
+	);
+}
+
 function addProjectFromPath(pathInput: string) {
 	const candidate = canonicalDirectory(resolve(pathInput));
 	const id = candidate.split(/[/\\]/u).pop() || "project";
@@ -467,6 +478,21 @@ async function runPrompt(
 ): Promise<void> {
 	const runtime = agentRouter.activeRuntime();
 	if (runtime.session.busy) {
+		if (isNaturalCancelRequest(prompt)) {
+			pendingAction = null;
+			pendingLabRequest = null;
+			pendingUiRequest = null;
+			pendingUiToken = null;
+			const queued = taskQueue.clear();
+			taskQueueGeneration++;
+			const cancelled = agentRouter.cancelActive();
+			await ctx.reply(
+				cancelled
+					? `Cancelé la tarea activa y limpié ${queued} tarea(s) en cola.`
+					: `No había tarea activa. Limpié ${queued} tarea(s) en cola.`,
+			);
+			return;
+		}
 		if (taskQueue.enqueue(prompt)) {
 			await ctx.reply(
 				`Ya hay una tarea Pi corriendo. Guardé tu mensaje en cola como Q${taskQueue.size}. Usá /queue para verla.`,
