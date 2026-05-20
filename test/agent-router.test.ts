@@ -90,8 +90,14 @@ test("formatAgentProfiles shows model for pi profiles", () => {
 	const { router } = createRouter();
 	const text = formatAgentProfiles(router);
 
-	assert.match(text, /1\. Pi default ✅\n {3}id: default\n {3}provider: pi\n {3}model: Pi default/);
-	assert.match(text, /2\. GPT Codex\n {3}id: codex\n {3}provider: pi\n {3}model: codex/);
+	assert.match(
+		text,
+		/1\. Pi default ✅\n {3}id: default\n {3}provider: pi\n {3}model: Pi default/,
+	);
+	assert.match(
+		text,
+		/2\. GPT Codex\n {3}id: codex\n {3}provider: pi\n {3}model: codex/,
+	);
 });
 
 test("keeps independent sessions per project and profile", async () => {
