@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildPrompt, createChildEnv } from "../src/pi.js";
+import { buildPromptCommand } from "../src/pi-rpc.js";
 
 test("buildPrompt returns plain user text without mode", () => {
 	assert.equal(buildPrompt("  hola  "), "hola");
@@ -11,6 +12,15 @@ test("buildPrompt prepends mode instruction when present", () => {
 		buildPrompt("hacé esto", "modo auto"),
 		"modo auto\n\nUser request:\nhacé esto",
 	);
+});
+
+test("buildPromptCommand queues safely if Pi is still streaming", () => {
+	assert.deepEqual(buildPromptCommand("req-1", "hacé esto"), {
+		id: "req-1",
+		type: "prompt",
+		message: "hacé esto",
+		streamingBehavior: "followUp",
+	});
 });
 
 test("createChildEnv removes bridge secrets but keeps normal env", () => {
