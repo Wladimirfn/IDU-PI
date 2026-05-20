@@ -1,16 +1,52 @@
 # Idu-pi
 
-Bridge de Telegram para controlar una sesión local de Pi desde un bot privado.
+Bridge privado de Telegram para operar Pi localmente: elegís proyecto, agente/modelo, workspaces de laboratorio, reportes y acciones seguras sin salir del chat.
+
+## Camino rápido
+
+### 1. Instalar y arrancar
+
+```text
+setup-pi-telegram-bridge.bat
+start-pi-telegram-bridge.bat
+```
+
+### 2. Inicializar desde Telegram
+
+Ejecutá estos comandos en orden:
+
+```text
+/config
+/config init_workspace
+/config init_assets
+/config skills_sync
+/config db_init
+/config sync_commands
+/agents
+/testlab quick
+/reports
+```
+
+### 3. Verificar estado
+
+```text
+/status
+/dashboard
+/config doctor
+```
 
 ## Qué hace
 
-- Acepta mensajes sólo desde `ALLOWED_USER_ID`.
-- Envía prompts a una sesión persistente de Pi en modo RPC.
-- Devuelve la salida de Pi al chat de Telegram.
-- Permite elegir proyectos, agentes/modelos y trabajos recientes.
-- Puede reenviar decisiones interactivas de Pi, por ejemplo confirmaciones tipo “Allow guarded command?”.
-- Muestra mini reportes de avance mientras el orquestador trabaja.
-- Mantiene secretos y estado local fuera de Git.
+| Área | Qué resuelve |
+|---|---|
+| Seguridad | Acepta mensajes solo desde `ALLOWED_USER_ID` y mantiene secretos fuera de Git. |
+| Pi RPC | Envía prompts a Pi en modo RPC con sesión persistente. |
+| Proyectos | Permite cambiar proyecto activo y retomar trabajos recientes. |
+| Agentes | Permite elegir perfiles/modelos y muestra qué modelo usa cada agente. |
+| Laboratorio | Ejecuta agentes no-default en clones aislados. |
+| Reportes | Guarda corridas en `reports/lab-runs.jsonl`; `/config db_init` prepara la DB SQLite `reports/lab.db` para tracking estructurado. |
+| Engram | Puede buscar contexto y sincronizar reportes aprobados cuando Engram está disponible. |
+| Telegram UI | Reenvía confirmaciones y selecciones interactivas de Pi al chat. |
 
 ## Requisitos
 
@@ -18,10 +54,11 @@ Bridge de Telegram para controlar una sesión local de Pi desde un bot privado.
 - Pi CLI instalado localmente.
 - Token de bot creado con BotFather.
 - Tu id numérico de Telegram desde `@userinfobot`.
+- Windows para scripts `.bat` / PowerShell incluidos.
 
-## Instalación rápida en Windows
+## Instalación
 
-Primera configuración:
+### Instalación rápida en Windows
 
 ```text
 setup-pi-telegram-bridge.bat
@@ -41,7 +78,7 @@ stop-pi-telegram-bridge.bat
 
 El script de arranque valida `.env`, instala dependencias si faltan, compila el proyecto e inicia el bot. El script de apagado solo cierra bridges abiertos de este proyecto.
 
-## Instalación manual
+### Instalación manual
 
 ```bash
 corepack pnpm install
@@ -68,93 +105,21 @@ Después ejecutá:
 corepack pnpm dev
 ```
 
-## Uso en Telegram
+## Configuración guiada desde Telegram
 
-```text
-/doctor
-/status
-/dashboard
-/server status
-/server run
-/server restart
-/server off
-/review
-/fix_tests
-/audit
-/safe_push
-/task bug el botón no responde
-/task feature nuevo panel
-/task refactor limpiar index
-/task docs README
-/queue
-/queue_clear
-/config
-/comandos
-/agents
-/useproject
-/trabajos
-/ver T1
-/nametrabajo T1 mantenimiento
-/resume T1
-/resumen
-/mem login auth
-/mode interactive
-arreglá los tests de este proyecto
-```
+`/config` es el instalador/mantenedor desde Telegram. Primero muestra diagnóstico; después podés ejecutar acciones puntuales.
 
-## Comandos principales
+| Comando | Resultado |
+|---|---|
+| `/config` | Checklist del proyecto activo. |
+| `/config doctor` | Diagnóstico detallado. |
+| `/config init_workspace` | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`. |
+| `/config init_assets` | Crea assets project-local mínimos. |
+| `/config skills_sync` | Copia solo skills necesarias desde el proyecto fuente registrado. |
+| `/config db_init` | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`. |
+| `/config sync_commands` | Actualiza el menú de comandos de Telegram con `setMyCommands`. |
 
-### `/comandos`
-
-Muestra el catálogo completo generado desde una fuente única en el código: comandos para BotFather `/setcommands`, usos con argumentos, comandos CLI `pnpm`, batch directos y PowerShell directos. Usalo cuando se agreguen comandos nuevos para copiar la lista actualizada sin revisar archivos a mano.
-
-### `/trabajos`
-
-Lista trabajos recientes del proyecto activo. Los trabajos usan selectores explícitos como `T1`, `T2`, etc. También podés responder `A`, `activo` o `esta sesión` para seguir con el agente activo.
-
-### `/dashboard`
-
-Muestra un panel operativo breve con estado del bridge, RPC, proyecto, agente, workspace y comandos sugeridos.
-
-### Comandos rápidos
-
-Estos comandos lanzan prompts operativos prearmados contra el orquestador activo:
-
-- `/review`: revisa cambios actuales sin commitear ni pushear.
-- `/fix_tests`: corre tests, identifica fallas y aplica fixes mínimos.
-- `/audit`: revisa preparación de repo público, secretos, artefactos y calidad.
-- `/safe_push`: ejecuta un checklist local de modo guardián: estado git, rutas sensibles ignoradas, posibles secretos en archivos versionados y remoto configurado. No commitea ni pushea.
-
-### Plantillas de tarea
-
-`/task` arma un prompt operativo con disciplina según el tipo de trabajo:
-
-```text
-/task bug <síntoma o error>
-/task feature <objetivo de producto>
-/task refactor <área a mejorar>
-/task docs <documento o tema>
-```
-
-Si falta el tipo o no es válido, el bot muestra ayuda breve.
-
-### Configuración guiada
-
-`/config` muestra un checklist del bridge y del proyecto activo. Sirve para validar proyecto, agentes, workspaces y assets versionables.
-
-```text
-/config
-/config doctor
-/config init_workspace
-/config init_assets
-/config skills_sync
-/config db_init
-/config sync_commands
-```
-
-`/config init_workspace` verifica/crea `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.
-
-`/config init_assets` crea estructura project-local mínima para skills y MCP:
+Assets creados por `/config init_assets`:
 
 ```text
 .agents/skills/.gitkeep
@@ -162,39 +127,216 @@ Si falta el tipo o no es válido, el bot muestra ayuda breve.
 .mcp/config.json
 ```
 
-`/config skills_sync` copia solo las skills necesarias para este bridge desde el proyecto fuente registrado `sistema_de_mantencion` y actualiza `.agents/skills/INDEX.md`.
+Reglas de seguridad:
 
-`/config db_init` crea o actualiza la base SQLite de laboratorio en `AGENT_WORKSPACE_ROOT/reports/lab.db`.
+- No ejecuta MCP automáticamente.
+- No copia secretos.
+- No commitea ni pushea.
+- `skills_sync` copia solo skills necesarias/generalistas, no todo el proyecto fuente.
 
-`/config sync_commands` actualiza el menú de comandos de Telegram desde `src/command-catalog.ts` usando `setMyCommands`.
+## Agentes y modelos
 
-No ejecuta MCP, no copia secretos, no commitea y no pushea.
+Configurá perfiles seleccionables con `PI_AGENT_PROFILES`:
 
-### Cola de tareas
-
-Si mandás mensajes mientras Pi está ocupado, Idu-pi los guarda en una cola FIFO y los ejecuta cuando termina el turno actual.
-
-```text
-/queue       # ver cola actual
-/queue_clear # limpiar cola
+```env
+PI_AGENT_PROFILES=default|Pi default;codex|GPT Codex|--model openai-codex/gpt-5.3-codex-spark;spark|Spark|--model openai-codex/gpt-5.3-codex-spark
 ```
 
-`/cancel` también limpia la cola.
+Formato:
 
-### `/server status|run|restart|off`
+```text
+id|Nombre visible|argumentos extra opcionales;otro_id|Otro nombre|argumentos extra
+```
 
-Controla la sesión Pi RPC activa, no el proceso del bot de Telegram:
+En Telegram:
 
-- `/server status`: muestra estado del bridge, RPC, proyecto y agente activo.
-- `/server run`: inicia o deja listo el RPC activo sin mandar un prompt nuevo.
-- `/server restart`: reinicia solo la sesión RPC activa.
-- `/server off`: detiene solo la sesión RPC activa.
+```text
+/agents
+```
 
-Nota: si el proceso del bot de Telegram está completamente caído, no puede recibir comandos. Para auto-recuperación completa usá el supervisor por tarea programada o `start-pi-telegram-bridge.bat`.
+La salida muestra label, id, provider y modelo:
 
-### Supervisor Windows / auto-restart
+```text
+1. Pi default ✅
+   id: default
+   provider: pi
+   model: Pi default
 
-Instalar e iniciar la tarea programada:
+2. GPT Codex
+   id: codex
+   provider: pi
+   model: openai-codex/gpt-5.3-codex-spark
+```
+
+Notas:
+
+- El perfil 1/default trabaja directo sobre el repo real.
+- Los perfiles no-default pueden correr como laboratorios en clones aislados si `AGENT_WORKSPACE_MODE=clone`.
+- Cada perfil mantiene su propia sesión RPC persistente por proyecto.
+
+## Laboratorios de tests
+
+Los agentes lab corren en workspaces clone bajo:
+
+```text
+AGENT_WORKSPACE_ROOT/workspaces
+```
+
+Reportes y DB quedan bajo:
+
+```text
+AGENT_WORKSPACE_ROOT/reports
+```
+
+Comandos principales:
+
+```text
+/testlab quick
+/testlab 3tests
+/testlab 5tests
+/testlab full
+/testlab2 quick
+/testlab3 quick
+/gentest_model_lab
+/reports
+/report <id>
+/triagereports
+/syncreports
+```
+
+Profundidades:
+
+| Profundidad | Uso recomendado |
+|---|---|
+| `quick` | Smoke test rápido. |
+| `3tests` | Señal media sin gastar demasiado. |
+| `5tests` | Verificación más fuerte. |
+| `full` | Revisión amplia, más lenta. |
+
+Decisiones sobre reportes:
+
+```text
+/report <id> defer
+/report <id> work
+/report <id> ignore
+/report <id> save
+```
+
+`/syncreports` usa el orquestador para guardar hallazgos aprobados en Engram cuando Engram está disponible.
+
+## Comandos operativos
+
+### Estado y servidor RPC
+
+```text
+/status
+/dashboard
+/server status
+/server run
+/server restart
+/server off
+```
+
+`/server` controla la sesión Pi RPC activa, no el proceso del bot de Telegram:
+
+| Comando | Acción |
+|---|---|
+| `/server status` | Muestra bridge, RPC, proyecto y agente activo. |
+| `/server run` | Inicia o deja listo el RPC activo. |
+| `/server restart` | Reinicia solo la sesión RPC activa. |
+| `/server off` | Detiene solo la sesión RPC activa. |
+
+Si el bot de Telegram está caído, no puede recibir comandos. Para recuperación completa usá el supervisor Windows o `start-pi-telegram-bridge.bat`.
+
+### Trabajo diario
+
+```text
+/review
+/fix_tests
+/audit
+/safe_push
+/task bug <detalle>
+/task feature <detalle>
+/task refactor <detalle>
+/task docs <detalle>
+```
+
+| Comando | Uso |
+|---|---|
+| `/review` | Revisa cambios actuales sin commitear ni pushear. |
+| `/fix_tests` | Corre tests, identifica fallas y aplica fixes mínimos. |
+| `/audit` | Revisa repo público, secretos, artefactos y calidad. |
+| `/safe_push` | Checklist antes de push; no commitea ni pushea. |
+| `/task` | Arma prompts operativos por tipo de tarea. |
+
+### Cola y cancelación
+
+Si mandás mensajes mientras Pi está ocupado, Idu-pi los guarda en cola FIFO.
+
+```text
+/queue
+/queue_clear
+/cancel
+```
+
+`/cancel` cancela la tarea actual y limpia la cola.
+
+### Trabajos recientes
+
+```text
+/trabajos
+/ver T1
+/nametrabajo T1 mantenimiento
+/resume T1
+/last
+/resumen
+```
+
+Los trabajos usan selectores explícitos `T1`, `T2`, etc. También podés responder `A`, `activo` o `esta sesión` cuando el menú lo indique.
+
+### Catálogo de comandos
+
+```text
+/comandos
+/config sync_commands
+```
+
+- `/comandos` muestra el catálogo completo desde `src/command-catalog.ts`.
+- `/config sync_commands` actualiza el menú nativo de Telegram desde esa misma fuente.
+
+## Engram y memoria
+
+Engram no viene de este repo; depende de que Pi tenga la herramienta/memoria disponible.
+
+Cuando está disponible:
+
+```text
+/mem <query>
+/syncreports
+```
+
+| Comando | Uso |
+|---|---|
+| `/mem login auth` | Busca contexto histórico vía Pi/Engram. |
+| `/syncreports` | Guarda reportes aprobados como memoria estructurada. |
+
+Si Engram no está disponible, el bridge debe seguir funcionando con archivos locales (`lab-runs.jsonl`, `lab.db`, `.agents`, `.atl`, `.mcp`).
+
+## Decisiones interactivas
+
+Si Pi emite una solicitud de UI en RPC, el bridge la reenvía a Telegram.
+
+Ejemplos:
+
+- Confirmación: respondé `sí` o `no`.
+- Selección: respondé `U1`, `U2`, etc.
+- Texto libre: respondé con el texto solicitado.
+
+Esto cubre aprobaciones tipo guarded command cuando Pi las expone como eventos RPC `extension_ui_request`.
+
+## Supervisor Windows / auto-restart
+
+Instalar e iniciar tarea programada:
 
 ```text
 install-idu-pi-task.bat
@@ -212,66 +354,7 @@ Desinstalar:
 uninstall-idu-pi-task.bat
 ```
 
-La tarea se registra como `Idu-pi Telegram Bridge`, arranca al iniciar sesión y reintenta si el proceso falla. Si ya existe una tarea con el mismo nombre, el instalador la reemplaza; podés cambiar el nombre con `IDU_PI_TASK_NAME`. Los logs quedan en `logs/bridge.log`, que está ignorado por Git.
-
-### Decisiones interactivas
-
-Si Pi emite una solicitud de UI en RPC, el bridge la reenvía a Telegram. Ejemplos:
-
-- confirmación: respondé `sí` o `no`;
-- selección: respondé `U1`, `U2`, etc.;
-- texto libre: respondé con el texto solicitado.
-
-Esto cubre prompts de aprobación cuando Pi los expone como eventos RPC `extension_ui_request`.
-
-### Mini reportes de avance
-
-Mientras el orquestador trabaja, el bot puede enviar mensajes breves como:
-
-```text
-Orquestador trabajando: Pi default
-Subtrabajo: usando bash...
-Orquestador: cerrando respuesta y preparando resumen final...
-```
-
-La intención es dar visibilidad sin llenar el chat con cada token de salida.
-
-## Laboratorios de tests
-
-Los agentes lab corren en workspaces `clone`. El perfil default/direct queda excluido de ejecución lab.
-
-```text
-/testlab quick
-/testlab2 3tests
-/testlab3
-/testlab1
-/gentest_model_lab
-/triagereports
-/reports
-/report <id>
-/report <id> defer
-/report <id> work
-/report <id> ignore
-/syncreports
-```
-
-Profundidades válidas: `quick`, `3tests`, `5tests`, `full`.
-
-## Perfiles de agente/modelo
-
-Configurá perfiles seleccionables de Pi con `PI_AGENT_PROFILES`:
-
-```env
-PI_AGENT_PROFILES=default|Pi default;codex|GPT Codex|--model provider/model
-```
-
-Formato:
-
-```text
-id|Nombre visible|argumentos extra opcionales;otro_id|Otro nombre|argumentos extra
-```
-
-Cada perfil Pi mantiene su propia sesión RPC persistente por proyecto.
+La tarea se registra como `Idu-pi Telegram Bridge`, arranca al iniciar sesión y reintenta si el proceso falla. Los logs quedan en `logs/bridge.log`, ignorado por Git.
 
 ## Seguridad
 
@@ -279,6 +362,7 @@ Cada perfil Pi mantiene su propia sesión RPC persistente por proyecto.
 - Nunca subas tokens de bot, API keys, registros locales de proyectos ni estado runtime.
 - Mantené `ALLOWED_ROOTS` lo más limitado posible.
 - Usá `/mode interactive` para operaciones riesgosas.
+- Pedí confirmación humana antes de push, copiar cambios desde labs o ejecutar MCP.
 
 ## Desarrollo
 
@@ -286,3 +370,16 @@ Cada perfil Pi mantiene su propia sesión RPC persistente por proyecto.
 corepack pnpm build
 corepack pnpm test
 ```
+
+Comandos locales útiles:
+
+```text
+corepack pnpm install
+corepack pnpm dev
+corepack pnpm start
+corepack pnpm clean
+```
+
+## Documentación
+
+Este README sigue una estructura de baja carga cognitiva: camino rápido primero, detalles después, tablas para reconocimiento rápido y comandos copiables. Para futuras mejoras de documentación, usá la skill `cognitive-doc-design`.
