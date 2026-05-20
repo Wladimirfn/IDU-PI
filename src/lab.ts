@@ -55,6 +55,23 @@ export function labPrompt(duration: LabDuration, agent: AgentProfile): string {
 	return `Modo laboratorio de tests para ${agent.label}. Profundidad: ${duration.label} (${duration.description}). Límite de seguridad: ${Math.round(duration.ms / 60_000)} minutos.\n\nReglas obligatorias:\n- Trabajá solo dentro de tu workspace/clon.\n- No modifiques el repo real.\n- No hagas commit.\n- No hagas push.\n- Corré como máximo ${duration.maxCommands} comandos de test/verificación.\n- Si el proyecto usa pnpm, preferí Corepack: corepack pnpm test. No uses pnpm directo si no verificaste que está en PATH.\n- No te cortes por tiempo salvo emergencia: terminá el comando en curso y reportá.\n- Antes de verificar, detectá contexto del proyecto: scripts de test, README/docs, skills en .agents/skills o .pi/skills y MCP/tools disponibles.\n- Si existe .agents/skills/buenas-practicas-bd/SKILL.md, considerala contexto prioritario.\n- Usá MCP/tools disponibles solo si aportan evidencia; si fallan, reportalo como detalle técnico secundario.\n- Si necesitás inspeccionar código, hacelo solo para diagnosticar.\n- Reportá comandos ejecutados, resultados, fallas, evidencia, posible causa y sugerencia.\n- Si un problema ya está resuelto, indicalo como resuelto.\n\nFormato de respuesta:\nResumen corto\nTests/comandos ejecutados\nHallazgos con severidad y confianza\nSugerencias para el orquestador`;
 }
 
+export type LabRunRecorder = {
+	recordLabRun(record: LabRunRecord): void;
+};
+
+function persistLabRun(options: {
+	store: LabReportStore;
+	labRunRecorder?: LabRunRecorder;
+	record: LabRunRecord;
+}): void {
+	options.store.append(options.record);
+	try {
+		options.labRunRecorder?.recordLabRun(options.record);
+	} catch {
+		// SQLite is a secondary copy; JSONL remains the source of truth.
+	}
+}
+
 export async function runTestLab(options: {
 	router: AgentRouter;
 	profile: AgentProfile;
@@ -62,6 +79,7 @@ export async function runTestLab(options: {
 	projectId: string;
 	projectPath: string;
 	store: LabReportStore;
+	labRunRecorder?: LabRunRecorder;
 }): Promise<LabRunRecord> {
 	const runtime = options.router.runtimeForProfile(options.profile.id);
 	const startedAt = new Date().toISOString();
@@ -85,7 +103,11 @@ export async function runTestLab(options: {
 			startedAt,
 			finishedAt: new Date().toISOString(),
 		};
-		options.store.append(record);
+		persistLabRun({
+			store: options.store,
+			labRunRecorder: options.labRunRecorder,
+			record,
+		});
 		return record;
 	}
 
@@ -107,7 +129,11 @@ export async function runTestLab(options: {
 			startedAt,
 			finishedAt: new Date().toISOString(),
 		};
-		options.store.append(record);
+		persistLabRun({
+			store: options.store,
+			labRunRecorder: options.labRunRecorder,
+			record,
+		});
 		return record;
 	}
 
@@ -139,7 +165,11 @@ export async function runTestLab(options: {
 			startedAt,
 			finishedAt: new Date().toISOString(),
 		};
-		options.store.append(record);
+		persistLabRun({
+			store: options.store,
+			labRunRecorder: options.labRunRecorder,
+			record,
+		});
 		return record;
 	} catch (error) {
 		const timeout = error instanceof Error && error.message === "LAB_TIMEOUT";
@@ -164,7 +194,11 @@ export async function runTestLab(options: {
 			startedAt,
 			finishedAt: new Date().toISOString(),
 		};
-		options.store.append(record);
+		persistLabRun({
+			store: options.store,
+			labRunRecorder: options.labRunRecorder,
+			record,
+		});
 		return record;
 	}
 }

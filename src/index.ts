@@ -44,6 +44,7 @@ import {
 	summarizeOutput,
 } from "./lab-reports.js";
 import { formatInitLabDbResult, initLabDb } from "./lab-db.js";
+import { LabDbRepository } from "./lab-db-repository.js";
 import { findPiProcesses } from "./processes.js";
 import {
 	addProject,
@@ -105,6 +106,7 @@ const agentRouter = new AgentRouter({
 	workspaceMode: config.agentWorkspaceMode,
 });
 const labReportStore = new LabReportStore(config.agentWorkspaceRoot);
+const labDbRepository = new LabDbRepository(labDbPath());
 const taskQueue = new TaskQueue();
 let taskQueueGeneration = 0;
 let activePromptInFlight = false;
@@ -350,6 +352,7 @@ async function runLabForProfiles(
 		projectId: currentProjectId(),
 		projectPath: currentCwd,
 		store: labReportStore,
+		labRunRecorder: labDbRepository,
 	});
 	const lines = formatLabRunResultLines(profiles, results);
 	await replyLong(ctx, `Test lab terminado:\n\n${lines.join("\n\n")}`);

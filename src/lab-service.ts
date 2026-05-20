@@ -1,6 +1,6 @@
 import type { AgentProfile } from "./config.js";
 import type { AgentRouter } from "./agent-router.js";
-import type { LabDuration } from "./lab.js";
+import type { LabDuration, LabRunRecorder } from "./lab.js";
 import { runTestLab } from "./lab.js";
 import {
 	cleanAgentOutput,
@@ -19,6 +19,7 @@ export type RunLabForProfilesOptions = {
 	projectId: string;
 	projectPath: string;
 	store: LabReportStore;
+	labRunRecorder?: LabRunRecorder;
 };
 
 export type RunLabForProfilesResult = {
@@ -60,6 +61,7 @@ export async function runLabForProfiles(
 				projectId: options.projectId,
 				projectPath: options.projectPath,
 				store: options.store,
+				labRunRecorder: options.labRunRecorder,
 			}),
 		),
 	);
