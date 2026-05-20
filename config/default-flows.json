@@ -1,0 +1,65 @@
+{
+  "version": "1.0.0",
+  "projectType": "private-ai-orchestrator",
+  "invariants": [
+    "Labs no pueden hacer commit.",
+    "Labs no pueden hacer push.",
+    "Labs no pueden modificar repo real.",
+    "Toda propuesta debe tener evidencia.",
+    "Cambios high/critical requieren aprobación humana.",
+    "No aceptar findings sin evidence.",
+    "No usar fallback textual sobre JSON inválido.",
+    "Build/test deben preservarse.",
+    "Evitar JS embebido en HTML salvo parche mínimo justificado.",
+    "No registrar bugs sin evidencia clara."
+  ],
+  "qualityRules": [
+    "Toda propuesta debe tener evidencia.",
+    "No registrar bugs sin evidencia clara.",
+    "Build/test deben preservarse antes de cerrar una fase.",
+    "Mejor devolver cero findings que inventar problemas.",
+    "Cambios high/critical requieren aprobación humana."
+  ],
+  "forbiddenTransitions": [
+    "lab -> commit",
+    "lab -> push",
+    "lab -> modify-real-repo",
+    "invalid-json -> text-fallback-findings",
+    "finding-without-evidence -> sqlite-record"
+  ],
+  "allowedTransitions": [
+    "lab -> isolated-report",
+    "isolated-report -> jsonl-primary",
+    "jsonl-primary -> sqlite-secondary",
+    "proposal -> human-approval",
+    "approved-change -> build-test-validation"
+  ],
+  "validationChecklist": [
+    "corepack pnpm build",
+    "corepack pnpm test",
+    "Confirmar git status",
+    "Confirmar que no cambió Telegram si la fase no lo pidió"
+  ],
+  "flows": [
+    {
+      "id": "agent-lab-review",
+      "summary": "AgentLabs auditan en workspaces aislados y reportan evidencia sin modificar el repo real.",
+      "steps": [
+        "Ejecutar laboratorio en workspace/clon",
+        "Guardar reporte JSONL como fuente principal",
+        "Copiar lab_run y findings/proposals a SQLite como complemento",
+        "Escalar propuestas riesgosas para aprobación humana"
+      ]
+    },
+    {
+      "id": "human-approved-change",
+      "summary": "Cambios críticos solo avanzan con aprobación humana y validación build/test.",
+      "steps": [
+        "Revisar evidencia",
+        "Pedir aprobación humana si aplica",
+        "Implementar cambio acotado",
+        "Ejecutar build/test"
+      ]
+    }
+  ]
+}
