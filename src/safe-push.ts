@@ -32,7 +32,11 @@ export function defaultSafePushRunner(cwd: string): SafePushCheckRunner {
 		}).trim();
 }
 
-function runCheck(run: SafePushCheckRunner, command: string, args: string[]): string {
+function runCheck(
+	run: SafePushCheckRunner,
+	command: string,
+	args: string[],
+): string {
 	try {
 		return run(command, args).trim();
 	} catch (error) {
@@ -95,7 +99,9 @@ export function buildSafePushReport(options: {
 	}
 
 	if (ignored.startsWith("ERROR:")) {
-		findings.push(`No pude confirmar .gitignore para rutas sensibles: ${ignored}`);
+		findings.push(
+			`No pude confirmar .gitignore para rutas sensibles: ${ignored}`,
+		);
 	} else {
 		const ignoredSet = new Set(
 			ignored
@@ -105,7 +111,9 @@ export function buildSafePushReport(options: {
 		);
 		const missing = sensitivePaths.filter((path) => !ignoredSet.has(path));
 		if (missing.length) {
-			findings.push(`Rutas sensibles sin ignore confirmado: ${missing.join(", ")}`);
+			findings.push(
+				`Rutas sensibles sin ignore confirmado: ${missing.join(", ")}`,
+			);
 		} else {
 			passed.push("Rutas sensibles verificadas por git check-ignore.");
 		}
@@ -114,7 +122,9 @@ export function buildSafePushReport(options: {
 	if (secrets && !secrets.startsWith("ERROR:")) {
 		findings.push(`Posibles secretos en archivos versionados:\n${secrets}`);
 	} else if (secrets.startsWith("ERROR:")) {
-		passed.push("Búsqueda de secretos sin coincidencias o sin resultados versionados.");
+		passed.push(
+			"Búsqueda de secretos sin coincidencias o sin resultados versionados.",
+		);
 	} else {
 		passed.push("Búsqueda de secretos sin coincidencias.");
 	}

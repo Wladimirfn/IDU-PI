@@ -2,10 +2,18 @@ $ErrorActionPreference = 'Stop'
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $Root
+$LogDir = Join-Path $Root 'logs'
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$LogFile = Join-Path $LogDir 'bridge.log'
+function Log($Message) {
+  $line = "$(Get-Date -Format o) $Message"
+  Add-Content -Path $LogFile -Value $line
+}
 
 function Step($Message) {
   Write-Host ""
   Write-Host "==> $Message" -ForegroundColor Cyan
+  Log "STEP $Message"
 }
 
 function Invoke-Checked($FilePath, $Arguments) {
@@ -62,4 +70,8 @@ Invoke-Checked 'corepack' @('pnpm', 'build')
 
 Step 'Iniciando bot'
 Write-Host 'Deja esta ventana abierta. Para detener: Ctrl+C o cerrar ventana.' -ForegroundColor Green
-& node $distIndex
+Log "Starting node $distIndex"
+& node $distIndex 2>&1 | Tee-Object -FilePath $LogFile -Append
+$NodeExitCode = $LASTEXITCODE
+Log "Node exited with code $NodeExitCode"
+exit $NodeExitCode

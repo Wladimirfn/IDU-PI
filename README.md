@@ -116,7 +116,29 @@ Controla el servidor Pi RPC activo:
 - `/server restart`: reinicia el RPC activo.
 - `/server off`: detiene el RPC activo.
 
-Nota: si el proceso del bot de Telegram está completamente caído, no puede recibir comandos. Para auto-recuperación completa hace falta correrlo bajo un supervisor externo, por ejemplo un servicio de Windows o una tarea programada.
+Nota: si el proceso del bot de Telegram está completamente caído, no puede recibir comandos. Para auto-recuperación completa usá el supervisor por tarea programada.
+
+### Supervisor Windows / auto-restart
+
+Instalar e iniciar la tarea programada:
+
+```text
+install-idu-pi-task.bat
+```
+
+Ver estado:
+
+```text
+status-idu-pi-task.bat
+```
+
+Desinstalar:
+
+```text
+uninstall-idu-pi-task.bat
+```
+
+La tarea se registra como `Idu-pi Telegram Bridge`, arranca al iniciar sesión y reintenta si el proceso falla. Si ya existe una tarea con el mismo nombre, el instalador la reemplaza; podés cambiar el nombre con `IDU_PI_TASK_NAME`. Los logs quedan en `logs/bridge.log`, que está ignorado por Git.
 
 ### Decisiones interactivas
 
