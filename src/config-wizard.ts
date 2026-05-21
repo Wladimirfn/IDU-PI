@@ -10,7 +10,10 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import type { AgentProfile, AgentWorkspaceMode } from "./config.js";
 import { isAllowedCwd } from "./config.js";
-import { validateProjectBlueprint } from "./project-blueprint.js";
+import {
+	loadProjectBlueprint,
+	validateProjectBlueprint,
+} from "./project-blueprint.js";
 import { validateProjectFlows } from "./project-flows.js";
 
 export type AssetStatus = {
@@ -97,6 +100,31 @@ export type SkillsSyncResult = {
 	existing: string[];
 	missing: string[];
 	indexPath: string;
+};
+
+export type ProjectMapInspection = {
+	projectPath: string;
+	source: "project-local" | "default";
+	projectName: string;
+	counts: {
+		modules: number;
+		screens: number;
+		uiElements: number;
+		dataStores: number;
+		flows: number;
+		moduleConnections: number;
+	};
+	issues: string[];
+	recommendations: string[];
+};
+
+type LooseProjectFlows = {
+	modules: Array<{ id?: unknown; screens?: unknown }>;
+	screens: Array<{ id?: unknown; module?: unknown }>;
+	uiElements: Array<{ id?: unknown; selector?: unknown; label?: unknown }>;
+	dataStores: Array<{ id?: unknown; ownerModule?: unknown }>;
+	flows: Array<{ id?: unknown; module?: unknown; steps?: unknown }>;
+	moduleConnections: Array<{ fromModule?: unknown; toModule?: unknown }>;
 };
 
 export const NECESSARY_PROJECT_SKILLS = [
@@ -489,6 +517,157 @@ function flowsContent(): string {
 	return `${JSON.stringify(validation.flows, null, 2)}\n`;
 }
 
+export function inspectProjectMap(projectPath: string): ProjectMapInspection {
+	const usesLocalBlueprint = existsSync(join(projectPath, PROJECT_BLUEPRINT));
+	const usesLocalFlows = existsSync(join(projectPath, PROJECT_FLOWS));
+	const blueprint = loadProjectBlueprint(projectPath);
+	const flows = readLooseProjectFlows(projectPath, usesLocalFlows);
+	const source =
+		usesLocalBlueprint && usesLocalFlows ? "project-local" : "default";
+	const issues = projectMapIssues(flows);
+	const recommendations = projectMapRecommendations(source, flows, issues);
+	return {
+		projectPath,
+		source,
+		projectName: blueprint.projectName,
+		counts: {
+			modules: flows.modules.length,
+			screens: flows.screens.length,
+			uiElements: flows.uiElements.length,
+			dataStores: flows.dataStores.length,
+			flows: flows.flows.length,
+			moduleConnections: flows.moduleConnections.length,
+		},
+		issues,
+		recommendations,
+	};
+}
+
+function readLooseProjectFlows(
+	projectPath: string,
+	usesLocalFlows: boolean,
+): LooseProjectFlows {
+	const path = usesLocalFlows
+		? join(projectPath, PROJECT_FLOWS)
+		: join(process.cwd(), DEFAULT_FLOWS);
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<
+		string,
+		unknown
+	>;
+	return {
+		modules: arrayValue(parsed.modules),
+		screens: arrayValue(parsed.screens),
+		uiElements: arrayValue(parsed.uiElements),
+		dataStores: arrayValue(parsed.dataStores),
+		flows: arrayValue(parsed.flows),
+		moduleConnections: arrayValue(parsed.moduleConnections),
+	};
+}
+
+function arrayValue(value: unknown): Record<string, unknown>[] {
+	return Array.isArray(value)
+		? value.filter(
+				(item): item is Record<string, unknown> =>
+					!!item && typeof item === "object" && !Array.isArray(item),
+			)
+		: [];
+}
+
+function stringValue(value: unknown): string {
+	return typeof value === "string" ? value : "";
+}
+
+function arrayLength(value: unknown): number {
+	return Array.isArray(value) ? value.length : 0;
+}
+
+function projectMapIssues(flows: LooseProjectFlows): string[] {
+	const issues: string[] = [];
+	const modules = new Set(
+		flows.modules.map((module) => stringValue(module.id)),
+	);
+	for (const module of flows.modules) {
+		const moduleId = stringValue(module.id);
+		if (arrayLength(module.screens) === 0) {
+			issues.push(`módulo sin pantallas: ${moduleId}`);
+		}
+	}
+	for (const screen of flows.screens) {
+		const screenModule = stringValue(screen.module);
+		if (!modules.has(screenModule)) {
+			issues.push(
+				`pantalla ${stringValue(screen.id)} referencia módulo inexistente: ${screenModule}`,
+			);
+		}
+	}
+	for (const flow of flows.flows) {
+		const flowId = stringValue(flow.id);
+		const flowModule = stringValue(flow.module);
+		if (!modules.has(flowModule)) {
+			issues.push(
+				`flow ${flowId} referencia módulo inexistente: ${flowModule}`,
+			);
+		}
+		for (const step of arrayValue(flow.steps)) {
+			if (!stringValue(step.from) || !stringValue(step.to)) {
+				issues.push(`flow ${flowId} tiene step sin from/to`);
+			}
+		}
+	}
+	for (const store of flows.dataStores) {
+		const ownerModule = stringValue(store.ownerModule);
+		if (!ownerModule) {
+			issues.push(`dataStore ${stringValue(store.id)} sin ownerModule`);
+		} else if (!modules.has(ownerModule)) {
+			issues.push(
+				`dataStore ${stringValue(store.id)} referencia ownerModule inexistente: ${ownerModule}`,
+			);
+		}
+	}
+	for (const connection of flows.moduleConnections) {
+		const fromModule = stringValue(connection.fromModule);
+		const toModule = stringValue(connection.toModule);
+		if (!modules.has(fromModule)) {
+			issues.push(
+				`moduleConnection referencia módulo inexistente: ${fromModule}`,
+			);
+		}
+		if (!modules.has(toModule)) {
+			issues.push(
+				`moduleConnection referencia módulo inexistente: ${toModule}`,
+			);
+		}
+	}
+	for (const element of flows.uiElements) {
+		if (!stringValue(element.selector) && !stringValue(element.label)) {
+			issues.push(`uiElement ${stringValue(element.id)} sin selector ni label`);
+		}
+	}
+	return issues;
+}
+
+function projectMapRecommendations(
+	source: ProjectMapInspection["source"],
+	flows: LooseProjectFlows,
+	issues: string[],
+): string[] {
+	const recommendations: string[] = [];
+	if (source === "default") {
+		recommendations.push(
+			"Usá /config init_project_config para crear config project-local editable.",
+		);
+	}
+	if (flows.modules.length < 2 || flows.flows.length < 2) {
+		recommendations.push(
+			"El mapa parece incompleto: agregá módulos y flows reales del proyecto.",
+		);
+	}
+	if (issues.length === 0) {
+		recommendations.push("Mapa usable por AgentLabs.");
+	}
+	return recommendations;
+}
+
 export function initWorkspaceRoot(workspaceRoot: string): InitWorkspaceResult {
 	const result: InitWorkspaceResult = {
 		workspaceRoot,
@@ -610,6 +789,42 @@ ${report.warnings.length ? report.warnings.map((warning) => `- ${warning}`).join
 
 Siguiente recomendado:
 ${report.recommendedNext}`;
+}
+
+export function formatProjectMapInspection(
+	inspection: ProjectMapInspection,
+): string {
+	const issues = inspection.issues.length
+		? inspection.issues.map((issue) => `- ${issue}`).join("\n")
+		: "- ninguna";
+	const recommendations = inspection.recommendations.length
+		? inspection.recommendations
+				.map((recommendation) => `- ${recommendation}`)
+				.join("\n")
+		: "- ninguna";
+	return `Mapa funcional del proyecto
+
+Proyecto:
+${inspection.projectName}
+
+Fuente:
+${inspection.source === "project-local" ? "project-local" : "usando defaults"}
+
+Conteo:
+- módulos: ${inspection.counts.modules}
+- pantallas: ${inspection.counts.screens}
+- uiElements: ${inspection.counts.uiElements}
+- dataStores: ${inspection.counts.dataStores}
+- flows: ${inspection.counts.flows}
+- moduleConnections: ${inspection.counts.moduleConnections}
+
+Inconsistencias:
+${issues}
+
+Recomendaciones:
+${recommendations}
+
+Solo lectura: no escribí archivos, no usé IA, no analicé código fuente.`;
 }
 
 export function formatInitWorkspaceResult(result: InitWorkspaceResult): string {

@@ -13,7 +13,7 @@ test("formatHelpText includes primary Telegram commands", () => {
 
 	assert.match(
 		text,
-		/\/config \[doctor\|init_workspace\|init_assets\|init_project_config\|skills_sync\|db_init\|sync_commands\]/,
+		/\/config \[doctor\|init_workspace\|init_assets\|init_project_config\|inspect_project_map\|skills_sync\|db_init\|sync_commands\]/,
 	);
 	assert.match(text, /\/comandos/);
 	assert.match(text, /\/testlab \[profundidad\]/);
@@ -24,6 +24,7 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 
 	assert.match(text, /Telegram — usos con argumentos/);
 	assert.match(text, /\/config init_project_config/);
+	assert.match(text, /\/config inspect_project_map/);
 	assert.match(text, /\/server restart/);
 	assert.match(text, /\/task bug <detalle>/);
 	assert.match(text, /CLI pnpm/);

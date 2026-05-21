@@ -16,6 +16,7 @@ import {
 	formatInitAssetsResult,
 	formatInitProjectConfigResult,
 	formatInitWorkspaceResult,
+	formatProjectMapInspection,
 	formatSkillsSyncResult,
 	initProjectAssets,
 	initProjectBlueprint,
@@ -24,6 +25,7 @@ import {
 	initWorkspaceRoot,
 	NECESSARY_PROJECT_SKILLS,
 	inspectProjectConfig,
+	inspectProjectMap,
 	syncNecessarySkills,
 } from "../src/config-wizard.js";
 
@@ -331,6 +333,153 @@ test("inspectProjectConfig reports invalid project config without throwing", () 
 		/project-blueprint\.json.*inválido/s,
 	);
 	assert.match(formatConfigDoctor(report), /project-flows\.json.*inválido/s);
+});
+
+test("inspectProjectMap detects default map in use", () => {
+	const projectPath = tempDir();
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.equal(result.source, "default");
+	assert.ok(result.counts.modules > 0);
+	assert.ok(
+		result.recommendations.includes(
+			"Usá /config init_project_config para crear config project-local editable.",
+		),
+	);
+	assert.match(formatProjectMapInspection(result), /usando defaults/);
+});
+
+test("inspectProjectMap detects valid project-local map", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.equal(result.source, "project-local");
+	assert.equal(result.issues.length, 0);
+	assert.ok(result.recommendations.includes("Mapa usable por AgentLabs."));
+});
+
+test("inspectProjectMap detects module without screens", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		modules: Array<{ screens: string[] }>;
+	};
+	flows.modules[0].screens = [];
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /módulo sin pantallas/u);
+});
+
+test("inspectProjectMap detects screen with missing module", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		screens: Array<{ module: string }>;
+	};
+	flows.screens[0].module = "missing-module";
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /pantalla.*missing-module/u);
+});
+
+test("inspectProjectMap detects flow with missing module", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		flows: Array<{ module: string }>;
+	};
+	flows.flows[0].module = "missing-module";
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /flow.*missing-module/u);
+});
+
+test("inspectProjectMap detects step without from or to", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		flows: Array<{ steps: Array<{ from?: string }> }>;
+	};
+	delete flows.flows[0].steps[0].from;
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /step sin from\/to/u);
+});
+
+test("inspectProjectMap detects dataStore without ownerModule", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		dataStores: Array<{ ownerModule?: string }>;
+	};
+	delete flows.dataStores[0].ownerModule;
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /dataStore.*ownerModule/u);
+});
+
+test("inspectProjectMap detects invalid moduleConnection", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		moduleConnections: Array<{ toModule: string }>;
+	};
+	flows.moduleConnections[0].toModule = "missing-module";
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /moduleConnection.*missing-module/u);
+});
+
+test("inspectProjectMap detects uiElement without selector or label", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		uiElements: Array<{ selector?: string; label?: string }>;
+	};
+	delete flows.uiElements[0].selector;
+	delete flows.uiElements[0].label;
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /uiElement.*selector.*label/u);
+});
+
+test("inspectProjectMap does not write files", () => {
+	const projectPath = tempDir();
+
+	inspectProjectMap(projectPath);
+
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		false,
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		false,
+	);
 });
 
 test("initWorkspaceRoot creates reports and workspaces directories", () => {

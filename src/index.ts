@@ -19,11 +19,13 @@ import {
 	formatInitAssetsResult,
 	formatInitProjectConfigResult,
 	formatInitWorkspaceResult,
+	formatProjectMapInspection,
 	formatSkillsSyncResult,
 	initProjectAssets,
 	initProjectConfig,
 	initWorkspaceRoot,
 	inspectProjectConfig,
+	inspectProjectMap,
 	syncNecessarySkills,
 } from "./config-wizard.js";
 import { detectAgents, formatAgents, formatDoctor } from "./doctor.js";
@@ -710,6 +712,19 @@ bot.command("config", async (ctx) => {
 		);
 		return;
 	}
+	if (arg === "inspect_project_map") {
+		if (!isAllowedCwd(currentCwd, config.allowedRoots)) {
+			await ctx.reply(
+				"No puedo inspeccionar mapa: el proyecto activo está fuera de ALLOWED_ROOTS.",
+			);
+			return;
+		}
+		await replyLong(
+			ctx,
+			formatProjectMapInspection(inspectProjectMap(currentCwd)),
+		);
+		return;
+	}
 	if (arg === "db_init") {
 		await replyLong(ctx, formatInitLabDbResult(initLabDb(labDbPath())));
 		return;
@@ -737,7 +752,7 @@ bot.command("config", async (ctx) => {
 		return;
 	}
 	await ctx.reply(
-		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config skills_sync | /config db_init | /config sync_commands",
+		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config inspect_project_map | /config skills_sync | /config db_init | /config sync_commands",
 	);
 });
 

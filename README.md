@@ -116,6 +116,7 @@ corepack pnpm dev
 | `/config init_workspace`      | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.                                                            |
 | `/config init_assets`         | Crea assets project-local mínimos.                                                                                               |
 | `/config init_project_config` | Crea `config/project-blueprint.json` y `config/project-flows.json` desde defaults si faltan; no sobreescribe configs existentes. |
+| `/config inspect_project_map` | Inspecciona el mapa funcional cargado y reporta vacíos/inconsistencias sin escribir archivos ni usar IA.                         |
 | `/config skills_sync`         | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
 | `/config db_init`             | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
 | `/config sync_commands`       | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |
