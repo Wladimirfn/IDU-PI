@@ -31,6 +31,11 @@ import {
 } from "./config-wizard.js";
 import { detectAgents, formatAgents, formatDoctor } from "./doctor.js";
 import {
+	createAiProjectBlueprintDraft,
+	createAiProjectFlowsDraft,
+	formatAiProjectDraftResult,
+} from "./project-ai-drafts.js";
+import {
 	formatDurationChoices,
 	parseLabDuration,
 	type LabDuration,
@@ -425,6 +430,12 @@ async function drainTaskQueue(ctx: Context, generation: number): Promise<void> {
 	if (generation !== taskQueueGeneration) {
 		await ctx.reply("Cola detenida por cancelación.");
 	}
+}
+
+async function generateAiProjectDraft(prompt: string): Promise<string> {
+	const result = await agentRouter.prompt(prompt);
+	if (!result.ok) throw new Error(result.output);
+	return result.output;
 }
 
 async function runPrompt(
@@ -860,6 +871,44 @@ bot.command("config", async (ctx) => {
 		);
 		return;
 	}
+	if (arg === "ai_draft_project_blueprint") {
+		if (!isAllowedCwd(currentCwd, config.allowedRoots)) {
+			await ctx.reply(
+				"No puedo generar borrador IA de blueprint: el proyecto activo está fuera de ALLOWED_ROOTS.",
+			);
+			return;
+		}
+		await replyLong(
+			ctx,
+			formatAiProjectDraftResult(
+				await createAiProjectBlueprintDraft({
+					projectPath: currentCwd,
+					reportsDir: join(config.agentWorkspaceRoot, "reports"),
+					generate: generateAiProjectDraft,
+				}),
+			),
+		);
+		return;
+	}
+	if (arg === "ai_draft_project_flows") {
+		if (!isAllowedCwd(currentCwd, config.allowedRoots)) {
+			await ctx.reply(
+				"No puedo generar borrador IA de project-flows: el proyecto activo está fuera de ALLOWED_ROOTS.",
+			);
+			return;
+		}
+		await replyLong(
+			ctx,
+			formatAiProjectDraftResult(
+				await createAiProjectFlowsDraft({
+					projectPath: currentCwd,
+					reportsDir: join(config.agentWorkspaceRoot, "reports"),
+					generate: generateAiProjectDraft,
+				}),
+			),
+		);
+		return;
+	}
 	if (arg === "db_init") {
 		await replyLong(ctx, formatInitLabDbResult(initLabDb(labDbPath())));
 		return;
@@ -887,7 +936,7 @@ bot.command("config", async (ctx) => {
 		return;
 	}
 	await ctx.reply(
-		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config inspect_project_map | /config scan_project_map | /config suggest_project_flows | /config draft_project_flows | /config review_project_flows_draft [latest|ruta] | /config apply_project_flows_draft <ruta> | /config skills_sync | /config db_init | /config sync_commands",
+		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config inspect_project_map | /config scan_project_map | /config suggest_project_flows | /config draft_project_flows | /config review_project_flows_draft [latest|ruta] | /config apply_project_flows_draft <ruta> | /config ai_draft_project_blueprint | /config ai_draft_project_flows | /config skills_sync | /config db_init | /config sync_commands",
 	);
 });
 
