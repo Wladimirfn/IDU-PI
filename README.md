@@ -158,13 +158,17 @@ Flujo seguro recomendado:
 scan → suggest → draft → review → apply con backup
 ```
 
-| Etapa   | Comando                                            | Garantía                                                                       |
-| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Scan    | `/config scan_project_map`                         | Lee archivos estáticos; no ejecuta código del proyecto.                        |
-| Suggest | `/config suggest_project_flows`                    | No escribe archivos ni usa IA.                                                 |
-| Draft   | `/config draft_project_flows`                      | Escribe solo en `AGENT_WORKSPACE_ROOT/reports/`.                               |
-| Review  | `/config review_project_flows_draft [latest/ruta]` | No escribe archivos; compara draft vs mapa actual.                             |
-| Apply   | `/config apply_project_flows_draft <ruta>`         | Requiere ruta explícita, rechaza `latest`, crea backup y fusiona solo aditivo. |
+| Etapa     | Comando                                            | Garantía                                                                       |
+| --------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Scan      | `/config scan_project_map`                         | Lee archivos estáticos; no ejecuta código del proyecto.                        |
+| Suggest   | `/config suggest_project_flows`                    | No escribe archivos ni usa IA.                                                 |
+| Draft     | `/config draft_project_flows`                      | Escribe solo en `AGENT_WORKSPACE_ROOT/reports/`.                               |
+| Review    | `/config review_project_flows_draft [latest/ruta]` | No escribe archivos; compara draft vs mapa actual.                             |
+| Apply     | `/config apply_project_flows_draft <ruta>`         | Requiere ruta explícita, rechaza `latest`, crea backup y fusiona solo aditivo. |
+| IA Draft  | `/config ai_draft_project_blueprint`               | Envía resumen seguro a Pi y guarda borrador IA en `reports/`; no aplica.       |
+| IA Draft  | `/config ai_draft_project_flows`                   | Usa scan + flows resumidos; guarda borrador IA en `reports/`; no aplica.       |
+| IA Review | `/config review_ai_blueprint_draft [latest/ruta]`  | Solo lectura; valida warning/schema y compara contra blueprint actual.         |
+| IA Review | `/config review_ai_flows_draft [latest/ruta]`      | Solo lectura; valida warning/schema parcial y detecta conflictos de IDs.       |
 
 Los AgentLabs reciben contexto resumido de `project-blueprint`, `project-flows` y el scan estático. El `rule-validator` funciona como validador interno del Orquestador; no reemplaza al AgentLab ni a la aprobación humana.
 
@@ -180,6 +184,8 @@ Reglas de seguridad:
 - `draft_project_flows` escribe solo bajo `AGENT_WORKSPACE_ROOT/reports/`.
 - `review_project_flows_draft` no escribe archivos.
 - `apply_project_flows_draft` requiere ruta explícita, rechaza `latest`, crea backup, valida antes/después y no borra ni sobrescribe IDs existentes.
+- `ai_draft_project_blueprint` y `ai_draft_project_flows` leen solo contexto seguro resumido; no leen `.env`, `reports/` ni `workspaces/`, no ejecutan código del proyecto y no modifican `config/`.
+- `review_ai_blueprint_draft` y `review_ai_flows_draft` son solo lectura, no usan IA y no aplican cambios.
 
 ## Agentes y modelos
 
@@ -322,9 +328,14 @@ Si mandás mensajes mientras Pi está ocupado, Idu-pi los guarda en cola FIFO.
 
 ```text
 /queue
+/queue_detail
 /queue_clear
 /cancel
 ```
+
+`/queue` mantiene la cola legacy visible sin cambiar su comportamiento. `/queue_detail` muestra la cola estructurada persistida como espejo secundario: id corto, estado, prioridad, categoría, emoción detectada, fecha y texto resumido.
+
+La prioridad/emoción se calcula localmente con `user-signal` por keywords, sin IA. Se usa solo como señal de orden/prioridad operativa; no decide cambios críticos ni reemplaza la decisión humana. Cuando SQLite está disponible, el evento se registra en `user_signal_events`; si SQLite falla, Telegram, `/queue` y la cola estructurada siguen funcionando.
 
 `/cancel` cancela la tarea actual y limpia la cola.
 

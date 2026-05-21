@@ -12,6 +12,10 @@ Esta rama agrega un ciclo seguro para describir el proyecto real, revisarlo con 
 /config draft_project_flows
 /config review_project_flows_draft <ruta>
 /config apply_project_flows_draft <ruta>
+/config ai_draft_project_blueprint
+/config ai_draft_project_flows
+/config review_ai_blueprint_draft latest
+/config review_ai_flows_draft latest
 ```
 
 Flujo recomendado:
@@ -54,15 +58,19 @@ El mapa sirve para comparar intención funcional contra código real. No describ
 
 ## Ciclo completo de comandos
 
-| Paso | Comando                                     | Escritura                            | Propósito                                                                           |
-| ---- | ------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
-| 1    | `/config init_project_config`               | Crea solo configs faltantes          | Inicializa `project-blueprint` y `project-flows` desde defaults sin sobreescribir.  |
-| 2    | `/config inspect_project_map`               | No escribe                           | Valida/inspecciona el JSON funcional cargado.                                       |
-| 3    | `/config scan_project_map`                  | No escribe                           | Escanea archivos estáticos del proyecto y compara hallazgos contra `project-flows`. |
-| 4    | `/config suggest_project_flows`             | No escribe                           | Devuelve sugerencias parciales desde el scan; no son fuente de verdad.              |
-| 5    | `/config draft_project_flows`               | Solo `AGENT_WORKSPACE_ROOT/reports/` | Guarda un draft revisable separado de `config/project-flows.json`.                  |
-| 6    | `/config review_project_flows_draft <ruta>` | No escribe                           | Revisa draft contra el mapa actual; acepta `latest` solo para revisar.              |
-| 7    | `/config apply_project_flows_draft <ruta>`  | `config/project-flows.json` + backup | Aplica un draft con ruta explícita, merge aditivo y validación final.               |
+| Paso | Comando                                           | Escritura                            | Propósito                                                                           |
+| ---- | ------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| 1    | `/config init_project_config`                     | Crea solo configs faltantes          | Inicializa `project-blueprint` y `project-flows` desde defaults sin sobreescribir.  |
+| 2    | `/config inspect_project_map`                     | No escribe                           | Valida/inspecciona el JSON funcional cargado.                                       |
+| 3    | `/config scan_project_map`                        | No escribe                           | Escanea archivos estáticos del proyecto y compara hallazgos contra `project-flows`. |
+| 4    | `/config suggest_project_flows`                   | No escribe                           | Devuelve sugerencias parciales desde el scan; no son fuente de verdad.              |
+| 5    | `/config draft_project_flows`                     | Solo `AGENT_WORKSPACE_ROOT/reports/` | Guarda un draft revisable separado de `config/project-flows.json`.                  |
+| 6    | `/config review_project_flows_draft <ruta>`       | No escribe                           | Revisa draft contra el mapa actual; acepta `latest` solo para revisar.              |
+| 7    | `/config apply_project_flows_draft <ruta>`        | `config/project-flows.json` + backup | Aplica un draft con ruta explícita, merge aditivo y validación final.               |
+| 8    | `/config ai_draft_project_blueprint`              | Solo `AGENT_WORKSPACE_ROOT/reports/` | Pide a Pi un borrador IA de blueprint con contexto seguro resumido.                 |
+| 9    | `/config ai_draft_project_flows`                  | Solo `AGENT_WORKSPACE_ROOT/reports/` | Pide a Pi un borrador IA de flows usando scan + flows resumidos.                    |
+| 10   | `/config review_ai_blueprint_draft [latest/ruta]` | No escribe                           | Revisa warning, JSON/schema y diferencias contra blueprint actual.                  |
+| 11   | `/config review_ai_flows_draft [latest/ruta]`     | No escribe                           | Revisa warning, JSON/schema parcial, sugerencias, conflictos y duplicados.          |
 
 ## Flujo seguro
 
@@ -83,8 +91,10 @@ Reglas de seguridad:
 - `apply_project_flows_draft` fusiona solo elementos aditivos.
 - `apply_project_flows_draft` no borra datos existentes.
 - `apply_project_flows_draft` no sobrescribe IDs existentes.
-- El ciclo no usa IA para generar flows.
-- El ciclo no ejecuta código del proyecto.
+- El ciclo estático `scan → suggest → draft → review → apply` no usa IA para generar flows.
+- Los comandos `ai_draft_*` pueden pedir propuestas a Pi, pero solo guardan borradores en `reports/` con el warning `Borrador IA. No es fuente de verdad.`.
+- Los comandos `review_ai_*` no usan IA, no escriben config y no aplican cambios.
+- Ningún comando de scan/draft/review ejecuta código del proyecto.
 
 ## Qué ve el AgentLab
 
@@ -125,7 +135,22 @@ corepack pnpm build
 corepack pnpm test
 ```
 
-Última verificación conocida: `253 passing`.
+Última verificación conocida en esta rama: `284 passing`.
+
+### Borradores IA
+
+Los comandos IA son opcionales y conservadores:
+
+```text
+/config ai_draft_project_blueprint
+/config ai_draft_project_flows
+/config review_ai_blueprint_draft latest
+/config review_ai_flows_draft latest
+```
+
+`ai_draft_project_blueprint` lee solo contexto mínimo seguro: `README.md`, `package.json`, docs chicos y resumen del blueprint actual. `ai_draft_project_flows` usa `scan_project_map` y resumen del `project-flows` actual. No leen `.env`, `reports/` ni `workspaces/`, no mandan archivos grandes completos y no ejecutan código.
+
+Los reviews IA muestran diferencias, faltantes, sugerencias, conflictos de IDs, duplicados, riesgos y errores. Si la IA devolvió JSON inválido, el draft conserva `rawOutput` y el review lo reporta sin romper.
 
 ### Riesgos y mitigaciones
 

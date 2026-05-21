@@ -23,6 +23,8 @@ serviceAccountKey.json
 
 # Local runtime state
 data/
+reports/
+workspaces/
 .atl/*
 !.atl/skill-registry.md
 .pi/
