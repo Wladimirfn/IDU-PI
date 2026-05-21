@@ -17,9 +17,11 @@ import {
 	formatConfigDoctor,
 	formatConfigOverview,
 	formatInitAssetsResult,
+	formatInitProjectConfigResult,
 	formatInitWorkspaceResult,
 	formatSkillsSyncResult,
 	initProjectAssets,
+	initProjectConfig,
 	initWorkspaceRoot,
 	inspectProjectConfig,
 	syncNecessarySkills,
@@ -693,6 +695,21 @@ bot.command("config", async (ctx) => {
 		await replyLong(ctx, formatInitAssetsResult(initProjectAssets(currentCwd)));
 		return;
 	}
+	if (arg === "init_project_config") {
+		if (!isAllowedCwd(currentCwd, config.allowedRoots)) {
+			await ctx.reply(
+				"No puedo inicializar config: el proyecto activo está fuera de ALLOWED_ROOTS.",
+			);
+			return;
+		}
+		await replyLong(
+			ctx,
+			formatInitProjectConfigResult(
+				initProjectConfig(currentCwd, currentProjectId()),
+			),
+		);
+		return;
+	}
 	if (arg === "db_init") {
 		await replyLong(ctx, formatInitLabDbResult(initLabDb(labDbPath())));
 		return;
@@ -720,7 +737,7 @@ bot.command("config", async (ctx) => {
 		return;
 	}
 	await ctx.reply(
-		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config skills_sync | /config db_init | /config sync_commands",
+		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config skills_sync | /config db_init | /config sync_commands",
 	);
 });
 

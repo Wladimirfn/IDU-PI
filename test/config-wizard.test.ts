@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,9 +14,13 @@ import {
 	formatConfigDoctor,
 	formatConfigOverview,
 	formatInitAssetsResult,
+	formatInitProjectConfigResult,
 	formatInitWorkspaceResult,
 	formatSkillsSyncResult,
 	initProjectAssets,
+	initProjectBlueprint,
+	initProjectConfig,
+	initProjectFlows,
 	initWorkspaceRoot,
 	NECESSARY_PROJECT_SKILLS,
 	inspectProjectConfig,
@@ -108,6 +118,108 @@ test("initProjectAssets creates missing assets without overwriting existing file
 	assert.equal(existsSync(join(projectPath, ".mcp", "config.json")), true);
 });
 
+test("initProjectBlueprint creates config and blueprint when missing", () => {
+	const projectPath = join(tempDir(), "demo-project");
+	mkdirSync(projectPath, { recursive: true });
+
+	const result = initProjectBlueprint(projectPath, "active-demo");
+	const blueprintPath = join(projectPath, "config", "project-blueprint.json");
+	const blueprint = JSON.parse(readFileSync(blueprintPath, "utf8")) as {
+		projectName: string;
+	};
+
+	assert.equal(existsSync(join(projectPath, "config")), true);
+	assert.ok(result.created.includes("config/project-blueprint.json"));
+	assert.equal(blueprint.projectName, "active-demo");
+});
+
+test("initProjectBlueprint does not overwrite existing blueprint", () => {
+	const projectPath = tempDir();
+	const blueprintPath = join(projectPath, "config", "project-blueprint.json");
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(blueprintPath, '{"projectName":"custom"}\n', "utf8");
+
+	const result = initProjectBlueprint(projectPath, "ignored");
+
+	assert.equal(
+		readFileSync(blueprintPath, "utf8"),
+		'{"projectName":"custom"}\n',
+	);
+	assert.ok(result.existing.includes("config/project-blueprint.json"));
+});
+
+test("initProjectFlows creates flows when missing", () => {
+	const projectPath = tempDir();
+
+	const result = initProjectFlows(projectPath);
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		projectType: string;
+	};
+
+	assert.ok(result.created.includes("config/project-flows.json"));
+	assert.equal(flows.projectType, "real-project-functional-map");
+});
+
+test("initProjectFlows does not overwrite existing flows", () => {
+	const projectPath = tempDir();
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(flowsPath, '{"projectType":"custom"}\n', "utf8");
+
+	const result = initProjectFlows(projectPath);
+
+	assert.equal(readFileSync(flowsPath, "utf8"), '{"projectType":"custom"}\n');
+	assert.ok(result.existing.includes("config/project-flows.json"));
+});
+
+test("initProjectConfig creates both project config files", () => {
+	const projectPath = tempDir();
+
+	const result = initProjectConfig(projectPath, "demo-id");
+
+	assert.ok(result.created.includes("config/project-blueprint.json"));
+	assert.ok(result.created.includes("config/project-flows.json"));
+	assert.match(formatInitProjectConfigResult(result), /init_project_config/);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		true,
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		true,
+	);
+});
+
+test("initProjectConfig infers safe projectName from folder", () => {
+	const projectPath = join(tempDir(), "folder-project");
+	mkdirSync(projectPath, { recursive: true });
+
+	initProjectConfig(projectPath);
+	const blueprint = JSON.parse(
+		readFileSync(join(projectPath, "config", "project-blueprint.json"), "utf8"),
+	) as { projectName: string };
+
+	assert.equal(blueprint.projectName, "folder-project");
+});
+
+test("initProjectConfig writes only under projectPath", () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	mkdirSync(projectPath, { recursive: true });
+
+	initProjectConfig(projectPath, "demo");
+
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		true,
+	);
+	assert.equal(
+		existsSync(join(root, "config", "project-blueprint.json")),
+		false,
+	);
+});
+
 test("initWorkspaceRoot creates reports and workspaces directories", () => {
 	const workspaceRoot = join(tempDir(), "bridge-agents");
 
@@ -127,7 +239,9 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`, "utf8");
 	}
-	mkdirSync(join(sourceSkillsDir, "rcm-flujos-operativos"), { recursive: true });
+	mkdirSync(join(sourceSkillsDir, "rcm-flujos-operativos"), {
+		recursive: true,
+	});
 	writeFileSync(
 		join(sourceSkillsDir, "rcm-flujos-operativos", "SKILL.md"),
 		"# domain\n",
@@ -139,13 +253,13 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 	assert.deepEqual(result.missing, []);
 	assert.equal(result.copied.length, NECESSARY_PROJECT_SKILLS.length);
 	assert.equal(
-		existsSync(join(projectPath, ".agents", "skills", "bug-hunter", "SKILL.md")),
+		existsSync(
+			join(projectPath, ".agents", "skills", "bug-hunter", "SKILL.md"),
+		),
 		true,
 	);
 	assert.equal(
-		existsSync(
-			join(projectPath, ".agents", "skills", "rcm-flujos-operativos"),
-		),
+		existsSync(join(projectPath, ".agents", "skills", "rcm-flujos-operativos")),
 		false,
 	);
 	assert.match(

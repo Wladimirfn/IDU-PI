@@ -1,8 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, relative } from "node:path";
 import type { AgentProfile, AgentWorkspaceMode } from "./config.js";
 import { isAllowedCwd } from "./config.js";
+import { validateProjectBlueprint } from "./project-blueprint.js";
+import { validateProjectFlows } from "./project-flows.js";
 
 export type AssetStatus = {
 	label: string;
@@ -58,6 +67,13 @@ export type InitAssetsResult = {
 	existing: string[];
 };
 
+export type InitProjectConfigResult = {
+	projectPath: string;
+	created: string[];
+	existing: string[];
+	projectName: string;
+};
+
 export type InitWorkspaceResult = {
 	workspaceRoot: string;
 	created: string[];
@@ -87,6 +103,10 @@ const SKILLS_KEEP = ".agents/skills/.gitkeep";
 const SKILL_INDEX = ".agents/skills/INDEX.md";
 const REGISTRY_FILE = ".atl/skill-registry.md";
 const MCP_CONFIG = ".mcp/config.json";
+const PROJECT_BLUEPRINT = "config/project-blueprint.json";
+const PROJECT_FLOWS = "config/project-flows.json";
+const DEFAULT_BLUEPRINT = "config/default-blueprint.json";
+const DEFAULT_FLOWS = "config/default-flows.json";
 
 const REGISTRY_TEMPLATE = `# Project Skill Registry
 
@@ -134,12 +154,28 @@ function createFileIfMissing(
 	result: InitAssetsResult,
 ): void {
 	const path = join(projectPath, relativePath);
-	mkdirSync(join(path, ".."), { recursive: true });
+	mkdirSync(dirname(path), { recursive: true });
 	if (existsSync(path)) {
 		result.existing.push(relativePath);
 		return;
 	}
 	writeFileSync(path, content, "utf8");
+	result.created.push(relativePath);
+}
+
+function createProjectConfigFileIfMissing(
+	projectPath: string,
+	relativePath: string,
+	content: () => string,
+	result: InitProjectConfigResult,
+): void {
+	const path = join(projectPath, relativePath);
+	mkdirSync(dirname(path), { recursive: true });
+	if (existsSync(path)) {
+		result.existing.push(relativePath);
+		return;
+	}
+	writeFileSync(path, content(), "utf8");
 	result.created.push(relativePath);
 }
 
@@ -213,7 +249,11 @@ export function inspectProjectConfig(
 			"AGENT_WORKSPACE_MODE no está en clone; los laboratorios no quedan aislados.",
 		);
 	}
-	if (!workspace.root.exists || !workspace.reports.exists || !workspace.workspaces.exists) {
+	if (
+		!workspace.root.exists ||
+		!workspace.reports.exists ||
+		!workspace.workspaces.exists
+	) {
 		warnings.push(
 			"Falta inicializar AGENT_WORKSPACE_ROOT con reports/ y workspaces/.",
 		);
@@ -241,7 +281,9 @@ export function inspectProjectConfig(
 	const missingAsset =
 		!assets.skills.exists || !assets.registry.exists || !assets.mcp.exists;
 	const missingWorkspace =
-		!workspace.root.exists || !workspace.reports.exists || !workspace.workspaces.exists;
+		!workspace.root.exists ||
+		!workspace.reports.exists ||
+		!workspace.workspaces.exists;
 	const recommendedNext = missingWorkspace
 		? "/config init_workspace"
 		: missingAsset
@@ -279,6 +321,98 @@ export function initProjectAssets(projectPath: string): InitAssetsResult {
 	createFileIfMissing(projectPath, REGISTRY_FILE, REGISTRY_TEMPLATE, result);
 	createFileIfMissing(projectPath, MCP_CONFIG, MCP_TEMPLATE, result);
 	return result;
+}
+
+export function initProjectBlueprint(
+	projectPath: string,
+	projectId?: string,
+): InitProjectConfigResult {
+	const result = emptyProjectConfigResult(projectPath, projectId);
+	createProjectConfigFileIfMissing(
+		projectPath,
+		PROJECT_BLUEPRINT,
+		() => blueprintContent(result.projectName),
+		result,
+	);
+	return result;
+}
+
+export function initProjectFlows(projectPath: string): InitProjectConfigResult {
+	const result = emptyProjectConfigResult(projectPath);
+	createProjectConfigFileIfMissing(
+		projectPath,
+		PROJECT_FLOWS,
+		flowsContent,
+		result,
+	);
+	return result;
+}
+
+export function initProjectConfig(
+	projectPath: string,
+	projectId?: string,
+): InitProjectConfigResult {
+	const result = emptyProjectConfigResult(projectPath, projectId);
+	createProjectConfigFileIfMissing(
+		projectPath,
+		PROJECT_BLUEPRINT,
+		() => blueprintContent(result.projectName),
+		result,
+	);
+	createProjectConfigFileIfMissing(
+		projectPath,
+		PROJECT_FLOWS,
+		flowsContent,
+		result,
+	);
+	return result;
+}
+
+function emptyProjectConfigResult(
+	projectPath: string,
+	projectId?: string,
+): InitProjectConfigResult {
+	return {
+		projectPath,
+		created: [],
+		existing: [],
+		projectName: safeProjectName(projectPath, projectId),
+	};
+}
+
+function safeProjectName(projectPath: string, projectId?: string): string {
+	const candidate = projectId?.trim() || basename(projectPath).trim();
+	return candidate || "project";
+}
+
+function blueprintContent(projectName: string): string {
+	const parsed = JSON.parse(
+		readFileSync(join(process.cwd(), DEFAULT_BLUEPRINT), "utf8"),
+	) as unknown;
+	const record =
+		parsed && typeof parsed === "object" && !Array.isArray(parsed)
+			? { ...(parsed as Record<string, unknown>), projectName }
+			: parsed;
+	const validation = validateProjectBlueprint(record);
+	if (!validation.ok) {
+		throw new Error(
+			`Default project blueprint is invalid: ${validation.errors.join("; ")}`,
+		);
+	}
+	return `${JSON.stringify(validation.blueprint, null, 2)}\n`;
+}
+
+function flowsContent(): string {
+	const parsed = JSON.parse(
+		readFileSync(join(process.cwd(), DEFAULT_FLOWS), "utf8"),
+	) as unknown;
+	const validation = validateProjectFlows(parsed);
+	if (!validation.ok) {
+		throw new Error(
+			`Default project flows are invalid: ${validation.errors.join("; ")}`,
+		);
+	}
+	return `${JSON.stringify(validation.flows, null, 2)}\n`;
 }
 
 export function initWorkspaceRoot(workspaceRoot: string): InitWorkspaceResult {
@@ -430,4 +564,30 @@ Ya existían:
 ${existing}
 
 No ejecuté MCP, no copié secretos, no hice commit ni push.`;
+}
+
+export function formatInitProjectConfigResult(
+	result: InitProjectConfigResult,
+): string {
+	const created = result.created.length
+		? result.created.map((path) => `- ${path}`).join("\n")
+		: "- ninguno";
+	const existing = result.existing.length
+		? result.existing.map((path) => `- ${path}`).join("\n")
+		: "- ninguno";
+	return `Config project-local (init_project_config)
+
+Proyecto:
+${result.projectPath}
+
+projectName seguro:
+${result.projectName}
+
+Creados:
+${created}
+
+Ya existían:
+${existing}
+
+No sobreescribí configs existentes, no usé IA, no analicé código, no hice commit ni push.`;
 }

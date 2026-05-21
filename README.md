@@ -37,16 +37,16 @@ Ejecutá estos comandos en orden:
 
 ## Qué hace
 
-| Área | Qué resuelve |
-|---|---|
-| Seguridad | Acepta mensajes solo desde `ALLOWED_USER_ID` y mantiene secretos fuera de Git. |
-| Pi RPC | Envía prompts a Pi en modo RPC con sesión persistente. |
-| Proyectos | Permite cambiar proyecto activo y retomar trabajos recientes. |
-| Agentes | Permite elegir perfiles/modelos y muestra qué modelo usa cada agente. |
-| Laboratorio | Ejecuta agentes no-default en clones aislados. |
-| Reportes | Guarda corridas en `reports/lab-runs.jsonl`; `/config db_init` prepara la DB SQLite `reports/lab.db` para tracking estructurado. |
-| Engram | Puede buscar contexto y sincronizar reportes aprobados cuando Engram está disponible. |
-| Telegram UI | Reenvía confirmaciones y selecciones interactivas de Pi al chat. |
+| Área        | Qué resuelve                                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Seguridad   | Acepta mensajes solo desde `ALLOWED_USER_ID` y mantiene secretos fuera de Git.                                                   |
+| Pi RPC      | Envía prompts a Pi en modo RPC con sesión persistente.                                                                           |
+| Proyectos   | Permite cambiar proyecto activo y retomar trabajos recientes.                                                                    |
+| Agentes     | Permite elegir perfiles/modelos y muestra qué modelo usa cada agente.                                                            |
+| Laboratorio | Ejecuta agentes no-default en clones aislados.                                                                                   |
+| Reportes    | Guarda corridas en `reports/lab-runs.jsonl`; `/config db_init` prepara la DB SQLite `reports/lab.db` para tracking estructurado. |
+| Engram      | Puede buscar contexto y sincronizar reportes aprobados cuando Engram está disponible.                                            |
+| Telegram UI | Reenvía confirmaciones y selecciones interactivas de Pi al chat.                                                                 |
 
 ## Requisitos
 
@@ -109,15 +109,16 @@ corepack pnpm dev
 
 `/config` es el instalador/mantenedor desde Telegram. Primero muestra diagnóstico; después podés ejecutar acciones puntuales.
 
-| Comando | Resultado |
-|---|---|
-| `/config` | Checklist del proyecto activo. |
-| `/config doctor` | Diagnóstico detallado. |
-| `/config init_workspace` | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`. |
-| `/config init_assets` | Crea assets project-local mínimos. |
-| `/config skills_sync` | Copia solo skills necesarias desde el proyecto fuente registrado. |
-| `/config db_init` | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`. |
-| `/config sync_commands` | Actualiza el menú de comandos de Telegram con `setMyCommands`. |
+| Comando                       | Resultado                                                                                                                        |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `/config`                     | Checklist del proyecto activo.                                                                                                   |
+| `/config doctor`              | Diagnóstico detallado.                                                                                                           |
+| `/config init_workspace`      | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.                                                            |
+| `/config init_assets`         | Crea assets project-local mínimos.                                                                                               |
+| `/config init_project_config` | Crea `config/project-blueprint.json` y `config/project-flows.json` desde defaults si faltan; no sobreescribe configs existentes. |
+| `/config skills_sync`         | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
+| `/config db_init`             | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
+| `/config sync_commands`       | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |
 
 Assets creados por `/config init_assets`:
 
@@ -125,6 +126,13 @@ Assets creados por `/config init_assets`:
 .agents/skills/.gitkeep
 .atl/skill-registry.md
 .mcp/config.json
+```
+
+Config project-local creada por `/config init_project_config` si falta:
+
+```text
+config/project-blueprint.json
+config/project-flows.json
 ```
 
 Reglas de seguridad:
@@ -206,12 +214,12 @@ Comandos principales:
 
 Profundidades:
 
-| Profundidad | Uso recomendado |
-|---|---|
-| `quick` | Smoke test rápido. |
-| `3tests` | Señal media sin gastar demasiado. |
-| `5tests` | Verificación más fuerte. |
-| `full` | Revisión amplia, más lenta. |
+| Profundidad | Uso recomendado                   |
+| ----------- | --------------------------------- |
+| `quick`     | Smoke test rápido.                |
+| `3tests`    | Señal media sin gastar demasiado. |
+| `5tests`    | Verificación más fuerte.          |
+| `full`      | Revisión amplia, más lenta.       |
 
 Decisiones sobre reportes:
 
@@ -239,12 +247,12 @@ Decisiones sobre reportes:
 
 `/server` controla la sesión Pi RPC activa, no el proceso del bot de Telegram:
 
-| Comando | Acción |
-|---|---|
-| `/server status` | Muestra bridge, RPC, proyecto y agente activo. |
-| `/server run` | Inicia o deja listo el RPC activo. |
-| `/server restart` | Reinicia solo la sesión RPC activa. |
-| `/server off` | Detiene solo la sesión RPC activa. |
+| Comando           | Acción                                         |
+| ----------------- | ---------------------------------------------- |
+| `/server status`  | Muestra bridge, RPC, proyecto y agente activo. |
+| `/server run`     | Inicia o deja listo el RPC activo.             |
+| `/server restart` | Reinicia solo la sesión RPC activa.            |
+| `/server off`     | Detiene solo la sesión RPC activa.             |
 
 Si el bot de Telegram está caído, no puede recibir comandos. Para recuperación completa usá el supervisor Windows o `start-pi-telegram-bridge.bat`.
 
@@ -261,13 +269,13 @@ Si el bot de Telegram está caído, no puede recibir comandos. Para recuperació
 /task docs <detalle>
 ```
 
-| Comando | Uso |
-|---|---|
-| `/review` | Revisa cambios actuales sin commitear ni pushear. |
+| Comando      | Uso                                                    |
+| ------------ | ------------------------------------------------------ |
+| `/review`    | Revisa cambios actuales sin commitear ni pushear.      |
 | `/fix_tests` | Corre tests, identifica fallas y aplica fixes mínimos. |
-| `/audit` | Revisa repo público, secretos, artefactos y calidad. |
-| `/safe_push` | Checklist antes de push; no commitea ni pushea. |
-| `/task` | Arma prompts operativos por tipo de tarea. |
+| `/audit`     | Revisa repo público, secretos, artefactos y calidad.   |
+| `/safe_push` | Checklist antes de push; no commitea ni pushea.        |
+| `/task`      | Arma prompts operativos por tipo de tarea.             |
 
 ### Cola y cancelación
 
@@ -315,10 +323,10 @@ Cuando está disponible:
 /syncreports
 ```
 
-| Comando | Uso |
-|---|---|
-| `/mem login auth` | Busca contexto histórico vía Pi/Engram. |
-| `/syncreports` | Guarda reportes aprobados como memoria estructurada. |
+| Comando           | Uso                                                  |
+| ----------------- | ---------------------------------------------------- |
+| `/mem login auth` | Busca contexto histórico vía Pi/Engram.              |
+| `/syncreports`    | Guarda reportes aprobados como memoria estructurada. |
 
 Si Engram no está disponible, el bridge debe seguir funcionando con archivos locales (`lab-runs.jsonl`, `lab.db`, `.agents`, `.atl`, `.mcp`).
 
