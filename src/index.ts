@@ -55,6 +55,10 @@ import {
 	scanProjectMap,
 	suggestProjectFlowsFromScan,
 } from "./project-map-scanner.js";
+import {
+	formatProjectConnectionReport,
+	inspectProjectConnection,
+} from "./project-connection.js";
 import { loadProjectFlows } from "./project-flows.js";
 import {
 	formatLabRunResultLines,
@@ -645,6 +649,17 @@ bot.command("status", async (ctx) => {
 bot.command("dashboard", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	await ctx.reply(buildDashboardText(dashboardState()));
+});
+
+bot.command("idu", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const report = inspectProjectConnection({
+		registry,
+		defaultCwd: config.defaultCwd,
+		allowedRoots: config.allowedRoots,
+		workspaceRoot: config.agentWorkspaceRoot,
+	});
+	await replyLong(ctx, formatProjectConnectionReport(report));
 });
 
 bot.command(QUICK_PROMPT_COMMANDS, async (ctx) => {

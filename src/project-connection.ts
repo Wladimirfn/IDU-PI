@@ -54,6 +54,82 @@ export type InspectProjectConnectionOptions = {
 	now?: () => Date;
 };
 
+export function formatProjectConnectionReport(
+	report: ProjectConnectionReport,
+): string {
+	return [
+		statusMessage(report.status),
+		"",
+		"Proyecto:",
+		report.projectId ?? "—",
+		"",
+		"Ruta:",
+		report.projectPath ?? "—",
+		"",
+		"Estado:",
+		report.status,
+		"",
+		"safeToOperate:",
+		String(report.safeToOperate),
+		"",
+		"needsUserConfirmation:",
+		String(report.needsUserConfirmation),
+		"",
+		"Comprensión:",
+		understandingSummary(report),
+		"",
+		"Problemas:",
+		formatList(report.problems),
+		"",
+		"Warnings:",
+		formatList(report.warnings),
+		"",
+		"Siguiente recomendado:",
+		report.recommendedNext,
+	].join("\n");
+}
+
+function statusMessage(status: ProjectConnectionStatus): string {
+	switch (status) {
+		case "ready":
+			return "Idu-pi conectado y listo para operar.";
+		case "connected":
+			return "Idu-pi conectado, pero falta comprensión/config completa.";
+		case "needs_understanding":
+			return "Idu-pi conectado, pero el proyecto necesita comprensión.";
+		case "broken_connection":
+			return "Idu-pi detectó conexión rota.";
+		case "not_connected":
+			return "Idu-pi no está conectado a ningún proyecto.";
+		case "unknown_project":
+			return "Proyecto no encontrado en memoria.";
+	}
+}
+
+function understandingSummary(report: ProjectConnectionReport): string {
+	if (
+		report.blueprint?.source === "project-local" &&
+		report.blueprint.valid &&
+		report.flows?.source === "project-local" &&
+		report.flows.valid
+	) {
+		return "- blueprint/flows project-local válidos";
+	}
+	if (!report.blueprint?.exists || !report.flows?.exists) {
+		return "- falta blueprint/flows project-local";
+	}
+	if (report.blueprint && report.flows) {
+		return "- blueprint/flows project-local incompletos o inválidos";
+	}
+	return "- no evaluada";
+}
+
+function formatList(items: string[]): string {
+	return items.length
+		? items.map((item) => `- ${item}`).join("\n")
+		: "- ninguno";
+}
+
 export function inspectProjectConnection(
 	options: InspectProjectConnectionOptions,
 ): ProjectConnectionReport {

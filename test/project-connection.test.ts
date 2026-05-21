@@ -12,7 +12,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import type { ProjectRegistry } from "../src/projects.js";
-import { inspectProjectConnection } from "../src/project-connection.js";
+import {
+	formatProjectConnectionReport,
+	inspectProjectConnection,
+} from "../src/project-connection.js";
 
 const tempRoots: string[] = [];
 
@@ -181,6 +184,85 @@ test("connected if local configs exist but are invalid", () => {
 	assert.equal(report.safeToOperate, false);
 	assert.equal(report.needsUserConfirmation, true);
 	assert.equal(report.recommendedNext, "/config inspect_project_map");
+});
+
+test("formatProjectConnectionReport shows ready", () => {
+	const text = formatProjectConnectionReport({
+		status: "ready",
+		projectId: "demo",
+		projectPath: "C:\\demo",
+		problems: [],
+		warnings: [],
+		recommendedNext: "listo para operar",
+		safeToOperate: true,
+		needsUserConfirmation: false,
+		inspectedAt: "2026-05-21T00:00:00.000Z",
+		blueprint: {
+			exists: true,
+			source: "project-local",
+			valid: true,
+			path: "C:\\demo\\config\\project-blueprint.json",
+			errors: [],
+		},
+		flows: {
+			exists: true,
+			source: "project-local",
+			valid: true,
+			path: "C:\\demo\\config\\project-flows.json",
+			errors: [],
+		},
+	});
+
+	assert.match(text, /Idu-pi conectado y listo para operar\./);
+	assert.match(text, /Proyecto:\ndemo/);
+	assert.match(text, /Estado:\nready/);
+	assert.match(text, /safeToOperate:\ntrue/);
+	assert.match(text, /needsUserConfirmation:\nfalse/);
+	assert.match(text, /blueprint\/flows project-local válidos/);
+	assert.match(text, /Siguiente recomendado:\nlisto para operar/);
+});
+
+test("formatProjectConnectionReport shows needs_understanding", () => {
+	const text = formatProjectConnectionReport({
+		status: "needs_understanding",
+		projectId: "demo",
+		projectPath: "C:\\demo",
+		problems: [
+			"Falta config/project-flows.json project-local; se usaría default.",
+		],
+		warnings: [],
+		recommendedNext: "/config init_project_config",
+		safeToOperate: false,
+		needsUserConfirmation: true,
+		inspectedAt: "2026-05-21T00:00:00.000Z",
+	});
+
+	assert.match(
+		text,
+		/Idu-pi conectado, pero el proyecto necesita comprensión\./,
+	);
+	assert.match(text, /Problemas:\n- Falta config\/project-flows\.json/);
+	assert.match(text, /Siguiente recomendado:\n\/config init_project_config/);
+});
+
+test("formatProjectConnectionReport shows broken_connection", () => {
+	const text = formatProjectConnectionReport({
+		status: "broken_connection",
+		projectId: "demo",
+		projectPath: "C:\\missing",
+		problems: [
+			"La ruta del proyecto no existe o no es un directorio: C:\\missing",
+		],
+		warnings: ["Revisá el registro de proyectos."],
+		recommendedNext: "/addproject <id> <ruta>",
+		safeToOperate: false,
+		needsUserConfirmation: true,
+		inspectedAt: "2026-05-21T00:00:00.000Z",
+	});
+
+	assert.match(text, /Idu-pi detectó conexión rota\./);
+	assert.match(text, /Warnings:\n- Revisá el registro de proyectos\./);
+	assert.match(text, /Siguiente recomendado:\n\/addproject <id> <ruta>/);
 });
 
 test("inspectProjectConnection does not write files", () => {

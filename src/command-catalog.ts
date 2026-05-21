@@ -37,6 +37,12 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		help: "/dashboard - panel operativo",
 	},
 	{
+		command: "idu",
+		description: "Ver conexión Idu-pi del proyecto",
+		help: "/idu - diagnosticar conexión y comprensión del proyecto activo",
+		usage: ["/idu"],
+	},
+	{
 		command: "server",
 		description: "Controlar sesión Pi RPC",
 		help: "/server status|run|restart|off - controlar sesión Pi RPC activa",

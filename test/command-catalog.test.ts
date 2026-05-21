@@ -18,6 +18,7 @@ test("formatHelpText includes primary Telegram commands", () => {
 		/\/config \[doctor\|init_workspace\|init_assets\|init_project_config\|inspect_project_map\|scan_project_map\|suggest_project_flows\|draft_project_flows\|review_project_flows_draft\|apply_project_flows_draft\|ai_draft_project_blueprint\|ai_draft_project_flows\|review_ai_blueprint_draft\|review_ai_flows_draft\|skills_sync\|db_init\|sync_commands\]/,
 	);
 	assert.match(text, /\/comandos/);
+	assert.match(text, /\/idu/);
 	assert.match(text, /\/testlab \[profundidad\]/);
 });
 
@@ -36,6 +37,7 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/config ai_draft_project_flows/);
 	assert.match(text, /\/config review_ai_blueprint_draft/);
 	assert.match(text, /\/config review_ai_flows_draft/);
+	assert.match(text, /\/idu/);
 	assert.match(text, /\/server restart/);
 	assert.match(text, /\/task bug <detalle>/);
 	assert.match(text, /\/queue_detail/);
@@ -115,6 +117,7 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 		description: TELEGRAM_COMMANDS[0].description,
 	});
 	assert.ok(commands.some((entry) => entry.command === "config"));
+	assert.ok(commands.some((entry) => entry.command === "idu"));
 	assert.ok(commands.some((entry) => entry.command === "queue_detail"));
 	assert.equal(commands.length, TELEGRAM_COMMANDS.length);
 	for (const entry of commands) {
