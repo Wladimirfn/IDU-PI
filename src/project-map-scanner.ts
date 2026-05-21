@@ -1,5 +1,12 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join, relative, sep } from "node:path";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { basename, extname, join, relative, sep } from "node:path";
 import type {
 	DataStoreType,
 	FlowStepType,
@@ -48,6 +55,12 @@ export type ProjectFlowSuggestions = {
 	uiElements: ProjectUiElement[];
 	dataStores: ProjectDataStore[];
 	flows: ProjectFlow[];
+};
+
+export type ProjectFlowDraftResult = {
+	path: string;
+	projectPath: string;
+	suggestions: ProjectFlowSuggestions;
 };
 
 export type ProjectMapScanResult = {
@@ -301,6 +314,72 @@ ${JSON.stringify(
 )}${limited.hidden ? `\n\n+${limited.hidden} más uiElements. Si la sugerencia es grande, conviene editar manualmente.` : ""}
 
 Solo lectura: No escribí archivos, no modifiqué project-flows, no usé IA, no ejecuté código del proyecto.`;
+}
+
+export function saveProjectFlowsDraft(
+	projectPath: string,
+	flows: ProjectFlows,
+	reportsPath: string,
+	now = new Date(),
+): ProjectFlowDraftResult {
+	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	mkdirSync(reportsPath, { recursive: true });
+	const path = uniqueDraftPath(reportsPath, now);
+	writeFileSync(
+		path,
+		`${JSON.stringify(
+			{
+				generatedAt: now.toISOString(),
+				projectPath,
+				warning: "Borrador sugerido, no es fuente de verdad",
+				suggestedScreens: suggestions.screens,
+				suggestedUiElements: suggestions.uiElements,
+				suggestedDataStores: suggestions.dataStores,
+				suggestedFlows: suggestions.flows,
+			},
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+	return { path, projectPath, suggestions };
+}
+
+export function formatProjectFlowDraftResult(
+	result: ProjectFlowDraftResult,
+): string {
+	return `Borrador project-flows guardado
+
+Ruta:
+${result.path}
+
+Contenido:
+- screens sugeridas: ${result.suggestions.screens.length}
+- uiElements sugeridos: ${result.suggestions.uiElements.length}
+- dataStores sugeridos: ${result.suggestions.dataStores.length}
+- flows candidatos: ${result.suggestions.flows.length}
+
+Esto es un borrador sugerido, no es fuente de verdad: revisalo antes de copiarlo a config/project-flows.json.
+
+No modifiqué config/project-flows.json, no usé IA, no ejecuté código del proyecto.`;
+}
+
+function uniqueDraftPath(reportsPath: string, now: Date): string {
+	const timestamp = now
+		.toISOString()
+		.replace(/[-:]/gu, "")
+		.replace(/T/u, "-")
+		.slice(0, 15);
+	let candidate = join(reportsPath, `project-flows-draft-${timestamp}.json`);
+	let suffix = 2;
+	while (existsSync(candidate)) {
+		candidate = join(
+			reportsPath,
+			`${basename(candidate, ".json").replace(/-\d+$/u, "")}-${suffix}.json`,
+		);
+		suffix += 1;
+	}
+	return candidate;
 }
 
 function uniqueBy<T>(items: T[], keyFor: (item: T) => string): T[] {

@@ -119,6 +119,7 @@ corepack pnpm dev
 | `/config inspect_project_map`   | Inspecciona el mapa funcional cargado y reporta vacíos/inconsistencias sin escribir archivos ni usar IA.                         |
 | `/config scan_project_map`      | Escanea código real en modo read-only y compara elementos detectados contra `project-flows`.                                     |
 | `/config suggest_project_flows` | Genera un borrador JSON parcial sugerido desde el escaneo, sin escribir `project-flows`.                                         |
+| `/config draft_project_flows`   | Guarda el borrador sugerido en `AGENT_WORKSPACE_ROOT/reports/` sin tocar `config/project-flows.json`.                            |
 | `/config skills_sync`           | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
 | `/config db_init`               | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
 | `/config sync_commands`         | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |

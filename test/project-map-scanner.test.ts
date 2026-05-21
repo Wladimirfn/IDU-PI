@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
 	existsSync,
 	mkdtempSync,
+	mkdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
@@ -10,9 +11,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import {
+	formatProjectFlowDraftResult,
 	formatProjectFlowSuggestions,
 	formatProjectMapScan,
 	scanProjectMap,
+	saveProjectFlowsDraft,
 	suggestProjectFlowsFromScan,
 	type ProjectMapScanResult,
 } from "../src/project-map-scanner.js";
@@ -587,4 +590,92 @@ test("formatProjectFlowSuggestions includes human review warning", () => {
 	);
 	assert.match(text, /No escribí archivos/u);
 	assert.match(text, /no usé IA/u);
+});
+
+test("saveProjectFlowsDraft creates draft in injected reports directory", () => {
+	const projectPath = tempProject();
+	const reportsPath = join(tempProject(), "reports");
+	writeFixture(projectPath);
+
+	const result = saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath);
+
+	assert.match(result.path, /project-flows-draft-\d{8}-\d{6}\.json$/u);
+	assert.equal(existsSync(result.path), true);
+});
+
+test("saveProjectFlowsDraft does not write config project-flows", () => {
+	const projectPath = tempProject();
+	const reportsPath = join(tempProject(), "reports");
+	writeFixture(projectPath);
+
+	saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath);
+
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		false,
+	);
+});
+
+test("saveProjectFlowsDraft does not overwrite existing draft", () => {
+	const projectPath = tempProject();
+	const reportsPath = join(tempProject(), "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	writeFixture(projectPath);
+	const existingPath = join(
+		reportsPath,
+		"project-flows-draft-20260102-030405.json",
+	);
+	writeFileSync(existingPath, "existing", "utf8");
+
+	const result = saveProjectFlowsDraft(
+		projectPath,
+		mappedFlows(),
+		reportsPath,
+		new Date("2026-01-02T03:04:05Z"),
+	);
+
+	assert.notEqual(result.path, existingPath);
+	assert.equal(readFileSync(existingPath, "utf8"), "existing");
+});
+
+test("saveProjectFlowsDraft includes draft warning and suggestions", () => {
+	const projectPath = tempProject();
+	const reportsPath = join(tempProject(), "reports");
+	writeFixture(projectPath);
+	const flows = mappedFlows();
+	flows.uiElements = flows.uiElements.filter(
+		(element) => element.id !== "create-machine",
+	);
+	flows.dataStores = [];
+	flows.flows = [];
+
+	const result = saveProjectFlowsDraft(projectPath, flows, reportsPath);
+	const draft = JSON.parse(readFileSync(result.path, "utf8")) as {
+		warning: string;
+		suggestedScreens: unknown[];
+		suggestedUiElements: unknown[];
+		suggestedDataStores: unknown[];
+		suggestedFlows: unknown[];
+	};
+
+	assert.equal(draft.warning, "Borrador sugerido, no es fuente de verdad");
+	assert.ok(Array.isArray(draft.suggestedScreens));
+	assert.ok(draft.suggestedUiElements.length > 0);
+	assert.ok(draft.suggestedDataStores.length > 0);
+	assert.ok(draft.suggestedFlows.length > 0);
+});
+
+test("formatProjectFlowDraftResult shows draft path and review warning", () => {
+	const projectPath = tempProject();
+	const reportsPath = join(tempProject(), "reports");
+	writeFixture(projectPath);
+
+	const text = formatProjectFlowDraftResult(
+		saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath),
+	);
+
+	assert.match(text, /Borrador project-flows guardado/u);
+	assert.match(text, /project-flows-draft-/u);
+	assert.match(text, /revisalo antes de copiarlo/u);
+	assert.match(text, /No modifiqué config\/project-flows\.json/u);
 });
