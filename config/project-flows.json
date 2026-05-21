@@ -1,0 +1,442 @@
+{
+  "version": "2.0.0",
+  "projectType": "real-project-functional-map",
+  "invariants": [
+    "project-flows es el mapa funcional del proyecto real, no el mapa interno de Idu-pi.",
+    "Todo flow debe describir un flujo observable del producto real.",
+    "Todo step debe declarar from y to.",
+    "Todo moduleConnection debe apuntar a módulos existentes.",
+    "No registrar bugs sin evidencia clara.",
+    "Build/test deben preservarse."
+  ],
+  "qualityRules": [
+    "Todo botón relevante debe mapear a una acción esperada.",
+    "Toda pantalla debe pertenecer a un módulo real.",
+    "Todo dataStore debe tener ownerModule.",
+    "Los flujos deben conectar UI, funciones, datos y vistas cuando aplique.",
+    "No usar fallback textual sobre JSON inválido."
+  ],
+  "forbiddenTransitions": [
+    "uiElement sin expectedAction -> flow válido",
+    "flow sin trigger -> ejecución",
+    "step sin from/to -> validación exitosa",
+    "screen sin module -> validación exitosa",
+    "dataStore sin ownerModule -> validación exitosa"
+  ],
+  "allowedTransitions": [
+    "button -> function -> db",
+    "db -> dashboard -> view",
+    "module -> connectedModule",
+    "form -> api -> data_write -> ui_update"
+  ],
+  "validationChecklist": [
+    "corepack pnpm build",
+    "corepack pnpm test",
+    "Validar referencias de módulos",
+    "Validar steps from/to"
+  ],
+  "modules": [
+    {
+      "id": "machines",
+      "name": "Máquinas",
+      "description": "Módulo genérico para activos, equipos o máquinas del proyecto real.",
+      "screens": [
+        "machines-list",
+        "machine-detail"
+      ],
+      "dataStores": [
+        "operations-db"
+      ],
+      "connectedModules": [
+        "spare-parts",
+        "purchasing",
+        "inventory"
+      ]
+    },
+    {
+      "id": "spare-parts",
+      "name": "Repuestos",
+      "description": "Módulo genérico para repuestos vinculados a máquinas o activos.",
+      "screens": [
+        "spare-parts-list"
+      ],
+      "dataStores": [
+        "operations-db"
+      ],
+      "connectedModules": [
+        "machines",
+        "purchasing",
+        "inventory"
+      ]
+    },
+    {
+      "id": "purchasing",
+      "name": "Compras",
+      "description": "Módulo genérico para solicitudes y compras derivadas de necesidades operativas.",
+      "screens": [
+        "purchase-dashboard"
+      ],
+      "dataStores": [
+        "operations-db"
+      ],
+      "connectedModules": [
+        "spare-parts",
+        "inventory"
+      ]
+    },
+    {
+      "id": "inventory",
+      "name": "Inventario",
+      "description": "Módulo genérico para existencias, bodega y movimientos de material.",
+      "screens": [
+        "inventory-dashboard"
+      ],
+      "dataStores": [
+        "operations-db"
+      ],
+      "connectedModules": [
+        "spare-parts",
+        "purchasing"
+      ]
+    },
+    {
+      "id": "maintenance-log",
+      "name": "Bitácora",
+      "description": "Módulo genérico para registrar historial, actividades y resultados.",
+      "screens": [
+        "maintenance-log"
+      ],
+      "dataStores": [
+        "operations-db",
+        "report-files"
+      ],
+      "connectedModules": [
+        "machines",
+        "spare-parts"
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "id": "machines-list",
+      "path": "/machines",
+      "module": "machines",
+      "purpose": "Listar máquinas y permitir creación o revisión.",
+      "tabs": [
+        "Activas",
+        "Historial"
+      ],
+      "uiElements": [
+        "create-machine-button",
+        "machines-dashboard"
+      ]
+    },
+    {
+      "id": "machine-detail",
+      "path": "/machines/:id",
+      "module": "machines",
+      "purpose": "Ver detalle y repuestos asociados a una máquina.",
+      "uiElements": [
+        "request-spare-part-form"
+      ]
+    },
+    {
+      "id": "spare-parts-list",
+      "path": "/spare-parts",
+      "module": "spare-parts",
+      "purpose": "Listar repuestos y su relación con máquinas.",
+      "uiElements": [
+        "spare-parts-table"
+      ]
+    },
+    {
+      "id": "purchase-dashboard",
+      "path": "/purchases",
+      "module": "purchasing",
+      "purpose": "Visualizar solicitudes y compras pendientes.",
+      "uiElements": [
+        "purchases-table",
+        "purchase-dashboard-card"
+      ]
+    },
+    {
+      "id": "inventory-dashboard",
+      "path": "/inventory",
+      "module": "inventory",
+      "purpose": "Visualizar stock y movimientos de bodega.",
+      "uiElements": [
+        "inventory-dashboard-card"
+      ]
+    },
+    {
+      "id": "maintenance-log",
+      "path": "/maintenance-log",
+      "module": "maintenance-log",
+      "purpose": "Registrar bitácora y trazabilidad operacional.",
+      "uiElements": [
+        "activity-log-table"
+      ]
+    }
+  ],
+  "uiElements": [
+    {
+      "id": "create-machine-button",
+      "type": "button",
+      "selector": "[data-testid='create-machine']",
+      "label": "Crear máquina",
+      "expectedAction": "button -> createMachine function -> operations-db.machines"
+    },
+    {
+      "id": "machines-dashboard",
+      "type": "dashboard",
+      "selector": "#machines-dashboard",
+      "label": "Dashboard máquinas",
+      "expectedAction": "operations-db -> dashboard -> vista de máquinas"
+    },
+    {
+      "id": "request-spare-part-form",
+      "type": "form",
+      "selector": "[data-testid='request-spare-part']",
+      "label": "Solicitar repuesto",
+      "expectedAction": "actividad -> solicitud material -> bodega/compras -> bitácora"
+    },
+    {
+      "id": "spare-parts-table",
+      "type": "table",
+      "selector": "#spare-parts-table",
+      "label": "Tabla repuestos",
+      "expectedAction": "Muestra repuestos conectados a máquinas e inventario."
+    },
+    {
+      "id": "purchases-table",
+      "type": "table",
+      "selector": "#purchases-table",
+      "label": "Tabla compras",
+      "expectedAction": "Muestra solicitudes derivadas desde repuestos."
+    },
+    {
+      "id": "purchase-dashboard-card",
+      "type": "card",
+      "selector": "#purchase-dashboard-card",
+      "label": "Resumen compras",
+      "expectedAction": "Resume solicitudes pendientes y aprobadas."
+    },
+    {
+      "id": "inventory-dashboard-card",
+      "type": "dashboard",
+      "selector": "#inventory-dashboard",
+      "label": "Dashboard inventario",
+      "expectedAction": "DB -> dashboard -> vista de stock."
+    },
+    {
+      "id": "activity-log-table",
+      "type": "table",
+      "selector": "#activity-log-table",
+      "label": "Bitácora",
+      "expectedAction": "Muestra trazabilidad de actividades y solicitudes."
+    }
+  ],
+  "dataStores": [
+    {
+      "id": "operations-db",
+      "type": "sqlite",
+      "tables": [
+        "machines",
+        "spare_parts",
+        "purchase_requests",
+        "inventory_movements",
+        "activity_log"
+      ],
+      "ownerModule": "machines"
+    },
+    {
+      "id": "report-files",
+      "type": "file",
+      "tables": [
+        "jsonl_reports"
+      ],
+      "ownerModule": "maintenance-log"
+    }
+  ],
+  "flows": [
+    {
+      "id": "button-creates-data",
+      "name": "Botón crea dato",
+      "module": "machines",
+      "trigger": "Usuario presiona Crear máquina",
+      "steps": [
+        {
+          "order": 1,
+          "type": "ui_action",
+          "from": "create-machine-button",
+          "to": "createMachine",
+          "description": "El botón dispara la función de creación."
+        },
+        {
+          "order": 2,
+          "type": "function_call",
+          "from": "createMachine",
+          "to": "operations-db.machines",
+          "description": "La función valida y escribe el dato en DB."
+        },
+        {
+          "order": 3,
+          "type": "ui_update",
+          "from": "operations-db.machines",
+          "to": "machines-dashboard",
+          "description": "La vista se actualiza con el dato creado."
+        }
+      ],
+      "expectedResult": "La máquina aparece en el dashboard.",
+      "testTargets": [
+        "createMachine",
+        "operations-db.machines",
+        "machines-dashboard"
+      ]
+    },
+    {
+      "id": "dashboard-reads-data",
+      "name": "Dashboard lee dato",
+      "module": "machines",
+      "trigger": "Usuario abre /machines",
+      "steps": [
+        {
+          "order": 1,
+          "type": "data_read",
+          "from": "operations-db.machines",
+          "to": "machines-dashboard",
+          "description": "El dashboard consulta datos persistidos."
+        },
+        {
+          "order": 2,
+          "type": "ui_update",
+          "from": "machines-dashboard",
+          "to": "machines-list",
+          "description": "La pantalla muestra métricas y lista actualizada."
+        }
+      ],
+      "expectedResult": "El dashboard refleja el estado actual de la DB.",
+      "testTargets": [
+        "machines-dashboard",
+        "machines-list"
+      ]
+    },
+    {
+      "id": "machines-to-purchasing-by-spare-parts",
+      "name": "Máquinas -> repuestos -> compras -> inventario",
+      "module": "machines",
+      "trigger": "Máquina requiere repuesto sin stock suficiente",
+      "steps": [
+        {
+          "order": 1,
+          "type": "function_call",
+          "from": "machines",
+          "to": "spare-parts",
+          "description": "El módulo máquinas identifica repuesto requerido."
+        },
+        {
+          "order": 2,
+          "type": "data_read",
+          "from": "spare-parts",
+          "to": "inventory",
+          "description": "Se consulta disponibilidad en inventario."
+        },
+        {
+          "order": 3,
+          "type": "api_call",
+          "from": "inventory",
+          "to": "purchasing",
+          "description": "Si falta stock, se crea solicitud de compra."
+        }
+      ],
+      "expectedResult": "La necesidad de repuesto queda trazada hasta compras/inventario.",
+      "testTargets": [
+        "spare-parts",
+        "inventory",
+        "purchasing"
+      ]
+    },
+    {
+      "id": "rcm-material-request",
+      "name": "Flujo RCM actividad -> material -> bodega/compras -> bitácora",
+      "module": "maintenance-log",
+      "trigger": "Actividad RCM requiere material",
+      "steps": [
+        {
+          "order": 1,
+          "type": "ui_action",
+          "from": "request-spare-part-form",
+          "to": "spare-parts",
+          "description": "La actividad genera solicitud de material."
+        },
+        {
+          "order": 2,
+          "type": "data_read",
+          "from": "spare-parts",
+          "to": "inventory",
+          "description": "Bodega revisa stock disponible."
+        },
+        {
+          "order": 3,
+          "type": "api_call",
+          "from": "inventory",
+          "to": "purchasing",
+          "description": "Compras recibe requerimiento si no hay stock."
+        },
+        {
+          "order": 4,
+          "type": "data_write",
+          "from": "purchasing",
+          "to": "operations-db.activity_log",
+          "description": "La bitácora registra el estado de la solicitud."
+        }
+      ],
+      "expectedResult": "La actividad, solicitud y estado de material quedan en bitácora.",
+      "testTargets": [
+        "request-spare-part-form",
+        "inventory",
+        "purchasing",
+        "activity-log-table"
+      ]
+    }
+  ],
+  "moduleConnections": [
+    {
+      "fromModule": "machines",
+      "toModule": "spare-parts",
+      "reason": "Las máquinas requieren repuestos específicos.",
+      "dataShared": [
+        "machineId",
+        "sparePartId"
+      ]
+    },
+    {
+      "fromModule": "spare-parts",
+      "toModule": "purchasing",
+      "reason": "Repuestos sin stock generan solicitudes de compra.",
+      "dataShared": [
+        "sparePartId",
+        "quantity",
+        "priority"
+      ]
+    },
+    {
+      "fromModule": "purchasing",
+      "toModule": "inventory",
+      "reason": "Compras actualiza disponibilidad e ingresos a bodega.",
+      "dataShared": [
+        "purchaseRequestId",
+        "receivedQuantity"
+      ]
+    },
+    {
+      "fromModule": "inventory",
+      "toModule": "maintenance-log",
+      "reason": "Movimientos de material se registran en bitácora.",
+      "dataShared": [
+        "inventoryMovementId",
+        "activityId"
+      ]
+    }
+  ]
+}
