@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import {
+	applyProjectFlowsDraft,
 	formatProjectFlowDraftResult,
 	formatProjectFlowDraftReview,
 	formatProjectFlowSuggestions,
@@ -21,7 +22,7 @@ import {
 	suggestProjectFlowsFromScan,
 	type ProjectMapScanResult,
 } from "../src/project-map-scanner.js";
-import type { ProjectFlows } from "../src/project-flows.js";
+import { loadProjectFlows, type ProjectFlows } from "../src/project-flows.js";
 
 const tempDirs: string[] = [];
 
@@ -882,4 +883,284 @@ test("reviewProjectFlowsDraft does not write files", () => {
 		existsSync(join(projectPath, "config", "project-flows.json")),
 		false,
 	);
+});
+
+function writeProjectFlows(projectPath: string, flows: ProjectFlows): string {
+	const configPath = join(projectPath, "config");
+	mkdirSync(configPath, { recursive: true });
+	const flowsPath = join(configPath, "project-flows.json");
+	const validFlows: ProjectFlows = {
+		...flows,
+		invariants: flows.invariants.length
+			? flows.invariants
+			: ["Preservar mapa funcional"],
+		qualityRules: flows.qualityRules.length
+			? flows.qualityRules
+			: ["Revisar cambios humanos"],
+		forbiddenTransitions: flows.forbiddenTransitions.length
+			? flows.forbiddenTransitions
+			: ["No borrar datos"],
+		allowedTransitions: flows.allowedTransitions.length
+			? flows.allowedTransitions
+			: ["Agregar elementos revisados"],
+		validationChecklist: flows.validationChecklist.length
+			? flows.validationChecklist
+			: ["Validar schema"],
+		modules: flows.modules.map((module) => ({
+			...module,
+			connectedModules: module.connectedModules.length
+				? module.connectedModules
+				: [module.id],
+		})),
+		screens: flows.screens.map((screen) => ({
+			...screen,
+			uiElements: screen.uiElements.length
+				? screen.uiElements
+				: ["placeholder"],
+		})),
+		dataStores: flows.dataStores.map((store) => ({
+			...store,
+			tables: store.tables.length ? store.tables : ["placeholder"],
+		})),
+		flows: flows.flows.map((flow) => ({
+			...flow,
+			testTargets: flow.testTargets.length ? flow.testTargets : ["manual"],
+		})),
+		moduleConnections: flows.moduleConnections.length
+			? flows.moduleConnections
+			: [
+					{
+						fromModule: "machines",
+						toModule: "machines",
+						reason: "self",
+						dataShared: ["placeholder"],
+					},
+				],
+	};
+	writeFileSync(flowsPath, `${JSON.stringify(validFlows, null, 2)}\n`, "utf8");
+	return flowsPath;
+}
+
+function writeDraft(
+	_projectPath: string,
+	draft: Record<string, unknown>,
+): string {
+	const reportsPath = join(tempProject(), "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	const draftPath = join(
+		reportsPath,
+		"project-flows-draft-20260102-030405.json",
+	);
+	writeFileSync(draftPath, JSON.stringify(draft, null, 2), "utf8");
+	return draftPath;
+}
+
+test("applyProjectFlowsDraft rejects missing explicit path", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+
+	const result = applyProjectFlowsDraft(projectPath, "");
+
+	assert.equal(result.applied, false);
+	assert.match(result.errors.join("\n"), /ruta explícita/u);
+});
+
+test("applyProjectFlowsDraft rejects latest", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+
+	const result = applyProjectFlowsDraft(projectPath, "latest");
+
+	assert.equal(result.applied, false);
+	assert.match(result.errors.join("\n"), /latest/u);
+});
+
+test("applyProjectFlowsDraft rejects invalid draft", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+	const draftPath = writeDraft(projectPath, { warning: "bad" });
+
+	const result = applyProjectFlowsDraft(projectPath, draftPath);
+
+	assert.equal(result.applied, false);
+	assert.match(result.errors.join("\n"), /generatedAt/u);
+});
+
+test("applyProjectFlowsDraft rejects different projectPath", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+	const draftPath = writeDraft(projectPath, {
+		generatedAt: "2026-01-02T03:04:05.000Z",
+		projectPath: "other-project",
+		warning: "Borrador sugerido, no es fuente de verdad",
+		suggestedScreens: [],
+		suggestedUiElements: [],
+		suggestedDataStores: [],
+		suggestedFlows: [],
+	});
+
+	const result = applyProjectFlowsDraft(projectPath, draftPath);
+
+	assert.equal(result.applied, false);
+	assert.match(result.errors.join("\n"), /projectPath no coincide/u);
+});
+
+test("applyProjectFlowsDraft creates backup before writing", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+	const draftPath = writeDraft(projectPath, {
+		generatedAt: "2026-01-02T03:04:05.000Z",
+		projectPath,
+		warning: "Borrador sugerido, no es fuente de verdad",
+		suggestedScreens: [
+			{
+				id: "reports",
+				path: "reports.html",
+				module: "machines",
+				purpose: "Reports",
+				uiElements: ["report-button"],
+			},
+		],
+		suggestedUiElements: [],
+		suggestedDataStores: [],
+		suggestedFlows: [],
+	});
+
+	const result = applyProjectFlowsDraft(
+		projectPath,
+		draftPath,
+		new Date("2026-01-02T03:04:05Z"),
+	);
+
+	assert.equal(result.applied, true);
+	assert.match(
+		result.backupPath ?? "",
+		/project-flows\.backup-20260102-030405\.json$/u,
+	);
+	assert.equal(existsSync(result.backupPath ?? ""), true);
+});
+
+test("applyProjectFlowsDraft merges new screens and uiElements", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+	const draftPath = writeDraft(projectPath, {
+		generatedAt: "2026-01-02T03:04:05.000Z",
+		projectPath,
+		warning: "Borrador sugerido, no es fuente de verdad",
+		suggestedScreens: [
+			{
+				id: "reports",
+				path: "reports.html",
+				module: "machines",
+				purpose: "Reports",
+				uiElements: ["report-button"],
+			},
+		],
+		suggestedUiElements: [
+			{
+				id: "report-button",
+				type: "button",
+				selector: "#report-button",
+				expectedAction: "review",
+			},
+		],
+		suggestedDataStores: [],
+		suggestedFlows: [],
+	});
+
+	applyProjectFlowsDraft(projectPath, draftPath);
+	const flows = loadProjectFlows(projectPath);
+
+	assert.ok(flows.screens.some((screen) => screen.id === "reports"));
+	assert.ok(flows.uiElements.some((element) => element.id === "report-button"));
+});
+
+test("applyProjectFlowsDraft does not duplicate existing ids", () => {
+	const projectPath = tempProject();
+	writeProjectFlows(projectPath, mappedFlows());
+	const draftPath = writeDraft(projectPath, {
+		generatedAt: "2026-01-02T03:04:05.000Z",
+		projectPath,
+		warning: "Borrador sugerido, no es fuente de verdad",
+		suggestedScreens: [
+			{
+				id: "machines",
+				path: "other.html",
+				module: "machines",
+				purpose: "Duplicate",
+				uiElements: ["duplicate"],
+			},
+		],
+		suggestedUiElements: [
+			{ id: "create-machine", type: "button", expectedAction: "duplicate" },
+		],
+		suggestedDataStores: [],
+		suggestedFlows: [],
+	});
+
+	const result = applyProjectFlowsDraft(projectPath, draftPath);
+	const flows = loadProjectFlows(projectPath);
+
+	assert.equal(
+		flows.screens.filter((screen) => screen.id === "machines").length,
+		1,
+	);
+	assert.equal(
+		flows.uiElements.filter((element) => element.id === "create-machine")
+			.length,
+		1,
+	);
+	assert.match(result.skipped.join("\n"), /machines/u);
+	assert.match(result.conflicts.join("\n"), /create-machine/u);
+});
+
+test("applyProjectFlowsDraft does not delete existing content and validates final flows", () => {
+	const projectPath = tempProject();
+	const original = mappedFlows();
+	writeProjectFlows(projectPath, original);
+	const draftPath = writeDraft(projectPath, {
+		generatedAt: "2026-01-02T03:04:05.000Z",
+		projectPath,
+		warning: "Borrador sugerido, no es fuente de verdad",
+		suggestedScreens: [],
+		suggestedUiElements: [],
+		suggestedDataStores: [
+			{
+				id: "reports-api",
+				type: "api",
+				tables: ["reports"],
+				ownerModule: "machines",
+			},
+		],
+		suggestedFlows: [
+			{
+				id: "report-flow",
+				name: "Report",
+				module: "machines",
+				trigger: "report",
+				steps: [
+					{
+						order: 1,
+						type: "ui_action",
+						from: "#report-button",
+						to: "report",
+						description: "Report",
+					},
+				],
+				expectedResult: "Report",
+				testTargets: ["manual"],
+			},
+		],
+	});
+
+	const result = applyProjectFlowsDraft(projectPath, draftPath);
+	const flows = loadProjectFlows(projectPath);
+
+	assert.equal(result.applied, true);
+	assert.ok(result.finalValidationOk);
+	assert.ok(
+		flows.screens.some((screen) => screen.id === original.screens[0].id),
+	);
+	assert.ok(flows.dataStores.some((store) => store.id === "reports-api"));
+	assert.ok(flows.flows.some((flow) => flow.id === "report-flow"));
 });

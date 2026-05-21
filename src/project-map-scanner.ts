@@ -7,15 +7,16 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, extname, join, relative, sep } from "node:path";
-import type {
-	DataStoreType,
-	FlowStepType,
-	ProjectDataStore,
-	ProjectFlow,
-	ProjectFlows,
-	ProjectScreen,
-	ProjectUiElement,
-	UiElementType,
+import {
+	validateProjectFlows,
+	type DataStoreType,
+	type FlowStepType,
+	type ProjectDataStore,
+	type ProjectFlow,
+	type ProjectFlows,
+	type ProjectScreen,
+	type ProjectUiElement,
+	type UiElementType,
 } from "./project-flows.js";
 
 export type ProjectMapScanSeverity = "warning" | "info";
@@ -73,6 +74,21 @@ export type ProjectFlowDraftReview = {
 	newFlows: ProjectFlow[];
 	duplicates: string[];
 	conflicts: string[];
+};
+
+export type ProjectFlowsDraftApplyResult = {
+	applied: boolean;
+	errors: string[];
+	added: {
+		screens: number;
+		uiElements: number;
+		dataStores: number;
+		flows: number;
+	};
+	skipped: string[];
+	conflicts: string[];
+	backupPath?: string;
+	finalValidationOk: boolean;
 };
 
 type ProjectFlowDraftFile = {
@@ -338,6 +354,123 @@ ${JSON.stringify(
 Solo lectura: No escribí archivos, no modifiqué project-flows, no usé IA, no ejecuté código del proyecto.`;
 }
 
+export function applyProjectFlowsDraft(
+	projectPath: string,
+	draftPath: string,
+	now = new Date(),
+): ProjectFlowsDraftApplyResult {
+	const result: ProjectFlowsDraftApplyResult = {
+		applied: false,
+		errors: [],
+		added: { screens: 0, uiElements: 0, dataStores: 0, flows: 0 },
+		skipped: [],
+		conflicts: [],
+		finalValidationOk: false,
+	};
+	if (!draftPath.trim()) {
+		result.errors.push("apply_project_flows_draft requiere ruta explícita");
+		return result;
+	}
+	if (draftPath.trim().toLowerCase() === "latest") {
+		result.errors.push(
+			"No se permite aplicar latest; indicá una ruta explícita",
+		);
+		return result;
+	}
+	const configPath = join(projectPath, "config", "project-flows.json");
+	let current: ProjectFlows;
+	try {
+		current = readProjectFlowsFile(configPath);
+	} catch (error) {
+		result.errors.push(error instanceof Error ? error.message : String(error));
+		return result;
+	}
+	const review = reviewProjectFlowsDraft(draftPath, current, "");
+	if (!review.valid) {
+		result.errors.push(...review.errors);
+		return result;
+	}
+	const draft = JSON.parse(
+		readFileSync(draftPath, "utf8"),
+	) as ProjectFlowDraftFile;
+	if (draft.projectPath !== projectPath) {
+		result.errors.push("projectPath no coincide con el proyecto activo");
+		return result;
+	}
+	const merged: ProjectFlows = {
+		...current,
+		modules: [...current.modules],
+		screens: [...current.screens],
+		uiElements: [...current.uiElements],
+		dataStores: [...current.dataStores],
+		flows: [...current.flows],
+		moduleConnections: [...current.moduleConnections],
+	};
+	mergeById(merged.screens, draft.suggestedScreens, "screen", result);
+	mergeById(merged.uiElements, draft.suggestedUiElements, "uiElement", result);
+	mergeById(merged.dataStores, draft.suggestedDataStores, "dataStore", result);
+	mergeById(merged.flows, draft.suggestedFlows, "flow", result);
+	const validation = validateProjectFlows(merged);
+	if (!validation.ok) {
+		result.errors.push(
+			`project-flows final inválido: ${validation.errors.join("; ")}`,
+		);
+		return result;
+	}
+	result.finalValidationOk = true;
+	const backupPath = uniqueBackupPath(projectPath, now);
+	writeFileSync(backupPath, readFileSync(configPath, "utf8"), "utf8");
+	writeFileSync(
+		configPath,
+		`${JSON.stringify(validation.flows, null, 2)}\n`,
+		"utf8",
+	);
+	const postWriteValidation = validateProjectFlows(
+		JSON.parse(readFileSync(configPath, "utf8")) as unknown,
+	);
+	if (!postWriteValidation.ok) {
+		result.errors.push(
+			`project-flows escrito no valida: ${postWriteValidation.errors.join("; ")}`,
+		);
+		return result;
+	}
+	result.applied = true;
+	result.backupPath = backupPath;
+	return result;
+}
+
+export function formatProjectFlowsDraftApplyResult(
+	result: ProjectFlowsDraftApplyResult,
+): string {
+	if (!result.applied) {
+		return `No apliqué el borrador project-flows
+
+Errores:
+${result.errors.length ? result.errors.map((error) => `- ${error}`).join("\n") : "- desconocido"}
+
+No usé IA, no ejecuté código del proyecto.`;
+	}
+	return `Draft project-flows aplicado
+
+Agregados:
+- screens: ${result.added.screens}
+- uiElements: ${result.added.uiElements}
+- dataStores: ${result.added.dataStores}
+- flows: ${result.added.flows}
+
+Saltados:
+${result.skipped.length ? result.skipped.map((item) => `- ${item}`).join("\n") : "- ninguno"}
+
+Conflictos:
+${result.conflicts.length ? result.conflicts.map((item) => `- ${item}`).join("\n") : "- ninguno"}
+
+Backup creado:
+${result.backupPath ?? "sin backup"}
+
+Validación final: ${result.finalValidationOk ? "ok" : "falló"}
+No usé IA, no ejecuté código del proyecto.`;
+}
+
 export function reviewProjectFlowsDraft(
 	draftPathOrLatest: string,
 	flows: ProjectFlows,
@@ -516,6 +649,62 @@ Contenido:
 Esto es un borrador sugerido, no es fuente de verdad: revisalo antes de copiarlo a config/project-flows.json.
 
 No modifiqué config/project-flows.json, no usé IA, no ejecuté código del proyecto.`;
+}
+
+function readProjectFlowsFile(path: string): ProjectFlows {
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+	const validation = validateProjectFlows(parsed);
+	if (!validation.ok) {
+		throw new Error(
+			`project-flows actual inválido: ${validation.errors.join("; ")}`,
+		);
+	}
+	return validation.flows;
+}
+
+function mergeById<T extends { id: string }>(
+	target: T[],
+	items: T[],
+	label: string,
+	result: ProjectFlowsDraftApplyResult,
+): void {
+	const ids = new Set(target.map((item) => item.id));
+	for (const item of items) {
+		if (ids.has(item.id)) {
+			result.skipped.push(`${label} existente: ${item.id}`);
+			result.conflicts.push(`${label} conflictivo: ${item.id}`);
+			continue;
+		}
+		target.push(item);
+		ids.add(item.id);
+		if (label === "screen") result.added.screens += 1;
+		if (label === "uiElement") result.added.uiElements += 1;
+		if (label === "dataStore") result.added.dataStores += 1;
+		if (label === "flow") result.added.flows += 1;
+	}
+}
+
+function uniqueBackupPath(projectPath: string, now: Date): string {
+	const timestamp = now
+		.toISOString()
+		.replace(/[-:]/gu, "")
+		.replace(/T/u, "-")
+		.slice(0, 15);
+	let candidate = join(
+		projectPath,
+		"config",
+		`project-flows.backup-${timestamp}.json`,
+	);
+	let suffix = 2;
+	while (existsSync(candidate)) {
+		candidate = join(
+			projectPath,
+			"config",
+			`project-flows.backup-${timestamp}-${suffix}.json`,
+		);
+		suffix += 1;
+	}
+	return candidate;
 }
 
 function validateDraftFile(value: Partial<ProjectFlowDraftFile>): string[] {

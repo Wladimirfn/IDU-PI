@@ -35,9 +35,11 @@ import {
 	type LabDuration,
 } from "./lab.js";
 import {
+	applyProjectFlowsDraft,
 	formatProjectFlowDraftResult,
 	formatProjectFlowDraftReview,
 	formatProjectFlowSuggestions,
+	formatProjectFlowsDraftApplyResult,
 	formatProjectMapScan,
 	reviewProjectFlowsDraft,
 	saveProjectFlowsDraft,
@@ -806,6 +808,21 @@ bot.command("config", async (ctx) => {
 		);
 		return;
 	}
+	if (arg === "apply_project_flows_draft") {
+		if (!isAllowedCwd(currentCwd, config.allowedRoots)) {
+			await ctx.reply(
+				"No puedo aplicar borrador project-flows: el proyecto activo está fuera de ALLOWED_ROOTS.",
+			);
+			return;
+		}
+		await replyLong(
+			ctx,
+			formatProjectFlowsDraftApplyResult(
+				applyProjectFlowsDraft(currentCwd, restArgs.join(" ")),
+			),
+		);
+		return;
+	}
 	if (arg === "db_init") {
 		await replyLong(ctx, formatInitLabDbResult(initLabDb(labDbPath())));
 		return;
@@ -833,7 +850,7 @@ bot.command("config", async (ctx) => {
 		return;
 	}
 	await ctx.reply(
-		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config inspect_project_map | /config scan_project_map | /config suggest_project_flows | /config draft_project_flows | /config review_project_flows_draft [latest|ruta] | /config skills_sync | /config db_init | /config sync_commands",
+		"Uso: /config | /config doctor | /config init_workspace | /config init_assets | /config init_project_config | /config inspect_project_map | /config scan_project_map | /config suggest_project_flows | /config draft_project_flows | /config review_project_flows_draft [latest|ruta] | /config apply_project_flows_draft <ruta> | /config skills_sync | /config db_init | /config sync_commands",
 	);
 });
 

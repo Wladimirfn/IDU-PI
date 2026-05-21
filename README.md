@@ -109,21 +109,22 @@ corepack pnpm dev
 
 `/config` es el instalador/mantenedor desde Telegram. Primero muestra diagnóstico; después podés ejecutar acciones puntuales.
 
-| Comando                                     | Resultado                                                                                                                        |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `/config`                                   | Checklist del proyecto activo.                                                                                                   |
-| `/config doctor`                            | Diagnóstico detallado.                                                                                                           |
-| `/config init_workspace`                    | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.                                                            |
-| `/config init_assets`                       | Crea assets project-local mínimos.                                                                                               |
-| `/config init_project_config`               | Crea `config/project-blueprint.json` y `config/project-flows.json` desde defaults si faltan; no sobreescribe configs existentes. |
-| `/config inspect_project_map`               | Inspecciona el mapa funcional cargado y reporta vacíos/inconsistencias sin escribir archivos ni usar IA.                         |
-| `/config scan_project_map`                  | Escanea código real en modo read-only y compara elementos detectados contra `project-flows`.                                     |
-| `/config suggest_project_flows`             | Genera un borrador JSON parcial sugerido desde el escaneo, sin escribir `project-flows`.                                         |
-| `/config draft_project_flows`               | Guarda el borrador sugerido en `AGENT_WORKSPACE_ROOT/reports/` sin tocar `config/project-flows.json`.                            |
-| `/config review_project_flows_draft [latest | ruta]`                                                                                                                           | Revisa un borrador guardado contra el `project-flows` actual sin aplicar cambios. |
-| `/config skills_sync`                       | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
-| `/config db_init`                           | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
-| `/config sync_commands`                     | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |
+| Comando                                            | Resultado                                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `/config`                                          | Checklist del proyecto activo.                                                                                                   |
+| `/config doctor`                                   | Diagnóstico detallado.                                                                                                           |
+| `/config init_workspace`                           | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.                                                            |
+| `/config init_assets`                              | Crea assets project-local mínimos.                                                                                               |
+| `/config init_project_config`                      | Crea `config/project-blueprint.json` y `config/project-flows.json` desde defaults si faltan; no sobreescribe configs existentes. |
+| `/config inspect_project_map`                      | Inspecciona el mapa funcional cargado y reporta vacíos/inconsistencias sin escribir archivos ni usar IA.                         |
+| `/config scan_project_map`                         | Escanea código real en modo read-only y compara elementos detectados contra `project-flows`.                                     |
+| `/config suggest_project_flows`                    | Genera un borrador JSON parcial sugerido desde el escaneo, sin escribir `project-flows`.                                         |
+| `/config draft_project_flows`                      | Guarda el borrador sugerido en `AGENT_WORKSPACE_ROOT/reports/` sin tocar `config/project-flows.json`.                            |
+| `/config review_project_flows_draft [latest/ruta]` | Revisa un borrador guardado contra el `project-flows` actual sin aplicar cambios.                                                |
+| `/config apply_project_flows_draft <ruta>`         | Aplica un borrador con ruta explícita, backup y validación final de `project-flows`.                                             |
+| `/config skills_sync`                              | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
+| `/config db_init`                                  | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
+| `/config sync_commands`                            | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |
 
 Assets creados por `/config init_assets`:
 
