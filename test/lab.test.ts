@@ -109,10 +109,41 @@ test("loadLabProjectContext returns undefined when blueprint or flows fail", () 
 	assert.equal(loadLabProjectContext(projectPath), undefined);
 });
 
+test("loadLabProjectContext includes scan summary when scanner works", () => {
+	const projectPath = tempDir();
+	writeFileSync(
+		join(projectPath, "index.html"),
+		`<button id="unmapped" onclick="runSecret()">token=secret-value</button><button id="unmapped">Duplicate</button>`,
+	);
+
+	const context = loadLabProjectContext(projectPath);
+
+	assert.ok(context);
+	assert.match(context.text, /Scan project map/u);
+	assert.match(context.text, /Pantallas reales no mapeadas/u);
+	assert.match(context.text, /UI elements no mapeados/u);
+	assert.match(context.text, /Selectores faltantes/u);
+	assert.match(context.text, /Botones duplicados/u);
+	assert.doesNotMatch(context.text, /secret-value/u);
+	assert.doesNotMatch(context.text, /<button/u);
+});
+
+test("loadLabProjectContext works without scan when scanner throws", () => {
+	const projectPath = join(tempDir(), "missing-project-dir");
+
+	const context = loadLabProjectContext(projectPath);
+
+	assert.ok(context);
+	assert.match(context.text, /Blueprint/u);
+	assert.match(context.text, /Project flows/u);
+	assert.doesNotMatch(context.text, /Scan project map/u);
+});
+
 test("formatLabProjectContext stays short and redacts secret-looking values", () => {
 	const context = formatLabProjectContext(
 		`Proyecto: Demo\napiKey: abc123\nObjetivo: ${"x".repeat(1200)}`,
 		`Módulos: machines\nPantallas: /machines\nDatos: operations-db\nFlujos: ${"y".repeat(1200)}`,
+		`Scan project map:\n${"z".repeat(1200)}`,
 	);
 
 	assert.ok(context.text.length <= 1800);
