@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative, sep } from "node:path";
 import type { ProjectFlows } from "./project-flows.js";
 
@@ -34,6 +34,8 @@ export type DetectedStorage = {
 
 export type ProjectMapScanResult = {
 	projectPath: string;
+	mapSource: "default" | "project-local";
+	definedFlows: number;
 	scannedFiles: string[];
 	detected: {
 		htmlFiles: string[];
@@ -76,6 +78,10 @@ export function scanProjectMap(
 	const scannedFiles = listScannableFiles(projectPath);
 	const result: ProjectMapScanResult = {
 		projectPath,
+		mapSource: existsSync(join(projectPath, "config", "project-flows.json"))
+			? "project-local"
+			: "default",
+		definedFlows: flows.flows.length,
 		scannedFiles,
 		detected: {
 			htmlFiles: [],
@@ -107,23 +113,53 @@ export function formatProjectMapScan(result: ProjectMapScanResult): string {
 	const infos = result.findings.filter(
 		(finding) => finding.severity === "info",
 	);
+	const topFindings = result.findings.slice(0, 10);
+	const hiddenFindings = Math.max(
+		result.findings.length - topFindings.length,
+		0,
+	);
+	const healthLine = warnings.length
+		? "Revisá los riesgos principales antes de pedir cambios grandes."
+		: "Mapa funcional consistente con el escaneo básico.";
+	const defaultFlowsWarning =
+		result.mapSource === "default"
+			? "\n⚠️ Estás usando default-flows; crea project-local con /config init_project_config."
+			: "";
 	return `scan_project_map — escaneo estático del proyecto
 
-Archivos escaneados: ${result.scannedFiles.length}
-HTML: ${result.detected.htmlFiles.length}
-UI elements: ${result.detected.uiElements.length}
-Scripts referenciados: ${result.detected.scriptRefs.length}
-Funciones JS: ${result.detected.functions.length}
-fetch/API: ${result.detected.apiEndpoints.length}
-dataStores posibles: ${result.detected.dataStores.length}
+Resumen:
+- pantallas detectadas: ${result.detected.htmlFiles.length}
+- botones/UI detectados: ${result.detected.uiElements.length}
+- flows definidos: ${result.definedFlows}
+- warnings: ${warnings.length}
+- infos: ${infos.length}${defaultFlowsWarning}
 
-Warnings:
-${warnings.length ? warnings.map((finding) => `- ${finding.message}`).join("\n") : "- ninguno"}
+Riesgos principales:
+- pantallas no declaradas: ${countMessages(warnings, "Pantalla real no declarada")}
+- botones no mapeados: ${countMessages(warnings, "UI element detectado no mapeado")}
+- selectors faltantes: ${countMessages(warnings, "Flow referencia selector que no aparece")}
+- dataStores no mapeados: ${countMessages(warnings, "dataStore detectado no mapeado")}
+- funciones no usadas en flows: ${countMessages(infos, "Función detectada no usada en flows")}
+- duplicados: ${countMessages(warnings, "Botón duplicado")}
+- exceso de onclick inline: ${countMessages(warnings, "HTML con muchos onclick inline")}
 
-Info:
-${infos.length ? infos.map((finding) => `- ${finding.message}`).join("\n") : "- ninguna"}
+Recomendación:
+- Actualiza config/project-flows.json antes de pedir cambios grandes a la IA.
+- Los AgentLabs pueden revisar estos puntos.
+- ${healthLine}
+
+Top 10 hallazgos:
+${topFindings.length ? topFindings.map((finding, index) => `${index + 1}. [${finding.severity}] ${finding.message}`).join("\n") : "- ninguno"}${hiddenFindings ? `\n- +${hiddenFindings} más` : ""}
 
 Solo lectura: no escribí archivos, no generé project-flows, no usé IA, no ejecuté código del proyecto.`;
+}
+
+function countMessages(
+	findings: ProjectMapScanFinding[],
+	prefix: string,
+): number {
+	return findings.filter((finding) => finding.message.startsWith(prefix))
+		.length;
 }
 
 function listScannableFiles(projectPath: string): string[] {

@@ -325,15 +325,95 @@ test("scanProjectMap does not write files", () => {
 	);
 });
 
-test("formatProjectMapScan summarizes read-only scan", () => {
+test("formatProjectMapScan includes grouped summary", () => {
 	const projectPath = tempProject();
 	writeFixture(projectPath);
 
 	const result = scanProjectMap(projectPath, mappedFlows());
 	const text = formatProjectMapScan(result);
 
-	assert.match(text, /scan_project_map/u);
+	assert.match(text, /Resumen/u);
+	assert.match(text, /pantallas detectadas: 1/u);
+	assert.match(text, /botones\/UI detectados: 6/u);
+	assert.match(text, /flows definidos: 1/u);
+	assert.match(text, /warnings: \d+/u);
+	assert.match(text, /infos: \d+/u);
 	assert.match(text, /Solo lectura/u);
 	assert.match(text, /no usé IA/u);
-	assert.match(text, /HTML: 1/u);
+});
+
+test("formatProjectMapScan limits top 10 findings", () => {
+	const projectPath = tempProject();
+	writeFixture(projectPath);
+	const result = scanProjectMap(projectPath, mappedFlows());
+	result.findings = Array.from({ length: 12 }, (_, index) => ({
+		severity: "warning" as const,
+		message: `warning ${index + 1}`,
+	}));
+
+	const text = formatProjectMapScan(result);
+
+	assert.match(text, /Top 10 hallazgos/u);
+	assert.match(text, /warning 10/u);
+	assert.doesNotMatch(text, /warning 11/u);
+	assert.match(text, /\+2 más/u);
+});
+
+test("formatProjectMapScan warns when default flows are used", () => {
+	const projectPath = tempProject();
+	writeFixture(projectPath);
+
+	const text = formatProjectMapScan(scanProjectMap(projectPath, mappedFlows()));
+
+	assert.match(text, /Estás usando default-flows/u);
+	assert.match(text, /\/config init_project_config/u);
+});
+
+test("formatProjectMapScan reports healthy map when no warnings", () => {
+	const projectPath = tempProject();
+	writeFileSync(
+		join(projectPath, "index.html"),
+		'<button id="create-machine">Create machine</button>',
+		"utf8",
+	);
+	const flows = mappedFlows();
+	flows.screens = [flows.screens[0]];
+	flows.uiElements = [flows.uiElements[0]];
+	flows.dataStores = [];
+	flows.flows = [
+		{
+			...flows.flows[0],
+			steps: [
+				{
+					...flows.flows[0].steps[0],
+					to: "#create-machine",
+				},
+			],
+		},
+	];
+
+	const text = formatProjectMapScan(scanProjectMap(projectPath, flows));
+
+	assert.match(text, /Mapa funcional consistente con el escaneo básico/u);
+});
+
+test("formatProjectMapScan keeps main warning categories", () => {
+	const projectPath = tempProject();
+	writeFixture(projectPath);
+
+	const text = formatProjectMapScan(scanProjectMap(projectPath, mappedFlows()));
+
+	assert.match(text, /Riesgos principales/u);
+	assert.match(text, /pantallas no declaradas/u);
+	assert.match(text, /botones no mapeados/u);
+	assert.match(text, /selectors faltantes/u);
+	assert.match(text, /dataStores no mapeados/u);
+	assert.match(text, /funciones no usadas en flows/u);
+	assert.match(text, /duplicados/u);
+	assert.match(text, /onclick inline/u);
+	assert.match(
+		text,
+		/Actualiza config\/project-flows\.json antes de pedir cambios grandes a la IA/u,
+	);
+	assert.match(text, /Los AgentLabs pueden revisar estos puntos/u);
 });
