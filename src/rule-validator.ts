@@ -143,6 +143,19 @@ export function validateFindingAgainstRules(
 			});
 		}
 	}
+	for (const transition of flows.forbiddenTransitions) {
+		if (matchesRule(proposalText, transition)) {
+			failures.push({
+				ruleId: `flows.forbiddenTransitions.${slug(transition)}`,
+				severity: "critical",
+				field: "proposal",
+				message: `Proposal violates forbidden project flow transition: ${transition}`,
+			});
+		}
+	}
+
+	validateFunctionalMapReferences(finding, flows, warnings);
+	validateFunctionalMapChanges(finding, flows, failures, warnings);
 
 	for (const ruleId of finding.ruleIds ?? []) {
 		if (!knownRuleIds(blueprint, flows).has(ruleId)) {
@@ -162,6 +175,264 @@ function proposalSearchText(finding: AgentLabFinding): string {
 	return [proposal?.summary, ...(proposal?.steps ?? []), proposal?.risk]
 		.filter((part): part is string => typeof part === "string")
 		.join("\n");
+}
+
+function findingSearchText(finding: AgentLabFinding): string {
+	return [
+		finding.title,
+		finding.description,
+		finding.evidence,
+		proposalSearchText(finding),
+	]
+		.filter((part): part is string => typeof part === "string")
+		.join("\n");
+}
+
+function validateFunctionalMapReferences(
+	finding: AgentLabFinding,
+	flows: ProjectFlows,
+	warnings: RuleValidationWarning[],
+): void {
+	const text = findingSearchText(finding);
+	const proposalText = proposalSearchText(finding);
+	const knownModules = new Set(
+		flows.modules.flatMap((module) => [
+			normalize(module.id),
+			normalize(module.name),
+		]),
+	);
+	const knownScreens = new Set(
+		flows.screens.flatMap((screen) => [
+			normalize(screen.id),
+			normalize(screen.path),
+		]),
+	);
+	const knownDataStores = new Set(
+		flows.dataStores.flatMap((store) => [
+			normalize(store.id),
+			...store.tables.map((table) => normalize(table)),
+		]),
+	);
+	const knownUiElements = new Set(
+		flows.uiElements.flatMap((element) => [
+			normalize(element.id),
+			...(element.selector ? [normalize(element.selector)] : []),
+			...(element.label ? [normalize(element.label)] : []),
+		]),
+	);
+
+	for (const mention of collectFunctionalMentions(text, "module")) {
+		if (!knownModules.has(normalize(mention))) {
+			pushUniqueWarning(warnings, {
+				ruleId: "flows.module.unknown",
+				field: "finding",
+				message: `Finding references module not defined in project-flows: ${mention}`,
+			});
+		}
+	}
+	for (const mention of collectScreenMentions(text)) {
+		if (!knownScreens.has(normalize(mention))) {
+			pushUniqueWarning(warnings, {
+				ruleId: "flows.screen.unknown",
+				field: "finding",
+				message: `Finding references screen not defined in project-flows: ${mention}`,
+			});
+		}
+	}
+	for (const mention of collectDataStoreMentions(proposalText)) {
+		if (!knownDataStores.has(normalize(mention))) {
+			pushUniqueWarning(warnings, {
+				ruleId: "flows.dataStore.unknown",
+				field: "proposal",
+				message: `Proposal references dataStore not defined in project-flows: ${mention}`,
+			});
+		}
+	}
+	for (const mention of collectUiElementMentions(proposalText)) {
+		if (!knownUiElements.has(normalize(mention))) {
+			pushUniqueWarning(warnings, {
+				ruleId: "flows.uiElement.unknown",
+				field: "proposal",
+				message: `Proposal references uiElement not defined in project-flows: ${mention}`,
+			});
+		}
+	}
+}
+
+function validateFunctionalMapChanges(
+	finding: AgentLabFinding,
+	flows: ProjectFlows,
+	failures: RuleValidationFailure[],
+	warnings: RuleValidationWarning[],
+): void {
+	const proposalText = proposalSearchText(finding);
+	const normalizedProposal = normalize(proposalText);
+	const protectedChange = mentionsProtectedFunctionalMapPart(
+		normalizedProposal,
+		flows,
+	);
+	if (
+		protectedChange &&
+		isHighRisk(finding.severity) &&
+		finding.proposal?.requiresHumanApproval !== true
+	) {
+		failures.push({
+			ruleId: "flows.protectedChange.approvalRequired",
+			severity: "critical",
+			field: "proposal.requiresHumanApproval",
+			message:
+				"High/critical proposals that change flow, moduleConnection, or dataStore require human approval.",
+		});
+	}
+
+	const contradiction = contradictsExistingFlow(normalizedProposal, flows);
+	if (!contradiction) return;
+	if (isHighRisk(finding.severity)) {
+		failures.push({
+			ruleId: "flows.flow.contradiction",
+			severity: "high",
+			field: "proposal",
+			message: `Proposal contradicts existing project flow: ${contradiction}`,
+		});
+		return;
+	}
+	pushUniqueWarning(warnings, {
+		ruleId: "flows.flow.contradiction",
+		field: "proposal",
+		message: `Proposal may contradict existing project flow: ${contradiction}`,
+	});
+}
+
+function mentionsProtectedFunctionalMapPart(
+	normalizedProposal: string,
+	flows: ProjectFlows,
+): boolean {
+	return (
+		flows.dataStores.some((store) =>
+			containsNormalized(normalizedProposal, store.id),
+		) ||
+		flows.flows.some(
+			(flow) =>
+				containsNormalized(normalizedProposal, flow.id) ||
+				containsNormalized(normalizedProposal, flow.name),
+		) ||
+		flows.moduleConnections.some(
+			(connection) =>
+				containsNormalized(normalizedProposal, connection.fromModule) &&
+				containsNormalized(normalizedProposal, connection.toModule),
+		)
+	);
+}
+
+function contradictsExistingFlow(
+	normalizedProposal: string,
+	flows: ProjectFlows,
+): string | undefined {
+	if (
+		!/\b(skip|bypass|remove|replace|ignore|saltar|omitir|eliminar|reemplazar)\b/iu.test(
+			normalizedProposal,
+		)
+	) {
+		return undefined;
+	}
+	for (const flow of flows.flows) {
+		const flowParts = [
+			flow.id,
+			flow.name,
+			flow.trigger,
+			...flow.steps.flatMap((step) => [step.from, step.to]),
+		];
+		if (
+			flowParts.some((part) => containsNormalized(normalizedProposal, part))
+		) {
+			return flow.id;
+		}
+	}
+	return undefined;
+}
+
+function collectFunctionalMentions(text: string, qualifier: string): string[] {
+	return [
+		...uniqueMatches(
+			text,
+			new RegExp(`\\b([\\p{L}0-9][\\p{L}0-9-]*)\\s+${qualifier}\\b`, "giu"),
+		),
+		...uniqueMatches(
+			text,
+			new RegExp(`\\b${qualifier}\\s+([\\p{L}0-9][\\p{L}0-9-]*)\\b`, "giu"),
+		),
+	];
+}
+
+function collectScreenMentions(text: string): string[] {
+	return [
+		...collectFunctionalMentions(text, "screen"),
+		...uniqueMatches(text, /(?:^|\s)(\/[a-z0-9][a-z0-9/_:-]*)/giu),
+	];
+}
+
+function collectDataStoreMentions(text: string): string[] {
+	return [
+		...uniqueMatches(
+			text,
+			/\b([a-z0-9]+(?:-[a-z0-9]+)*(?:-store|-db|-database|database))\b/giu,
+		),
+		...collectFunctionalMentions(text, "dataStore"),
+		...collectFunctionalMentions(text, "database"),
+	];
+}
+
+function collectUiElementMentions(text: string): string[] {
+	return [
+		...uniqueMatches(
+			text,
+			/\b([a-z0-9]+(?:-[a-z0-9]+)*(?:-button|-form|-table|-dashboard|-card|-link|-modal|-tab))\b/giu,
+		),
+		...collectFunctionalMentions(text, "button"),
+		...collectFunctionalMentions(text, "uiElement"),
+	];
+}
+
+function uniqueMatches(text: string, regex: RegExp): string[] {
+	const matches = new Set<string>();
+	for (const match of text.matchAll(regex)) {
+		const value = match[1]?.trim();
+		if (value && !NOISY_FUNCTIONAL_MENTIONS.has(normalize(value))) {
+			matches.add(value);
+		}
+	}
+	return [...matches];
+}
+
+const NOISY_FUNCTIONAL_MENTIONS = new Set([
+	"fix",
+	"update",
+	"fails",
+	"handling",
+	"refresh",
+	"the",
+	"this",
+]);
+
+function containsNormalized(normalizedText: string, value: string): boolean {
+	const normalizedValue = normalize(value);
+	return normalizedValue.length > 0 && normalizedText.includes(normalizedValue);
+}
+
+function pushUniqueWarning(
+	warnings: RuleValidationWarning[],
+	warning: RuleValidationWarning,
+): void {
+	if (
+		warnings.some(
+			(existing) =>
+				existing.ruleId === warning.ruleId &&
+				existing.message === warning.message,
+		)
+	) {
+		return;
+	}
+	warnings.push(warning);
 }
 
 function matchesRule(text: string, rule: string): boolean {
@@ -219,6 +490,15 @@ function knownRuleIds(
 			(rule) => `blueprint.forbiddenActions.${slug(rule)}`,
 		),
 		...flows.invariants.map((rule) => `flows.invariants.${slug(rule)}`),
+		...flows.forbiddenTransitions.map(
+			(rule) => `flows.forbiddenTransitions.${slug(rule)}`,
+		),
+		"flows.module.unknown",
+		"flows.screen.unknown",
+		"flows.dataStore.unknown",
+		"flows.uiElement.unknown",
+		"flows.protectedChange.approvalRequired",
+		"flows.flow.contradiction",
 	]);
 }
 
