@@ -20,6 +20,12 @@ export type AssetStatus = {
 	exists: boolean;
 };
 
+export type ProjectConfigStatus = AssetStatus & {
+	source: "project-local" | "default";
+	valid: boolean;
+	error?: string;
+};
+
 export type ConfigWizardReport = {
 	projectId: string;
 	projectPath: string;
@@ -35,6 +41,10 @@ export type ConfigWizardReport = {
 		skills: AssetStatus;
 		registry: AssetStatus;
 		mcp: AssetStatus;
+	};
+	projectConfig: {
+		blueprint: ProjectConfigStatus;
+		flows: ProjectConfigStatus;
 	};
 	workspace: {
 		root: AssetStatus;
@@ -219,6 +229,37 @@ function safeRelative(projectPath: string, path: string): string {
 	return relative(projectPath, path).replace(/\\/gu, "/");
 }
 
+function projectConfigStatus(
+	projectPath: string,
+	label: string,
+	relativePath: string,
+	validator: (value: unknown) => { ok: true } | { ok: false; errors: string[] },
+): ProjectConfigStatus {
+	const status = asset(projectPath, label, relativePath);
+	if (!status.exists) {
+		return { ...status, source: "default", valid: true };
+	}
+	try {
+		const parsed = JSON.parse(readFileSync(status.path, "utf8")) as unknown;
+		const validation = validator(parsed);
+		return validation.ok
+			? { ...status, source: "project-local", valid: true }
+			: {
+					...status,
+					source: "project-local",
+					valid: false,
+					error: validation.errors.join("; "),
+				};
+	} catch (error) {
+		return {
+			...status,
+			source: "project-local",
+			valid: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
 export function inspectProjectConfig(
 	options: InspectProjectConfigOptions,
 ): ConfigWizardReport {
@@ -226,6 +267,20 @@ export function inspectProjectConfig(
 		skills: asset(options.projectPath, "Skills", SKILLS_DIR),
 		registry: asset(options.projectPath, "Skill registry", REGISTRY_FILE),
 		mcp: asset(options.projectPath, "MCP config", MCP_CONFIG),
+	};
+	const projectConfig = {
+		blueprint: projectConfigStatus(
+			options.projectPath,
+			"Project blueprint",
+			PROJECT_BLUEPRINT,
+			validateProjectBlueprint,
+		),
+		flows: projectConfigStatus(
+			options.projectPath,
+			"Project flows",
+			PROJECT_FLOWS,
+			validateProjectFlows,
+		),
 	};
 	const workspace = {
 		root: asset(options.workspaceRoot, "Workspace root", "."),
@@ -268,6 +323,16 @@ export function inspectProjectConfig(
 			"No hay perfiles lab configurados; solo existe el agente default/directo.",
 		);
 	}
+	if (!projectConfig.blueprint.exists || !projectConfig.flows.exists) {
+		warnings.push(
+			"Falta config project-local; usá /config init_project_config.",
+		);
+	}
+	if (!projectConfig.blueprint.valid || !projectConfig.flows.valid) {
+		warnings.push(
+			"Config project-local inválida; corregí JSON antes de continuar.",
+		);
+	}
 	if (
 		options.piArgs.some(
 			(arg) => arg === "--no-skill-registry" || arg === "--no-lens",
@@ -284,13 +349,21 @@ export function inspectProjectConfig(
 		!workspace.root.exists ||
 		!workspace.reports.exists ||
 		!workspace.workspaces.exists;
+	const missingProjectConfig =
+		!projectConfig.blueprint.exists || !projectConfig.flows.exists;
+	const invalidProjectConfig =
+		!projectConfig.blueprint.valid || !projectConfig.flows.valid;
 	const recommendedNext = missingWorkspace
 		? "/config init_workspace"
 		: missingAsset
 			? "/config init_assets"
-			: missingSkills.length
-				? "/config skills_sync"
-				: "/config doctor";
+			: missingProjectConfig
+				? "/config init_project_config"
+				: invalidProjectConfig
+					? "Corregir config project-local inválida"
+					: missingSkills.length
+						? "/config skills_sync"
+						: "/config doctor";
 
 	return {
 		projectId: options.projectId,
@@ -304,6 +377,7 @@ export function inspectProjectConfig(
 		labAgentCount: Math.max(0, options.agentProfiles.length - 1),
 		piArgs: options.piArgs,
 		assets,
+		projectConfig,
 		workspace,
 		necessarySkills: {
 			present: presentSkills,
@@ -459,6 +533,11 @@ export function syncNecessarySkills(
 	return result;
 }
 
+function projectConfigSummary(status: ProjectConfigStatus): string {
+	if (!status.exists) return "falta, usando default";
+	return `${status.exists ? "existe" : "falta"}, ${status.source}, ${status.valid ? "válido" : "inválido"}`;
+}
+
 export function formatConfigOverview(report: ConfigWizardReport): string {
 	return `Configuración Idu-pi
 
@@ -482,6 +561,10 @@ ${marker(report.assets.skills.exists)} ${report.assets.skills.relativePath}
 ${marker(report.assets.registry.exists)} ${report.assets.registry.relativePath}
 ${marker(report.assets.mcp.exists)} ${report.assets.mcp.relativePath}
 ${marker(!report.necessarySkills.missing.length)} Skills necesarias: ${report.necessarySkills.present.length}/${NECESSARY_PROJECT_SKILLS.length}
+
+Project config
+${marker(report.projectConfig.blueprint.exists && report.projectConfig.blueprint.valid)} ${report.projectConfig.blueprint.relativePath}: ${projectConfigSummary(report.projectConfig.blueprint)}
+${marker(report.projectConfig.flows.exists && report.projectConfig.flows.valid)} ${report.projectConfig.flows.relativePath}: ${projectConfigSummary(report.projectConfig.flows)}
 
 ${report.warnings.length ? `Advertencias:\n${report.warnings.map((warning) => `- ${warning}`).join("\n")}\n\n` : ""}Siguiente recomendado:
 ${report.recommendedNext}`;
@@ -510,6 +593,10 @@ Project-local assets
 - ${report.assets.skills.label}: ${report.assets.skills.exists ? "existe" : "falta"} (${safeRelative(report.projectPath, report.assets.skills.path)})
 - ${report.assets.registry.label}: ${report.assets.registry.exists ? "existe" : "falta"} (${safeRelative(report.projectPath, report.assets.registry.path)})
 - ${report.assets.mcp.label}: ${report.assets.mcp.exists ? "existe" : "falta"} (${safeRelative(report.projectPath, report.assets.mcp.path)})
+
+Project config
+- ${report.projectConfig.blueprint.relativePath}: ${projectConfigSummary(report.projectConfig.blueprint)}${report.projectConfig.blueprint.error ? ` — ${report.projectConfig.blueprint.error}` : ""}
+- ${report.projectConfig.flows.relativePath}: ${projectConfigSummary(report.projectConfig.flows)}${report.projectConfig.flows.error ? ` — ${report.projectConfig.flows.error}` : ""}
 
 Skills necesarias
 - presentes: ${report.necessarySkills.present.length ? report.necessarySkills.present.join(", ") : "ninguna"}

@@ -94,7 +94,7 @@ test("inspectProjectConfig reports existing project-local assets and workspace s
 	assert.equal(report.workspace.reports.exists, true);
 	assert.equal(report.workspace.workspaces.exists, true);
 	assert.equal(report.labAgentCount, 1);
-	assert.equal(report.recommendedNext, "/config skills_sync");
+	assert.equal(report.recommendedNext, "/config init_project_config");
 });
 
 test("initProjectAssets creates missing assets without overwriting existing files", () => {
@@ -218,6 +218,119 @@ test("initProjectConfig writes only under projectPath", () => {
 		existsSync(join(root, "config", "project-blueprint.json")),
 		false,
 	);
+});
+
+test("inspectProjectConfig reports missing project config and recommends init", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	initProjectAssets(projectPath);
+	initWorkspaceRoot(workspaceRoot);
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "codex", label: "Codex", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "codex",
+		workspaceMode: "clone",
+		workspaceRoot,
+		piArgs: [],
+		isGitRepo: true,
+	});
+
+	assert.equal(report.projectConfig.blueprint.exists, false);
+	assert.equal(report.projectConfig.flows.exists, false);
+	assert.equal(report.projectConfig.blueprint.source, "default");
+	assert.equal(report.projectConfig.flows.source, "default");
+	assert.equal(report.recommendedNext, "/config init_project_config");
+	assert.match(formatConfigOverview(report), /project-blueprint\.json.*falta/s);
+	assert.match(formatConfigOverview(report), /project-flows\.json.*falta/s);
+});
+
+test("inspectProjectConfig reports valid local project config", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	initProjectAssets(projectPath);
+	initProjectConfig(projectPath, "demo");
+	initWorkspaceRoot(workspaceRoot);
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "codex", label: "Codex", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "codex",
+		workspaceMode: "clone",
+		workspaceRoot,
+		piArgs: [],
+		isGitRepo: true,
+	});
+
+	assert.equal(report.projectConfig.blueprint.exists, true);
+	assert.equal(report.projectConfig.flows.exists, true);
+	assert.equal(report.projectConfig.blueprint.valid, true);
+	assert.equal(report.projectConfig.flows.valid, true);
+	assert.equal(report.projectConfig.blueprint.source, "project-local");
+	assert.equal(report.projectConfig.flows.source, "project-local");
+	assert.match(
+		formatConfigDoctor(report),
+		/project-blueprint\.json: existe, project-local, válido/s,
+	);
+	assert.match(
+		formatConfigDoctor(report),
+		/project-flows\.json: existe, project-local, válido/s,
+	);
+});
+
+test("inspectProjectConfig reports invalid project config without throwing", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	initProjectAssets(projectPath);
+	initWorkspaceRoot(workspaceRoot);
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(
+		join(projectPath, "config", "project-blueprint.json"),
+		"{ invalid",
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "config", "project-flows.json"),
+		"{}",
+		"utf8",
+	);
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "codex", label: "Codex", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "codex",
+		workspaceMode: "clone",
+		workspaceRoot,
+		piArgs: [],
+		isGitRepo: true,
+	});
+
+	assert.equal(report.projectConfig.blueprint.valid, false);
+	assert.equal(report.projectConfig.flows.valid, false);
+	assert.equal(
+		report.recommendedNext,
+		"Corregir config project-local inválida",
+	);
+	assert.match(
+		formatConfigDoctor(report),
+		/project-blueprint\.json.*inválido/s,
+	);
+	assert.match(formatConfigDoctor(report), /project-flows\.json.*inválido/s);
 });
 
 test("initWorkspaceRoot creates reports and workspaces directories", () => {
