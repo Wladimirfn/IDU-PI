@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,12 +14,18 @@ import {
 	formatConfigDoctor,
 	formatConfigOverview,
 	formatInitAssetsResult,
+	formatInitProjectConfigResult,
 	formatInitWorkspaceResult,
+	formatProjectMapInspection,
 	formatSkillsSyncResult,
 	initProjectAssets,
+	initProjectBlueprint,
+	initProjectConfig,
+	initProjectFlows,
 	initWorkspaceRoot,
 	NECESSARY_PROJECT_SKILLS,
 	inspectProjectConfig,
+	inspectProjectMap,
 	syncNecessarySkills,
 } from "../src/config-wizard.js";
 
@@ -84,7 +96,7 @@ test("inspectProjectConfig reports existing project-local assets and workspace s
 	assert.equal(report.workspace.reports.exists, true);
 	assert.equal(report.workspace.workspaces.exists, true);
 	assert.equal(report.labAgentCount, 1);
-	assert.equal(report.recommendedNext, "/config skills_sync");
+	assert.equal(report.recommendedNext, "/config init_project_config");
 });
 
 test("initProjectAssets creates missing assets without overwriting existing files", () => {
@@ -108,6 +120,368 @@ test("initProjectAssets creates missing assets without overwriting existing file
 	assert.equal(existsSync(join(projectPath, ".mcp", "config.json")), true);
 });
 
+test("initProjectBlueprint creates config and blueprint when missing", () => {
+	const projectPath = join(tempDir(), "demo-project");
+	mkdirSync(projectPath, { recursive: true });
+
+	const result = initProjectBlueprint(projectPath, "active-demo");
+	const blueprintPath = join(projectPath, "config", "project-blueprint.json");
+	const blueprint = JSON.parse(readFileSync(blueprintPath, "utf8")) as {
+		projectName: string;
+	};
+
+	assert.equal(existsSync(join(projectPath, "config")), true);
+	assert.ok(result.created.includes("config/project-blueprint.json"));
+	assert.equal(blueprint.projectName, "active-demo");
+});
+
+test("initProjectBlueprint does not overwrite existing blueprint", () => {
+	const projectPath = tempDir();
+	const blueprintPath = join(projectPath, "config", "project-blueprint.json");
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(blueprintPath, '{"projectName":"custom"}\n', "utf8");
+
+	const result = initProjectBlueprint(projectPath, "ignored");
+
+	assert.equal(
+		readFileSync(blueprintPath, "utf8"),
+		'{"projectName":"custom"}\n',
+	);
+	assert.ok(result.existing.includes("config/project-blueprint.json"));
+});
+
+test("initProjectFlows creates flows when missing", () => {
+	const projectPath = tempDir();
+
+	const result = initProjectFlows(projectPath);
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		projectType: string;
+	};
+
+	assert.ok(result.created.includes("config/project-flows.json"));
+	assert.equal(flows.projectType, "real-project-functional-map");
+});
+
+test("initProjectFlows does not overwrite existing flows", () => {
+	const projectPath = tempDir();
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(flowsPath, '{"projectType":"custom"}\n', "utf8");
+
+	const result = initProjectFlows(projectPath);
+
+	assert.equal(readFileSync(flowsPath, "utf8"), '{"projectType":"custom"}\n');
+	assert.ok(result.existing.includes("config/project-flows.json"));
+});
+
+test("initProjectConfig creates both project config files", () => {
+	const projectPath = tempDir();
+
+	const result = initProjectConfig(projectPath, "demo-id");
+
+	assert.ok(result.created.includes("config/project-blueprint.json"));
+	assert.ok(result.created.includes("config/project-flows.json"));
+	assert.match(formatInitProjectConfigResult(result), /init_project_config/);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		true,
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		true,
+	);
+});
+
+test("initProjectConfig infers safe projectName from folder", () => {
+	const projectPath = join(tempDir(), "folder-project");
+	mkdirSync(projectPath, { recursive: true });
+
+	initProjectConfig(projectPath);
+	const blueprint = JSON.parse(
+		readFileSync(join(projectPath, "config", "project-blueprint.json"), "utf8"),
+	) as { projectName: string };
+
+	assert.equal(blueprint.projectName, "folder-project");
+});
+
+test("initProjectConfig writes only under projectPath", () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	mkdirSync(projectPath, { recursive: true });
+
+	initProjectConfig(projectPath, "demo");
+
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		true,
+	);
+	assert.equal(
+		existsSync(join(root, "config", "project-blueprint.json")),
+		false,
+	);
+});
+
+test("inspectProjectConfig reports missing project config and recommends init", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	initProjectAssets(projectPath);
+	initWorkspaceRoot(workspaceRoot);
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "codex", label: "Codex", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "codex",
+		workspaceMode: "clone",
+		workspaceRoot,
+		piArgs: [],
+		isGitRepo: true,
+	});
+
+	assert.equal(report.projectConfig.blueprint.exists, false);
+	assert.equal(report.projectConfig.flows.exists, false);
+	assert.equal(report.projectConfig.blueprint.source, "default");
+	assert.equal(report.projectConfig.flows.source, "default");
+	assert.equal(report.recommendedNext, "/config init_project_config");
+	assert.match(formatConfigOverview(report), /project-blueprint\.json.*falta/s);
+	assert.match(formatConfigOverview(report), /project-flows\.json.*falta/s);
+});
+
+test("inspectProjectConfig reports valid local project config", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	initProjectAssets(projectPath);
+	initProjectConfig(projectPath, "demo");
+	initWorkspaceRoot(workspaceRoot);
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "codex", label: "Codex", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "codex",
+		workspaceMode: "clone",
+		workspaceRoot,
+		piArgs: [],
+		isGitRepo: true,
+	});
+
+	assert.equal(report.projectConfig.blueprint.exists, true);
+	assert.equal(report.projectConfig.flows.exists, true);
+	assert.equal(report.projectConfig.blueprint.valid, true);
+	assert.equal(report.projectConfig.flows.valid, true);
+	assert.equal(report.projectConfig.blueprint.source, "project-local");
+	assert.equal(report.projectConfig.flows.source, "project-local");
+	assert.match(
+		formatConfigDoctor(report),
+		/project-blueprint\.json: existe, project-local, válido/s,
+	);
+	assert.match(
+		formatConfigDoctor(report),
+		/project-flows\.json: existe, project-local, válido/s,
+	);
+});
+
+test("inspectProjectConfig reports invalid project config without throwing", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	initProjectAssets(projectPath);
+	initWorkspaceRoot(workspaceRoot);
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(
+		join(projectPath, "config", "project-blueprint.json"),
+		"{ invalid",
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "config", "project-flows.json"),
+		"{}",
+		"utf8",
+	);
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{ id: "codex", label: "Codex", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "codex",
+		workspaceMode: "clone",
+		workspaceRoot,
+		piArgs: [],
+		isGitRepo: true,
+	});
+
+	assert.equal(report.projectConfig.blueprint.valid, false);
+	assert.equal(report.projectConfig.flows.valid, false);
+	assert.equal(
+		report.recommendedNext,
+		"Corregir config project-local inválida",
+	);
+	assert.match(
+		formatConfigDoctor(report),
+		/project-blueprint\.json.*inválido/s,
+	);
+	assert.match(formatConfigDoctor(report), /project-flows\.json.*inválido/s);
+});
+
+test("inspectProjectMap detects default map in use", () => {
+	const projectPath = tempDir();
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.equal(result.source, "default");
+	assert.ok(result.counts.modules > 0);
+	assert.ok(
+		result.recommendations.includes(
+			"Usá /config init_project_config para crear config project-local editable.",
+		),
+	);
+	assert.match(formatProjectMapInspection(result), /usando defaults/);
+});
+
+test("inspectProjectMap detects valid project-local map", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.equal(result.source, "project-local");
+	assert.equal(result.issues.length, 0);
+	assert.ok(result.recommendations.includes("Mapa usable por AgentLabs."));
+});
+
+test("inspectProjectMap detects module without screens", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		modules: Array<{ screens: string[] }>;
+	};
+	flows.modules[0].screens = [];
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /módulo sin pantallas/u);
+});
+
+test("inspectProjectMap detects screen with missing module", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		screens: Array<{ module: string }>;
+	};
+	flows.screens[0].module = "missing-module";
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /pantalla.*missing-module/u);
+});
+
+test("inspectProjectMap detects flow with missing module", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		flows: Array<{ module: string }>;
+	};
+	flows.flows[0].module = "missing-module";
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /flow.*missing-module/u);
+});
+
+test("inspectProjectMap detects step without from or to", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		flows: Array<{ steps: Array<{ from?: string }> }>;
+	};
+	delete flows.flows[0].steps[0].from;
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /step sin from\/to/u);
+});
+
+test("inspectProjectMap detects dataStore without ownerModule", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		dataStores: Array<{ ownerModule?: string }>;
+	};
+	delete flows.dataStores[0].ownerModule;
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /dataStore.*ownerModule/u);
+});
+
+test("inspectProjectMap detects invalid moduleConnection", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		moduleConnections: Array<{ toModule: string }>;
+	};
+	flows.moduleConnections[0].toModule = "missing-module";
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /moduleConnection.*missing-module/u);
+});
+
+test("inspectProjectMap detects uiElement without selector or label", () => {
+	const projectPath = tempDir();
+	initProjectConfig(projectPath, "demo");
+	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		uiElements: Array<{ selector?: string; label?: string }>;
+	};
+	delete flows.uiElements[0].selector;
+	delete flows.uiElements[0].label;
+	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
+
+	const result = inspectProjectMap(projectPath);
+
+	assert.match(result.issues.join("\n"), /uiElement.*selector.*label/u);
+});
+
+test("inspectProjectMap does not write files", () => {
+	const projectPath = tempDir();
+
+	inspectProjectMap(projectPath);
+
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		false,
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		false,
+	);
+});
+
 test("initWorkspaceRoot creates reports and workspaces directories", () => {
 	const workspaceRoot = join(tempDir(), "bridge-agents");
 
@@ -127,7 +501,9 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 		mkdirSync(skillDir, { recursive: true });
 		writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`, "utf8");
 	}
-	mkdirSync(join(sourceSkillsDir, "rcm-flujos-operativos"), { recursive: true });
+	mkdirSync(join(sourceSkillsDir, "rcm-flujos-operativos"), {
+		recursive: true,
+	});
 	writeFileSync(
 		join(sourceSkillsDir, "rcm-flujos-operativos", "SKILL.md"),
 		"# domain\n",
@@ -139,13 +515,13 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 	assert.deepEqual(result.missing, []);
 	assert.equal(result.copied.length, NECESSARY_PROJECT_SKILLS.length);
 	assert.equal(
-		existsSync(join(projectPath, ".agents", "skills", "bug-hunter", "SKILL.md")),
+		existsSync(
+			join(projectPath, ".agents", "skills", "bug-hunter", "SKILL.md"),
+		),
 		true,
 	);
 	assert.equal(
-		existsSync(
-			join(projectPath, ".agents", "skills", "rcm-flujos-operativos"),
-		),
+		existsSync(join(projectPath, ".agents", "skills", "rcm-flujos-operativos")),
 		false,
 	);
 	assert.match(

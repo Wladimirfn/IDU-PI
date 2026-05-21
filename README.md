@@ -109,15 +109,22 @@ corepack pnpm dev
 
 `/config` es el instalador/mantenedor desde Telegram. Primero muestra diagnóstico; después podés ejecutar acciones puntuales.
 
-| Comando                  | Resultado                                                             |
-| ------------------------ | --------------------------------------------------------------------- |
-| `/config`                | Checklist del proyecto activo.                                        |
-| `/config doctor`         | Diagnóstico detallado.                                                |
-| `/config init_workspace` | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`. |
-| `/config init_assets`    | Crea assets project-local mínimos.                                    |
-| `/config skills_sync`    | Copia solo skills necesarias desde el proyecto fuente registrado.     |
-| `/config db_init`        | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                 |
-| `/config sync_commands`  | Actualiza el menú de comandos de Telegram con `setMyCommands`.        |
+| Comando                                            | Resultado                                                                                                                        |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `/config`                                          | Checklist del proyecto activo.                                                                                                   |
+| `/config doctor`                                   | Diagnóstico detallado.                                                                                                           |
+| `/config init_workspace`                           | Crea/verifica `reports/` y `workspaces/` bajo `AGENT_WORKSPACE_ROOT`.                                                            |
+| `/config init_assets`                              | Crea assets project-local mínimos.                                                                                               |
+| `/config init_project_config`                      | Crea `config/project-blueprint.json` y `config/project-flows.json` desde defaults si faltan; no sobreescribe configs existentes. |
+| `/config inspect_project_map`                      | Inspecciona el mapa funcional cargado y reporta vacíos/inconsistencias sin escribir archivos ni usar IA.                         |
+| `/config scan_project_map`                         | Escanea código real en modo read-only y compara elementos detectados contra `project-flows`.                                     |
+| `/config suggest_project_flows`                    | Genera un borrador JSON parcial sugerido desde el escaneo, sin escribir `project-flows`.                                         |
+| `/config draft_project_flows`                      | Guarda el borrador sugerido en `AGENT_WORKSPACE_ROOT/reports/` sin tocar `config/project-flows.json`.                            |
+| `/config review_project_flows_draft [latest/ruta]` | Revisa un borrador guardado contra el `project-flows` actual sin aplicar cambios.                                                |
+| `/config apply_project_flows_draft <ruta>`         | Aplica un borrador con ruta explícita, backup y validación final de `project-flows`.                                             |
+| `/config skills_sync`                              | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
+| `/config db_init`                                  | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
+| `/config sync_commands`                            | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |
 
 Assets creados por `/config init_assets`:
 
@@ -127,12 +134,52 @@ Assets creados por `/config init_assets`:
 .mcp/config.json
 ```
 
+Config project-local creada por `/config init_project_config` si falta:
+
+```text
+config/project-blueprint.json
+config/project-flows.json
+```
+
+### Project blueprint y project flows
+
+`/config init_project_config` crea dos archivos project-local cuando faltan:
+
+| Archivo                         | Rol                                                                                                |
+| ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `config/project-blueprint.json` | Define objetivo del proyecto, reglas maestras y jerarquía humano/orquestador/AgentLabs/subagentes. |
+| `config/project-flows.json`     | Define módulos, pantallas, UI elements, dataStores, flows y moduleConnections del proyecto real.   |
+
+`project-flows es el mapa funcional del proyecto real, no el mapa interno de Idu-pi.`
+
+Flujo seguro recomendado:
+
+```text
+scan → suggest → draft → review → apply con backup
+```
+
+| Etapa   | Comando                                            | Garantía                                                                       |
+| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Scan    | `/config scan_project_map`                         | Lee archivos estáticos; no ejecuta código del proyecto.                        |
+| Suggest | `/config suggest_project_flows`                    | No escribe archivos ni usa IA.                                                 |
+| Draft   | `/config draft_project_flows`                      | Escribe solo en `AGENT_WORKSPACE_ROOT/reports/`.                               |
+| Review  | `/config review_project_flows_draft [latest/ruta]` | No escribe archivos; compara draft vs mapa actual.                             |
+| Apply   | `/config apply_project_flows_draft <ruta>`         | Requiere ruta explícita, rechaza `latest`, crea backup y fusiona solo aditivo. |
+
+Los AgentLabs reciben contexto resumido de `project-blueprint`, `project-flows` y el scan estático. El `rule-validator` funciona como validador interno del Orquestador; no reemplaza al AgentLab ni a la aprobación humana.
+
+Guía completa: [`docs/project-map-workflow.md`](docs/project-map-workflow.md).
+
 Reglas de seguridad:
 
 - No ejecuta MCP automáticamente.
 - No copia secretos.
 - No commitea ni pushea.
 - `skills_sync` copia solo skills necesarias/generalistas, no todo el proyecto fuente.
+- `suggest_project_flows` no escribe archivos.
+- `draft_project_flows` escribe solo bajo `AGENT_WORKSPACE_ROOT/reports/`.
+- `review_project_flows_draft` no escribe archivos.
+- `apply_project_flows_draft` requiere ruta explícita, rechaza `latest`, crea backup, valida antes/después y no borra ni sobrescribe IDs existentes.
 
 ## Agentes y modelos
 

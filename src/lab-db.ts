@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import type { LabRunRecord } from "./lab-reports.js";
 
 export type FindingSeverity = "critical" | "high" | "medium" | "low" | "info";
 export type FindingConfidence = "high" | "medium" | "low";
@@ -30,12 +31,7 @@ export type BugFindingInput = {
 export type BugFinding = Required<
 	Pick<
 		BugFindingInput,
-		| "id"
-		| "projectId"
-		| "title"
-		| "description"
-		| "severity"
-		| "confidence"
+		"id" | "projectId" | "title" | "description" | "severity" | "confidence"
 	>
 > & {
 	status: FindingStatus;
@@ -43,6 +39,22 @@ export type BugFinding = Required<
 	suspectedCause: string;
 	affectedFiles: string[];
 	dedupeKey: string;
+};
+
+export type ProposalType = "fix" | "test" | "investigation" | "docs" | "memory";
+
+export type ProposalInput = {
+	id: string;
+	proposalType: ProposalType;
+	summary: string;
+	details?: string;
+	priority?: number;
+	createdByAgentId?: string;
+};
+
+export type FindingWithProposalInput = {
+	finding: BugFindingInput;
+	proposal?: ProposalInput;
 };
 
 export type InitLabDbResult = {
@@ -154,6 +166,18 @@ function sqlString(value: string | undefined): string {
 	return `'${value.replace(/'/gu, "''")}'`;
 }
 
+function sqlOptionalString(value: string | undefined): string {
+	if (value === undefined) return "NULL";
+	return `'${value.replace(/'/gu, "''")}'`;
+}
+
+function sqlInteger(value: number, fieldName: string): string {
+	if (!Number.isSafeInteger(value)) {
+		throw new TypeError(`${fieldName} must be a safe integer`);
+	}
+	return value.toString();
+}
+
 function runSql(dbPath: string, sql: string): string {
 	return execFileSync("sqlite3", ["-json", dbPath, sql], {
 		encoding: "utf8",
@@ -170,6 +194,134 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 
 export function formatInitLabDbResult(result: InitLabDbResult): string {
 	return `Lab DB\n${result.dbPath}\n\nEstado: ${result.created ? "creada" : "existente/actualizada"}`;
+}
+
+export function recordLabRun(dbPath: string, record: LabRunRecord): void {
+	initLabDb(dbPath);
+	const sql = `
+INSERT INTO lab_runs (
+  id, project_id, project_path, agent_id, agent_label, workspace,
+  duration_label, duration_ms, status, summary, raw_output, error,
+  started_at, finished_at
+) VALUES (
+  ${sqlString(record.id)},
+  ${sqlString(record.projectId)},
+  ${sqlString(record.projectPath)},
+  ${sqlString(record.agentId)},
+  ${sqlString(record.agentLabel)},
+  ${sqlString(record.workspace)},
+  ${sqlString(record.durationLabel)},
+  ${sqlInteger(record.durationMs, "durationMs")},
+  ${sqlString(record.status)},
+  ${sqlString(record.summary)},
+  ${sqlOptionalString(record.rawOutput)},
+  ${sqlOptionalString(record.error)},
+  ${sqlString(record.startedAt)},
+  ${sqlString(record.finishedAt)}
+)
+ON CONFLICT(id) DO UPDATE SET
+  project_id = excluded.project_id,
+  project_path = excluded.project_path,
+  agent_id = excluded.agent_id,
+  agent_label = excluded.agent_label,
+  workspace = excluded.workspace,
+  duration_label = excluded.duration_label,
+  duration_ms = excluded.duration_ms,
+  status = excluded.status,
+  summary = excluded.summary,
+  raw_output = excluded.raw_output,
+  error = excluded.error,
+  started_at = excluded.started_at,
+  finished_at = excluded.finished_at;
+`;
+	runSql(dbPath, sql);
+}
+
+export function recordFindingWithProposal(
+	dbPath: string,
+	input: FindingWithProposalInput,
+): void {
+	initLabDb(dbPath);
+	const status = input.finding.status ?? "new";
+	const affectedFiles = JSON.stringify(input.finding.affectedFiles ?? []);
+	const sql = `
+INSERT INTO bug_findings (
+  id, project_id, title, description, severity, confidence, status,
+  evidence, suspected_cause, affected_files, dedupe_key, updated_at
+) VALUES (
+  ${sqlString(input.finding.id)},
+  ${sqlString(input.finding.projectId)},
+  ${sqlString(input.finding.title)},
+  ${sqlString(input.finding.description)},
+  ${sqlString(input.finding.severity)},
+  ${sqlString(input.finding.confidence)},
+  ${sqlString(status)},
+  ${sqlString(input.finding.evidence)},
+  ${sqlString(input.finding.suspectedCause)},
+  ${sqlString(affectedFiles)},
+  ${sqlString(input.finding.dedupeKey)},
+  datetime('now')
+)
+ON CONFLICT(id) DO UPDATE SET
+  title = excluded.title,
+  description = excluded.description,
+  severity = excluded.severity,
+  confidence = excluded.confidence,
+  status = excluded.status,
+  evidence = excluded.evidence,
+  suspected_cause = excluded.suspected_cause,
+  affected_files = excluded.affected_files,
+  dedupe_key = excluded.dedupe_key,
+  updated_at = datetime('now')
+ON CONFLICT(project_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key != '' DO UPDATE SET
+  title = excluded.title,
+  description = excluded.description,
+  severity = excluded.severity,
+  confidence = excluded.confidence,
+  status = excluded.status,
+  evidence = excluded.evidence,
+  suspected_cause = excluded.suspected_cause,
+  affected_files = excluded.affected_files,
+  updated_at = datetime('now');
+`;
+	runSql(dbPath, sql);
+	if (!input.proposal) return;
+	const findingId = findingIdForProposal(dbPath, input.finding);
+	const proposalSql = `
+INSERT INTO proposals (
+  id, finding_id, proposal_type, summary, details, priority, created_by_agent_id
+) VALUES (
+  ${sqlString(input.proposal.id)},
+  ${sqlString(findingId)},
+  ${sqlString(input.proposal.proposalType)},
+  ${sqlString(input.proposal.summary)},
+  ${sqlString(input.proposal.details)},
+  ${sqlInteger(input.proposal.priority ?? 3, "priority")},
+  ${sqlString(input.proposal.createdByAgentId)}
+)
+ON CONFLICT(id) DO UPDATE SET
+  finding_id = excluded.finding_id,
+  proposal_type = excluded.proposal_type,
+  summary = excluded.summary,
+  details = excluded.details,
+  priority = excluded.priority,
+  created_by_agent_id = excluded.created_by_agent_id;
+`;
+	runSql(dbPath, proposalSql);
+}
+
+function findingIdForProposal(
+	dbPath: string,
+	finding: BugFindingInput,
+): string {
+	if (!finding.dedupeKey) return finding.id;
+	const output = runSql(
+		dbPath,
+		`SELECT id FROM bug_findings WHERE project_id = ${sqlString(finding.projectId)} AND dedupe_key = ${sqlString(finding.dedupeKey)} LIMIT 1;`,
+	).trim();
+	if (!output) return finding.id;
+	const rows = JSON.parse(output) as Array<{ id: string }>;
+	return rows[0]?.id ?? finding.id;
 }
 
 export function recordBugFinding(dbPath: string, input: BugFindingInput): void {
@@ -213,7 +365,10 @@ ON CONFLICT(id) DO UPDATE SET
 	);
 }
 
-export function listOpenFindings(dbPath: string, projectId: string): BugFinding[] {
+export function listOpenFindings(
+	dbPath: string,
+	projectId: string,
+): BugFinding[] {
 	initLabDb(dbPath);
 	const output = runSql(
 		dbPath,

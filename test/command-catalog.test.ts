@@ -11,7 +11,10 @@ import {
 test("formatHelpText includes primary Telegram commands", () => {
 	const text = formatHelpText();
 
-	assert.match(text, /\/config \[doctor\|init_workspace\|init_assets\|skills_sync\|db_init\|sync_commands\]/);
+	assert.match(
+		text,
+		/\/config \[doctor\|init_workspace\|init_assets\|init_project_config\|inspect_project_map\|scan_project_map\|suggest_project_flows\|draft_project_flows\|review_project_flows_draft\|apply_project_flows_draft\|skills_sync\|db_init\|sync_commands\]/,
+	);
 	assert.match(text, /\/comandos/);
 	assert.match(text, /\/testlab \[profundidad\]/);
 });
@@ -20,6 +23,13 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	const text = formatCommandCatalog();
 
 	assert.match(text, /Telegram — usos con argumentos/);
+	assert.match(text, /\/config init_project_config/);
+	assert.match(text, /\/config inspect_project_map/);
+	assert.match(text, /\/config scan_project_map/);
+	assert.match(text, /\/config suggest_project_flows/);
+	assert.match(text, /\/config draft_project_flows/);
+	assert.match(text, /\/config review_project_flows_draft/);
+	assert.match(text, /\/config apply_project_flows_draft/);
 	assert.match(text, /\/server restart/);
 	assert.match(text, /\/task bug <detalle>/);
 	assert.match(text, /CLI pnpm/);

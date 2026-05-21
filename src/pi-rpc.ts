@@ -53,6 +53,20 @@ type PendingPrompt = {
 	accepted: boolean;
 };
 
+export type PiRpcPromptCommand = {
+	id: string;
+	type: "prompt";
+	message: string;
+	streamingBehavior: "followUp";
+};
+
+export function buildPromptCommand(
+	id: string,
+	message: string,
+): PiRpcPromptCommand {
+	return { id, type: "prompt", message, streamingBehavior: "followUp" };
+}
+
 export class PiRpcSession {
 	private child: ChildProcessWithoutNullStreams | undefined;
 	private buffer = "";
@@ -101,7 +115,7 @@ export class PiRpcSession {
 		return new Promise((resolve, reject) => {
 			this.pending = { id, resolve, reject, text: "", accepted: false };
 			try {
-				this.writeCommand({ id, type: "prompt", message: text });
+				this.writeCommand(buildPromptCommand(id, text));
 			} catch (error) {
 				this.pending = undefined;
 				this.onProgress = undefined;
