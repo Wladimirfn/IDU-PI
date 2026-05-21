@@ -1,4 +1,5 @@
 import { Bot, type Context } from "grammy";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -106,10 +107,10 @@ import {
 } from "./telegram-ui.js";
 import { TaskQueue } from "./task-queue.js";
 import {
+	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
-	structuredTaskCategory,
-	structuredTaskPriority,
+	structuredTaskInputForText,
 } from "./structured-task-queue.js";
 
 const config = loadConfig();
@@ -449,16 +450,32 @@ async function runPrompt(
 			return;
 		}
 		if (taskQueue.enqueue(prompt)) {
+			const projectId = currentProjectId();
+			const signal = analyzeStructuredTaskSignal(prompt);
 			try {
-				structuredTaskQueue.enqueueTask({
-					text: prompt,
-					category: structuredTaskCategory(prompt),
-					priority: structuredTaskPriority(prompt),
-					source: "telegram",
-					projectId: currentProjectId(),
-				});
+				structuredTaskQueue.enqueueTask(
+					structuredTaskInputForText(prompt, {
+						source: "telegram",
+						projectId,
+						analyzer: () => signal,
+					}),
+				);
 			} catch {
 				// La cola estructurada es secundaria; /queue legacy sigue siendo fuente visible.
+			}
+			try {
+				labDbRepository.recordUserSignal({
+					id: randomUUID(),
+					projectId,
+					source: "telegram-queue",
+					rawText: prompt,
+					detectedEmotion: signal.emotion,
+					urgency: signal.urgency,
+					confidence: signal.confidence,
+					matchedKeywords: signal.matchedKeywords,
+				});
+			} catch {
+				// SQLite es complementario; no debe romper Telegram ni la cola legacy.
 			}
 			await ctx.reply(
 				`Ya hay una tarea Pi corriendo. Guardé tu mensaje en cola como Q${taskQueue.size}. Usá /queue para verla.`,

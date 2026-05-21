@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
 	structuredTaskCategory,
+	structuredTaskInputForText,
 	structuredTaskPriority,
 } from "../src/structured-task-queue.js";
 import { TaskQueue } from "../src/task-queue.js";
@@ -184,6 +186,38 @@ test("structuredTaskPriority can use analyzeUserSignal urgency", () => {
 	assert.equal(structuredTaskPriority("Gracias, perfecto"), 2);
 });
 
+test("structuredTaskPriority treats neutral as normal priority", () => {
+	assert.equal(structuredTaskPriority("revisar estado"), 3);
+});
+
+test("structuredTaskInputForText stores emotion and priority", () => {
+	const urgent = structuredTaskInputForText("Urgente, no funciona", {
+		source: "telegram",
+		projectId: "idu-pi",
+	});
+	const annoyed = structuredTaskInputForText("Estoy molesto otra vez");
+	const neutral = structuredTaskInputForText("revisar estado");
+
+	assert.equal(urgent.priority, 5);
+	assert.equal(urgent.emotion, "urgente");
+	assert.equal(urgent.source, "telegram");
+	assert.equal(urgent.projectId, "idu-pi");
+	assert.equal(annoyed.emotion, "molesto");
+	assert.equal(neutral.priority, 3);
+	assert.equal(neutral.emotion, "neutral");
+});
+
+test("analyzeStructuredTaskSignal falls back to neutral", () => {
+	const signal = analyzeStructuredTaskSignal("texto", () => {
+		throw new Error("sqlite unavailable");
+	});
+
+	assert.equal(signal.emotion, "neutral");
+	assert.equal(signal.urgency, 3);
+	assert.equal(signal.confidence, "low");
+	assert.deepEqual(signal.matchedKeywords, []);
+});
+
 test("formatStructuredTaskQueueDetail shows structured task fields", async () => {
 	await withTempQueue((queue) => {
 		queue.enqueueTask({
@@ -199,6 +233,7 @@ test("formatStructuredTaskQueueDetail shows structured task fields", async () =>
 		assert.match(detail, /pending/u);
 		assert.match(detail, /P4/u);
 		assert.match(detail, /bug/u);
+		assert.match(detail, /neutral/u);
 		assert.match(detail, /\/task bug arreglar cola/u);
 	});
 });

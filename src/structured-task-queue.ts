@@ -12,6 +12,7 @@ export type StructuredTask = {
 	status: StructuredTaskStatus;
 	createdAt: string;
 	updatedAt: string;
+	emotion?: string;
 	source?: string;
 	projectId?: string;
 	failureReason?: string;
@@ -21,6 +22,7 @@ export type StructuredTaskInput = {
 	text: string;
 	category: string;
 	priority?: number;
+	emotion?: string;
 	source?: string;
 	projectId?: string;
 };
@@ -60,6 +62,7 @@ export class StructuredTaskQueue {
 			status: "pending",
 			createdAt: timestamp,
 			updatedAt: timestamp,
+			...(input.emotion ? { emotion: input.emotion } : {}),
 			...(input.source ? { source: input.source } : {}),
 			...(input.projectId ? { projectId: input.projectId } : {}),
 		};
@@ -159,16 +162,48 @@ export function structuredTaskCategory(text: string): string {
 	return "general";
 }
 
+export function analyzeStructuredTaskSignal(
+	text: string,
+	analyzer: UserSignalAnalyzer = analyzeUserSignal,
+): ReturnType<UserSignalAnalyzer> {
+	try {
+		return analyzer(text);
+	} catch {
+		return {
+			emotion: "neutral",
+			urgency: 3,
+			confidence: "low",
+			matchedKeywords: [],
+		};
+	}
+}
+
 export function structuredTaskPriority(
 	text: string,
 	analyzer: UserSignalAnalyzer = analyzeUserSignal,
 ): number {
-	try {
-		const signal = analyzer(text);
-		return signal.urgency >= 1 && signal.urgency <= 5 ? signal.urgency : 3;
-	} catch {
-		return 3;
-	}
+	const signal = analyzeStructuredTaskSignal(text, analyzer);
+	if (signal.emotion === "neutral") return 3;
+	return signal.urgency >= 1 && signal.urgency <= 5 ? signal.urgency : 3;
+}
+
+export function structuredTaskInputForText(
+	text: string,
+	options: {
+		source?: string;
+		projectId?: string;
+		analyzer?: UserSignalAnalyzer;
+	} = {},
+): StructuredTaskInput {
+	const signal = analyzeStructuredTaskSignal(text, options.analyzer);
+	return {
+		text,
+		category: structuredTaskCategory(text),
+		priority: signal.emotion === "neutral" ? 3 : signal.urgency,
+		emotion: signal.emotion,
+		...(options.source ? { source: options.source } : {}),
+		...(options.projectId ? { projectId: options.projectId } : {}),
+	};
 }
 
 export function formatStructuredTaskQueueDetail(
@@ -178,7 +213,7 @@ export function formatStructuredTaskQueueDetail(
 	return `Cola estructurada (${tasks.length}):\n\n${tasks
 		.map(
 			(task) =>
-				`${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.createdAt}\n${summarizeTaskText(task.text)}`,
+				`${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"} | ${task.createdAt}\n${summarizeTaskText(task.text)}`,
 		)
 		.join("\n\n")}`;
 }
