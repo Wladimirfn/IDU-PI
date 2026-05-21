@@ -52,6 +52,17 @@ export type ProposalInput = {
 	createdByAgentId?: string;
 };
 
+export type UserSignalInput = {
+	id: string;
+	projectId: string;
+	source: string;
+	rawText: string;
+	detectedEmotion: string;
+	urgency: number;
+	confidence: string;
+	matchedKeywords: string[];
+};
+
 export type FindingWithProposalInput = {
 	finding: BugFindingInput;
 	proposal?: ProposalInput;
@@ -158,6 +169,18 @@ CREATE TABLE IF NOT EXISTS finding_skills (
   skill_id TEXT NOT NULL REFERENCES skill_index(id) ON DELETE CASCADE,
   reason TEXT,
   PRIMARY KEY (finding_id, skill_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_signal_events (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  raw_text TEXT NOT NULL,
+  detected_emotion TEXT NOT NULL,
+  urgency INTEGER NOT NULL CHECK (urgency BETWEEN 1 AND 5),
+  confidence TEXT NOT NULL,
+  matched_keywords TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `;
 
@@ -322,6 +345,30 @@ function findingIdForProposal(
 	if (!output) return finding.id;
 	const rows = JSON.parse(output) as Array<{ id: string }>;
 	return rows[0]?.id ?? finding.id;
+}
+
+export function recordUserSignal(dbPath: string, input: UserSignalInput): void {
+	initLabDb(dbPath);
+	const urgency = sqlInteger(input.urgency, "urgency");
+	if (input.urgency < 1 || input.urgency > 5) {
+		throw new RangeError("urgency must be between 1 and 5");
+	}
+	const matchedKeywords = JSON.stringify(input.matchedKeywords);
+	const sql = `
+INSERT INTO user_signal_events (
+  id, project_id, source, raw_text, detected_emotion, urgency, confidence, matched_keywords
+) VALUES (
+  ${sqlString(input.id)},
+  ${sqlString(input.projectId)},
+  ${sqlString(input.source)},
+  ${sqlString(input.rawText)},
+  ${sqlString(input.detectedEmotion)},
+  ${urgency},
+  ${sqlString(input.confidence)},
+  ${sqlString(matchedKeywords)}
+);
+`;
+	runSql(dbPath, sql);
 }
 
 export function recordBugFinding(dbPath: string, input: BugFindingInput): void {

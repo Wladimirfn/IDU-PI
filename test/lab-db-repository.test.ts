@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { LabDbRepository } from "../src/lab-db-repository.js";
+import { recordUserSignal } from "../src/lab-db.js";
 import type { FindingStatus } from "../src/lab-db.js";
 import type { LabRunRecord } from "../src/lab-reports.js";
 
@@ -53,6 +54,40 @@ function queryLabRuns(dbPath: string): Array<Record<string, unknown>> {
 	return output ? (JSON.parse(output) as Array<Record<string, unknown>>) : [];
 }
 
+function queryUserSignalEvents(dbPath: string): Array<Record<string, unknown>> {
+	const output = execFileSync(
+		"sqlite3",
+		[
+			"-json",
+			dbPath,
+			"SELECT id, project_id, source, raw_text, detected_emotion, urgency, confidence, matched_keywords FROM user_signal_events ORDER BY id;",
+		],
+		{
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	).trim();
+	return output ? (JSON.parse(output) as Array<Record<string, unknown>>) : [];
+}
+
+function tableExists(dbPath: string, tableName: string): boolean {
+	const output = execFileSync(
+		"sqlite3",
+		[
+			"-json",
+			dbPath,
+			`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${tableName}';`,
+		],
+		{
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	).trim();
+	return output
+		? (JSON.parse(output) as Array<Record<string, unknown>>).length > 0
+		: false;
+}
+
 function createLabRunRecord(
 	overrides: Partial<LabRunRecord> = {},
 ): LabRunRecord {
@@ -80,6 +115,14 @@ test("LabDbRepository initializes a temporary database", async () => {
 		assert.equal(result.dbPath, dbPath);
 		assert.equal(result.created, true);
 		assert.equal(existsSync(dbPath), true);
+	});
+});
+
+test("LabDbRepository init creates user_signal_events table", async () => {
+	await withTempDb((dbPath, repository) => {
+		repository.init();
+
+		assert.equal(tableExists(dbPath, "user_signal_events"), true);
 	});
 });
 
@@ -281,6 +324,86 @@ test("LabDbRepository records optional raw output", async () => {
 
 		const [row] = queryLabRuns(dbPath);
 		assert.equal(row.raw_output, "## Agent output\nDone");
+	});
+});
+
+test("LabDbRepository records a user signal event", async () => {
+	await withTempDb((dbPath, repository) => {
+		repository.recordUserSignal({
+			id: "signal-1",
+			projectId: "pi-telegram-bridge",
+			source: "telegram",
+			rawText: "Urgente, no funciona",
+			detectedEmotion: "urgente",
+			urgency: 5,
+			confidence: "high",
+			matchedKeywords: ["urgente", "no funciona"],
+		});
+
+		assert.deepEqual(queryUserSignalEvents(dbPath), [
+			{
+				id: "signal-1",
+				project_id: "pi-telegram-bridge",
+				source: "telegram",
+				raw_text: "Urgente, no funciona",
+				detected_emotion: "urgente",
+				urgency: 5,
+				confidence: "high",
+				matched_keywords: '["urgente","no funciona"]',
+			},
+		]);
+	});
+});
+
+test("recordUserSignal stores matchedKeywords as JSON array", async () => {
+	await withTempDb((dbPath) => {
+		recordUserSignal(dbPath, {
+			id: "signal-json",
+			projectId: "pi-telegram-bridge",
+			source: "manual-test",
+			rawText: "Gracias, perfecto",
+			detectedEmotion: "feliz",
+			urgency: 2,
+			confidence: "high",
+			matchedKeywords: ["gracias", "perfecto"],
+		});
+
+		const [row] = queryUserSignalEvents(dbPath);
+		assert.deepEqual(JSON.parse(row.matched_keywords as string), [
+			"gracias",
+			"perfecto",
+		]);
+	});
+});
+
+test("LabDbRepository rejects user signal urgency outside 1 to 5", async () => {
+	await withTempDb((dbPath, repository) => {
+		repository.recordBugFinding({
+			id: "finding-before-unsafe-signal",
+			projectId: "pi-telegram-bridge",
+			title: "Existing finding",
+			description: "Must survive unsafe signal input.",
+			severity: "low",
+			confidence: "high",
+		});
+
+		assert.throws(
+			() =>
+				repository.recordUserSignal({
+					id: "signal-bad",
+					projectId: "pi-telegram-bridge",
+					source: "telegram",
+					rawText: "bad",
+					detectedEmotion: "neutral",
+					urgency: 6,
+					confidence: "low",
+					matchedKeywords: [],
+				}),
+			/urgency/u,
+		);
+
+		assert.equal(queryUserSignalEvents(dbPath).length, 0);
+		assert.equal(repository.listOpenFindings("pi-telegram-bridge").length, 1);
 	});
 });
 
