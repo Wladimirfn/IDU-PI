@@ -12,8 +12,19 @@ export class TaskQueue {
 		return true;
 	}
 
+	peek(): string | undefined {
+		return this.items[0];
+	}
+
 	dequeue(): string | undefined {
 		return this.items.shift();
+	}
+
+	removeFirstMatching(text: string): boolean {
+		const index = this.items.findIndex((item) => item === text);
+		if (index === -1) return false;
+		this.items.splice(index, 1);
+		return true;
 	}
 
 	drain(): string[] {

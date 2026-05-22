@@ -513,16 +513,64 @@ async function drainTaskQueue(ctx: Context, generation: number): Promise<void> {
 			);
 			return;
 		}
-		const queuedPrompt = taskQueue.dequeue();
+		const queuedPrompt = taskQueue.peek();
 		if (!queuedPrompt) return;
+		if (!(await guardQueuedPrompt(ctx, queuedPrompt))) {
+			taskQueue.dequeue();
+			return;
+		}
+		taskQueue.dequeue();
 		await ctx.reply(
 			`Ejecutando tarea en cola. Restantes después de esta: ${taskQueue.size}.`,
 		);
-		await runPrompt(ctx, queuedPrompt, { fromQueue: true });
+		await runPrompt(ctx, queuedPrompt, {
+			fromQueue: true,
+			preserveActivePromptInFlight: true,
+		});
 	}
 	if (generation !== taskQueueGeneration) {
 		await ctx.reply("Cola detenida por cancelación.");
 	}
+}
+
+async function guardQueuedPrompt(
+	ctx: Context,
+	prompt: string,
+): Promise<boolean> {
+	const task =
+		structuredTaskQueue.findByText(prompt) ??
+		structuredTaskQueue.enqueueTask(
+			structuredTaskInputForText(prompt, {
+				source: "queue-guard",
+				projectId: currentProjectId(),
+			}),
+		);
+	if (task.guardStatus === "approved") return true;
+	if (task.guardStatus === "rejected") return false;
+
+	const report = buildPreflightReport(prompt);
+	const reason = `${report.risk}: ${report.affectedAreas.join(", ")}`;
+	if (report.risk === "high" || report.risk === "blocker") {
+		structuredTaskQueue.markNeedsConfirmation(task.id, {
+			guardRisk: report.risk,
+			guardReason: reason,
+		});
+		await replyLong(
+			ctx,
+			[
+				"⛔ Tarea en cola pausada: requiere confirmación humana.",
+				`ID: ${task.id}`,
+				"",
+				formatProjectAdvisory(buildProjectAdvisory(report)),
+				"",
+				`Aprobar: /queue_approve ${task.id}`,
+				`Rechazar: /queue_reject ${task.id}`,
+			].join("\n"),
+		);
+		return false;
+	}
+	structuredTaskQueue.markGuardClear(task.id, report.risk, reason);
+	return true;
 }
 
 async function generateAiProjectDraft(prompt: string): Promise<string> {
@@ -534,7 +582,11 @@ async function generateAiProjectDraft(prompt: string): Promise<string> {
 async function runPrompt(
 	ctx: Context,
 	prompt: string,
-	options: { fromQueue?: boolean; structuredTaskCategory?: string } = {},
+	options: {
+		fromQueue?: boolean;
+		structuredTaskCategory?: string;
+		preserveActivePromptInFlight?: boolean;
+	} = {},
 ): Promise<void> {
 	const runtime = agentRouter.activeRuntime();
 	const queueDecision = decidePromptQueueAction({
@@ -674,7 +726,7 @@ async function runPrompt(
 			await ctx.reply(`Error inesperado: ${message}`);
 		}
 	} finally {
-		if (!options.fromQueue) {
+		if (!options.preserveActivePromptInFlight) {
 			activePromptInFlight = false;
 		}
 	}
@@ -1538,6 +1590,45 @@ bot.command("queue_clear_structured", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const count = structuredTaskQueue.clearPersisted();
 	await ctx.reply(`Cola estructurada limpiada: ${count} tarea(s).`);
+});
+
+bot.command("queue_approve", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const id = commandArg(ctx.message?.text ?? "");
+	const task = structuredTaskQueue.findByIdPrefix(id);
+	if (!id || !task) {
+		await ctx.reply("Uso: /queue_approve <id>");
+		return;
+	}
+	if (
+		task.guardStatus !== "needs_confirmation" &&
+		task.guardStatus !== "approved"
+	) {
+		await ctx.reply("Esa tarea no está esperando aprobación.");
+		return;
+	}
+	structuredTaskQueue.markGuardApproved(task.id);
+	await ctx.reply(`Tarea aprobada: ${task.id}. Ejecutando con guard aprobado.`);
+	void runPrompt(ctx, task.text, {
+		fromQueue: true,
+		structuredTaskCategory: task.category,
+	});
+});
+
+bot.command("queue_reject", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const id = commandArg(ctx.message?.text ?? "");
+	const task = structuredTaskQueue.findByIdPrefix(id);
+	if (!id || !task) {
+		await ctx.reply("Uso: /queue_reject <id>");
+		return;
+	}
+	structuredTaskQueue.markGuardRejected(
+		task.id,
+		"Rechazada por confirmación humana.",
+	);
+	taskQueue.removeFirstMatching(task.text);
+	await ctx.reply(`Tarea rechazada: ${task.id}.`);
 });
 
 bot.command("mode", async (ctx) => {

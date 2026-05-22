@@ -263,3 +263,54 @@ test("formatStructuredTaskQueueDetail shows structured task fields", async () =>
 		assert.match(detail, /\/task bug arreglar cola/u);
 	});
 });
+
+test("StructuredTaskQueue stores and formats guard state", async () => {
+	await withTempQueue((queue, filePath) => {
+		const task = queue.enqueueTask({
+			text: "Bug task. Symptom/context: falló login",
+			category: "bug",
+			priority: 5,
+		});
+
+		queue.markNeedsConfirmation(task.id, {
+			guardRisk: "high",
+			guardReason: "auth/login requiere confirmación humana",
+		});
+
+		const reloaded = new StructuredTaskQueue({ filePath });
+		const guarded = reloaded.listTasks()[0];
+		assert.equal(guarded.guardStatus, "needs_confirmation");
+		assert.equal(guarded.guardRisk, "high");
+		assert.match(
+			formatStructuredTaskQueueDetail([guarded]),
+			/guard: needs_confirmation\/high/u,
+		);
+		assert.match(formatStructuredTaskQueueDetail([guarded]), /queue_approve/u);
+	});
+});
+
+test("StructuredTaskQueue approves and rejects guarded tasks", async () => {
+	await withTempQueue((queue) => {
+		const approved = queue.enqueueTask({ text: "one", category: "bug" });
+		const rejected = queue.enqueueTask({ text: "two", category: "bug" });
+
+		queue.markNeedsConfirmation(approved.id, {
+			guardRisk: "high",
+			guardReason: "login",
+		});
+		queue.markNeedsConfirmation(rejected.id, {
+			guardRisk: "blocker",
+			guardReason: "schema",
+		});
+
+		assert.equal(queue.markGuardApproved(approved.id)?.guardStatus, "approved");
+		assert.equal(
+			queue.markGuardRejected(rejected.id, "rechazado")?.guardStatus,
+			"rejected",
+		);
+		assert.equal(
+			queue.markGuardRejected(rejected.id, "rechazado")?.status,
+			"failed",
+		);
+	});
+});
