@@ -12,6 +12,8 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"idu_off",
 	"idu_status",
 	"idu_prepare",
+	"idu_define_project",
+	"idu_core_status",
 	"preflight",
 	"advisory",
 	"postflight",

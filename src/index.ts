@@ -75,6 +75,11 @@ import {
 } from "./idu-session.js";
 import { buildLabReviewPlan, formatLabReviewPlan } from "./lab-review-plan.js";
 import { loadProjectBlueprint } from "./project-blueprint.js";
+import {
+	answerProjectCoreWizard,
+	getProjectCoreWizardStatus,
+	startProjectCoreWizard,
+} from "./project-core-wizard.js";
 import { inspectProjectConnection } from "./project-connection.js";
 import {
 	analyzeProjectPreflight,
@@ -199,6 +204,7 @@ let pendingAction:
 	| "extension-ui"
 	| "select-lab-agent"
 	| "select-lab-duration"
+	| "project-core-wizard"
 	| null = null;
 let lastProjectChoices: string[] = [];
 let lastSessionPicks: SessionPick[] = [];
@@ -1003,6 +1009,31 @@ bot.command("idu_prepare", async (ctx) => {
 	});
 	lastIduPrepareByProject.set(projectId, result);
 	await replyLong(ctx, formatIduPrepareResult(result));
+});
+
+bot.command("idu_define_project", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	const result = startProjectCoreWizard({
+		projectId: activeProject?.id ?? currentProjectId(),
+		projectPath: activeProject?.path ?? currentCwd,
+		workspaceRoot: config.agentWorkspaceRoot,
+		projectName: activeProject?.name ?? activeProject?.id,
+	});
+	pendingAction = "project-core-wizard";
+	await replyLong(ctx, result.message);
+});
+
+bot.command("idu_core_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	const status = getProjectCoreWizardStatus({
+		projectId: activeProject?.id ?? currentProjectId(),
+		projectPath: activeProject?.path ?? currentCwd,
+		workspaceRoot: config.agentWorkspaceRoot,
+		projectName: activeProject?.name ?? activeProject?.id,
+	});
+	await replyLong(ctx, status.text);
 });
 
 bot.command("preflight", async (ctx) => {
@@ -1952,6 +1983,28 @@ bot.on("message:text", async (ctx) => {
 	}
 
 	if (text.startsWith("/")) return;
+
+	if (pendingAction === "project-core-wizard") {
+		const activeProject = getActiveProject(registry);
+		try {
+			const result = answerProjectCoreWizard(
+				{
+					projectId: activeProject?.id ?? currentProjectId(),
+					projectPath: activeProject?.path ?? currentCwd,
+					workspaceRoot: config.agentWorkspaceRoot,
+					projectName: activeProject?.name ?? activeProject?.id,
+				},
+				text,
+			);
+			if (result.completed) pendingAction = null;
+			await replyLong(ctx, result.message);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			pendingAction = null;
+			await replyLong(ctx, `No pude actualizar Project Core:\n${message}`);
+		}
+		return;
+	}
 
 	if (pendingAction === "addproject-path") {
 		pendingAction = null;

@@ -61,6 +61,18 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/idu_prepare"],
 	},
 	{
+		command: "idu_define_project",
+		description: "Definir Project Core manual",
+		help: "/idu_define_project - iniciar wizard manual para crear config/project-core.json draft",
+		usage: ["/idu_define_project"],
+	},
+	{
+		command: "idu_core_status",
+		description: "Ver estado Project Core",
+		help: "/idu_core_status - ver si existe Project Core local, status, resumen y preguntas abiertas",
+		usage: ["/idu_core_status"],
+	},
+	{
 		command: "preflight",
 		description: "Analizar riesgo antes de cambios",
 		help: "/preflight <solicitud> - analizar riesgo, contexto faltante y siguiente acción",
