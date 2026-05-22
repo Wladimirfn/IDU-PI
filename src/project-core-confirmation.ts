@@ -312,7 +312,9 @@ export function formatProjectCoreDiff(result: ProjectCoreDiffResult): string {
 					`campos podría completar: ${formatList(result.fieldsResearchCouldComplete)}`,
 				]
 			: ["research latest: —", "campos podría completar: —"]),
-		...(result.errors.length ? [`errores research: ${result.errors.join(" | ")}`] : []),
+		...(result.errors.length
+			? [`errores research: ${result.errors.join(" | ")}`]
+			: []),
 		"No escribí archivos.",
 	].join("\n");
 }
