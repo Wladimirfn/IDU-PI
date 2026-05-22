@@ -16,11 +16,15 @@ function connection(
 ): ProjectConnectionReport {
 	return {
 		status: "ready",
+		configStatus: "project_local_valid",
+		alignmentStatus: "pending_scan",
+		readiness: "config_ready",
+		alignmentReason: ["no existe scan reciente"],
 		projectId: "demo",
 		projectPath: "/demo",
 		problems: [],
 		warnings: [],
-		recommendedNext: "listo para operar",
+		recommendedNext: "/idu_prepare",
 		safeToOperate: true,
 		needsUserConfirmation: false,
 		inspectedAt: "2026-05-21T00:00:00.000Z",

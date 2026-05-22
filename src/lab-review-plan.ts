@@ -170,16 +170,16 @@ function structuredTaskInput(
 		].join("\n"),
 		category: "review",
 		priority: risk === "blocker" ? 1 : risk === "high" ? 2 : 3,
-		source: "lab_review_plan",
+		source: "idu-pi",
 		...(input.projectId ? { projectId: input.projectId } : {}),
 	};
 }
 
 function commands(plan: LabReviewPlan): string[] {
-	if (!plan.shouldReview) return ["/postflight"];
+	if (!plan.shouldReview) return ["/lab_review_plan postflight"];
 	return [
-		"/postflight",
-		"/preflight <solicitud>",
+		"/lab_review_plan postflight",
+		"/lab_review_plan preflight <solicitud>",
 		"confirmar ejecución AgentLab manualmente",
 	];
 }

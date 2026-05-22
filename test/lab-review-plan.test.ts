@@ -62,6 +62,7 @@ test("postflight DB high suggests database lab", () => {
 	assert.equal(plan.shouldReview, true);
 	assert.ok(plan.suggestedAgentLabs.includes("database"));
 	assert.equal(plan.structuredTaskInput?.category, "review");
+	assert.equal(plan.structuredTaskInput?.source, "idu-pi");
 	assert.equal(plan.structuredTaskInput?.projectId, "demo");
 });
 
@@ -132,6 +133,40 @@ test("performance build test impact suggests performance lab", () => {
 	});
 
 	assert.ok(plan.suggestedAgentLabs.includes("performance"));
+});
+
+test("preflight high by login auth suggests security lab", () => {
+	const plan = buildLabReviewPlan({
+		projectId: "demo",
+		requestText: "arreglar login y auth",
+		preflightReport: preflight({
+			risk: "high",
+			affectedAreas: ["auth/login", "security"],
+			warnings: ["cambio toca autenticación"],
+		}),
+	});
+
+	assert.equal(plan.shouldReview, true);
+	assert.ok(plan.suggestedAgentLabs.includes("security"));
+	assert.equal(plan.structuredTaskInput?.category, "review");
+	assert.equal(plan.structuredTaskInput?.source, "idu-pi");
+});
+
+test("medium high and blocker risks create review StructuredTaskInput", () => {
+	for (const risk of ["medium", "high", "blocker"] as const) {
+		const plan = buildLabReviewPlan({
+			projectId: "demo",
+			preflightReport: preflight({
+				risk,
+				affectedAreas: ["lab/queue"],
+			}),
+		});
+
+		assert.equal(plan.shouldReview, true);
+		assert.equal(plan.structuredTaskInput?.category, "review");
+		assert.equal(plan.structuredTaskInput?.source, "idu-pi");
+		assert.equal(plan.structuredTaskInput?.projectId, "demo");
+	}
 });
 
 test("preflight high creates StructuredTaskInput category review", () => {

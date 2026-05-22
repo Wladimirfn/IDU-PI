@@ -13,6 +13,21 @@ export type ProjectConnectionStatus =
 	| "needs_understanding"
 	| "ready";
 
+export type ProjectConfigStatus =
+	| "missing"
+	| "default"
+	| "project_local_valid"
+	| "invalid";
+
+export type ProjectAlignmentStatus =
+	| "unknown"
+	| "pending_scan"
+	| "needs_review"
+	| "aligned"
+	| "stale";
+
+export type ProjectReadiness = "not_ready" | "config_ready" | "aligned_ready";
+
 export type ProjectConfigConnectionStatus = {
 	exists: boolean;
 	source: "project-local" | "default";
@@ -32,6 +47,10 @@ export type ProjectConnectionWorkspaceStatus = {
 
 export type ProjectConnectionReport = {
 	status: ProjectConnectionStatus;
+	configStatus: ProjectConfigStatus;
+	alignmentStatus: ProjectAlignmentStatus;
+	readiness: ProjectReadiness;
+	alignmentReason: string[];
 	projectId?: string;
 	projectPath?: string;
 	problems: string[];
@@ -69,6 +88,15 @@ export function formatProjectConnectionReport(
 		"Estado:",
 		report.status,
 		"",
+		"configStatus:",
+		report.configStatus,
+		"",
+		"alignmentStatus:",
+		report.alignmentStatus,
+		"",
+		"readiness:",
+		report.readiness,
+		"",
 		"safeToOperate:",
 		String(report.safeToOperate),
 		"",
@@ -92,7 +120,7 @@ export function formatProjectConnectionReport(
 function statusMessage(status: ProjectConnectionStatus): string {
 	switch (status) {
 		case "ready":
-			return "Idu-pi conectado y listo para operar.";
+			return "Idu-pi conectado con configuración válida; alineación pendiente.";
 		case "connected":
 			return "Idu-pi conectado, pero falta comprensión/config completa.";
 		case "needs_understanding":
@@ -216,6 +244,10 @@ export function inspectProjectConnection(
 	if (!blueprint.exists || !flows.exists) {
 		return {
 			status: "needs_understanding",
+			configStatus: "missing",
+			alignmentStatus: "unknown",
+			readiness: "not_ready",
+			alignmentReason: ["faltan blueprint/flows project-local"],
 			projectId: project.id,
 			projectPath: project.path,
 			problems,
@@ -233,6 +265,10 @@ export function inspectProjectConnection(
 	if (!blueprint.valid || !flows.valid) {
 		return {
 			status: "connected",
+			configStatus: "invalid",
+			alignmentStatus: "unknown",
+			readiness: "not_ready",
+			alignmentReason: ["blueprint/flows project-local inválidos"],
 			projectId: project.id,
 			projectPath: project.path,
 			problems,
@@ -249,11 +285,15 @@ export function inspectProjectConnection(
 
 	return {
 		status: "ready",
+		configStatus: "project_local_valid",
+		alignmentStatus: "pending_scan",
+		readiness: "config_ready",
+		alignmentReason: ["no existe scan reciente"],
 		projectId: project.id,
 		projectPath: project.path,
 		problems,
 		warnings,
-		recommendedNext: "listo para operar",
+		recommendedNext: "/idu_prepare",
 		safeToOperate: true,
 		needsUserConfirmation: false,
 		inspectedAt,
@@ -286,6 +326,10 @@ function baseReport(options: {
 }): ProjectConnectionReport {
 	return {
 		status: options.status,
+		configStatus: "missing",
+		alignmentStatus: "unknown",
+		readiness: "not_ready",
+		alignmentReason: ["conexión de proyecto no disponible"],
 		...(options.projectId ? { projectId: options.projectId } : {}),
 		...(options.projectPath ? { projectPath: options.projectPath } : {}),
 		problems: options.problems,

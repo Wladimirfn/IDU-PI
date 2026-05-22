@@ -38,9 +38,27 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 	},
 	{
 		command: "idu",
-		description: "Ver conexión Idu-pi del proyecto",
-		help: "/idu - diagnosticar conexión y comprensión del proyecto activo",
+		description: "Activar guardrails Idu-pi",
+		help: "/idu - activar guardrails automáticos y ver conexión del proyecto activo",
 		usage: ["/idu"],
+	},
+	{
+		command: "idu_off",
+		description: "Apagar guardrails Idu-pi",
+		help: "/idu_off - desactivar guardrails automáticos para el proyecto activo",
+		usage: ["/idu_off"],
+	},
+	{
+		command: "idu_status",
+		description: "Ver modo Idu-pi",
+		help: "/idu_status - mostrar active/inactive, projectId, activatedAt y guardrails",
+		usage: ["/idu_status"],
+	},
+	{
+		command: "idu_prepare",
+		description: "Preparar proyecto con Idu-pi",
+		help: "/idu_prepare - ejecutar preparación segura del proyecto sin aplicar flows ni AgentLabs",
+		usage: ["/idu_prepare"],
 	},
 	{
 		command: "preflight",

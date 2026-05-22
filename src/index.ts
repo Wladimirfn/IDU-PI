@@ -59,12 +59,23 @@ import {
 	buildProjectAdvisory,
 	formatProjectAdvisory,
 } from "./project-advisory.js";
+import {
+	formatIduPrepareResult,
+	runIduPrepare,
+	type IduPrepareResult,
+} from "./idu-prepare.js";
+import { formatIduProjectDashboard } from "./idu-project-dashboard.js";
+import {
+	activateIduSession,
+	configureIduSessionStore,
+	deactivateIduSession,
+	formatIduSessionStatus,
+	getIduSessionStatus,
+	shouldUseAutomaticGuardrails,
+} from "./idu-session.js";
 import { buildLabReviewPlan, formatLabReviewPlan } from "./lab-review-plan.js";
 import { loadProjectBlueprint } from "./project-blueprint.js";
-import {
-	formatProjectConnectionReport,
-	inspectProjectConnection,
-} from "./project-connection.js";
+import { inspectProjectConnection } from "./project-connection.js";
 import {
 	analyzeProjectPreflight,
 	formatProjectPreflightReport,
@@ -150,6 +161,7 @@ import {
 } from "./structured-task-queue.js";
 
 const config = loadConfig();
+configureIduSessionStore({ workspaceRoot: config.agentWorkspaceRoot });
 const bot = new Bot(config.telegramBotToken);
 const registry = loadRegistry(config.defaultCwd, config.allowedRoots);
 let sessionNames = loadSessionNames();
@@ -168,6 +180,7 @@ const agentRouter = new AgentRouter({
 const labReportStore = new LabReportStore(config.agentWorkspaceRoot);
 const labDbRepository = new LabDbRepository(labDbPath());
 const taskQueue = new TaskQueue();
+const lastIduPrepareByProject = new Map<string, IduPrepareResult>();
 const structuredTaskQueue = new StructuredTaskQueue({
 	workspaceRoot: config.agentWorkspaceRoot,
 });
@@ -367,6 +380,54 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 	});
 }
 
+function iduProjectDashboardText(
+	report: ReturnType<typeof inspectProjectConnection>,
+): string {
+	const lastPrepare = report.projectId
+		? lastIduPrepareByProject.get(report.projectId)
+		: undefined;
+	return formatIduProjectDashboard({
+		projectId: report.projectId,
+		configStatus: report.configStatus,
+		alignmentStatus: lastPrepare?.alignmentStatus ?? report.alignmentStatus,
+		readiness: lastPrepare?.readiness ?? report.readiness,
+		reason: lastPrepare
+			? prepareAlignmentReason(lastPrepare)
+			: report.alignmentReason,
+		recommendedNext: report.recommendedNext,
+	});
+}
+
+function prepareAlignmentReason(result: IduPrepareResult): string[] {
+	const differences = result.differencesDetected;
+	const reasons: string[] = [];
+	if (differences.screens > 0) {
+		reasons.push(
+			`último prepare detectó ${differences.screens} screens sugeridas`,
+		);
+	}
+	if (differences.uiElements > 0) {
+		reasons.push(
+			`último prepare detectó ${differences.uiElements} uiElements sugeridos`,
+		);
+	}
+	if (differences.dataStores > 0) {
+		reasons.push(
+			`último prepare detectó ${differences.dataStores} dataStores sugeridos`,
+		);
+	}
+	if (differences.flows > 0) {
+		reasons.push(`último prepare detectó ${differences.flows} flows sugeridos`);
+	}
+	if (result.alignmentStatus === "stale") {
+		reasons.push("hubo cambios locales después del prepare");
+	}
+	if (!reasons.length && result.alignmentStatus === "aligned") {
+		reasons.push("último prepare no detectó diferencias relevantes");
+	}
+	return reasons.length ? reasons : ["último prepare no dejó motivo detallado"];
+}
+
 function buildPostflightReport(): ProjectPostflightReport {
 	const connection = inspectProjectConnection({
 		registry,
@@ -553,12 +614,60 @@ async function guardTaskPrompt(
 		enqueueLegacyOnBlock?: boolean;
 	},
 ): Promise<boolean> {
+	if (!shouldUseAutomaticGuardrails(currentProjectId())) return true;
+
 	const existingTask = structuredTaskQueue.findByText(prompt);
 	if (existingTask?.guardStatus === "approved") return true;
-	if (existingTask?.guardStatus === "needs_confirmation") return false;
+	if (existingTask?.guardStatus === "needs_confirmation") {
+		await replyLong(
+			ctx,
+			[
+				options.blockTitle,
+				`ID: ${existingTask.id}`,
+				"",
+				`Aprobar: /queue_approve ${existingTask.id}`,
+				`Rechazar: /queue_reject ${existingTask.id}`,
+			].join("\n"),
+		);
+		return false;
+	}
 	if (existingTask?.guardStatus === "rejected") return false;
 
-	const report = buildPreflightReport(prompt);
+	let report: ProjectPreflightReport;
+	try {
+		report = buildPreflightReport(prompt);
+	} catch (error) {
+		const task =
+			existingTask ??
+			structuredTaskQueue.enqueueTask(
+				structuredTaskInputForText(prompt, {
+					source: options.source,
+					projectId: currentProjectId(),
+					category: options.structuredTaskCategory,
+				}),
+			);
+		const reason =
+			error instanceof Error ? error.message : "preflight interno falló";
+		structuredTaskQueue.markNeedsConfirmation(task.id, {
+			guardRisk: "blocker",
+			guardReason: `preflight falló: ${reason}`,
+		});
+		if (options.enqueueLegacyOnBlock && !existingTask)
+			taskQueue.enqueue(prompt);
+		await replyLong(
+			ctx,
+			[
+				"No pude completar preflight; tarea pausada por seguridad",
+				`ID: ${task.id}`,
+				"Guard: needs_confirmation/blocker",
+				`Motivo: ${reason}`,
+				"",
+				`Aprobar: /queue_approve ${task.id}`,
+				`Rechazar: /queue_reject ${task.id}`,
+			].join("\n"),
+		);
+		return false;
+	}
 	const reason = `${report.risk}: ${report.affectedAreas.join(", ")}`;
 	if (report.risk === "high" || report.risk === "blocker") {
 		const task =
@@ -824,13 +933,76 @@ bot.command("dashboard", async (ctx) => {
 
 bot.command("idu", async (ctx) => {
 	if (!(await guard(ctx))) return;
+	const projectId = currentProjectId();
+	activateIduSession(projectId);
 	const report = inspectProjectConnection({
 		registry,
 		defaultCwd: config.defaultCwd,
 		allowedRoots: config.allowedRoots,
 		workspaceRoot: config.agentWorkspaceRoot,
 	});
-	await replyLong(ctx, formatProjectConnectionReport(report));
+	await replyLong(
+		ctx,
+		[
+			"Guardrails automáticos activados para el proyecto activo.",
+			"",
+			iduProjectDashboardText(report),
+		].join("\n"),
+	);
+});
+
+bot.command("idu_off", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatIduSessionStatus(deactivateIduSession(currentProjectId())),
+	);
+});
+
+bot.command("idu_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatIduSessionStatus(getIduSessionStatus(currentProjectId())),
+	);
+});
+
+bot.command("idu_prepare", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	const projectId = activeProject?.id ?? currentProjectId();
+	const projectPath = activeProject?.path ?? currentCwd;
+	const reportsPath = join(config.agentWorkspaceRoot, "reports");
+	const result = runIduPrepare({
+		projectId,
+		projectPath,
+		reportsPath,
+		inspectConnection: () =>
+			inspectProjectConnection({
+				registry,
+				defaultCwd: config.defaultCwd,
+				allowedRoots: config.allowedRoots,
+				workspaceRoot: config.agentWorkspaceRoot,
+			}),
+		initProjectConfig: () => initProjectConfig(projectPath, projectId),
+		inspectProjectMap: () =>
+			inspectProjectMap(projectPath, {
+				activeProjectId: projectId,
+				activeProjectName: activeProject?.name,
+			}),
+		loadProjectFlows: () => loadProjectFlows(projectPath),
+		scanProjectMap: (flows) => scanProjectMap(projectPath, flows),
+		suggestProjectFlows: (flows) =>
+			suggestProjectFlowsFromScan(projectPath, flows),
+		draftProjectFlows: (flows) =>
+			saveProjectFlowsDraft(projectPath, flows, reportsPath),
+		reviewProjectFlowsDraft: (draftPathOrLatest, flows) =>
+			reviewProjectFlowsDraft(draftPathOrLatest, flows, reportsPath),
+		postflight: () => buildPostflightReport(),
+		createStructuredTask: (input) => structuredTaskQueue.enqueueTask(input),
+	});
+	lastIduPrepareByProject.set(projectId, result);
+	await replyLong(ctx, formatIduPrepareResult(result));
 });
 
 bot.command("preflight", async (ctx) => {
