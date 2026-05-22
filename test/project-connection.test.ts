@@ -128,6 +128,9 @@ test("needs_understanding if project-local configs are missing", () => {
 	});
 
 	assert.equal(report.status, "needs_understanding");
+	assert.equal(report.configStatus, "missing");
+	assert.equal(report.alignmentStatus, "unknown");
+	assert.equal(report.readiness, "not_ready");
 	assert.equal(report.safeToOperate, false);
 	assert.equal(report.needsUserConfirmation, true);
 	assert.match(report.problems.join("\n"), /project-blueprint/);
@@ -148,9 +151,12 @@ test("ready if local blueprint and flows are valid", () => {
 	});
 
 	assert.equal(report.status, "ready");
+	assert.equal(report.configStatus, "project_local_valid");
+	assert.equal(report.alignmentStatus, "pending_scan");
+	assert.equal(report.readiness, "config_ready");
 	assert.equal(report.safeToOperate, true);
 	assert.equal(report.needsUserConfirmation, false);
-	assert.equal(report.recommendedNext, "listo para operar");
+	assert.equal(report.recommendedNext, "/idu_prepare");
 });
 
 test("warnings if reports directory does not exist", () => {
@@ -181,6 +187,9 @@ test("connected if local configs exist but are invalid", () => {
 	});
 
 	assert.equal(report.status, "connected");
+	assert.equal(report.configStatus, "invalid");
+	assert.equal(report.alignmentStatus, "unknown");
+	assert.equal(report.readiness, "not_ready");
 	assert.equal(report.safeToOperate, false);
 	assert.equal(report.needsUserConfirmation, true);
 	assert.equal(report.recommendedNext, "/config inspect_project_map");
@@ -189,11 +198,15 @@ test("connected if local configs exist but are invalid", () => {
 test("formatProjectConnectionReport shows ready", () => {
 	const text = formatProjectConnectionReport({
 		status: "ready",
+		configStatus: "project_local_valid",
+		alignmentStatus: "pending_scan",
+		readiness: "config_ready",
+		alignmentReason: ["no existe scan reciente"],
 		projectId: "demo",
 		projectPath: "C:\\demo",
 		problems: [],
 		warnings: [],
-		recommendedNext: "listo para operar",
+		recommendedNext: "/idu_prepare",
 		safeToOperate: true,
 		needsUserConfirmation: false,
 		inspectedAt: "2026-05-21T00:00:00.000Z",
@@ -213,18 +226,28 @@ test("formatProjectConnectionReport shows ready", () => {
 		},
 	});
 
-	assert.match(text, /Idu-pi conectado y listo para operar\./);
+	assert.match(
+		text,
+		/Idu-pi conectado con configuración válida; alineación pendiente\./,
+	);
 	assert.match(text, /Proyecto:\ndemo/);
 	assert.match(text, /Estado:\nready/);
+	assert.match(text, /configStatus:\nproject_local_valid/);
+	assert.match(text, /alignmentStatus:\npending_scan/);
+	assert.match(text, /readiness:\nconfig_ready/);
 	assert.match(text, /safeToOperate:\ntrue/);
 	assert.match(text, /needsUserConfirmation:\nfalse/);
 	assert.match(text, /blueprint\/flows project-local válidos/);
-	assert.match(text, /Siguiente recomendado:\nlisto para operar/);
+	assert.match(text, /Siguiente recomendado:\n\/idu_prepare/);
 });
 
 test("formatProjectConnectionReport shows needs_understanding", () => {
 	const text = formatProjectConnectionReport({
 		status: "needs_understanding",
+		configStatus: "missing",
+		alignmentStatus: "unknown",
+		readiness: "not_ready",
+		alignmentReason: ["faltan blueprint/flows project-local"],
 		projectId: "demo",
 		projectPath: "C:\\demo",
 		problems: [
@@ -248,6 +271,10 @@ test("formatProjectConnectionReport shows needs_understanding", () => {
 test("formatProjectConnectionReport shows broken_connection", () => {
 	const text = formatProjectConnectionReport({
 		status: "broken_connection",
+		configStatus: "missing",
+		alignmentStatus: "unknown",
+		readiness: "not_ready",
+		alignmentReason: ["conexión de proyecto no disponible"],
 		projectId: "demo",
 		projectPath: "C:\\missing",
 		problems: [

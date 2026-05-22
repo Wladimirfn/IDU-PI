@@ -1,6 +1,11 @@
 import type { InitProjectConfigResult } from "./config-wizard.js";
 import { buildLabReviewPlan } from "./lab-review-plan.js";
-import type { ProjectConnectionReport } from "./project-connection.js";
+import type {
+	ProjectAlignmentStatus,
+	ProjectConfigStatus,
+	ProjectConnectionReport,
+	ProjectReadiness,
+} from "./project-connection.js";
 import type { ProjectFlows } from "./project-flows.js";
 import type { ProjectFlowDraftReview } from "./project-map-scanner.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
@@ -24,10 +29,21 @@ export type IduPrepareStep = {
 	error?: string;
 };
 
+export type ProjectAlignmentDiffCounts = {
+	screens: number;
+	uiElements: number;
+	dataStores: number;
+	flows: number;
+};
+
 export type IduPrepareResult = {
 	projectId: string;
 	projectPath: string;
 	initialStatus: string;
+	configStatus: ProjectConfigStatus;
+	alignmentStatus: ProjectAlignmentStatus;
+	readiness: ProjectReadiness;
+	differencesDetected: ProjectAlignmentDiffCounts;
 	steps: IduPrepareStep[];
 	errors: string[];
 	finalRisk: ProjectPostflightReport["risk"];
@@ -73,6 +89,10 @@ export function runIduPrepare(
 	let postflightReport: ProjectPostflightReport | undefined;
 	let labReviewTaskId: string | undefined;
 	let labReviewTaskInput: StructuredTaskInput | undefined;
+	let differencesDetected: ProjectAlignmentDiffCounts = emptyDifferences();
+	let suggestionsWereCalculated = false;
+	let scanCompleted = false;
+	let initCompleted = false;
 
 	function record(step: IduPrepareStep): void {
 		steps.push(step);
@@ -108,6 +128,7 @@ export function runIduPrepare(
 			"init_project_config",
 			options.initProjectConfig,
 			(result) => {
+				initCompleted = true;
 				const created = result.created.length
 					? result.created.join(", ")
 					: "ninguno";
@@ -140,6 +161,7 @@ export function runIduPrepare(
 			() => {
 				const currentFlows = options.loadProjectFlows();
 				options.scanProjectMap(currentFlows);
+				scanCompleted = true;
 				return currentFlows;
 			},
 			() => "escaneo completado",
@@ -152,7 +174,11 @@ export function runIduPrepare(
 				record,
 				"suggest_project_flows",
 				() => options.suggestProjectFlows(flowsForSuggestions),
-				() => "sugerencias calculadas",
+				(result) => {
+					suggestionsWereCalculated = true;
+					differencesDetected = countDifferences(result);
+					return "sugerencias calculadas";
+				},
 			);
 			const draft = safeStep(
 				record,
@@ -245,18 +271,32 @@ export function runIduPrepare(
 	}
 
 	const finalRisk = postflightReport?.risk ?? "low";
+	const configStatus = finalConfigStatus(connection, initCompleted);
+	const alignmentStatus = determineAlignmentStatus({
+		canUseProject,
+		configStatus,
+		scanCompleted,
+		suggestionsWereCalculated,
+		differencesDetected,
+		postflightReport,
+	});
+	const readiness = determineReadiness(configStatus, alignmentStatus);
 	return {
 		projectId: options.projectId,
 		projectPath: options.projectPath,
 		initialStatus,
+		configStatus,
+		alignmentStatus,
+		readiness,
+		differencesDetected,
 		steps,
 		errors,
 		finalRisk,
 		...(draftPath ? { draftPath } : {}),
 		...(labReviewTaskId ? { labReviewTaskId } : {}),
 		...(labReviewTaskInput ? { labReviewTaskInput } : {}),
-		recommendedNext: recommendedNext(finalRisk, draftPath),
-		suggestedActions: suggestedActions(finalRisk, draftPath),
+		recommendedNext: recommendedNext(finalRisk, differencesDetected),
+		suggestedActions: suggestedActions(finalRisk, differencesDetected),
 	};
 }
 
@@ -272,6 +312,21 @@ export function formatIduPrepareResult(result: IduPrepareResult): string {
 		"",
 		"Estado inicial:",
 		result.initialStatus,
+		"",
+		"configStatus final:",
+		result.configStatus,
+		"",
+		"alignmentStatus final:",
+		result.alignmentStatus,
+		"",
+		"readiness final:",
+		result.readiness,
+		"",
+		"Diferencias detectadas:",
+		`- screens sugeridas: ${result.differencesDetected.screens}`,
+		`- uiElements sugeridos: ${result.differencesDetected.uiElements}`,
+		`- dataStores sugeridos: ${result.differencesDetected.dataStores}`,
+		`- flows sugeridos: ${result.differencesDetected.flows}`,
 		"",
 		"Resultado:",
 		...result.steps.map(formatStep),
@@ -301,6 +356,75 @@ export function formatIduPrepareResult(result: IduPrepareResult): string {
 		"Nota segura:",
 		"No ejecuté AgentLabs, no apliqué project-flows, no usé IA y no ejecuté código del proyecto.",
 	].join("\n");
+}
+
+function emptyDifferences(): ProjectAlignmentDiffCounts {
+	return { screens: 0, uiElements: 0, dataStores: 0, flows: 0 };
+}
+
+function countDifferences(value: unknown): ProjectAlignmentDiffCounts {
+	if (!isRecord(value)) return emptyDifferences();
+	return {
+		screens: arrayLength(value.screens),
+		uiElements: arrayLength(value.uiElements),
+		dataStores: arrayLength(value.dataStores),
+		flows: arrayLength(value.flows),
+	};
+}
+
+function totalDifferences(differences: ProjectAlignmentDiffCounts): number {
+	return (
+		differences.screens +
+		differences.uiElements +
+		differences.dataStores +
+		differences.flows
+	);
+}
+
+function determineAlignmentStatus(options: {
+	canUseProject: boolean;
+	configStatus: ProjectConfigStatus;
+	scanCompleted: boolean;
+	suggestionsWereCalculated: boolean;
+	differencesDetected: ProjectAlignmentDiffCounts;
+	postflightReport: ProjectPostflightReport | undefined;
+}): ProjectAlignmentStatus {
+	if (
+		!options.canUseProject ||
+		options.configStatus !== "project_local_valid"
+	) {
+		return "unknown";
+	}
+	if (!options.scanCompleted || !options.suggestionsWereCalculated) {
+		return "pending_scan";
+	}
+	if (totalDifferences(options.differencesDetected) > 0) {
+		return "needs_review";
+	}
+	if ((options.postflightReport?.changedFiles.length ?? 0) > 0) {
+		return "stale";
+	}
+	if (options.postflightReport?.risk === "low") {
+		return "aligned";
+	}
+	return "needs_review";
+}
+
+function determineReadiness(
+	configStatus: ProjectConfigStatus,
+	alignmentStatus: ProjectAlignmentStatus,
+): ProjectReadiness {
+	if (configStatus !== "project_local_valid") return "not_ready";
+	if (alignmentStatus === "aligned") return "aligned_ready";
+	return "config_ready";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function arrayLength(value: unknown): number {
+	return Array.isArray(value) ? value.length : 0;
 }
 
 function safeStep<T>(
@@ -334,25 +458,38 @@ function safeLoadFlows(
 	}
 }
 
+function finalConfigStatus(
+	connection: ProjectConnectionReport | undefined,
+	initCompleted: boolean,
+): ProjectConfigStatus {
+	if (connection?.configStatus === "project_local_valid")
+		return "project_local_valid";
+	if (initCompleted) return "project_local_valid";
+	return connection?.configStatus ?? "missing";
+}
+
 function isReviewRisk(risk: ProjectPostflightReport["risk"]): boolean {
 	return risk === "medium" || risk === "high" || risk === "blocker";
 }
 
 function recommendedNext(
 	risk: ProjectPostflightReport["risk"],
-	draftPath?: string,
+	differences: ProjectAlignmentDiffCounts,
 ): string {
-	if (draftPath) return "Revisar draft antes de aplicar.";
+	if (totalDifferences(differences) > 0)
+		return "Revisar draft antes de aplicar.";
 	if (isReviewRisk(risk)) return "Revisar lab_review_plan antes de continuar.";
 	return "Proyecto preparado; continuar bajo riesgo low.";
 }
 
 function suggestedActions(
 	risk: ProjectPostflightReport["risk"],
-	draftPath?: string,
+	differences: ProjectAlignmentDiffCounts,
 ): string[] {
-	const actions = ["/config review_project_flows_draft latest"];
-	if (draftPath) actions.push(`/config apply_project_flows_draft ${draftPath}`);
+	const actions: string[] = [];
+	if (totalDifferences(differences) > 0) {
+		actions.push("/config review_project_flows_draft latest");
+	}
 	if (isReviewRisk(risk)) actions.push("/lab_review_plan postflight");
 	actions.push("continuar bajo riesgo");
 	return actions;

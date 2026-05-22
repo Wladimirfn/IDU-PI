@@ -59,13 +59,15 @@ import {
 	buildProjectAdvisory,
 	formatProjectAdvisory,
 } from "./project-advisory.js";
-import { formatIduPrepareResult, runIduPrepare } from "./idu-prepare.js";
+import {
+	formatIduPrepareResult,
+	runIduPrepare,
+	type IduPrepareResult,
+} from "./idu-prepare.js";
+import { formatIduProjectDashboard } from "./idu-project-dashboard.js";
 import { buildLabReviewPlan, formatLabReviewPlan } from "./lab-review-plan.js";
 import { loadProjectBlueprint } from "./project-blueprint.js";
-import {
-	formatProjectConnectionReport,
-	inspectProjectConnection,
-} from "./project-connection.js";
+import { inspectProjectConnection } from "./project-connection.js";
 import {
 	analyzeProjectPreflight,
 	formatProjectPreflightReport,
@@ -169,6 +171,7 @@ const agentRouter = new AgentRouter({
 const labReportStore = new LabReportStore(config.agentWorkspaceRoot);
 const labDbRepository = new LabDbRepository(labDbPath());
 const taskQueue = new TaskQueue();
+const lastIduPrepareByProject = new Map<string, IduPrepareResult>();
 const structuredTaskQueue = new StructuredTaskQueue({
 	workspaceRoot: config.agentWorkspaceRoot,
 });
@@ -368,28 +371,52 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 	});
 }
 
-function iduConnectionActionText(
+function iduProjectDashboardText(
 	report: ReturnType<typeof inspectProjectConnection>,
 ): string {
-	if (report.status === "ready") {
-		return ["", "Acción principal:", "Listo para operar."].join("\n");
-	}
-	if (
-		report.status === "needs_understanding" ||
-		report.status === "connected"
-	) {
-		return ["", "Acción principal:", "Preparar proyecto: /idu_prepare"].join(
-			"\n",
+	const lastPrepare = report.projectId
+		? lastIduPrepareByProject.get(report.projectId)
+		: undefined;
+	return formatIduProjectDashboard({
+		projectId: report.projectId,
+		configStatus: report.configStatus,
+		alignmentStatus: lastPrepare?.alignmentStatus ?? report.alignmentStatus,
+		readiness: lastPrepare?.readiness ?? report.readiness,
+		reason: lastPrepare
+			? prepareAlignmentReason(lastPrepare)
+			: report.alignmentReason,
+		recommendedNext: report.recommendedNext,
+	});
+}
+
+function prepareAlignmentReason(result: IduPrepareResult): string[] {
+	const differences = result.differencesDetected;
+	const reasons: string[] = [];
+	if (differences.screens > 0) {
+		reasons.push(
+			`último prepare detectó ${differences.screens} screens sugeridas`,
 		);
 	}
-	if (report.status === "broken_connection") {
-		return [
-			"",
-			"Acción principal:",
-			"No preparo todavía: corregí la conexión antes de preparar.",
-		].join("\n");
+	if (differences.uiElements > 0) {
+		reasons.push(
+			`último prepare detectó ${differences.uiElements} uiElements sugeridos`,
+		);
 	}
-	return "";
+	if (differences.dataStores > 0) {
+		reasons.push(
+			`último prepare detectó ${differences.dataStores} dataStores sugeridos`,
+		);
+	}
+	if (differences.flows > 0) {
+		reasons.push(`último prepare detectó ${differences.flows} flows sugeridos`);
+	}
+	if (result.alignmentStatus === "stale") {
+		reasons.push("hubo cambios locales después del prepare");
+	}
+	if (!reasons.length && result.alignmentStatus === "aligned") {
+		reasons.push("último prepare no detectó diferencias relevantes");
+	}
+	return reasons.length ? reasons : ["último prepare no dejó motivo detallado"];
 }
 
 function buildPostflightReport(): ProjectPostflightReport {
@@ -855,10 +882,7 @@ bot.command("idu", async (ctx) => {
 		allowedRoots: config.allowedRoots,
 		workspaceRoot: config.agentWorkspaceRoot,
 	});
-	await replyLong(
-		ctx,
-		`${formatProjectConnectionReport(report)}${iduConnectionActionText(report)}`,
-	);
+	await replyLong(ctx, iduProjectDashboardText(report));
 });
 
 bot.command("idu_prepare", async (ctx) => {
@@ -895,6 +919,7 @@ bot.command("idu_prepare", async (ctx) => {
 		postflight: () => buildPostflightReport(),
 		createStructuredTask: (input) => structuredTaskQueue.enqueueTask(input),
 	});
+	lastIduPrepareByProject.set(projectId, result);
 	await replyLong(ctx, formatIduPrepareResult(result));
 });
 

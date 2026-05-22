@@ -18,6 +18,10 @@ test("/idu_prepare is wired without unsafe operations", () => {
 	assert.doesNotMatch(handlerBlock, /runTestLab\(/u);
 	assert.doesNotMatch(handlerBlock, /runLabForProfiles\(/u);
 	assert.doesNotMatch(handlerBlock, /runLabForProfilesService\(/u);
+	assert.match(
+		handlerBlock,
+		/lastIduPrepareByProject\.set\(projectId, result\)/u,
+	);
 });
 
 test("/idu response advertises prepare only when safe", () => {
@@ -28,21 +32,9 @@ test("/idu response advertises prepare only when safe", () => {
 		handler.indexOf('bot.command("idu_prepare"'),
 	);
 
-	assert.match(handlerBlock, /iduConnectionActionText\(report\)/u);
-	const actionHelper = source.slice(
-		source.indexOf("function iduConnectionActionText"),
-	);
-	const actionHelperBlock = actionHelper.slice(
-		0,
-		actionHelper.indexOf("function buildPostflightReport"),
-	);
-	const readyBlock = actionHelperBlock.slice(
-		actionHelperBlock.indexOf('report.status === "ready"'),
-		actionHelperBlock.indexOf('report.status === "needs_understanding"'),
-	);
-
-	assert.match(source, /Preparar proyecto: \/idu_prepare/u);
-	assert.match(source, /Listo para operar/u);
-	assert.match(source, /corregí la conexión antes de preparar/u);
-	assert.doesNotMatch(readyBlock, /Preparar proyecto/u);
+	assert.match(handlerBlock, /iduProjectDashboardText\(report\)/u);
+	assert.match(source, /formatIduProjectDashboard\(/u);
+	assert.match(source, /lastIduPrepareByProject\.get\(report\.projectId\)/u);
+	assert.match(source, /recommendedNext: report\.recommendedNext/u);
+	assert.doesNotMatch(handlerBlock, /applyProjectFlowsDraft\(/u);
 });

@@ -13,6 +13,10 @@ function connection(
 ): ProjectConnectionReport {
 	return {
 		status: "ready",
+		configStatus: "project_local_valid",
+		alignmentStatus: "pending_scan",
+		readiness: "config_ready",
+		alignmentReason: ["no existe scan reciente"],
 		projectId: "demo",
 		projectPath: "/tmp/demo",
 		problems: [],
@@ -91,6 +95,10 @@ test("runIduPrepare executes initProjectConfig when project-local configs are mi
 		inspectConnection: () =>
 			connection({
 				status: "needs_understanding",
+				configStatus: "missing",
+				alignmentStatus: "unknown",
+				readiness: "not_ready",
+				alignmentReason: ["faltan blueprint/flows project-local"],
 				blueprint: undefined,
 				flows: undefined,
 			}),
@@ -126,6 +134,8 @@ test("runIduPrepare executes initProjectConfig when project-local configs are mi
 		result.steps.find((step) => step.id === "init_project_config")?.status,
 		"completed",
 	);
+	assert.equal(result.configStatus, "project_local_valid");
+	assert.equal(result.readiness, "aligned_ready");
 });
 
 test("runIduPrepare does not write or scan without valid connection", () => {
@@ -314,6 +324,166 @@ test("runIduPrepare reports scan failure and continues with safe postflight", ()
 		"completed",
 	);
 	assert.equal(result.labReviewTaskId, "task-1");
+});
+
+test("runIduPrepare with suggested dataStores reports needs_review", () => {
+	const suggestedStores = Array.from({ length: 39 }, (_, index) => ({
+		id: `store-${index}`,
+		name: `Store ${index}`,
+		type: "json" as const,
+		path: `data/store-${index}.json`,
+		description: "Suggested store",
+	}));
+	const result = runIduPrepare({
+		projectId: "demo",
+		projectPath: "/tmp/demo",
+		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		inspectConnection: () => connection(),
+		initProjectConfig: () => {
+			throw new Error("should not init");
+		},
+		inspectProjectMap: () => ({ issues: [] }),
+		loadProjectFlows: () => flows(),
+		scanProjectMap: () => ({ findings: [] }),
+		suggestProjectFlows: () => ({
+			screens: [],
+			uiElements: [],
+			dataStores: suggestedStores,
+			flows: [],
+		}),
+		draftProjectFlows: () => ({
+			path: "/tmp/reports/draft.json",
+			suggestions: {
+				screens: [],
+				uiElements: [],
+				dataStores: suggestedStores,
+				flows: [],
+			},
+		}),
+		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
+		postflight: () => postflight("low"),
+		createStructuredTask: () => ({ id: "task-1" }),
+	});
+
+	assert.equal(result.configStatus, "project_local_valid");
+	assert.equal(result.alignmentStatus, "needs_review");
+	assert.equal(result.readiness, "config_ready");
+	assert.deepEqual(result.differencesDetected, {
+		screens: 0,
+		uiElements: 0,
+		dataStores: 39,
+		flows: 0,
+	});
+	assert.equal(result.recommendedNext, "Revisar draft antes de aplicar.");
+	assert.deepEqual(result.suggestedActions, [
+		"/config review_project_flows_draft latest",
+		"continuar bajo riesgo",
+	]);
+});
+
+test("runIduPrepare without suggestions and low postflight reports aligned_ready", () => {
+	const result = runIduPrepare({
+		projectId: "demo",
+		projectPath: "/tmp/demo",
+		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		inspectConnection: () => connection(),
+		initProjectConfig: () => {
+			throw new Error("should not init");
+		},
+		inspectProjectMap: () => ({ issues: [] }),
+		loadProjectFlows: () => flows(),
+		scanProjectMap: () => ({ findings: [] }),
+		suggestProjectFlows: () => ({
+			screens: [],
+			uiElements: [],
+			dataStores: [],
+			flows: [],
+		}),
+		draftProjectFlows: () => ({
+			path: "/tmp/reports/draft.json",
+			suggestions: { screens: [], uiElements: [], dataStores: [], flows: [] },
+		}),
+		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
+		postflight: () => postflight("low"),
+		createStructuredTask: () => ({ id: "task-1" }),
+	});
+
+	assert.equal(result.alignmentStatus, "aligned");
+	assert.equal(result.readiness, "aligned_ready");
+	assert.deepEqual(result.differencesDetected, {
+		screens: 0,
+		uiElements: 0,
+		dataStores: 0,
+		flows: 0,
+	});
+});
+
+test("runIduPrepare reports stale when local changes exist after prepare", () => {
+	const result = runIduPrepare({
+		projectId: "demo",
+		projectPath: "/tmp/demo",
+		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		inspectConnection: () => connection(),
+		initProjectConfig: () => {
+			throw new Error("should not init");
+		},
+		inspectProjectMap: () => ({ issues: [] }),
+		loadProjectFlows: () => flows(),
+		scanProjectMap: () => ({ findings: [] }),
+		suggestProjectFlows: () => ({
+			screens: [],
+			uiElements: [],
+			dataStores: [],
+			flows: [],
+		}),
+		draftProjectFlows: () => ({
+			path: "/tmp/reports/draft.json",
+			suggestions: { screens: [], uiElements: [], dataStores: [], flows: [] },
+		}),
+		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
+		postflight: () => ({
+			...postflight("low"),
+			changedFiles: ["src/index.ts"],
+		}),
+		createStructuredTask: () => ({ id: "task-1" }),
+	});
+
+	assert.equal(result.alignmentStatus, "stale");
+	assert.equal(result.readiness, "config_ready");
+});
+
+test("formatIduPrepareResult includes alignment statuses and differences", () => {
+	const result = runIduPrepare({
+		projectId: "demo",
+		projectPath: "/tmp/demo",
+		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		inspectConnection: () => connection(),
+		initProjectConfig: () => {
+			throw new Error("should not init");
+		},
+		inspectProjectMap: () => ({ issues: [] }),
+		loadProjectFlows: () => flows(),
+		scanProjectMap: () => ({ findings: [] }),
+		suggestProjectFlows: () => ({
+			screens: [],
+			uiElements: [],
+			dataStores: [],
+			flows: [],
+		}),
+		draftProjectFlows: () => ({
+			path: "/tmp/reports/draft.json",
+			suggestions: { screens: [], uiElements: [], dataStores: [], flows: [] },
+		}),
+		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
+		postflight: () => postflight("low"),
+		createStructuredTask: () => ({ id: "task-1" }),
+	});
+	const text = formatIduPrepareResult(result);
+
+	assert.match(text, /configStatus final:\nproject_local_valid/u);
+	assert.match(text, /alignmentStatus final:\naligned/u);
+	assert.match(text, /readiness final:\naligned_ready/u);
+	assert.match(text, /dataStores sugeridos: 0/u);
 });
 
 test("formatIduPrepareResult includes project risk actions and no AgentLab execution claim", () => {
