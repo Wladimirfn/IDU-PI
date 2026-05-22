@@ -9,7 +9,12 @@ import {
 	analyzeProjectPreflight,
 	formatProjectPreflightReport,
 } from "../src/project-preflight.js";
+import { deriveConstitutionFromProjectCore } from "../src/project-constitution.js";
 import type { ProjectFlows } from "../src/project-flows.js";
+import {
+	createDefaultProjectCore,
+	type ProjectCore,
+} from "../src/project-core.js";
 
 function connection(
 	overrides: Partial<ProjectConnectionReport> = {},
@@ -59,6 +64,25 @@ const blueprint: ProjectBlueprint = {
 	createdAt: "2026-05-21T00:00:00.000Z",
 	updatedAt: "2026-05-21T00:00:00.000Z",
 };
+
+function confirmedCore(overrides: Partial<ProjectCore> = {}): ProjectCore {
+	return {
+		...createDefaultProjectCore("Idu PI"),
+		projectGoal: "Coordinar desarrollo seguro desde Telegram",
+		problemStatement:
+			"Las tareas técnicas pierden contexto y confirmación humana",
+		targetUsers: ["Founder"],
+		preferredStack: ["TypeScript", "SQLite"],
+		rejectedStack: ["Firebase"],
+		includedScope: ["Project Core", "Telegram bridge"],
+		excludedScope: ["Billing"],
+		successCriteria: ["Build and tests pass"],
+		dataSensitivity: "high",
+		openQuestions: [],
+		status: "confirmed",
+		...overrides,
+	};
+}
 
 const flows: ProjectFlows = {
 	version: "1",
@@ -304,6 +328,34 @@ test("formatProjectPreflightReport renders high risk details", () => {
 	assert.match(text, /compras no está confirmado/u);
 	assert.match(text, /pedir confirmación humana/u);
 	assert.match(text, /no lanzar AgentLab todavía/u);
+});
+
+test("constitution gates add high risk for auth/login", () => {
+	const report = analyzeProjectPreflight("agregar login", {
+		connection: connection(),
+		blueprint,
+		flows,
+		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
+	});
+
+	assert.equal(report.risk, "high");
+	assert.ok(
+		report.constitutionGate?.failures.some(
+			(gate) => gate.gateId === "auth_security_review",
+		),
+	);
+	assert.match(formatProjectPreflightReport(report), /auth_security_review/u);
+});
+
+test("constitution gates preserve previous behavior without Project Core", () => {
+	const report = analyzeProjectPreflight("resumir proyecto", {
+		connection: connection(),
+		blueprint,
+		flows,
+	});
+
+	assert.equal(report.risk, "low");
+	assert.equal(report.constitutionGate, undefined);
 });
 
 test("analyzeProjectPreflight does not write files", () => {

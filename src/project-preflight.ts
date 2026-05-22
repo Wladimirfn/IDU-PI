@@ -1,6 +1,11 @@
 import type { ProjectBlueprint } from "./project-blueprint.js";
 import type { ProjectConnectionReport } from "./project-connection.js";
 import type { ProjectFlows } from "./project-flows.js";
+import {
+	evaluateConstitutionGates,
+	type ConstitutionGateResult,
+	type ProjectConstitution,
+} from "./project-constitution.js";
 
 export type ProjectPreflightRisk = "low" | "medium" | "high" | "blocker";
 
@@ -8,6 +13,7 @@ export type ProjectPreflightContext = {
 	connection: ProjectConnectionReport;
 	blueprint?: ProjectBlueprint;
 	flows?: ProjectFlows;
+	constitution?: ProjectConstitution;
 	projectId?: string;
 	projectPath?: string;
 };
@@ -26,6 +32,7 @@ export type ProjectPreflightReport = {
 	requiresHumanConfirmation: boolean;
 	shouldRunAgentLab: boolean;
 	availableContext?: string[];
+	constitutionGate?: ConstitutionGateResult;
 };
 
 type IntentFlags = {
@@ -228,7 +235,28 @@ export function analyzeProjectPreflight(
 		risk = maxRisk(risk, "high");
 	}
 
-	const requiresHumanConfirmation = risk === "high" || risk === "blocker";
+	const constitutionGate = context.constitution
+		? evaluateConstitutionGates({
+				request: normalizedRequest,
+				constitution: context.constitution,
+			})
+		: undefined;
+	if (constitutionGate) {
+		risk = maxRisk(risk, constitutionGate.risk);
+		warnings.push(
+			...constitutionGate.failures.map(
+				(failure) => `${failure.gateId}: ${failure.message}`,
+			),
+			...constitutionGate.warnings.map(
+				(warning) => `${warning.gateId}: ${warning.message}`,
+			),
+		);
+	}
+
+	const requiresHumanConfirmation =
+		risk === "high" ||
+		risk === "blocker" ||
+		Boolean(constitutionGate?.requiresHumanConfirmation);
 	const shouldRunAgentLab =
 		risk === "high" &&
 		(intents.architecture || intents.newModule || intents.moduleConnection);
@@ -250,6 +278,7 @@ export function analyzeProjectPreflight(
 		),
 		requiresHumanConfirmation,
 		shouldRunAgentLab,
+		constitutionGate,
 	});
 }
 
@@ -280,6 +309,13 @@ export function formatProjectPreflightReport(
 		"Problemas:",
 		formatList(report.warnings),
 		"",
+		...(report.constitutionGate
+			? [
+					"Reglas determinísticas:",
+					formatList(report.constitutionGate.affectedRules),
+					"",
+				]
+			: []),
 		"Recomendación:",
 		report.recommendedNext,
 		"",
@@ -378,6 +414,7 @@ function buildReport(options: {
 	requiresHumanConfirmation: boolean;
 	shouldRunAgentLab: boolean;
 	availableContext?: string[];
+	constitutionGate?: ConstitutionGateResult;
 }): ProjectPreflightReport {
 	return {
 		risk: options.risk,
@@ -395,6 +432,7 @@ function buildReport(options: {
 		requiresHumanConfirmation: options.requiresHumanConfirmation,
 		shouldRunAgentLab: options.shouldRunAgentLab,
 		availableContext: dedupe(options.availableContext ?? []),
+		constitutionGate: options.constitutionGate,
 	};
 }
 

@@ -1,3 +1,4 @@
+import type { ConstitutionGateResult } from "./project-constitution.js";
 import type {
 	ProjectPreflightReport,
 	ProjectPreflightRisk,
@@ -17,6 +18,7 @@ export type ProjectAdvisory = {
 	actions: string[];
 	requiresHumanConfirmation: boolean;
 	okToProceed: boolean;
+	constitutionGate?: ConstitutionGateResult;
 };
 
 export function buildProjectAdvisory(
@@ -35,6 +37,7 @@ export function buildProjectAdvisory(
 		actions: suggestedActions(preflightReport),
 		requiresHumanConfirmation: preflightReport.requiresHumanConfirmation,
 		okToProceed: preflightReport.okToProceed,
+		constitutionGate: preflightReport.constitutionGate,
 	};
 }
 
@@ -57,6 +60,13 @@ export function formatProjectAdvisory(advisory: ProjectAdvisory): string {
 		"Alertas:",
 		formatLimitedList(advisory.warnings),
 		"",
+		...(advisory.constitutionGate
+			? [
+					"Reglas afectadas:",
+					formatLimitedList(advisory.constitutionGate.affectedRules),
+					"",
+				]
+			: []),
 		"Recomendación:",
 		advisory.recommendation,
 		"",

@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "projectName": "Proyecto sin definir",
+  "projectGoal": "Definir objetivo antes de construir",
+  "problemStatement": "Plantilla inicial: definir el problema real antes de construir.",
+  "targetUsers": [
+    "Usuarios por definir"
+  ],
+  "projectType": "unknown",
+  "complexityLevel": "simple",
+  "deploymentTarget": "unknown",
+  "securityLevel": "medium",
+  "dataSensitivity": "none",
+  "preferredStack": [],
+  "rejectedStack": [],
+  "architectureStyle": "Por definir",
+  "includedScope": [
+    "Definir alcance incluido antes de construir"
+  ],
+  "excludedScope": [
+    "Definir qué queda fuera del alcance"
+  ],
+  "initialModules": [],
+  "criticalFlows": [],
+  "successCriteria": [
+    "Project Core confirmado por un humano"
+  ],
+  "validationCommands": [],
+  "humanDecisions": [
+    "Confirmar objetivo, alcance, seguridad y datos antes de construir"
+  ],
+  "assumptions": [
+    "Esta es una plantilla inicial genérica, no una especificación confirmada"
+  ],
+  "openQuestions": [
+    "¿Qué problema resuelve?",
+    "¿Quiénes son los usuarios?",
+    "¿Será local, servidor o cloud?",
+    "¿Qué nivel de seguridad requiere?",
+    "¿Qué datos sensibles manejará?",
+    "¿Qué queda fuera del alcance?"
+  ],
+  "status": "draft",
+  "createdAt": "2026-05-22T00:00:00.000Z",
+  "updatedAt": "2026-05-22T00:00:00.000Z"
+}

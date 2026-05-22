@@ -61,6 +61,51 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/idu_prepare"],
 	},
 	{
+		command: "idu_define_project",
+		description: "Definir Project Core manual",
+		help: "/idu_define_project - iniciar wizard manual para crear config/project-core.json draft",
+		usage: ["/idu_define_project"],
+	},
+	{
+		command: "idu_core_status",
+		description: "Ver estado Project Core",
+		help: "/idu_core_status - ver si existe Project Core local, status, resumen y preguntas abiertas",
+		usage: ["/idu_core_status"],
+	},
+	{
+		command: "idu_research_core",
+		description: "Generar research draft Project Core",
+		help: "/idu_research_core - pedir a IA un borrador de investigación técnica basado en Project Core",
+		usage: ["/idu_research_core"],
+	},
+	{
+		command: "idu_review_core_research",
+		description: "Revisar research draft Project Core",
+		help: "/idu_review_core_research [latest|ruta] - revisar borrador IA sin aplicar decisiones",
+		usage: [
+			"/idu_review_core_research latest",
+			"/idu_review_core_research <ruta>",
+		],
+	},
+	{
+		command: "idu_confirm_core",
+		description: "Confirmar Project Core",
+		help: "/idu_confirm_core [latest_research|ruta] - confirmar Project Core como verdad humana",
+		usage: ["/idu_confirm_core", "/idu_confirm_core latest_research"],
+	},
+	{
+		command: "idu_reject_core",
+		description: "Rechazar Project Core",
+		help: "/idu_reject_core [motivo] - marcar Project Core como draft/stale sin borrarlo",
+		usage: ["/idu_reject_core alcance incompleto"],
+	},
+	{
+		command: "idu_core_diff",
+		description: "Comparar Project Core",
+		help: "/idu_core_diff - ver campos completos, faltantes y research disponible",
+		usage: ["/idu_core_diff"],
+	},
+	{
 		command: "preflight",
 		description: "Analizar riesgo antes de cambios",
 		help: "/preflight <solicitud> - analizar riesgo, contexto faltante y siguiente acción",

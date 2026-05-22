@@ -92,6 +92,32 @@ test("formatProjectAdvisory limits long lists to top 5", () => {
 	assert.doesNotMatch(text, /- w6/u);
 });
 
+test("formatProjectAdvisory shows affected constitution rules", () => {
+	const advisory = buildProjectAdvisory(
+		preflight({
+			risk: "high",
+			constitutionGate: {
+				risk: "high",
+				ok: false,
+				requiresHumanConfirmation: true,
+				failures: [
+					{
+						gateId: "auth_security_review",
+						severity: "high",
+						message: "Auth/security requiere confirmación humana.",
+					},
+				],
+				warnings: [],
+				affectedRules: ["auth_security_review"],
+			},
+		}),
+	);
+	const text = formatProjectAdvisory(advisory);
+
+	assert.match(text, /Reglas afectadas:/u);
+	assert.match(text, /auth_security_review/u);
+});
+
 test("formatProjectAdvisory renders short risk advisory", () => {
 	const advisory = buildProjectAdvisory(
 		preflight({
