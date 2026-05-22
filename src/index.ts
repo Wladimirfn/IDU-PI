@@ -59,6 +59,7 @@ import {
 	buildProjectAdvisory,
 	formatProjectAdvisory,
 } from "./project-advisory.js";
+import { buildLabReviewPlan, formatLabReviewPlan } from "./lab-review-plan.js";
 import { loadProjectBlueprint } from "./project-blueprint.js";
 import {
 	formatProjectConnectionReport,
@@ -69,6 +70,12 @@ import {
 	formatProjectPreflightReport,
 	type ProjectPreflightReport,
 } from "./project-preflight.js";
+import {
+	analyzeProjectPostflight,
+	formatProjectPostflightReport,
+	readProjectPostflightGitState,
+	type ProjectPostflightReport,
+} from "./project-postflight.js";
 import { loadProjectFlows } from "./project-flows.js";
 import {
 	formatLabRunResultLines,
@@ -357,6 +364,34 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		projectId: connection.projectId,
 		projectPath: connection.projectPath,
 	});
+}
+
+function buildPostflightReport(): ProjectPostflightReport {
+	const connection = inspectProjectConnection({
+		registry,
+		defaultCwd: config.defaultCwd,
+		allowedRoots: config.allowedRoots,
+		workspaceRoot: config.agentWorkspaceRoot,
+	});
+	const projectPath = connection.projectPath ?? currentCwd;
+	const flows =
+		connection.projectPath &&
+		connection.flows?.source === "project-local" &&
+		connection.flows.valid
+			? loadProjectFlows(connection.projectPath)
+			: undefined;
+	const gitState = readProjectPostflightGitState(projectPath);
+	const report = analyzeProjectPostflight({
+		projectPath,
+		connectionReport: connection,
+		projectFlows: flows,
+		changedFiles: gitState.changedFiles,
+		diffSummary: gitState.diffSummary,
+	});
+	return {
+		...report,
+		warnings: [...gitState.warnings, ...report.warnings],
+	};
 }
 
 function looksLikePath(text: string): boolean {
@@ -712,6 +747,40 @@ bot.command("advisory", async (ctx) => {
 	const request = commandArg(ctx.message?.text ?? "");
 	const report = buildPreflightReport(request);
 	await replyLong(ctx, formatProjectAdvisory(buildProjectAdvisory(report)));
+});
+
+bot.command("postflight", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(ctx, formatProjectPostflightReport(buildPostflightReport()));
+});
+
+bot.command("lab_review_plan", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const args = commandArg(ctx.message?.text ?? "");
+	const preflightMatch = /^preflight\s+(.+)/u.exec(args);
+	const input = preflightMatch
+		? {
+				preflightReport: buildPreflightReport(preflightMatch[1]),
+				requestText: preflightMatch[1],
+				projectId: currentProjectId(),
+			}
+		: {
+				postflightReport: buildPostflightReport(),
+				projectId: currentProjectId(),
+			};
+	const plan = buildLabReviewPlan(input);
+	const task = plan.structuredTaskInput
+		? structuredTaskQueue.enqueueTask(plan.structuredTaskInput)
+		: undefined;
+	await replyLong(
+		ctx,
+		[
+			formatLabReviewPlan(plan),
+			"",
+			"Tarea creada:",
+			task ? `${task.id} | ${task.category} | P${task.priority}` : "- ninguna",
+		].join("\n"),
+	);
 });
 
 bot.command(QUICK_PROMPT_COMMANDS, async (ctx) => {

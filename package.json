@@ -1,6 +1,6 @@
 {
   "name": "idu-pi",
-  "version": "0.0.23",
+  "version": "0.0.25",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.1.3",
