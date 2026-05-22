@@ -534,7 +534,7 @@ async function generateAiProjectDraft(prompt: string): Promise<string> {
 async function runPrompt(
 	ctx: Context,
 	prompt: string,
-	options: { fromQueue?: boolean } = {},
+	options: { fromQueue?: boolean; structuredTaskCategory?: string } = {},
 ): Promise<void> {
 	const runtime = agentRouter.activeRuntime();
 	const queueDecision = decidePromptQueueAction({
@@ -577,6 +577,7 @@ async function runPrompt(
 					structuredTaskInputForText(prompt, {
 						source: "telegram",
 						projectId,
+						category: options.structuredTaskCategory,
 						analyzer: () => signal,
 					}),
 				);
@@ -835,7 +836,7 @@ bot.command("task", async (ctx) => {
 		await ctx.reply(formatTaskTemplateHelp());
 		return;
 	}
-	void runPrompt(ctx, prompt);
+	void runPrompt(ctx, prompt, { structuredTaskCategory: parsed.kind });
 });
 
 bot.command("server", async (ctx) => {
@@ -1531,6 +1532,12 @@ bot.command("queue_clear", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const count = taskQueue.clear();
 	await ctx.reply(`Cola limpiada: ${count} tarea(s).`);
+});
+
+bot.command("queue_clear_structured", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const count = structuredTaskQueue.clearPersisted();
+	await ctx.reply(`Cola estructurada limpiada: ${count} tarea(s).`);
 });
 
 bot.command("mode", async (ctx) => {

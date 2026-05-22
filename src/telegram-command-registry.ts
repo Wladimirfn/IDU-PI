@@ -44,6 +44,7 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"queue",
 	"queue_detail",
 	"queue_clear",
+	"queue_clear_structured",
 	"mode",
 	"model",
 	"cancel",
