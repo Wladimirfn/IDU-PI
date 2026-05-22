@@ -72,6 +72,26 @@ test("guarded queue only blocks high or blocker risk when /idu is active", () =>
 	assert.match(guardBlock, /return false/u);
 });
 
+test("guarded /task pauses visibly if preflight throws", () => {
+	const guard = source.slice(source.indexOf("async function guardTaskPrompt"));
+	const guardBlock = guard.slice(
+		0,
+		guard.indexOf("async function generateAiProjectDraft"),
+	);
+
+	assert.match(guardBlock, /try\s*\{/u);
+	assert.match(guardBlock, /catch \(error\)/u);
+	assert.match(
+		guardBlock,
+		/No pude completar preflight; tarea pausada por seguridad/u,
+	);
+	assert.match(guardBlock, /guardRisk: "blocker"/u);
+	assert.match(guardBlock, /markNeedsConfirmation/u);
+	assert.match(guardBlock, /queue_approve/u);
+	assert.match(guardBlock, /queue_reject/u);
+	assert.match(guardBlock, /return false/u);
+});
+
 test("manual preflight advisory and postflight stay independent of /idu", () => {
 	const manual = source.slice(source.indexOf('bot.command("preflight"'));
 	const manualBlock = manual.slice(

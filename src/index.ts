@@ -618,10 +618,56 @@ async function guardTaskPrompt(
 
 	const existingTask = structuredTaskQueue.findByText(prompt);
 	if (existingTask?.guardStatus === "approved") return true;
-	if (existingTask?.guardStatus === "needs_confirmation") return false;
+	if (existingTask?.guardStatus === "needs_confirmation") {
+		await replyLong(
+			ctx,
+			[
+				options.blockTitle,
+				`ID: ${existingTask.id}`,
+				"",
+				`Aprobar: /queue_approve ${existingTask.id}`,
+				`Rechazar: /queue_reject ${existingTask.id}`,
+			].join("\n"),
+		);
+		return false;
+	}
 	if (existingTask?.guardStatus === "rejected") return false;
 
-	const report = buildPreflightReport(prompt);
+	let report: ProjectPreflightReport;
+	try {
+		report = buildPreflightReport(prompt);
+	} catch (error) {
+		const task =
+			existingTask ??
+			structuredTaskQueue.enqueueTask(
+				structuredTaskInputForText(prompt, {
+					source: options.source,
+					projectId: currentProjectId(),
+					category: options.structuredTaskCategory,
+				}),
+			);
+		const reason =
+			error instanceof Error ? error.message : "preflight interno falló";
+		structuredTaskQueue.markNeedsConfirmation(task.id, {
+			guardRisk: "blocker",
+			guardReason: `preflight falló: ${reason}`,
+		});
+		if (options.enqueueLegacyOnBlock && !existingTask)
+			taskQueue.enqueue(prompt);
+		await replyLong(
+			ctx,
+			[
+				"No pude completar preflight; tarea pausada por seguridad",
+				`ID: ${task.id}`,
+				"Guard: needs_confirmation/blocker",
+				`Motivo: ${reason}`,
+				"",
+				`Aprobar: /queue_approve ${task.id}`,
+				`Rechazar: /queue_reject ${task.id}`,
+			].join("\n"),
+		);
+		return false;
+	}
 	const reason = `${report.risk}: ${report.affectedAreas.join(", ")}`;
 	if (report.risk === "high" || report.risk === "blocker") {
 		const task =
