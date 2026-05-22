@@ -1,8 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
+import type { ProjectPreflightRisk } from "./project-preflight.js";
 import { analyzeUserSignal } from "./user-signal.js";
 
 export type StructuredTaskStatus = "pending" | "running" | "done" | "failed";
+export type StructuredTaskGuardStatus =
+	| "clear"
+	| "needs_confirmation"
+	| "approved"
+	| "rejected";
 
 export type StructuredTask = {
 	id: string;
@@ -16,6 +28,9 @@ export type StructuredTask = {
 	source?: string;
 	projectId?: string;
 	failureReason?: string;
+	guardRisk?: ProjectPreflightRisk;
+	guardStatus?: StructuredTaskGuardStatus;
+	guardReason?: string;
 };
 
 export type StructuredTaskInput = {
@@ -88,6 +103,14 @@ export class StructuredTaskQueue {
 		return count;
 	}
 
+	clearPersisted(): number {
+		const count = this.tasks.length;
+		this.tasks = [];
+		this.sequence = 0;
+		if (this.filePath) rmSync(this.filePath, { force: true });
+		return count;
+	}
+
 	markRunning(id: string): StructuredTask | undefined {
 		return this.updateStatus(id, "running");
 	}
@@ -98,6 +121,54 @@ export class StructuredTaskQueue {
 
 	markFailed(id: string, reason: string): StructuredTask | undefined {
 		return this.updateStatus(id, "failed", reason);
+	}
+
+	findByText(text: string): StructuredTask | undefined {
+		const task = this.tasks.find(
+			(candidate) => candidate.text === text && candidate.status === "pending",
+		);
+		return task ? { ...task } : undefined;
+	}
+
+	getTask(id: string): StructuredTask | undefined {
+		const task = this.findTaskById(id);
+		return task ? { ...task } : undefined;
+	}
+
+	findByIdPrefix(idOrPrefix: string): StructuredTask | undefined {
+		const task = this.tasks.find((candidate) =>
+			candidate.id.startsWith(idOrPrefix),
+		);
+		return task ? { ...task } : undefined;
+	}
+
+	markGuardClear(
+		id: string,
+		guardRisk: ProjectPreflightRisk,
+		guardReason?: string,
+	): StructuredTask | undefined {
+		return this.updateGuard(id, "clear", guardRisk, guardReason);
+	}
+
+	markNeedsConfirmation(
+		id: string,
+		options: { guardRisk: ProjectPreflightRisk; guardReason: string },
+	): StructuredTask | undefined {
+		return this.updateGuard(
+			id,
+			"needs_confirmation",
+			options.guardRisk,
+			options.guardReason,
+		);
+	}
+
+	markGuardApproved(id: string): StructuredTask | undefined {
+		return this.updateGuard(id, "approved");
+	}
+
+	markGuardRejected(id: string, reason: string): StructuredTask | undefined {
+		const task = this.updateGuard(id, "rejected", undefined, reason);
+		return task ? this.updateStatus(id, "failed", reason) : undefined;
 	}
 
 	private pendingTasks(): StructuredTask[] {
@@ -115,7 +186,7 @@ export class StructuredTaskQueue {
 		status: StructuredTaskStatus,
 		failureReason?: string,
 	): StructuredTask | undefined {
-		const task = this.tasks.find((candidate) => candidate.id === id);
+		const task = this.findTaskById(id);
 		if (!task) return undefined;
 		task.status = status;
 		task.updatedAt = this.now().toISOString();
@@ -126,6 +197,26 @@ export class StructuredTaskQueue {
 		}
 		this.persist();
 		return { ...task };
+	}
+
+	private updateGuard(
+		id: string,
+		guardStatus: StructuredTaskGuardStatus,
+		guardRisk?: ProjectPreflightRisk,
+		guardReason?: string,
+	): StructuredTask | undefined {
+		const task = this.findTaskById(id);
+		if (!task) return undefined;
+		task.guardStatus = guardStatus;
+		task.updatedAt = this.now().toISOString();
+		if (guardRisk) task.guardRisk = guardRisk;
+		if (guardReason?.trim()) task.guardReason = guardReason.trim();
+		this.persist();
+		return { ...task };
+	}
+
+	private findTaskById(id: string): StructuredTask | undefined {
+		return this.tasks.find((candidate) => candidate.id === id);
 	}
 
 	private nextId(): string {
@@ -192,13 +283,14 @@ export function structuredTaskInputForText(
 	options: {
 		source?: string;
 		projectId?: string;
+		category?: string;
 		analyzer?: UserSignalAnalyzer;
 	} = {},
 ): StructuredTaskInput {
 	const signal = analyzeStructuredTaskSignal(text, options.analyzer);
 	return {
 		text,
-		category: structuredTaskCategory(text),
+		category: options.category?.trim() || structuredTaskCategory(text),
 		priority: signal.emotion === "neutral" ? 3 : signal.urgency,
 		emotion: signal.emotion,
 		...(options.source ? { source: options.source } : {}),
@@ -211,10 +303,16 @@ export function formatStructuredTaskQueueDetail(
 ): string {
 	if (!tasks.length) return "Cola estructurada vacía.";
 	return `Cola estructurada (${tasks.length}):\n\n${tasks
-		.map(
-			(task) =>
-				`${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"} | ${task.createdAt}\n${summarizeTaskText(task.text)}`,
-		)
+		.map((task) => {
+			const guard = task.guardStatus
+				? ` | guard: ${task.guardStatus}${task.guardRisk ? `/${task.guardRisk}` : ""}`
+				: "";
+			const approvalHint =
+				task.guardStatus === "needs_confirmation"
+					? `\nAprobar: /queue_approve ${task.id}\nRechazar: /queue_reject ${task.id}`
+					: "";
+			return `${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${guard} | ${task.createdAt}\n${summarizeTaskText(task.text)}${approvalHint}`;
+		})
 		.join("\n\n")}`;
 }
 

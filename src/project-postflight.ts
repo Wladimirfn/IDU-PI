@@ -197,6 +197,10 @@ function classifyFile(file: string): {
 	}
 	if (isDocsFile(lower)) areas.push("docs");
 	if (isTestFile(lower)) areas.push("tests");
+	if (isCodeFile(lower)) {
+		areas.push("code");
+		risk = maxRisk(risk, "medium");
+	}
 	if (isConfigFile(lower)) {
 		areas.push("configuración");
 		risk = maxRisk(risk, "medium");
@@ -236,6 +240,10 @@ function isDocsFile(file: string): boolean {
 	return file.endsWith(".md") || file.startsWith("docs/");
 }
 
+function isCodeFile(file: string): boolean {
+	return /\.(js|jsx|ts|tsx|mjs|cjs)$/u.test(file) && !isTestFile(file);
+}
+
 function isTestFile(file: string): boolean {
 	return file.startsWith("test/") || file.includes(".test.");
 }
@@ -247,7 +255,9 @@ function isConfigFile(file: string): boolean {
 }
 
 function isSecurityFile(file: string): boolean {
-	return /(auth|login|token|secret|\.env\.example|env)/u.test(file);
+	return /(permissions?|auth|login|token|secret|\.env\.example|env)/u.test(
+		file,
+	);
 }
 
 function isDbFile(file: string): boolean {

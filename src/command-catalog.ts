@@ -124,6 +124,24 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		help: "/queue_clear - limpiar cola",
 	},
 	{
+		command: "queue_clear_structured",
+		description: "Limpiar cola estructurada persistida",
+		help: "/queue_clear_structured - limpiar solo reports/tasks.jsonl",
+		usage: ["/queue_clear_structured"],
+	},
+	{
+		command: "queue_approve",
+		description: "Aprobar tarea en cola pausada",
+		help: "/queue_approve <id> - aprobar y ejecutar tarea pausada por guard",
+		usage: ["/queue_approve task-abc"],
+	},
+	{
+		command: "queue_reject",
+		description: "Rechazar tarea en cola pausada",
+		help: "/queue_reject <id> - rechazar tarea pausada por guard",
+		usage: ["/queue_reject task-abc"],
+	},
+	{
 		command: "config",
 		description: "Configuración guiada del proyecto",
 		help: "/config [doctor|init_workspace|init_assets|init_project_config|inspect_project_map|scan_project_map|suggest_project_flows|draft_project_flows|review_project_flows_draft|apply_project_flows_draft|ai_draft_project_blueprint|ai_draft_project_flows|review_ai_blueprint_draft|review_ai_flows_draft|skills_sync|db_init|sync_commands] - configuración guiada del bridge/proyecto",

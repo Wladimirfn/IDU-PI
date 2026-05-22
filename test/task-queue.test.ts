@@ -21,6 +21,27 @@ test("TaskQueue dequeues one item without dropping the rest", () => {
 	assert.deepEqual(queue.drain(), ["segundo"]);
 });
 
+test("TaskQueue can peek and remove a matching queued item", () => {
+	const queue = new TaskQueue();
+	queue.enqueue("primero");
+	queue.enqueue("segundo");
+
+	assert.equal(queue.peek(), "primero");
+	assert.equal(queue.removeFirstMatching("segundo"), true);
+	assert.deepEqual(queue.drain(), ["primero"]);
+	assert.equal(queue.removeFirstMatching("missing"), false);
+});
+
+test("TaskQueue removes all matching duplicates", () => {
+	const queue = new TaskQueue();
+	queue.enqueue("duplicado");
+	queue.enqueue("otro");
+	queue.enqueue("duplicado");
+
+	assert.equal(queue.removeAllMatching("duplicado"), 2);
+	assert.deepEqual(queue.drain(), ["otro"]);
+});
+
 test("TaskQueue formats status and clears", () => {
 	const queue = new TaskQueue();
 	queue.enqueue("revisar README");

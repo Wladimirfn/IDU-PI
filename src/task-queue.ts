@@ -12,8 +12,25 @@ export class TaskQueue {
 		return true;
 	}
 
+	peek(): string | undefined {
+		return this.items[0];
+	}
+
 	dequeue(): string | undefined {
 		return this.items.shift();
+	}
+
+	removeFirstMatching(text: string): boolean {
+		const index = this.items.findIndex((item) => item === text);
+		if (index === -1) return false;
+		this.items.splice(index, 1);
+		return true;
+	}
+
+	removeAllMatching(text: string): number {
+		const initialSize = this.items.length;
+		this.items = this.items.filter((item) => item !== text);
+		return initialSize - this.items.length;
 	}
 
 	drain(): string[] {

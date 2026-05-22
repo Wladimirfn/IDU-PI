@@ -513,16 +513,86 @@ async function drainTaskQueue(ctx: Context, generation: number): Promise<void> {
 			);
 			return;
 		}
-		const queuedPrompt = taskQueue.dequeue();
+		const queuedPrompt = taskQueue.peek();
 		if (!queuedPrompt) return;
+		if (!(await guardQueuedPrompt(ctx, queuedPrompt))) {
+			taskQueue.dequeue();
+			return;
+		}
+		taskQueue.dequeue();
 		await ctx.reply(
 			`Ejecutando tarea en cola. Restantes después de esta: ${taskQueue.size}.`,
 		);
-		await runPrompt(ctx, queuedPrompt, { fromQueue: true });
+		await runPrompt(ctx, queuedPrompt, {
+			fromQueue: true,
+			preserveActivePromptInFlight: true,
+		});
 	}
 	if (generation !== taskQueueGeneration) {
 		await ctx.reply("Cola detenida por cancelación.");
 	}
+}
+
+async function guardQueuedPrompt(
+	ctx: Context,
+	prompt: string,
+): Promise<boolean> {
+	return guardTaskPrompt(ctx, prompt, {
+		blockTitle: "⛔ Tarea en cola pausada: requiere confirmación humana.",
+		source: "queue-guard",
+	});
+}
+
+async function guardTaskPrompt(
+	ctx: Context,
+	prompt: string,
+	options: {
+		structuredTaskCategory?: string;
+		source: string;
+		blockTitle: string;
+		enqueueLegacyOnBlock?: boolean;
+	},
+): Promise<boolean> {
+	const existingTask = structuredTaskQueue.findByText(prompt);
+	if (existingTask?.guardStatus === "approved") return true;
+	if (existingTask?.guardStatus === "needs_confirmation") return false;
+	if (existingTask?.guardStatus === "rejected") return false;
+
+	const report = buildPreflightReport(prompt);
+	const reason = `${report.risk}: ${report.affectedAreas.join(", ")}`;
+	if (report.risk === "high" || report.risk === "blocker") {
+		const task =
+			existingTask ??
+			structuredTaskQueue.enqueueTask(
+				structuredTaskInputForText(prompt, {
+					source: options.source,
+					projectId: currentProjectId(),
+					category: options.structuredTaskCategory,
+				}),
+			);
+		structuredTaskQueue.markNeedsConfirmation(task.id, {
+			guardRisk: report.risk,
+			guardReason: reason,
+		});
+		if (options.enqueueLegacyOnBlock && !existingTask)
+			taskQueue.enqueue(prompt);
+		await replyLong(
+			ctx,
+			[
+				options.blockTitle,
+				`ID: ${task.id}`,
+				"",
+				formatProjectAdvisory(buildProjectAdvisory(report)),
+				"",
+				`Aprobar: /queue_approve ${task.id}`,
+				`Rechazar: /queue_reject ${task.id}`,
+			].join("\n"),
+		);
+		return false;
+	}
+	if (existingTask)
+		structuredTaskQueue.markGuardClear(existingTask.id, report.risk, reason);
+	return true;
 }
 
 async function generateAiProjectDraft(prompt: string): Promise<string> {
@@ -534,7 +604,11 @@ async function generateAiProjectDraft(prompt: string): Promise<string> {
 async function runPrompt(
 	ctx: Context,
 	prompt: string,
-	options: { fromQueue?: boolean } = {},
+	options: {
+		fromQueue?: boolean;
+		structuredTaskCategory?: string;
+		preserveActivePromptInFlight?: boolean;
+	} = {},
 ): Promise<void> {
 	const runtime = agentRouter.activeRuntime();
 	const queueDecision = decidePromptQueueAction({
@@ -577,6 +651,7 @@ async function runPrompt(
 					structuredTaskInputForText(prompt, {
 						source: "telegram",
 						projectId,
+						category: options.structuredTaskCategory,
 						analyzer: () => signal,
 					}),
 				);
@@ -673,7 +748,7 @@ async function runPrompt(
 			await ctx.reply(`Error inesperado: ${message}`);
 		}
 	} finally {
-		if (!options.fromQueue) {
+		if (!options.preserveActivePromptInFlight) {
 			activePromptInFlight = false;
 		}
 	}
@@ -835,7 +910,17 @@ bot.command("task", async (ctx) => {
 		await ctx.reply(formatTaskTemplateHelp());
 		return;
 	}
-	void runPrompt(ctx, prompt);
+	if (
+		!(await guardTaskPrompt(ctx, prompt, {
+			structuredTaskCategory: parsed.kind,
+			source: "task-direct-guard",
+			blockTitle: "⛔ Tarea pausada: requiere confirmación humana.",
+			enqueueLegacyOnBlock: true,
+		}))
+	) {
+		return;
+	}
+	void runPrompt(ctx, prompt, { structuredTaskCategory: parsed.kind });
 });
 
 bot.command("server", async (ctx) => {
@@ -1531,6 +1616,49 @@ bot.command("queue_clear", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const count = taskQueue.clear();
 	await ctx.reply(`Cola limpiada: ${count} tarea(s).`);
+});
+
+bot.command("queue_clear_structured", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const count = structuredTaskQueue.clearPersisted();
+	await ctx.reply(`Cola estructurada limpiada: ${count} tarea(s).`);
+});
+
+bot.command("queue_approve", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const id = commandArg(ctx.message?.text ?? "");
+	const task = structuredTaskQueue.findByIdPrefix(id);
+	if (!id || !task) {
+		await ctx.reply("Uso: /queue_approve <id>");
+		return;
+	}
+	if (task.guardStatus !== "needs_confirmation") {
+		await ctx.reply("Esa tarea no está esperando aprobación.");
+		return;
+	}
+	structuredTaskQueue.markGuardApproved(task.id);
+	taskQueue.removeAllMatching(task.text);
+	await ctx.reply(`Tarea aprobada: ${task.id}. Ejecutando con guard aprobado.`);
+	void runPrompt(ctx, task.text, {
+		fromQueue: true,
+		structuredTaskCategory: task.category,
+	});
+});
+
+bot.command("queue_reject", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const id = commandArg(ctx.message?.text ?? "");
+	const task = structuredTaskQueue.findByIdPrefix(id);
+	if (!id || !task) {
+		await ctx.reply("Uso: /queue_reject <id>");
+		return;
+	}
+	structuredTaskQueue.markGuardRejected(
+		task.id,
+		"Rechazada por confirmación humana.",
+	);
+	taskQueue.removeFirstMatching(task.text);
+	await ctx.reply(`Tarea rechazada: ${task.id}.`);
 });
 
 bot.command("mode", async (ctx) => {

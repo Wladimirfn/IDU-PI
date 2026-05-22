@@ -72,6 +72,15 @@ test("auth login and env example changes are high risk", () => {
 	assert.ok(report.impactedAreas.includes("seguridad"));
 });
 
+test("permission patch JavaScript is security code", () => {
+	const report = reportFor(["patch_permissions_server.js"]);
+
+	assert.equal(report.risk, "high");
+	assert.ok(report.impactedAreas.includes("code"));
+	assert.ok(report.impactedAreas.includes("seguridad"));
+	assert.deepEqual(report.impactedAreas.includes("docs"), false);
+});
+
 test("changed .env is blocker", () => {
 	const report = reportFor([".env"]);
 

@@ -131,6 +131,11 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	assert.ok(commands.some((entry) => entry.command === "postflight"));
 	assert.ok(commands.some((entry) => entry.command === "lab_review_plan"));
 	assert.ok(commands.some((entry) => entry.command === "queue_detail"));
+	assert.ok(
+		commands.some((entry) => entry.command === "queue_clear_structured"),
+	);
+	assert.ok(commands.some((entry) => entry.command === "queue_approve"));
+	assert.ok(commands.some((entry) => entry.command === "queue_reject"));
 	assert.equal(commands.length, TELEGRAM_COMMANDS.length);
 	for (const entry of commands) {
 		assert.match(entry.command, /^[a-z0-9_]{1,32}$/u);

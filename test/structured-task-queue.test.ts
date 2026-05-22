@@ -134,6 +134,17 @@ test("StructuredTaskQueue clear removes tasks and persists empty state", async (
 	});
 });
 
+test("StructuredTaskQueue clearPersisted deletes tasks jsonl", async () => {
+	await withTempQueue((queue, filePath) => {
+		queue.enqueueTask({ text: "One", category: "general", priority: 1 });
+		queue.enqueueTask({ text: "Two", category: "general", priority: 1 });
+
+		assert.equal(queue.clearPersisted(), 2);
+		assert.deepEqual(queue.listTasks(), []);
+		assert.equal(existsSync(filePath), false);
+	});
+});
+
 test("StructuredTaskQueue does not affect legacy TaskQueue", async () => {
 	await withTempQueue((structured) => {
 		const legacy = new TaskQueue();
@@ -190,14 +201,29 @@ test("structuredTaskPriority treats neutral as normal priority", () => {
 	assert.equal(structuredTaskPriority("revisar estado"), 3);
 });
 
+test("structuredTaskInputForText honors explicit task template categories", () => {
+	for (const category of ["bug", "feature", "refactor", "docs"]) {
+		const input = structuredTaskInputForText(
+			`Operational prompt for ${category}`,
+			{
+				category,
+			},
+		);
+
+		assert.equal(input.category, category);
+	}
+});
+
 test("structuredTaskInputForText stores emotion and priority", () => {
 	const urgent = structuredTaskInputForText("Urgente, no funciona", {
 		source: "telegram",
 		projectId: "idu-pi",
+		category: "bug",
 	});
 	const annoyed = structuredTaskInputForText("Estoy molesto otra vez");
 	const neutral = structuredTaskInputForText("revisar estado");
 
+	assert.equal(urgent.category, "bug");
 	assert.equal(urgent.priority, 5);
 	assert.equal(urgent.emotion, "urgente");
 	assert.equal(urgent.source, "telegram");
@@ -235,5 +261,56 @@ test("formatStructuredTaskQueueDetail shows structured task fields", async () =>
 		assert.match(detail, /bug/u);
 		assert.match(detail, /neutral/u);
 		assert.match(detail, /\/task bug arreglar cola/u);
+	});
+});
+
+test("StructuredTaskQueue stores and formats guard state", async () => {
+	await withTempQueue((queue, filePath) => {
+		const task = queue.enqueueTask({
+			text: "Bug task. Symptom/context: falló login",
+			category: "bug",
+			priority: 5,
+		});
+
+		queue.markNeedsConfirmation(task.id, {
+			guardRisk: "high",
+			guardReason: "auth/login requiere confirmación humana",
+		});
+
+		const reloaded = new StructuredTaskQueue({ filePath });
+		const guarded = reloaded.listTasks()[0];
+		assert.equal(guarded.guardStatus, "needs_confirmation");
+		assert.equal(guarded.guardRisk, "high");
+		assert.match(
+			formatStructuredTaskQueueDetail([guarded]),
+			/guard: needs_confirmation\/high/u,
+		);
+		assert.match(formatStructuredTaskQueueDetail([guarded]), /queue_approve/u);
+	});
+});
+
+test("StructuredTaskQueue approves and rejects guarded tasks", async () => {
+	await withTempQueue((queue) => {
+		const approved = queue.enqueueTask({ text: "one", category: "bug" });
+		const rejected = queue.enqueueTask({ text: "two", category: "bug" });
+
+		queue.markNeedsConfirmation(approved.id, {
+			guardRisk: "high",
+			guardReason: "login",
+		});
+		queue.markNeedsConfirmation(rejected.id, {
+			guardRisk: "blocker",
+			guardReason: "schema",
+		});
+
+		assert.equal(queue.markGuardApproved(approved.id)?.guardStatus, "approved");
+		assert.equal(
+			queue.markGuardRejected(rejected.id, "rechazado")?.guardStatus,
+			"rejected",
+		);
+		assert.equal(
+			queue.markGuardRejected(rejected.id, "rechazado")?.status,
+			"failed",
+		);
 	});
 });
