@@ -4,7 +4,14 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { StructuredTaskQueue } from "../src/structured-task-queue.js";
+import {
+	analyzeStructuredTaskSignal,
+	formatStructuredTaskQueueDetail,
+	StructuredTaskQueue,
+	structuredTaskCategory,
+	structuredTaskInputForText,
+	structuredTaskPriority,
+} from "../src/structured-task-queue.js";
 import { TaskQueue } from "../src/task-queue.js";
 
 async function withTempQueue(
@@ -140,5 +147,93 @@ test("StructuredTaskQueue does not affect legacy TaskQueue", async () => {
 		assert.equal(legacy.dequeue(), "legacy task");
 		assert.equal(legacy.dequeue(), undefined);
 		assert.equal(structured.listTasks().length, 1);
+	});
+});
+
+test("StructuredTaskQueue uses workspaceRoot reports tasks path", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "idu-structured-root-"));
+	try {
+		const queue = new StructuredTaskQueue({ workspaceRoot: dir });
+		queue.enqueueTask({ text: "Persist from root", category: "general" });
+
+		const reloaded = new StructuredTaskQueue({ workspaceRoot: dir });
+		assert.equal(existsSync(join(dir, "reports", "tasks.jsonl")), true);
+		assert.equal(reloaded.listTasks()[0].text, "Persist from root");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("structuredTaskCategory detects /task categories", () => {
+	assert.equal(structuredTaskCategory("/task bug arreglo"), "bug");
+	assert.equal(structuredTaskCategory("/task feature nueva vista"), "feature");
+	assert.equal(structuredTaskCategory("/task refactor servicio"), "refactor");
+	assert.equal(structuredTaskCategory("/task docs README"), "docs");
+	assert.equal(structuredTaskCategory("revisar algo"), "general");
+});
+
+test("structuredTaskPriority uses default priority when analyzer fails", () => {
+	assert.equal(
+		structuredTaskPriority("texto", () => {
+			throw new Error("signal unavailable");
+		}),
+		3,
+	);
+});
+
+test("structuredTaskPriority can use analyzeUserSignal urgency", () => {
+	assert.equal(structuredTaskPriority("Urgente, no funciona"), 5);
+	assert.equal(structuredTaskPriority("Gracias, perfecto"), 2);
+});
+
+test("structuredTaskPriority treats neutral as normal priority", () => {
+	assert.equal(structuredTaskPriority("revisar estado"), 3);
+});
+
+test("structuredTaskInputForText stores emotion and priority", () => {
+	const urgent = structuredTaskInputForText("Urgente, no funciona", {
+		source: "telegram",
+		projectId: "idu-pi",
+	});
+	const annoyed = structuredTaskInputForText("Estoy molesto otra vez");
+	const neutral = structuredTaskInputForText("revisar estado");
+
+	assert.equal(urgent.priority, 5);
+	assert.equal(urgent.emotion, "urgente");
+	assert.equal(urgent.source, "telegram");
+	assert.equal(urgent.projectId, "idu-pi");
+	assert.equal(annoyed.emotion, "molesto");
+	assert.equal(neutral.priority, 3);
+	assert.equal(neutral.emotion, "neutral");
+});
+
+test("analyzeStructuredTaskSignal falls back to neutral", () => {
+	const signal = analyzeStructuredTaskSignal("texto", () => {
+		throw new Error("sqlite unavailable");
+	});
+
+	assert.equal(signal.emotion, "neutral");
+	assert.equal(signal.urgency, 3);
+	assert.equal(signal.confidence, "low");
+	assert.deepEqual(signal.matchedKeywords, []);
+});
+
+test("formatStructuredTaskQueueDetail shows structured task fields", async () => {
+	await withTempQueue((queue) => {
+		queue.enqueueTask({
+			text: "/task bug arreglar cola",
+			category: "bug",
+			priority: 4,
+		});
+
+		const detail = formatStructuredTaskQueueDetail(queue.listTasks());
+
+		assert.match(detail, /Cola estructurada \(1\)/u);
+		assert.match(detail, /task-/u);
+		assert.match(detail, /pending/u);
+		assert.match(detail, /P4/u);
+		assert.match(detail, /bug/u);
+		assert.match(detail, /neutral/u);
+		assert.match(detail, /\/task bug arreglar cola/u);
 	});
 });

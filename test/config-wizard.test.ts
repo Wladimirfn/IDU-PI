@@ -338,7 +338,11 @@ test("inspectProjectConfig reports invalid project config without throwing", () 
 test("inspectProjectMap detects default map in use", () => {
 	const projectPath = tempDir();
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, {
+		activeProjectId: "sistema_de_mantencion",
+		activeProjectName: "Sistema de Mantención",
+	});
+	const formatted = formatProjectMapInspection(result);
 
 	assert.equal(result.source, "default");
 	assert.ok(result.counts.modules > 0);
@@ -347,7 +351,14 @@ test("inspectProjectMap detects default map in use", () => {
 			"Usá /config init_project_config para crear config project-local editable.",
 		),
 	);
-	assert.match(formatProjectMapInspection(result), /usando defaults/);
+	assert.match(formatted, /Fuente del mapa:\n(?:.*\n)*usando defaults/u);
+	assert.match(
+		formatted,
+		/Proyecto activo:\n(?:.*sistema_de_mantencion.*Sistema de Mantención|.*Sistema de Mantención.*sistema_de_mantencion)/u,
+	);
+	assert.ok(formatted.includes(`Ruta activa:\n${projectPath}`));
+	assert.match(formatted, /Nombre declarado en blueprint:\nIdu-pi/u);
+	assert.doesNotMatch(formatted, /Proyecto:\nIdu-pi/u);
 });
 
 test("inspectProjectMap detects valid project-local map", () => {

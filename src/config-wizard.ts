@@ -104,6 +104,8 @@ export type SkillsSyncResult = {
 
 export type ProjectMapInspection = {
 	projectPath: string;
+	activeProjectId?: string;
+	activeProjectName?: string;
 	source: "project-local" | "default";
 	projectName: string;
 	counts: {
@@ -517,7 +519,10 @@ function flowsContent(): string {
 	return `${JSON.stringify(validation.flows, null, 2)}\n`;
 }
 
-export function inspectProjectMap(projectPath: string): ProjectMapInspection {
+export function inspectProjectMap(
+	projectPath: string,
+	activeProject?: { activeProjectId?: string; activeProjectName?: string },
+): ProjectMapInspection {
 	const usesLocalBlueprint = existsSync(join(projectPath, PROJECT_BLUEPRINT));
 	const usesLocalFlows = existsSync(join(projectPath, PROJECT_FLOWS));
 	const blueprint = loadProjectBlueprint(projectPath);
@@ -528,6 +533,8 @@ export function inspectProjectMap(projectPath: string): ProjectMapInspection {
 	const recommendations = projectMapRecommendations(source, flows, issues);
 	return {
 		projectPath,
+		activeProjectId: activeProject?.activeProjectId,
+		activeProjectName: activeProject?.activeProjectName,
 		source,
 		projectName: blueprint.projectName,
 		counts: {
@@ -802,13 +809,25 @@ export function formatProjectMapInspection(
 				.map((recommendation) => `- ${recommendation}`)
 				.join("\n")
 		: "- ninguna";
+	const activeProject = inspection.activeProjectId
+		? `${inspection.activeProjectId}${inspection.activeProjectName ? ` — ${inspection.activeProjectName}` : ""}`
+		: (inspection.activeProjectName ?? "(sin proyecto registrado)");
 	return `Mapa funcional del proyecto
 
-Proyecto:
+Proyecto activo:
+${activeProject}
+
+Ruta activa:
+${inspection.projectPath}
+
+Fuente del mapa:
+${inspection.source === "project-local" ? "project-local" : "usando defaults"}
+
+Nombre declarado en blueprint:
 ${inspection.projectName}
 
-Fuente:
-${inspection.source === "project-local" ? "project-local" : "usando defaults"}
+Nombre declarado en flows:
+—
 
 Conteo:
 - módulos: ${inspection.counts.modules}

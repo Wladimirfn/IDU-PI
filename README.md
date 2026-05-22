@@ -122,6 +122,10 @@ corepack pnpm dev
 | `/config draft_project_flows`                      | Guarda el borrador sugerido en `AGENT_WORKSPACE_ROOT/reports/` sin tocar `config/project-flows.json`.                            |
 | `/config review_project_flows_draft [latest/ruta]` | Revisa un borrador guardado contra el `project-flows` actual sin aplicar cambios.                                                |
 | `/config apply_project_flows_draft <ruta>`         | Aplica un borrador con ruta explícita, backup y validación final de `project-flows`.                                             |
+| `/config ai_draft_project_blueprint`               | Pide a Pi un borrador seguro de `project-blueprint` y lo guarda en `reports/`; no aplica cambios.                                |
+| `/config ai_draft_project_flows`                   | Pide a Pi un borrador seguro de `project-flows` usando scan/contexto resumido; no aplica cambios.                                |
+| `/config review_ai_blueprint_draft [latest/ruta]`  | Revisa un borrador IA de blueprint contra schema/warning y config actual; solo lectura.                                          |
+| `/config review_ai_flows_draft [latest/ruta]`      | Revisa un borrador IA de flows contra schema parcial/conflictos; solo lectura.                                                   |
 | `/config skills_sync`                              | Copia solo skills necesarias desde el proyecto fuente registrado.                                                                |
 | `/config db_init`                                  | Crea/actualiza `AGENT_WORKSPACE_ROOT/reports/lab.db`.                                                                            |
 | `/config sync_commands`                            | Actualiza el menú de comandos de Telegram con `setMyCommands`.                                                                   |
@@ -158,13 +162,17 @@ Flujo seguro recomendado:
 scan → suggest → draft → review → apply con backup
 ```
 
-| Etapa   | Comando                                            | Garantía                                                                       |
-| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Scan    | `/config scan_project_map`                         | Lee archivos estáticos; no ejecuta código del proyecto.                        |
-| Suggest | `/config suggest_project_flows`                    | No escribe archivos ni usa IA.                                                 |
-| Draft   | `/config draft_project_flows`                      | Escribe solo en `AGENT_WORKSPACE_ROOT/reports/`.                               |
-| Review  | `/config review_project_flows_draft [latest/ruta]` | No escribe archivos; compara draft vs mapa actual.                             |
-| Apply   | `/config apply_project_flows_draft <ruta>`         | Requiere ruta explícita, rechaza `latest`, crea backup y fusiona solo aditivo. |
+| Etapa     | Comando                                            | Garantía                                                                       |
+| --------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Scan      | `/config scan_project_map`                         | Lee archivos estáticos; no ejecuta código del proyecto.                        |
+| Suggest   | `/config suggest_project_flows`                    | No escribe archivos ni usa IA.                                                 |
+| Draft     | `/config draft_project_flows`                      | Escribe solo en `AGENT_WORKSPACE_ROOT/reports/`.                               |
+| Review    | `/config review_project_flows_draft [latest/ruta]` | No escribe archivos; compara draft vs mapa actual.                             |
+| Apply     | `/config apply_project_flows_draft <ruta>`         | Requiere ruta explícita, rechaza `latest`, crea backup y fusiona solo aditivo. |
+| IA Draft  | `/config ai_draft_project_blueprint`               | Envía resumen seguro a Pi y guarda borrador IA en `reports/`; no aplica.       |
+| IA Draft  | `/config ai_draft_project_flows`                   | Usa scan + flows resumidos; guarda borrador IA en `reports/`; no aplica.       |
+| IA Review | `/config review_ai_blueprint_draft [latest/ruta]`  | Solo lectura; valida warning/schema y compara contra blueprint actual.         |
+| IA Review | `/config review_ai_flows_draft [latest/ruta]`      | Solo lectura; valida warning/schema parcial y detecta conflictos de IDs.       |
 
 Los AgentLabs reciben contexto resumido de `project-blueprint`, `project-flows` y el scan estático. El `rule-validator` funciona como validador interno del Orquestador; no reemplaza al AgentLab ni a la aprobación humana.
 
@@ -180,6 +188,8 @@ Reglas de seguridad:
 - `draft_project_flows` escribe solo bajo `AGENT_WORKSPACE_ROOT/reports/`.
 - `review_project_flows_draft` no escribe archivos.
 - `apply_project_flows_draft` requiere ruta explícita, rechaza `latest`, crea backup, valida antes/después y no borra ni sobrescribe IDs existentes.
+- `ai_draft_project_blueprint` y `ai_draft_project_flows` leen solo contexto seguro resumido; no leen `.env`, `reports/` ni `workspaces/`, no ejecutan código del proyecto y no modifican `config/`.
+- `review_ai_blueprint_draft` y `review_ai_flows_draft` son solo lectura, no usan IA y no aplican cambios.
 
 ## Agentes y modelos
 
@@ -278,6 +288,8 @@ Decisiones sobre reportes:
 ```text
 /status
 /dashboard
+/doctor
+/config doctor
 /server status
 /server run
 /server restart
@@ -293,7 +305,29 @@ Decisiones sobre reportes:
 | `/server restart` | Reinicia solo la sesión RPC activa.            |
 | `/server off`     | Detiene solo la sesión RPC activa.             |
 
+`/doctor` es el atajo operativo para el diagnóstico local; `/config doctor` muestra el diagnóstico dentro del flujo guiado de configuración.
+
 Si el bot de Telegram está caído, no puede recibir comandos. Para recuperación completa usá el supervisor Windows o `start-pi-telegram-bridge.bat`.
+
+### Proyectos
+
+```text
+/projects
+/where
+/addproject <id> <ruta>
+/useproject <id>
+/cwd <ruta>
+/new <ruta>
+```
+
+| Comando       | Uso                                                                |
+| ------------- | ------------------------------------------------------------------ |
+| `/projects`   | Lista proyectos registrados.                                       |
+| `/where`      | Muestra el proyecto activo y cwd actual.                           |
+| `/addproject` | Agrega y activa un proyecto permitido; también acepta modo guiado. |
+| `/useproject` | Cambia al proyecto registrado por id o selector.                   |
+| `/cwd`        | Cambia directo a una ruta permitida.                               |
+| `/new`        | Alias de `/cwd` para empezar trabajo en una ruta permitida.        |
 
 ### Trabajo diario
 
@@ -322,9 +356,14 @@ Si mandás mensajes mientras Pi está ocupado, Idu-pi los guarda en cola FIFO.
 
 ```text
 /queue
+/queue_detail
 /queue_clear
 /cancel
 ```
+
+`/queue` mantiene la cola legacy visible sin cambiar su comportamiento. `/queue_detail` muestra la cola estructurada persistida como espejo secundario: id corto, estado, prioridad, categoría, emoción detectada, fecha y texto resumido.
+
+La prioridad/emoción se calcula localmente con `user-signal` por keywords, sin IA. Se usa solo como señal de orden/prioridad operativa; no decide cambios críticos ni reemplaza la decisión humana. Cuando SQLite está disponible, el evento se registra en `user_signal_events`; si SQLite falla, Telegram, `/queue` y la cola estructurada siguen funcionando.
 
 `/cancel` cancela la tarea actual y limpia la cola.
 
@@ -340,6 +379,30 @@ Si mandás mensajes mientras Pi está ocupado, Idu-pi los guarda en cola FIFO.
 ```
 
 Los trabajos usan selectores explícitos `T1`, `T2`, etc. También podés responder `A`, `activo` o `esta sesión` cuando el menú lo indique.
+
+Aliases y compatibilidad:
+
+```text
+/work
+/sessions
+/use
+/approve
+/reject
+/model
+/mode interactive
+/mode auto
+/mode clear
+/testlab1
+/testlab2 quick
+/testlab3 quick
+```
+
+- `/work` es alias de `/trabajos`.
+- `/sessions`, `/use`, `/approve` y `/reject` quedan reservados como compatibilidad legacy.
+- `/model` muestra el modelo del agente activo.
+- `/mode` define o limpia el prefijo operativo del agente activo.
+- `/testlab1` explica por qué el agente 1/default no usa lab aislado.
+- `/testlab2` y `/testlab3` ejecutan labs por selector rápido.
 
 ### Catálogo de comandos
 
@@ -422,7 +485,9 @@ Comandos locales útiles:
 
 ```text
 corepack pnpm install
+corepack pnpm run setup
 corepack pnpm dev
+corepack pnpm serve
 corepack pnpm start
 corepack pnpm clean
 ```
