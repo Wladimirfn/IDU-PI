@@ -12,6 +12,7 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"preflight",
 	"advisory",
 	"postflight",
+	"lab_review_plan",
 	...QUICK_PROMPT_COMMANDS,
 	"safe_push",
 	"task",
