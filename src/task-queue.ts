@@ -27,6 +27,12 @@ export class TaskQueue {
 		return true;
 	}
 
+	removeAllMatching(text: string): number {
+		const initialSize = this.items.length;
+		this.items = this.items.filter((item) => item !== text);
+		return initialSize - this.items.length;
+	}
+
 	drain(): string[] {
 		const drained = [...this.items];
 		this.items = [];

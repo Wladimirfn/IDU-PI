@@ -537,28 +537,49 @@ async function guardQueuedPrompt(
 	ctx: Context,
 	prompt: string,
 ): Promise<boolean> {
-	const task =
-		structuredTaskQueue.findByText(prompt) ??
-		structuredTaskQueue.enqueueTask(
-			structuredTaskInputForText(prompt, {
-				source: "queue-guard",
-				projectId: currentProjectId(),
-			}),
-		);
-	if (task.guardStatus === "approved") return true;
-	if (task.guardStatus === "rejected") return false;
+	return guardTaskPrompt(ctx, prompt, {
+		blockTitle: "⛔ Tarea en cola pausada: requiere confirmación humana.",
+		source: "queue-guard",
+	});
+}
+
+async function guardTaskPrompt(
+	ctx: Context,
+	prompt: string,
+	options: {
+		structuredTaskCategory?: string;
+		source: string;
+		blockTitle: string;
+		enqueueLegacyOnBlock?: boolean;
+	},
+): Promise<boolean> {
+	const existingTask = structuredTaskQueue.findByText(prompt);
+	if (existingTask?.guardStatus === "approved") return true;
+	if (existingTask?.guardStatus === "needs_confirmation") return false;
+	if (existingTask?.guardStatus === "rejected") return false;
 
 	const report = buildPreflightReport(prompt);
 	const reason = `${report.risk}: ${report.affectedAreas.join(", ")}`;
 	if (report.risk === "high" || report.risk === "blocker") {
+		const task =
+			existingTask ??
+			structuredTaskQueue.enqueueTask(
+				structuredTaskInputForText(prompt, {
+					source: options.source,
+					projectId: currentProjectId(),
+					category: options.structuredTaskCategory,
+				}),
+			);
 		structuredTaskQueue.markNeedsConfirmation(task.id, {
 			guardRisk: report.risk,
 			guardReason: reason,
 		});
+		if (options.enqueueLegacyOnBlock && !existingTask)
+			taskQueue.enqueue(prompt);
 		await replyLong(
 			ctx,
 			[
-				"⛔ Tarea en cola pausada: requiere confirmación humana.",
+				options.blockTitle,
 				`ID: ${task.id}`,
 				"",
 				formatProjectAdvisory(buildProjectAdvisory(report)),
@@ -569,7 +590,8 @@ async function guardQueuedPrompt(
 		);
 		return false;
 	}
-	structuredTaskQueue.markGuardClear(task.id, report.risk, reason);
+	if (existingTask)
+		structuredTaskQueue.markGuardClear(existingTask.id, report.risk, reason);
 	return true;
 }
 
@@ -886,6 +908,16 @@ bot.command("task", async (ctx) => {
 	const prompt = buildTaskPrompt(parsed.kind, parsed.details);
 	if (!prompt) {
 		await ctx.reply(formatTaskTemplateHelp());
+		return;
+	}
+	if (
+		!(await guardTaskPrompt(ctx, prompt, {
+			structuredTaskCategory: parsed.kind,
+			source: "task-direct-guard",
+			blockTitle: "⛔ Tarea pausada: requiere confirmación humana.",
+			enqueueLegacyOnBlock: true,
+		}))
+	) {
 		return;
 	}
 	void runPrompt(ctx, prompt, { structuredTaskCategory: parsed.kind });
@@ -1600,14 +1632,12 @@ bot.command("queue_approve", async (ctx) => {
 		await ctx.reply("Uso: /queue_approve <id>");
 		return;
 	}
-	if (
-		task.guardStatus !== "needs_confirmation" &&
-		task.guardStatus !== "approved"
-	) {
+	if (task.guardStatus !== "needs_confirmation") {
 		await ctx.reply("Esa tarea no está esperando aprobación.");
 		return;
 	}
 	structuredTaskQueue.markGuardApproved(task.id);
+	taskQueue.removeAllMatching(task.text);
 	await ctx.reply(`Tarea aprobada: ${task.id}. Ejecutando con guard aprobado.`);
 	void runPrompt(ctx, task.text, {
 		fromQueue: true,

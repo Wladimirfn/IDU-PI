@@ -21,10 +21,28 @@ test("queued drain applies preflight guard before execution", () => {
 	);
 });
 
-test("guarded queue blocks high or blocker risk with advisory", () => {
-	const guard = source.slice(
-		source.indexOf("async function guardQueuedPrompt"),
+test("direct /task applies guard before execution", () => {
+	const handler = source.slice(source.indexOf('bot.command("task"'));
+	const handlerBlock = handler.slice(
+		0,
+		handler.indexOf('bot.command("server"'),
 	);
+
+	assert.match(
+		handlerBlock,
+		/buildTaskPrompt\(parsed\.kind, parsed\.details\)/u,
+	);
+	assert.match(handlerBlock, /guardTaskPrompt\(ctx, prompt/u);
+	assert.match(handlerBlock, /structuredTaskCategory: parsed\.kind/u);
+	assert.match(handlerBlock, /source: "task-direct-guard"/u);
+	assert.match(handlerBlock, /enqueueLegacyOnBlock: true/u);
+	assert.ok(
+		handlerBlock.indexOf("guardTaskPrompt") < handlerBlock.indexOf("runPrompt"),
+	);
+});
+
+test("guarded queue blocks high or blocker risk with advisory", () => {
+	const guard = source.slice(source.indexOf("async function guardTaskPrompt"));
 	const guardBlock = guard.slice(
 		0,
 		guard.indexOf("async function generateAiProjectDraft"),
@@ -35,7 +53,9 @@ test("guarded queue blocks high or blocker risk with advisory", () => {
 		guardBlock,
 		/report\.risk === "high" \|\| report\.risk === "blocker"/u,
 	);
+	assert.match(guardBlock, /guardStatus === "needs_confirmation"/u);
 	assert.match(guardBlock, /markNeedsConfirmation/u);
+	assert.match(guardBlock, /!existingTask/u);
 	assert.match(
 		guardBlock,
 		/formatProjectAdvisory\(buildProjectAdvisory\(report\)\)/u,
@@ -56,5 +76,7 @@ test("queue approval and rejection commands are wired", () => {
 		approval.indexOf('bot.command("queue_reject"'),
 	);
 	assert.doesNotMatch(approvalBlock, /preserveActivePromptInFlight/u);
-	assert.match(source, /taskQueue\.removeFirstMatching\(task\.text\)/u);
+	assert.match(source, /taskQueue\.removeAllMatching\(task\.text\)/u);
+	assert.match(approvalBlock, /taskQueue\.removeAllMatching\(task\.text\)/u);
+	assert.doesNotMatch(approvalBlock, /task\.guardStatus !== "approved"/u);
 });
