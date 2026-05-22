@@ -55,6 +55,10 @@ import {
 	scanProjectMap,
 	suggestProjectFlowsFromScan,
 } from "./project-map-scanner.js";
+import {
+	buildProjectAdvisory,
+	formatProjectAdvisory,
+} from "./project-advisory.js";
 import { loadProjectBlueprint } from "./project-blueprint.js";
 import {
 	formatProjectConnectionReport,
@@ -63,6 +67,7 @@ import {
 import {
 	analyzeProjectPreflight,
 	formatProjectPreflightReport,
+	type ProjectPreflightReport,
 } from "./project-preflight.js";
 import { loadProjectFlows } from "./project-flows.js";
 import {
@@ -324,6 +329,34 @@ async function guard(ctx: Context): Promise<boolean> {
 
 function commandArg(text: string): string {
 	return text.replace(/^\/\w+(?:@\w+)?\s*/u, "").trim();
+}
+
+function buildPreflightReport(request: string): ProjectPreflightReport {
+	const connection = inspectProjectConnection({
+		registry,
+		defaultCwd: config.defaultCwd,
+		allowedRoots: config.allowedRoots,
+		workspaceRoot: config.agentWorkspaceRoot,
+	});
+	const blueprint =
+		connection.projectPath &&
+		connection.blueprint?.source === "project-local" &&
+		connection.blueprint.valid
+			? loadProjectBlueprint(connection.projectPath)
+			: undefined;
+	const flows =
+		connection.projectPath &&
+		connection.flows?.source === "project-local" &&
+		connection.flows.valid
+			? loadProjectFlows(connection.projectPath)
+			: undefined;
+	return analyzeProjectPreflight(request, {
+		connection,
+		blueprint,
+		flows,
+		projectId: connection.projectId,
+		projectPath: connection.projectPath,
+	});
 }
 
 function looksLikePath(text: string): boolean {
@@ -670,32 +703,15 @@ bot.command("idu", async (ctx) => {
 bot.command("preflight", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const request = commandArg(ctx.message?.text ?? "");
-	const connection = inspectProjectConnection({
-		registry,
-		defaultCwd: config.defaultCwd,
-		allowedRoots: config.allowedRoots,
-		workspaceRoot: config.agentWorkspaceRoot,
-	});
-	const blueprint =
-		connection.projectPath &&
-		connection.blueprint?.source === "project-local" &&
-		connection.blueprint.valid
-			? loadProjectBlueprint(connection.projectPath)
-			: undefined;
-	const flows =
-		connection.projectPath &&
-		connection.flows?.source === "project-local" &&
-		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
-			: undefined;
-	const report = analyzeProjectPreflight(request, {
-		connection,
-		blueprint,
-		flows,
-		projectId: connection.projectId,
-		projectPath: connection.projectPath,
-	});
+	const report = buildPreflightReport(request);
 	await replyLong(ctx, formatProjectPreflightReport(report));
+});
+
+bot.command("advisory", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const request = commandArg(ctx.message?.text ?? "");
+	const report = buildPreflightReport(request);
+	await replyLong(ctx, formatProjectAdvisory(buildProjectAdvisory(report)));
 });
 
 bot.command(QUICK_PROMPT_COMMANDS, async (ctx) => {

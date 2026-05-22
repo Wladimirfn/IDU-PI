@@ -400,7 +400,9 @@ function actions(report: ProjectPreflightReport): string[] {
 	if (report.requiresHumanConfirmation)
 		result.push("pedir confirmación humana");
 	if (report.shouldRunAgentLab)
-		result.push("marcar para revisión arquitectónica futura; no lanzar AgentLab todavía");
+		result.push(
+			"marcar para revisión arquitectónica futura; no lanzar AgentLab todavía",
+		);
 	if (!report.requiresHumanConfirmation && !report.shouldRunAgentLab) {
 		result.push("continuar con tarea simple");
 	}

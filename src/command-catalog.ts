@@ -49,6 +49,12 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/preflight <solicitud>"],
 	},
 	{
+		command: "advisory",
+		description: "Volante corto de riesgo Idu-pi",
+		help: "/advisory <solicitud> - generar advisory corto y accionable",
+		usage: ["/advisory <solicitud>"],
+	},
+	{
 		command: "server",
 		description: "Controlar sesión Pi RPC",
 		help: "/server status|run|restart|off - controlar sesión Pi RPC activa",

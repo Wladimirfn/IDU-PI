@@ -20,6 +20,7 @@ test("formatHelpText includes primary Telegram commands", () => {
 	assert.match(text, /\/comandos/);
 	assert.match(text, /\/idu/);
 	assert.match(text, /\/preflight <solicitud>/);
+	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/testlab \[profundidad\]/);
 });
 
@@ -40,6 +41,7 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/config review_ai_flows_draft/);
 	assert.match(text, /\/idu/);
 	assert.match(text, /\/preflight <solicitud>/);
+	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/server restart/);
 	assert.match(text, /\/task bug <detalle>/);
 	assert.match(text, /\/queue_detail/);
@@ -121,6 +123,7 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	assert.ok(commands.some((entry) => entry.command === "config"));
 	assert.ok(commands.some((entry) => entry.command === "idu"));
 	assert.ok(commands.some((entry) => entry.command === "preflight"));
+	assert.ok(commands.some((entry) => entry.command === "advisory"));
 	assert.ok(commands.some((entry) => entry.command === "queue_detail"));
 	assert.equal(commands.length, TELEGRAM_COMMANDS.length);
 	for (const entry of commands) {
