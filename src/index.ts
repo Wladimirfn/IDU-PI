@@ -81,6 +81,13 @@ import {
 	startProjectCoreWizard,
 } from "./project-core-wizard.js";
 import {
+	confirmProjectCore,
+	diffProjectCore,
+	formatProjectCoreConfirmationResult,
+	formatProjectCoreDiff,
+	rejectProjectCore,
+} from "./project-core-confirmation.js";
+import {
 	formatProjectCoreResearchDraft,
 	formatProjectCoreResearchReview,
 	reviewProjectCoreResearchDraft,
@@ -1071,6 +1078,50 @@ bot.command("idu_review_core_research", async (ctx) => {
 				commandArg(ctx.message?.text ?? "") || "latest",
 				join(config.agentWorkspaceRoot, "reports"),
 			),
+		),
+	);
+});
+
+bot.command("idu_confirm_core", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	await replyLong(
+		ctx,
+		formatProjectCoreConfirmationResult(
+			confirmProjectCore({
+				projectPath: activeProject?.path ?? currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+				research: commandArg(ctx.message?.text ?? "") || undefined,
+			}),
+		),
+	);
+});
+
+bot.command("idu_reject_core", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	await replyLong(
+		ctx,
+		formatProjectCoreConfirmationResult(
+			rejectProjectCore({
+				projectPath: activeProject?.path ?? currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+				reason: commandArg(ctx.message?.text ?? "") || undefined,
+			}),
+		),
+	);
+});
+
+bot.command("idu_core_diff", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	await replyLong(
+		ctx,
+		formatProjectCoreDiff(
+			diffProjectCore({
+				projectPath: activeProject?.path ?? currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+			}),
 		),
 	);
 });

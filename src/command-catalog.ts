@@ -88,6 +88,24 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		],
 	},
 	{
+		command: "idu_confirm_core",
+		description: "Confirmar Project Core",
+		help: "/idu_confirm_core [latest_research|ruta] - confirmar Project Core como verdad humana",
+		usage: ["/idu_confirm_core", "/idu_confirm_core latest_research"],
+	},
+	{
+		command: "idu_reject_core",
+		description: "Rechazar Project Core",
+		help: "/idu_reject_core [motivo] - marcar Project Core como draft/stale sin borrarlo",
+		usage: ["/idu_reject_core alcance incompleto"],
+	},
+	{
+		command: "idu_core_diff",
+		description: "Comparar Project Core",
+		help: "/idu_core_diff - ver campos completos, faltantes y research disponible",
+		usage: ["/idu_core_diff"],
+	},
+	{
 		command: "preflight",
 		description: "Analizar riesgo antes de cambios",
 		help: "/preflight <solicitud> - analizar riesgo, contexto faltante y siguiente acción",

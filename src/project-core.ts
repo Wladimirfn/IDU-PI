@@ -20,6 +20,16 @@ export type ProjectCoreDataSensitivity =
 	| "high"
 	| "critical";
 export type ProjectCoreStatus = "draft" | "proposed" | "confirmed" | "stale";
+export type ProjectCoreHumanDecision =
+	| string
+	| {
+			decision: string;
+			confirmedAt?: string;
+			rejectedAt?: string;
+			source?: string;
+			reason?: string;
+			researchDraftPath?: string;
+	  };
 
 export type ProjectCore = {
 	version: string;
@@ -41,7 +51,7 @@ export type ProjectCore = {
 	criticalFlows: string[];
 	successCriteria: string[];
 	validationCommands: string[];
-	humanDecisions: string[];
+	humanDecisions: ProjectCoreHumanDecision[];
 	assumptions: string[];
 	openQuestions: string[];
 	status: ProjectCoreStatus;
@@ -74,7 +84,6 @@ const REQUIRED_STRING_ARRAY_FIELDS = [
 	"criticalFlows",
 	"successCriteria",
 	"validationCommands",
-	"humanDecisions",
 	"assumptions",
 	"openQuestions",
 ] as const;
@@ -145,6 +154,7 @@ export function validateProjectCore(
 			readRequiredStringArray(record, field, errors),
 		]),
 	) as Partial<Record<(typeof REQUIRED_STRING_ARRAY_FIELDS)[number], string[]>>;
+	const humanDecisions = readHumanDecisions(record, errors);
 
 	const complexityLevel = readEnum(
 		record,
@@ -196,7 +206,7 @@ export function validateProjectCore(
 			criticalFlows: arrays.criticalFlows!,
 			successCriteria: arrays.successCriteria!,
 			validationCommands: arrays.validationCommands!,
-			humanDecisions: arrays.humanDecisions!,
+			humanDecisions: humanDecisions!,
 			assumptions: arrays.assumptions!,
 			openQuestions: arrays.openQuestions!,
 			status: status!,
@@ -316,6 +326,58 @@ function readRequiredStringArray(
 	return nonEmpty;
 }
 
+function readHumanDecisions(
+	record: Record<string, unknown>,
+	errors: string[],
+): ProjectCoreHumanDecision[] | undefined {
+	const value = record.humanDecisions;
+	if (!Array.isArray(value)) {
+		errors.push("humanDecisions must be an array");
+		return undefined;
+	}
+	const decisions: ProjectCoreHumanDecision[] = [];
+	for (const item of value) {
+		if (typeof item === "string") {
+			if (!item.trim()) {
+				errors.push("humanDecisions must not contain empty strings");
+				return undefined;
+			}
+			decisions.push(item.trim());
+			continue;
+		}
+		const decision = asRecord(item);
+		if (
+			!decision ||
+			typeof decision.decision !== "string" ||
+			!decision.decision.trim()
+		) {
+			errors.push("humanDecisions objects must include a non-empty decision");
+			return undefined;
+		}
+		decisions.push({
+			decision: decision.decision.trim(),
+			...(typeof decision.confirmedAt === "string" &&
+			decision.confirmedAt.trim()
+				? { confirmedAt: decision.confirmedAt.trim() }
+				: {}),
+			...(typeof decision.rejectedAt === "string" && decision.rejectedAt.trim()
+				? { rejectedAt: decision.rejectedAt.trim() }
+				: {}),
+			...(typeof decision.source === "string" && decision.source.trim()
+				? { source: decision.source.trim() }
+				: {}),
+			...(typeof decision.reason === "string" && decision.reason.trim()
+				? { reason: decision.reason.trim() }
+				: {}),
+			...(typeof decision.researchDraftPath === "string" &&
+			decision.researchDraftPath.trim()
+				? { researchDraftPath: decision.researchDraftPath.trim() }
+				: {}),
+		});
+	}
+	return decisions;
+}
+
 function readEnum<T extends readonly string[]>(
 	record: Record<string, unknown>,
 	field: string,
@@ -328,8 +390,12 @@ function readEnum<T extends readonly string[]>(
 	return undefined;
 }
 
-function formatList(items: string[]): string {
-	return items.length ? items.join(" | ") : "—";
+function formatList(items: readonly unknown[]): string {
+	return items.length
+		? items
+				.map((item) => (typeof item === "string" ? item : JSON.stringify(item)))
+				.join(" | ")
+		: "—";
 }
 
 function defaultOpenQuestions(): string[] {
