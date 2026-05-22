@@ -3,7 +3,12 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import {
+	createDefaultProjectCore,
+	type ProjectCore,
+} from "../src/project-core.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
+import { deriveConstitutionFromProjectCore } from "../src/project-constitution.js";
 import {
 	analyzeProjectPostflight,
 	formatProjectPostflightReport,
@@ -26,6 +31,25 @@ function connection(
 		safeToOperate: true,
 		needsUserConfirmation: false,
 		inspectedAt: "2026-05-21T00:00:00.000Z",
+		...overrides,
+	};
+}
+
+function confirmedCore(overrides: Partial<ProjectCore> = {}): ProjectCore {
+	return {
+		...createDefaultProjectCore("Idu PI"),
+		projectGoal: "Coordinar desarrollo seguro desde Telegram",
+		problemStatement:
+			"Las tareas técnicas pierden contexto y confirmación humana",
+		targetUsers: ["Founder"],
+		preferredStack: ["TypeScript", "SQLite"],
+		rejectedStack: [],
+		includedScope: ["Project Core", "Telegram bridge"],
+		excludedScope: ["Billing"],
+		successCriteria: ["Build and tests pass"],
+		dataSensitivity: "high",
+		openQuestions: [],
+		status: "confirmed",
 		...overrides,
 	};
 }
@@ -109,6 +133,23 @@ test("index AgentRouter and lab changes are medium or high", () => {
 	assert.equal(report.risk, "high");
 	assert.ok(report.impactedAreas.includes("orquestación"));
 	assert.equal(report.shouldRunAgentLab, true);
+});
+
+test("constitution gates detect auth/security changed files", () => {
+	const report = analyzeProjectPostflight({
+		projectPath: "/demo",
+		connectionReport: connection(),
+		changedFiles: ["src/auth/login.ts"],
+		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
+	});
+
+	assert.equal(report.risk, "high");
+	assert.ok(
+		report.constitutionGate?.failures.some(
+			(gate) => gate.gateId === "auth_security_review",
+		),
+	);
+	assert.match(formatProjectPostflightReport(report), /auth_security_review/u);
 });
 
 test("formatProjectPostflightReport renders high report", () => {

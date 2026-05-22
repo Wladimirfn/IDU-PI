@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "projectName": "Proyecto sin definir",
+  "sourceCoreStatus": "draft",
+  "principles": [
+    "La IA puede proponer, pero el humano confirma.",
+    "Solo el Project Core confirmado es fuente de verdad."
+  ],
+  "forbiddenPractices": [
+    "Saltar tests o build requeridos",
+    "Ignorar revisión de seguridad en auth, secrets o datos sensibles"
+  ],
+  "requiredPractices": [
+    "Pedir confirmación humana para cambios de alto riesgo",
+    "Mantener cambios dentro del alcance confirmado"
+  ],
+  "technologyRules": {
+    "preferredStack": [],
+    "rejectedStack": []
+  },
+  "securityRules": [
+    "Cambios de auth/login/security requieren confirmación humana."
+  ],
+  "dataRules": [
+    "Cambios de datos con sensibilidad alta requieren revisión de seguridad."
+  ],
+  "approvalRules": [
+    "Project Core debe estar confirmed antes de aplicar gates como verdad."
+  ],
+  "validationGates": [
+    {
+      "id": "project_core_not_confirmed",
+      "severity": "blocker",
+      "description": "Project Core debe estar confirmed."
+    },
+    {
+      "id": "db_schema_plan",
+      "severity": "high",
+      "description": "DB/schema requiere regla, plan o migración explícita."
+    },
+    {
+      "id": "auth_security_review",
+      "severity": "high",
+      "description": "Auth/login/security requiere confirmación humana."
+    },
+    {
+      "id": "scope_included",
+      "severity": "medium",
+      "description": "Cambios deben respetar includedScope confirmado."
+    },
+    {
+      "id": "scope_excluded",
+      "severity": "blocker",
+      "description": "No tocar excludedScope confirmado."
+    },
+    {
+      "id": "rejected_stack",
+      "severity": "blocker",
+      "description": "No usar tecnología de rejectedStack."
+    },
+    {
+      "id": "non_preferred_stack",
+      "severity": "high",
+      "description": "Stack no preferido con arquitectura requiere confirmación."
+    },
+    {
+      "id": "data_security_review",
+      "severity": "high",
+      "description": "Datos high/critical requieren revisión de seguridad."
+    },
+    {
+      "id": "skip_tests_blocker",
+      "severity": "blocker",
+      "description": "No se permite saltar tests/build."
+    },
+    {
+      "id": "forbidden_practice",
+      "severity": "blocker",
+      "description": "No usar prácticas prohibidas."
+    }
+  ],
+  "specialistRoles": ["security", "database", "architecture"],
+  "createdAt": "2026-05-22T00:00:00.000Z",
+  "updatedAt": "2026-05-22T00:00:00.000Z",
+  "status": "draft"
+}

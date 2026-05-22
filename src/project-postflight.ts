@@ -1,5 +1,10 @@
 import { execFileSync } from "node:child_process";
 import type { ProjectConnectionReport } from "./project-connection.js";
+import {
+	evaluateConstitutionGates,
+	type ConstitutionGateResult,
+	type ProjectConstitution,
+} from "./project-constitution.js";
 import type { ProjectFlows } from "./project-flows.js";
 
 export type ProjectPostflightRisk = "low" | "medium" | "high" | "blocker";
@@ -8,6 +13,7 @@ export type ProjectPostflightContext = {
 	projectPath: string;
 	connectionReport: ProjectConnectionReport;
 	projectFlows?: ProjectFlows;
+	constitution?: ProjectConstitution;
 	changedFiles: string[];
 	diffSummary?: string;
 };
@@ -22,6 +28,7 @@ export type ProjectPostflightReport = {
 	suggestedAgentLabs: string[];
 	requiresHumanConfirmation: boolean;
 	diffSummary?: string;
+	constitutionGate?: ConstitutionGateResult;
 };
 
 export type ProjectPostflightGitState = {
@@ -99,6 +106,22 @@ export function analyzeProjectPostflight(
 		suggestedAgentLabs.push("project-understanding");
 	}
 
+	const constitutionGate = context.constitution
+		? evaluateConstitutionGates({
+				changedFiles,
+				constitution: context.constitution,
+			})
+		: undefined;
+	if (constitutionGate) {
+		risk = maxRisk(risk, constitutionGate.risk);
+		for (const failure of constitutionGate.failures) {
+			warnings.push(`${failure.gateId}: ${failure.message}`);
+		}
+		for (const warning of constitutionGate.warnings) {
+			warnings.push(`${warning.gateId}: ${warning.message}`);
+		}
+	}
+
 	return {
 		risk,
 		changedFiles,
@@ -107,8 +130,12 @@ export function analyzeProjectPostflight(
 		recommendedNext: recommendedNext(risk, dedupe(impactedAreas)),
 		shouldRunAgentLab: risk === "high" || risk === "blocker",
 		suggestedAgentLabs: dedupe(suggestedAgentLabs),
-		requiresHumanConfirmation: risk === "high" || risk === "blocker",
+		requiresHumanConfirmation:
+			risk === "high" ||
+			risk === "blocker" ||
+			Boolean(constitutionGate?.requiresHumanConfirmation),
 		diffSummary: context.diffSummary,
+		constitutionGate,
 	};
 }
 
@@ -130,6 +157,13 @@ export function formatProjectPostflightReport(
 		"Advertencias:",
 		formatList(report.warnings),
 		"",
+		...(report.constitutionGate
+			? [
+					"Reglas determinísticas:",
+					formatList(report.constitutionGate.affectedRules),
+					"",
+				]
+			: []),
 		"Recomendación:",
 		report.recommendedNext,
 		"",

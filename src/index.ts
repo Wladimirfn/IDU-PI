@@ -1,4 +1,5 @@
 import { Bot, type Context } from "grammy";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -75,6 +76,29 @@ import {
 } from "./idu-session.js";
 import { buildLabReviewPlan, formatLabReviewPlan } from "./lab-review-plan.js";
 import { loadProjectBlueprint } from "./project-blueprint.js";
+import {
+	answerProjectCoreWizard,
+	getProjectCoreWizardStatus,
+	startProjectCoreWizard,
+} from "./project-core-wizard.js";
+import {
+	confirmProjectCore,
+	diffProjectCore,
+	formatProjectCoreConfirmationResult,
+	formatProjectCoreDiff,
+	rejectProjectCore,
+} from "./project-core-confirmation.js";
+import {
+	deriveConstitutionFromProjectCore,
+	loadProjectConstitution,
+} from "./project-constitution.js";
+import { loadProjectCore } from "./project-core.js";
+import {
+	formatProjectCoreResearchDraft,
+	formatProjectCoreResearchReview,
+	reviewProjectCoreResearchDraft,
+	saveProjectCoreResearchDraft,
+} from "./project-core-research.js";
 import { inspectProjectConnection } from "./project-connection.js";
 import {
 	analyzeProjectPreflight,
@@ -199,6 +223,7 @@ let pendingAction:
 	| "extension-ui"
 	| "select-lab-agent"
 	| "select-lab-duration"
+	| "project-core-wizard"
 	| null = null;
 let lastProjectChoices: string[] = [];
 let lastSessionPicks: SessionPick[] = [];
@@ -371,10 +396,12 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection.flows.valid
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
+	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
 	return analyzeProjectPreflight(request, {
 		connection,
 		blueprint,
 		flows,
+		constitution,
 		projectId: connection.projectId,
 		projectPath: connection.projectPath,
 	});
@@ -443,10 +470,12 @@ function buildPostflightReport(): ProjectPostflightReport {
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
+	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
 	const report = analyzeProjectPostflight({
 		projectPath,
 		connectionReport: connection,
 		projectFlows: flows,
+		constitution,
 		changedFiles: gitState.changedFiles,
 		diffSummary: gitState.diffSummary,
 	});
@@ -454,6 +483,26 @@ function buildPostflightReport(): ProjectPostflightReport {
 		...report,
 		warnings: [...gitState.warnings, ...report.warnings],
 	};
+}
+
+function loadConfirmedProjectConstitution(projectPath: string | undefined) {
+	if (!projectPath) return undefined;
+	const corePath = join(projectPath, "config", "project-core.json");
+	if (!existsSync(corePath)) return undefined;
+	try {
+		const core = loadProjectCore(projectPath);
+		if (core.status !== "confirmed") return undefined;
+		const constitutionPath = join(
+			projectPath,
+			"config",
+			"project-constitution.json",
+		);
+		return existsSync(constitutionPath)
+			? loadProjectConstitution(projectPath)
+			: deriveConstitutionFromProjectCore(core);
+	} catch {
+		return undefined;
+	}
 }
 
 function looksLikePath(text: string): boolean {
@@ -1003,6 +1052,108 @@ bot.command("idu_prepare", async (ctx) => {
 	});
 	lastIduPrepareByProject.set(projectId, result);
 	await replyLong(ctx, formatIduPrepareResult(result));
+});
+
+bot.command("idu_define_project", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	const result = startProjectCoreWizard({
+		projectId: activeProject?.id ?? currentProjectId(),
+		projectPath: activeProject?.path ?? currentCwd,
+		workspaceRoot: config.agentWorkspaceRoot,
+		projectName: activeProject?.name ?? activeProject?.id,
+	});
+	pendingAction = "project-core-wizard";
+	await replyLong(ctx, result.message);
+});
+
+bot.command("idu_core_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	const status = getProjectCoreWizardStatus({
+		projectId: activeProject?.id ?? currentProjectId(),
+		projectPath: activeProject?.path ?? currentCwd,
+		workspaceRoot: config.agentWorkspaceRoot,
+		projectName: activeProject?.name ?? activeProject?.id,
+	});
+	await replyLong(ctx, status.text);
+});
+
+bot.command("idu_research_core", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	if (!isAllowedCwd(currentCwd, config.allowedRoots)) {
+		await ctx.reply(
+			"No puedo generar research Project Core: el proyecto activo está fuera de ALLOWED_ROOTS.",
+		);
+		return;
+	}
+	await replyLong(
+		ctx,
+		formatProjectCoreResearchDraft(
+			await saveProjectCoreResearchDraft({
+				projectPath: currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+				generate: generateAiProjectDraft,
+			}),
+		),
+	);
+});
+
+bot.command("idu_review_core_research", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatProjectCoreResearchReview(
+			reviewProjectCoreResearchDraft(
+				commandArg(ctx.message?.text ?? "") || "latest",
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		),
+	);
+});
+
+bot.command("idu_confirm_core", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	await replyLong(
+		ctx,
+		formatProjectCoreConfirmationResult(
+			confirmProjectCore({
+				projectPath: activeProject?.path ?? currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+				research: commandArg(ctx.message?.text ?? "") || undefined,
+			}),
+		),
+	);
+});
+
+bot.command("idu_reject_core", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	await replyLong(
+		ctx,
+		formatProjectCoreConfirmationResult(
+			rejectProjectCore({
+				projectPath: activeProject?.path ?? currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+				reason: commandArg(ctx.message?.text ?? "") || undefined,
+			}),
+		),
+	);
+});
+
+bot.command("idu_core_diff", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const activeProject = getActiveProject(registry);
+	await replyLong(
+		ctx,
+		formatProjectCoreDiff(
+			diffProjectCore({
+				projectPath: activeProject?.path ?? currentCwd,
+				reportsDir: join(config.agentWorkspaceRoot, "reports"),
+			}),
+		),
+	);
 });
 
 bot.command("preflight", async (ctx) => {
@@ -1952,6 +2103,28 @@ bot.on("message:text", async (ctx) => {
 	}
 
 	if (text.startsWith("/")) return;
+
+	if (pendingAction === "project-core-wizard") {
+		const activeProject = getActiveProject(registry);
+		try {
+			const result = answerProjectCoreWizard(
+				{
+					projectId: activeProject?.id ?? currentProjectId(),
+					projectPath: activeProject?.path ?? currentCwd,
+					workspaceRoot: config.agentWorkspaceRoot,
+					projectName: activeProject?.name ?? activeProject?.id,
+				},
+				text,
+			);
+			if (result.completed) pendingAction = null;
+			await replyLong(ctx, result.message);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			pendingAction = null;
+			await replyLong(ctx, `No pude actualizar Project Core:\n${message}`);
+		}
+		return;
+	}
 
 	if (pendingAction === "addproject-path") {
 		pendingAction = null;

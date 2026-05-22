@@ -56,6 +56,24 @@ Jerarquía operativa:
 
 El mapa sirve para comparar intención funcional contra código real. No describe comandos internos de Idu-pi, colas internas, SQLite interno ni la arquitectura del bridge salvo que el proyecto activo sea Idu-pi mismo como producto auditado.
 
+## Idu-pi como supervisor de obra
+
+`/idu` activa el modo automático del proyecto actual. Desde ese momento, Idu-pi usa contexto confirmado para supervisar `/task`, `/preflight`, `/advisory`, `/postflight` y planes de revisión antes de que el orquestador construya.
+
+`/idu_off` apaga esas guardrails automáticas. Los comandos manuales siguen disponibles, pero la cola deja de bloquear tareas por riesgo automáticamente.
+
+La cadena de supervisión es:
+
+1. **Project Core**: corazón del proyecto. Define objetivo, alcance, usuarios, stack, sensibilidad de datos y criterios de éxito. Puede nacer como draft por wizard o por propuesta IA, pero solo vale como verdad cuando un humano lo confirma.
+2. **Constitution**: reglas no negociables derivadas del Project Core confirmado. Traduce alcance, stack, seguridad, datos y aprobaciones humanas a reglas operativas.
+3. **Gates**: validadores deterministas. Evalúan texto, archivos cambiados y riesgo sin usar IA. Si detectan `high` o `blocker`, piden confirmación humana.
+
+Principio de decisión:
+
+- La IA propone borradores o recomendaciones; no convierte nada en verdad por sí sola.
+- El humano confirma Project Core, rechaza drafts, aprueba tareas bloqueadas y decide ejecución.
+- AgentLabs revisan y preparan evidencia en contextos aislados; no deciden solos y no se ejecutan automáticamente desde `lab_review_plan`.
+
 ## Ciclo completo de comandos
 
 | Paso | Comando                                           | Escritura                            | Propósito                                                                           |
