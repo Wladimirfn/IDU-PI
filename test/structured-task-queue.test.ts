@@ -134,6 +134,17 @@ test("StructuredTaskQueue clear removes tasks and persists empty state", async (
 	});
 });
 
+test("StructuredTaskQueue clearPersisted deletes tasks jsonl", async () => {
+	await withTempQueue((queue, filePath) => {
+		queue.enqueueTask({ text: "One", category: "general", priority: 1 });
+		queue.enqueueTask({ text: "Two", category: "general", priority: 1 });
+
+		assert.equal(queue.clearPersisted(), 2);
+		assert.deepEqual(queue.listTasks(), []);
+		assert.equal(existsSync(filePath), false);
+	});
+});
+
 test("StructuredTaskQueue does not affect legacy TaskQueue", async () => {
 	await withTempQueue((structured) => {
 		const legacy = new TaskQueue();
@@ -190,14 +201,29 @@ test("structuredTaskPriority treats neutral as normal priority", () => {
 	assert.equal(structuredTaskPriority("revisar estado"), 3);
 });
 
+test("structuredTaskInputForText honors explicit task template categories", () => {
+	for (const category of ["bug", "feature", "refactor", "docs"]) {
+		const input = structuredTaskInputForText(
+			`Operational prompt for ${category}`,
+			{
+				category,
+			},
+		);
+
+		assert.equal(input.category, category);
+	}
+});
+
 test("structuredTaskInputForText stores emotion and priority", () => {
 	const urgent = structuredTaskInputForText("Urgente, no funciona", {
 		source: "telegram",
 		projectId: "idu-pi",
+		category: "bug",
 	});
 	const annoyed = structuredTaskInputForText("Estoy molesto otra vez");
 	const neutral = structuredTaskInputForText("revisar estado");
 
+	assert.equal(urgent.category, "bug");
 	assert.equal(urgent.priority, 5);
 	assert.equal(urgent.emotion, "urgente");
 	assert.equal(urgent.source, "telegram");

@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { analyzeUserSignal } from "./user-signal.js";
 
@@ -85,6 +91,14 @@ export class StructuredTaskQueue {
 		const count = this.tasks.length;
 		this.tasks = [];
 		this.persist();
+		return count;
+	}
+
+	clearPersisted(): number {
+		const count = this.tasks.length;
+		this.tasks = [];
+		this.sequence = 0;
+		if (this.filePath) rmSync(this.filePath, { force: true });
 		return count;
 	}
 
@@ -192,13 +206,14 @@ export function structuredTaskInputForText(
 	options: {
 		source?: string;
 		projectId?: string;
+		category?: string;
 		analyzer?: UserSignalAnalyzer;
 	} = {},
 ): StructuredTaskInput {
 	const signal = analyzeStructuredTaskSignal(text, options.analyzer);
 	return {
 		text,
-		category: structuredTaskCategory(text),
+		category: options.category?.trim() || structuredTaskCategory(text),
 		priority: signal.emotion === "neutral" ? 3 : signal.urgency,
 		emotion: signal.emotion,
 		...(options.source ? { source: options.source } : {}),
