@@ -70,6 +70,24 @@ function queryUserSignalEvents(dbPath: string): Array<Record<string, unknown>> {
 	return output ? (JSON.parse(output) as Array<Record<string, unknown>>) : [];
 }
 
+function querySemanticAuditRuns(
+	dbPath: string,
+): Array<Record<string, unknown>> {
+	const output = execFileSync(
+		"sqlite3",
+		[
+			"-json",
+			dbPath,
+			"SELECT id, scanned_counts FROM semantic_audit_runs ORDER BY id;",
+		],
+		{
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	).trim();
+	return output ? (JSON.parse(output) as Array<Record<string, unknown>>) : [];
+}
+
 function tableExists(dbPath: string, tableName: string): boolean {
 	const output = execFileSync(
 		"sqlite3",
@@ -123,6 +141,16 @@ test("LabDbRepository init creates user_signal_events table", async () => {
 		repository.init();
 
 		assert.equal(tableExists(dbPath, "user_signal_events"), true);
+	});
+});
+
+test("LabDbRepository init creates semantic audit tables", async () => {
+	await withTempDb((dbPath, repository) => {
+		repository.init();
+
+		assert.equal(tableExists(dbPath, "semantic_audit_runs"), true);
+		assert.equal(tableExists(dbPath, "semantic_audit_checkpoints"), true);
+		assert.equal(tableExists(dbPath, "semantic_memory_items"), true);
 	});
 });
 
@@ -423,6 +451,56 @@ test("LabDbRepository recordLabRun keeps init idempotent", async () => {
 		assert.equal(repository.init().created, true);
 		repository.recordLabRun(createLabRunRecord());
 		assert.equal(repository.init().created, false);
+	});
+});
+
+test("LabDbRepository wraps semantic audit storage", async () => {
+	await withTempDb((dbPath, repository) => {
+		repository.recordLabRun(createLabRunRecord());
+		const stats = repository.getSemanticAuditStats("pi-telegram-bridge");
+		assert.equal(stats.labRunCount, 1);
+		assert.deepEqual(
+			repository.getSemanticAuditCheckpoint("pi-telegram-bridge"),
+			{
+				projectId: "pi-telegram-bridge",
+				lastLabRunCount: 0,
+				lastFindingCount: 0,
+				lastProposalCount: 0,
+				lastTaskCount: 0,
+				lastUserSignalCount: 0,
+				lastMemoryItemCount: 0,
+				lastCriticalFindingCount: 0,
+				lastHighFindingCount: 0,
+			},
+		);
+
+		repository.createSemanticAuditRun({
+			id: "audit-1",
+			projectId: "pi-telegram-bridge",
+			triggerReason: "manual",
+			mode: "manual",
+			status: "completed",
+			scannedCounts: { labRunCount: 1 },
+		});
+		repository.updateSemanticAuditCheckpoint("pi-telegram-bridge", stats);
+		repository.recordSemanticMemoryItem({
+			id: "memory-1",
+			projectId: "pi-telegram-bridge",
+			sourceType: "audit",
+			importance: "medium",
+			title: "Keep audit result",
+			summary: "The audit completed.",
+			tags: ["audit"],
+		});
+
+		const [audit] = querySemanticAuditRuns(dbPath);
+		assert.deepEqual(JSON.parse(audit.scanned_counts as string), {
+			labRunCount: 1,
+		});
+		assert.equal(
+			repository.getSemanticAuditStats("pi-telegram-bridge").memoryItemCount,
+			1,
+		);
 	});
 });
 

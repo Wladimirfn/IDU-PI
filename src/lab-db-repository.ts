@@ -12,6 +12,17 @@ import {
 	type UserSignalInput,
 } from "./lab-db.js";
 import type { LabRunRecord } from "./lab-reports.js";
+import {
+	createSemanticAuditRun,
+	getSemanticAuditCheckpoint,
+	getSemanticAuditStats,
+	recordSemanticMemoryItem,
+	updateSemanticAuditCheckpoint,
+	type SemanticAuditCheckpoint,
+	type SemanticAuditRunInput,
+	type SemanticAuditStats,
+	type SemanticMemoryItemInput,
+} from "./semantic-audit.js";
 
 export class LabDbRepository {
 	constructor(private readonly dbPath: string) {}
@@ -38,5 +49,28 @@ export class LabDbRepository {
 
 	listOpenFindings(projectId: string): BugFinding[] {
 		return listOpenFindings(this.dbPath, projectId);
+	}
+
+	getSemanticAuditStats(projectId: string): SemanticAuditStats {
+		return getSemanticAuditStats(this.dbPath, projectId);
+	}
+
+	getSemanticAuditCheckpoint(projectId: string): SemanticAuditCheckpoint {
+		return getSemanticAuditCheckpoint(this.dbPath, projectId);
+	}
+
+	createSemanticAuditRun(input: SemanticAuditRunInput): void {
+		createSemanticAuditRun(this.dbPath, input);
+	}
+
+	updateSemanticAuditCheckpoint(
+		projectId: string,
+		stats: SemanticAuditStats,
+	): void {
+		updateSemanticAuditCheckpoint(this.dbPath, projectId, stats);
+	}
+
+	recordSemanticMemoryItem(input: SemanticMemoryItemInput): void {
+		recordSemanticMemoryItem(this.dbPath, input);
 	}
 }

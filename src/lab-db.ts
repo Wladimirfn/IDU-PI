@@ -182,6 +182,48 @@ CREATE TABLE IF NOT EXISTS user_signal_events (
   matched_keywords TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS semantic_audit_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  trigger_reason TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('manual','threshold','scheduled')),
+  status TEXT NOT NULL CHECK (status IN ('pending','completed','failed','skipped')),
+  scanned_counts TEXT NOT NULL DEFAULT '{}',
+  summary TEXT,
+  critical_findings TEXT NOT NULL DEFAULT '[]',
+  rules_to_preserve TEXT NOT NULL DEFAULT '[]',
+  suggested_agent_tasks TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS semantic_audit_checkpoints (
+  project_id TEXT PRIMARY KEY,
+  last_lab_run_count INTEGER NOT NULL DEFAULT 0,
+  last_finding_count INTEGER NOT NULL DEFAULT 0,
+  last_proposal_count INTEGER NOT NULL DEFAULT 0,
+  last_task_count INTEGER NOT NULL DEFAULT 0,
+  last_user_signal_count INTEGER NOT NULL DEFAULT 0,
+  last_memory_item_count INTEGER NOT NULL DEFAULT 0,
+  last_critical_finding_count INTEGER NOT NULL DEFAULT 0,
+  last_high_finding_count INTEGER NOT NULL DEFAULT 0,
+  last_audit_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS semantic_memory_items (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  source_id TEXT,
+  importance TEXT NOT NULL CHECK (importance IN ('critical','high','medium','low','noise')),
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','superseded')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 function sqlString(value: string | undefined): string {
@@ -212,7 +254,36 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 	const created = !existsSync(dbPath);
 	mkdirSync(dirname(dbPath), { recursive: true });
 	runSql(dbPath, SCHEMA);
+	ensureColumn(
+		dbPath,
+		"semantic_audit_checkpoints",
+		"last_critical_finding_count",
+		"INTEGER NOT NULL DEFAULT 0",
+	);
+	ensureColumn(
+		dbPath,
+		"semantic_audit_checkpoints",
+		"last_high_finding_count",
+		"INTEGER NOT NULL DEFAULT 0",
+	);
 	return { dbPath, created };
+}
+
+function ensureColumn(
+	dbPath: string,
+	tableName: string,
+	columnName: string,
+	definition: string,
+): void {
+	const output = runSql(dbPath, `PRAGMA table_info(${tableName});`).trim();
+	const columns = output
+		? (JSON.parse(output) as Array<{ name: string }>).map((row) => row.name)
+		: [];
+	if (columns.includes(columnName)) return;
+	runSql(
+		dbPath,
+		`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`,
+	);
 }
 
 export function formatInitLabDbResult(result: InitLabDbResult): string {
