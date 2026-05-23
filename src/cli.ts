@@ -23,6 +23,7 @@ import {
 	formatLabReviewPlan,
 	type LabReviewPlan,
 } from "./lab-review-plan.js";
+import { LabDbRepository } from "./lab-db-repository.js";
 import {
 	buildProjectAdvisory,
 	formatProjectAdvisory,
@@ -63,6 +64,14 @@ import {
 	type ProjectEntry,
 	type ProjectRegistry,
 } from "./projects.js";
+import {
+	buildSemanticAuditStatus,
+	formatSemanticAuditRunResult,
+	formatSemanticAuditStatus,
+	runManualSemanticAudit,
+	type SemanticAuditRunResult,
+	type SemanticAuditStatusReport,
+} from "./semantic-audit-command.js";
 import { StructuredTaskQueue } from "./structured-task-queue.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -90,6 +99,10 @@ export type CliRuntime = {
 	formatPrepare: (result: IduPrepareResult) => string;
 	labReviewPlan: (mode: "postflight") => LabReviewPlan;
 	formatLabReviewPlan: (plan: LabReviewPlan) => string;
+	semanticAuditStatus: () => SemanticAuditStatusReport;
+	formatSemanticAuditStatus: (report: SemanticAuditStatusReport) => string;
+	semanticAuditRun: () => SemanticAuditRunResult;
+	formatSemanticAuditRun: (result: SemanticAuditRunResult) => string;
 };
 
 type RuntimeContext = {
@@ -112,6 +125,9 @@ export function createCliRuntime(): CliRuntime {
 	const structuredTaskQueue = new StructuredTaskQueue({
 		workspaceRoot: config.agentWorkspaceRoot,
 	});
+	const labDbRepository = new LabDbRepository(
+		join(config.agentWorkspaceRoot, "reports", "lab.db"),
+	);
 	const context = { config, registry, activeProject, structuredTaskQueue };
 	return {
 		projectId: activeProject.id,
@@ -135,6 +151,18 @@ export function createCliRuntime(): CliRuntime {
 				projectId: activeProject.id,
 			}),
 		formatLabReviewPlan,
+		semanticAuditStatus: () =>
+			buildSemanticAuditStatus({
+				projectId: activeProject.id,
+				repository: labDbRepository,
+			}),
+		formatSemanticAuditStatus,
+		semanticAuditRun: () =>
+			runManualSemanticAudit({
+				projectId: activeProject.id,
+				repository: labDbRepository,
+			}),
+		formatSemanticAuditRun: formatSemanticAuditRunResult,
 	};
 }
 
@@ -205,6 +233,18 @@ export async function runCliCommand(
 					),
 				);
 			}
+			case "semantic-audit-status":
+				return ok(
+					activeRuntime.formatSemanticAuditStatus(
+						activeRuntime.semanticAuditStatus(),
+					),
+				);
+			case "semantic-audit-run":
+				return ok(
+					activeRuntime.formatSemanticAuditRun(
+						activeRuntime.semanticAuditRun(),
+					),
+				);
 			default:
 				return {
 					exitCode: 1,
@@ -381,6 +421,8 @@ export function helpText(): string {
 		'  idu-pi advisory "solicitud"',
 		"  idu-pi postflight",
 		"  idu-pi lab-review-plan postflight",
+		"  idu-pi semantic-audit-status (Telegram: /semantic_audit_status)",
+		"  idu-pi semantic-audit-run    (Telegram: /semantic_audit_run)",
 		"",
 		"Notas:",
 		"- Usa AGENT_WORKSPACE_ROOT y el registro de proyectos del bridge.",

@@ -61,6 +61,18 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/idu_prepare"],
 	},
 	{
+		command: "semantic_audit_status",
+		description: "Ver auditoría semántica",
+		help: "/semantic_audit_status - revisar conteos, checkpoint y decisión de auditoría semántica sin IA",
+		usage: ["/semantic_audit_status"],
+	},
+	{
+		command: "semantic_audit_run",
+		description: "Registrar auditoría semántica manual",
+		help: "/semantic_audit_run - registrar auditoría semántica manual sin compactar, borrar ni ejecutar AgentLabs",
+		usage: ["/semantic_audit_run"],
+	},
+	{
 		command: "idu_define_project",
 		description: "Definir Project Core manual",
 		help: "/idu_define_project - iniciar wizard manual para crear config/project-core.json draft",

@@ -128,6 +128,12 @@ import {
 } from "./lab-reports.js";
 import { formatInitLabDbResult, initLabDb } from "./lab-db.js";
 import { LabDbRepository } from "./lab-db-repository.js";
+import {
+	buildSemanticAuditStatus,
+	formatSemanticAuditRunResult,
+	formatSemanticAuditStatus,
+	runManualSemanticAudit,
+} from "./semantic-audit-command.js";
 import { findPiProcesses } from "./processes.js";
 import {
 	addProject,
@@ -1013,6 +1019,32 @@ bot.command("idu_status", async (ctx) => {
 	await replyLong(
 		ctx,
 		formatIduSessionStatus(getIduSessionStatus(currentProjectId())),
+	);
+});
+
+bot.command("semantic_audit_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatSemanticAuditStatus(
+			buildSemanticAuditStatus({
+				projectId: currentProjectId(),
+				repository: labDbRepository,
+			}),
+		),
+	);
+});
+
+bot.command("semantic_audit_run", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatSemanticAuditRunResult(
+			runManualSemanticAudit({
+				projectId: currentProjectId(),
+				repository: labDbRepository,
+			}),
+		),
 	);
 });
 

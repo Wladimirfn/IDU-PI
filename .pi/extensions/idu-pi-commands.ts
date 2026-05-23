@@ -170,4 +170,24 @@ export default function (pi: ExtensionAPI) {
 		cliArgs: (args) => ["lab-review-plan", args || "postflight"],
 		usage: "/idu-lab-review-plan [postflight|preflight <solicitud>]",
 	});
+
+	registerIduCommand("semantic-audit-status", {
+		description: "Mostrar estado de auditoría semántica Idu-pi",
+		cliArgs: () => ["semantic-audit-status"],
+	});
+
+	registerIduCommand("semantic-audit-run", {
+		description: "Registrar auditoría semántica manual Idu-pi",
+		cliArgs: () => ["semantic-audit-run"],
+	});
+
+	registerIduCommand("idu-semantic-audit-status", {
+		description: "Alias Idu-pi para estado de auditoría semántica",
+		cliArgs: () => ["semantic-audit-status"],
+	});
+
+	registerIduCommand("idu-semantic-audit-run", {
+		description: "Alias Idu-pi para auditoría semántica manual",
+		cliArgs: () => ["semantic-audit-run"],
+	});
 }

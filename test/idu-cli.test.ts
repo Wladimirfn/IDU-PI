@@ -14,6 +14,10 @@ import type { ProjectAdvisory } from "../src/project-advisory.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
+import type {
+	SemanticAuditRunResult,
+	SemanticAuditStatusReport,
+} from "../src/semantic-audit-command.js";
 
 async function withRuntime(
 	fn: (
@@ -81,6 +85,65 @@ function fakePostflight(): ProjectPostflightReport {
 		shouldRunAgentLab: false,
 		suggestedAgentLabs: [],
 		requiresHumanConfirmation: false,
+	};
+}
+
+function fakeSemanticAuditStatus(): SemanticAuditStatusReport {
+	return {
+		projectId: "pi-telegram-bridge",
+		stats: {
+			projectId: "pi-telegram-bridge",
+			labRunCount: 1,
+			findingCount: 0,
+			proposalCount: 0,
+			taskCount: 0,
+			userSignalCount: 0,
+			memoryItemCount: 0,
+			criticalFindingCount: 0,
+			highFindingCount: 0,
+		},
+		checkpoint: {
+			projectId: "pi-telegram-bridge",
+			lastLabRunCount: 0,
+			lastFindingCount: 0,
+			lastProposalCount: 0,
+			lastTaskCount: 0,
+			lastUserSignalCount: 0,
+			lastMemoryItemCount: 0,
+			lastCriticalFindingCount: 0,
+			lastHighFindingCount: 0,
+		},
+		newEvents: {
+			labRuns: 1,
+			findings: 0,
+			proposals: 0,
+			tasks: 0,
+			userSignals: 0,
+			memoryItems: 0,
+			criticalFindings: 0,
+			highFindings: 0,
+		},
+		decision: {
+			shouldRun: false,
+			triggerReason: "not_enough_data",
+			newEventCount: 1,
+		},
+		recommendedNext:
+			"Esperar umbral o ejecutar futura compactación supervisada.",
+	};
+}
+
+function fakeSemanticAuditRun(): SemanticAuditRunResult {
+	return {
+		projectId: "pi-telegram-bridge",
+		runId: "audit-1",
+		status: "completed",
+		summary: "Auditoría manual registrada sin compactación.",
+		checkpointUpdated: true,
+		stats: fakeSemanticAuditStatus().stats,
+		decision: fakeSemanticAuditStatus().decision,
+		recommendedNext:
+			"Esperar umbral o ejecutar futura compactación supervisada.",
 	};
 }
 
@@ -169,6 +232,27 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		}),
 		formatLabReviewPlan: () =>
 			"Lab Review Plan Idu-pi\n\nNo ejecuté AgentLabs; solo preparé el plan.",
+		semanticAuditStatus: fakeSemanticAuditStatus,
+		formatSemanticAuditStatus: (report) =>
+			[
+				"Semantic Audit Status",
+				"",
+				"Proyecto:",
+				report.projectId,
+				"",
+				"shouldRun:",
+				String(report.decision.shouldRun),
+			].join("\n"),
+		semanticAuditRun: fakeSemanticAuditRun,
+		formatSemanticAuditRun: (result) =>
+			[
+				"Semantic Audit Run",
+				"",
+				"Estado:",
+				result.status,
+				"",
+				"No usé IA, no compacté memoria, no borré datos y no ejecuté AgentLabs.",
+			].join("\n"),
 	};
 }
 
@@ -295,6 +379,26 @@ test("cli lab-review-plan postflight prepara plan sin AgentLabs", async () => {
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Lab Review Plan Idu-pi/u);
 		assert.match(result.stdout, /No ejecuté AgentLabs/u);
+	});
+});
+
+test("CLI semantic-audit-status funciona", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["semantic-audit-status"], runtime);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Semantic Audit Status/u);
+		assert.match(result.stdout, /pi-telegram-bridge/u);
+	});
+});
+
+test("CLI semantic-audit-run funciona", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["semantic-audit-run"], runtime);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Semantic Audit Run/u);
+		assert.match(result.stdout, /No usé IA/u);
 	});
 });
 
