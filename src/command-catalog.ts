@@ -477,9 +477,8 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{ label: "Idu status", command: "corepack pnpm cli -- idu-status" },
 	{ label: "Idu off", command: "corepack pnpm cli -- idu-off" },
 	{ label: "Prepare seguro", command: "corepack pnpm cli -- prepare" },
-	{ label: "Supervisor tick", command: "corepack pnpm cli -- supervisor-tick" },
 	{
-		label: "Supervisor tick alias",
+		label: "Idu supervisor tick",
 		command: "corepack pnpm cli -- idu-supervisor-tick",
 	},
 	{ label: "Preflight", command: 'corepack pnpm cli -- preflight "solicitud"' },
@@ -516,19 +515,19 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	},
 	{
 		label: "Semantic compact draft",
-		command: "corepack pnpm cli -- semantic-compact-draft",
+		command: "corepack pnpm cli -- idu-semantic-compact-draft",
 	},
 	{
 		label: "Semantic compact review",
-		command: "corepack pnpm cli -- semantic-compact-review latest",
+		command: "corepack pnpm cli -- idu-semantic-compact-review latest",
 	},
 	{
 		label: "Semantic agent tasks review",
-		command: "corepack pnpm cli -- semantic-agent-tasks-review latest",
+		command: "corepack pnpm cli -- idu-semantic-agent-tasks-review latest",
 	},
 	{
 		label: "Semantic agent tasks create",
-		command: "corepack pnpm cli -- semantic-agent-tasks-create latest",
+		command: "corepack pnpm cli -- idu-semantic-agent-tasks-create latest",
 	},
 ];
 

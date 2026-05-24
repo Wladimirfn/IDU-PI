@@ -165,6 +165,11 @@ export default function (pi: ExtensionAPI) {
 		cliArgs: () => ["postflight"],
 	});
 
+	registerIduCommand("idu-supervisor-tick", {
+		description: "Ejecutar supervisor Idu-pi",
+		cliArgs: () => ["idu-supervisor-tick"],
+	});
+
 	registerIduCommand("idu-lab-review-plan", {
 		description: "Preparar plan de revisión Lab sin ejecutar AgentLabs",
 		cliArgs: (args) => ["lab-review-plan", args || "postflight"],
@@ -173,131 +178,66 @@ export default function (pi: ExtensionAPI) {
 
 	registerIduCommand("idu-task", {
 		description: "Crear tarea estructurada Idu-pi desde Pi CLI",
-		cliArgs: (args) => ["task", ...args.split(/\s+/u).filter(Boolean)],
+		cliArgs: (args) => ["idu-task", ...args.split(/\s+/u).filter(Boolean)],
 		requiresArgs: true,
 		usage:
 			"/idu-task [bug|feature|refactor|docs|review] <detalle> | /idu-task <texto libre>",
 	});
 
-	registerIduCommand("task", {
-		description: "Alias legacy para /idu-task",
-		cliArgs: (args) => ["task", ...args.split(/\s+/u).filter(Boolean)],
-		requiresArgs: true,
-		usage:
-			"/task [bug|feature|refactor|docs|review] <detalle> | /task <texto libre>",
-	});
-
 	registerIduCommand("idu-queue-detail", {
 		description: "Ver cola estructurada Idu-pi",
-		cliArgs: () => ["queue-detail"],
-	});
-
-	registerIduCommand("queue-detail", {
-		description: "Ver cola estructurada Idu-pi",
-		cliArgs: () => ["queue-detail"],
+		cliArgs: () => ["idu-queue-detail"],
 	});
 
 	registerIduCommand("idu-queue-clear-structured", {
 		description: "Limpiar cola estructurada Idu-pi",
-		cliArgs: () => ["queue-clear-structured"],
-	});
-
-	registerIduCommand("queue-clear-structured", {
-		description: "Alias legacy para /idu-queue-clear-structured",
-		cliArgs: () => ["queue-clear-structured"],
+		cliArgs: () => ["idu-queue-clear-structured"],
 	});
 
 	registerIduCommand("idu-queue-approve", {
 		description: "Aprobar tarea pausada en cola Idu-pi",
-		cliArgs: (args) => ["queue-approve", args],
+		cliArgs: (args) => ["idu-queue-approve", args],
 		requiresArgs: true,
 		usage: "/idu-queue-approve <id>",
 	});
 
-	registerIduCommand("queue_approve", {
-		description: "Aprobar tarea pausada en cola Idu-pi",
-		cliArgs: (args) => ["queue-approve", args],
-		requiresArgs: true,
-		usage: "/queue_approve <id>",
-	});
-
 	registerIduCommand("idu-queue-reject", {
 		description: "Rechazar tarea en cola Idu-pi",
-		cliArgs: (args) => ["queue-reject", args],
+		cliArgs: (args) => ["idu-queue-reject", args],
 		requiresArgs: true,
 		usage: "/idu-queue-reject <id>",
 	});
 
-	registerIduCommand("queue_reject", {
-		description: "Alias legacy para /idu-queue-reject",
-		cliArgs: (args) => ["queue-reject", args],
-		requiresArgs: true,
-		usage: "/queue_reject <id>",
-	});
-
-	registerIduCommand("semantic-audit-status", {
-		description: "Mostrar estado de auditoría semántica Idu-pi",
-		cliArgs: () => ["semantic-audit-status"],
-	});
-
-	registerIduCommand("semantic-audit-run", {
-		description: "Registrar auditoría semántica manual Idu-pi",
-		cliArgs: () => ["semantic-audit-run"],
-	});
-
 	registerIduCommand("idu-semantic-audit-status", {
-		description: "Alias Idu-pi para estado de auditoría semántica",
-		cliArgs: () => ["semantic-audit-status"],
+		description: "Mostrar estado de auditoría semántica Idu-pi",
+		cliArgs: () => ["idu-semantic-audit-status"],
 	});
 
 	registerIduCommand("idu-semantic-audit-run", {
-		description: "Alias Idu-pi para auditoría semántica manual",
-		cliArgs: () => ["semantic-audit-run"],
-	});
-
-	registerIduCommand("semantic-compact-draft", {
-		description: "Crear draft de compactación semántica Idu-pi",
-		cliArgs: () => ["semantic-compact-draft"],
-	});
-
-	registerIduCommand("semantic-compact-review", {
-		description: "Revisar draft de compactación semántica Idu-pi",
-		cliArgs: (args) => ["semantic-compact-review", args || "latest"],
-		usage: "/semantic-compact-review [latest|ruta]",
+		description: "Registrar auditoría semántica manual Idu-pi",
+		cliArgs: () => ["idu-semantic-audit-run"],
 	});
 
 	registerIduCommand("idu-semantic-compact-draft", {
-		description: "Alias Idu-pi para draft de compactación semántica",
-		cliArgs: () => ["semantic-compact-draft"],
+		description: "Crear draft de compactación semántica Idu-pi",
+		cliArgs: () => ["idu-semantic-compact-draft"],
 	});
 
 	registerIduCommand("idu-semantic-compact-review", {
-		description: "Alias Idu-pi para revisar compactación semántica",
-		cliArgs: (args) => ["semantic-compact-review", args || "latest"],
+		description: "Revisar draft de compactación semántica Idu-pi",
+		cliArgs: (args) => ["idu-semantic-compact-review", args || "latest"],
 		usage: "/idu-semantic-compact-review [latest|ruta]",
 	});
 
-	registerIduCommand("semantic-agent-tasks-review", {
-		description: "Revisar tareas AgentLab sugeridas por auditoría semántica",
-		cliArgs: (args) => ["semantic-agent-tasks-review", args || "latest"],
-		usage: "/semantic-agent-tasks-review [latest|ruta]",
-	});
-
-	registerIduCommand("semantic-agent-tasks-create", {
-		description: "Crear tareas review desde auditoría semántica",
-		cliArgs: (args) => ["semantic-agent-tasks-create", args || "latest"],
-		usage: "/semantic-agent-tasks-create [latest|ruta]",
-	});
-
 	registerIduCommand("idu-semantic-agent-tasks-review", {
-		description: "Alias Idu-pi para revisar tareas AgentLab semánticas",
-		cliArgs: (args) => ["semantic-agent-tasks-review", args || "latest"],
+		description: "Revisar tareas AgentLab sugeridas por auditoría semántica",
+		cliArgs: (args) => ["idu-semantic-agent-tasks-review", args || "latest"],
 		usage: "/idu-semantic-agent-tasks-review [latest|ruta]",
 	});
 
 	registerIduCommand("idu-semantic-agent-tasks-create", {
-		description: "Alias Idu-pi para crear tareas review semánticas",
-		cliArgs: (args) => ["semantic-agent-tasks-create", args || "latest"],
+		description: "Crear tareas review desde auditoría semántica",
+		cliArgs: (args) => ["idu-semantic-agent-tasks-create", args || "latest"],
 		usage: "/idu-semantic-agent-tasks-create [latest|ruta]",
 	});
 }

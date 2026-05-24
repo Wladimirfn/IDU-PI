@@ -1056,11 +1056,15 @@ test("CLI comandos muestra catálogo local sin runtime", async () => {
 
 	assert.equal(result.exitCode, 0);
 	assert.match(result.stdout, /CLI pnpm/u);
-	assert.match(result.stdout, /corepack pnpm cli -- semantic-compact-draft/u);
 	assert.match(
 		result.stdout,
-		/corepack pnpm cli -- semantic-agent-tasks-create latest/u,
+		/corepack pnpm cli -- idu-semantic-compact-draft/u,
 	);
+	assert.match(
+		result.stdout,
+		/corepack pnpm cli -- idu-semantic-agent-tasks-create latest/u,
+	);
+	assert.doesNotMatch(result.stdout, /corepack pnpm cli -- supervisor-tick/u);
 });
 
 test("comando desconocido muestra ayuda", async () => {

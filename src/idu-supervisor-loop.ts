@@ -299,11 +299,11 @@ function recommendations(
 ): string[] {
 	if (!auditStatus.decision.shouldRun)
 		return ["Esperar umbral o ejecutar revisión manual."];
-	const items = ["semantic-compact-review latest"];
+	const items = ["idu-semantic-compact-review latest"];
 	if (createdTasks > 0) items.push("idu-queue-detail");
 	else
 		items.push(
-			"semantic-agent-tasks-review latest",
+			"idu-semantic-agent-tasks-review latest",
 			"lab-review-plan postflight",
 		);
 	return items;
