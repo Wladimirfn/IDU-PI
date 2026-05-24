@@ -475,20 +475,27 @@ export function createCliTask(
 	);
 	if (shouldUseAutomaticGuardrails(context.projectId)) {
 		const report = context.preflight(prompt);
+		const guardRisk = strongestGuardRisk(report.risk, task.intentRiskHint);
 		const reason = [
 			`preflight ${report.risk}`,
+			task.intentRiskHint ? `intent ${task.intentRiskHint}` : undefined,
+			task.intentConcepts?.length
+				? `intención: ${task.intentKind}/${task.intentConcepts.join("+")}`
+				: undefined,
 			...report.affectedAreas.map((area) => `área: ${area}`),
 			...report.warnings,
-		].join("; ");
+		]
+			.filter(Boolean)
+			.join("; ");
 		task =
-			report.risk === "high" || report.risk === "blocker"
+			guardRisk === "high" || guardRisk === "blocker"
 				? (context.structuredTaskQueue.markNeedsConfirmation(task.id, {
-						guardRisk: report.risk,
+						guardRisk,
 						guardReason: reason,
 					}) ?? task)
 				: (context.structuredTaskQueue.markGuardClear(
 						task.id,
-						report.risk,
+						guardRisk,
 						reason,
 					) ?? task);
 	}
@@ -507,6 +514,22 @@ export function createCliTask(
 		// SQLite/semantic trigger is secondary; CLI task creation remains the source of truth.
 	}
 	return task;
+}
+
+function strongestGuardRisk(
+	preflightRisk: ProjectPreflightReport["risk"],
+	intentRisk: StructuredTask["intentRiskHint"],
+): ProjectPreflightReport["risk"] {
+	const order: ProjectPreflightReport["risk"][] = [
+		"low",
+		"medium",
+		"high",
+		"blocker",
+	];
+	if (!intentRisk) return preflightRisk;
+	return order.indexOf(intentRisk) > order.indexOf(preflightRisk)
+		? intentRisk
+		: preflightRisk;
 }
 
 export function approveStructuredTaskById(
@@ -546,6 +569,13 @@ export function formatCliTaskResult(task: StructuredTask): string {
 		"",
 		"Emoción:",
 		task.emotion ?? "neutral",
+		...(task.intentKind
+			? [
+					"",
+					"Intención:",
+					`${task.intentKind}/${primaryIntentConcept(task.intentConcepts)}/${task.intentRiskHint ?? "low"}`,
+				]
+			: []),
 		...(task.guardStatus
 			? [
 					"",
@@ -566,6 +596,14 @@ export function formatCliTaskResult(task: StructuredTask): string {
 		"Nota segura:",
 		"Registré la tarea y la señal localmente; no ejecuté IA ni AgentLabs.",
 	].join("\n");
+}
+
+function primaryIntentConcept(concepts: string[] | undefined): string {
+	return (
+		concepts?.find((concept) => concept !== "task" && concept !== "queue") ??
+		concepts?.[0] ??
+		"unknown"
+	);
 }
 
 function cliCommandFor(telegramCommand: string): string {

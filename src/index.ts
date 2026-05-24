@@ -725,19 +725,33 @@ async function guardTaskPrompt(
 		);
 		return false;
 	}
-	const reason = `${report.risk}: ${report.affectedAreas.join(", ")}`;
-	if (report.risk === "high" || report.risk === "blocker") {
-		const task =
-			existingTask ??
-			structuredTaskQueue.enqueueTask(
-				structuredTaskInputForText(prompt, {
-					source: options.source,
-					projectId: currentProjectId(),
-					category: options.structuredTaskCategory,
-				}),
-			);
+	const taskInput = structuredTaskInputForText(prompt, {
+		source: options.source,
+		projectId: currentProjectId(),
+		category: options.structuredTaskCategory,
+	});
+	const guardRisk = strongestGuardRisk(
+		report.risk,
+		existingTask?.intentRiskHint ?? taskInput.intentRiskHint,
+	);
+	const reason = [
+		`preflight ${report.risk}`,
+		(existingTask?.intentRiskHint ?? taskInput.intentRiskHint)
+			? `intent ${existingTask?.intentRiskHint ?? taskInput.intentRiskHint}`
+			: undefined,
+		(existingTask?.intentConcepts ?? taskInput.intentConcepts)?.length
+			? `intención: ${existingTask?.intentKind ?? taskInput.intentKind}/${(existingTask?.intentConcepts ?? taskInput.intentConcepts ?? []).join("+")}`
+			: undefined,
+		report.affectedAreas.length
+			? `áreas: ${report.affectedAreas.join(", ")}`
+			: undefined,
+	]
+		.filter(Boolean)
+		.join("; ");
+	if (guardRisk === "high" || guardRisk === "blocker") {
+		const task = existingTask ?? structuredTaskQueue.enqueueTask(taskInput);
 		structuredTaskQueue.markNeedsConfirmation(task.id, {
-			guardRisk: report.risk,
+			guardRisk,
 			guardReason: reason,
 		});
 		if (options.enqueueLegacyOnBlock && !existingTask)
@@ -757,8 +771,24 @@ async function guardTaskPrompt(
 		return false;
 	}
 	if (existingTask)
-		structuredTaskQueue.markGuardClear(existingTask.id, report.risk, reason);
+		structuredTaskQueue.markGuardClear(existingTask.id, guardRisk, reason);
 	return true;
+}
+
+function strongestGuardRisk(
+	preflightRisk: ProjectPreflightReport["risk"],
+	intentRisk: "low" | "medium" | "high" | "blocker" | undefined,
+): ProjectPreflightReport["risk"] {
+	const order: ProjectPreflightReport["risk"][] = [
+		"low",
+		"medium",
+		"high",
+		"blocker",
+	];
+	if (!intentRisk) return preflightRisk;
+	return order.indexOf(intentRisk) > order.indexOf(preflightRisk)
+		? intentRisk
+		: preflightRisk;
 }
 
 async function generateAiProjectDraft(prompt: string): Promise<string> {

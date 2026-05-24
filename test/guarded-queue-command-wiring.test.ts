@@ -57,9 +57,11 @@ test("guarded queue only blocks high or blocker risk when /idu is active", () =>
 			guardBlock.indexOf("buildPreflightReport"),
 	);
 	assert.match(guardBlock, /buildPreflightReport\(prompt\)/u);
+	assert.match(guardBlock, /strongestGuardRisk\(\s*report\.risk/u);
+	assert.match(guardBlock, /taskInput\.intentRiskHint/u);
 	assert.match(
 		guardBlock,
-		/report\.risk === "high" \|\| report\.risk === "blocker"/u,
+		/guardRisk === "high" \|\| guardRisk === "blocker"/u,
 	);
 	assert.match(guardBlock, /guardStatus === "needs_confirmation"/u);
 	assert.match(guardBlock, /markNeedsConfirmation/u);

@@ -6,6 +6,13 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+	classifyIntentWithContext,
+	type IntentAction,
+	type IntentConcept,
+	type IntentKind,
+	type IntentRiskHint,
+} from "./human-intent.js";
 import type { ProjectPreflightRisk } from "./project-preflight.js";
 import { analyzeUserSignal } from "./user-signal.js";
 
@@ -31,6 +38,12 @@ export type StructuredTask = {
 	guardRisk?: ProjectPreflightRisk;
 	guardStatus?: StructuredTaskGuardStatus;
 	guardReason?: string;
+	intentKind?: IntentKind;
+	intentAction?: IntentAction;
+	intentConcepts?: IntentConcept[];
+	intentRiskHint?: IntentRiskHint;
+	intentConfidence?: string;
+	intentEvidence?: string[];
 };
 
 export type StructuredTaskInput = {
@@ -40,6 +53,12 @@ export type StructuredTaskInput = {
 	emotion?: string;
 	source?: string;
 	projectId?: string;
+	intentKind?: IntentKind;
+	intentAction?: IntentAction;
+	intentConcepts?: IntentConcept[];
+	intentRiskHint?: IntentRiskHint;
+	intentConfidence?: string;
+	intentEvidence?: string[];
 };
 
 export type StructuredTaskQueueOptions = {
@@ -80,6 +99,18 @@ export class StructuredTaskQueue {
 			...(input.emotion ? { emotion: input.emotion } : {}),
 			...(input.source ? { source: input.source } : {}),
 			...(input.projectId ? { projectId: input.projectId } : {}),
+			...(input.intentKind ? { intentKind: input.intentKind } : {}),
+			...(input.intentAction ? { intentAction: input.intentAction } : {}),
+			...(input.intentConcepts?.length
+				? { intentConcepts: input.intentConcepts }
+				: {}),
+			...(input.intentRiskHint ? { intentRiskHint: input.intentRiskHint } : {}),
+			...(input.intentConfidence
+				? { intentConfidence: input.intentConfidence }
+				: {}),
+			...(input.intentEvidence?.length
+				? { intentEvidence: input.intentEvidence }
+				: {}),
 		};
 		this.tasks.push(task);
 		this.persist();
@@ -288,11 +319,19 @@ export function structuredTaskInputForText(
 	} = {},
 ): StructuredTaskInput {
 	const signal = analyzeStructuredTaskSignal(text, options.analyzer);
+	const category = options.category?.trim() || structuredTaskCategory(text);
+	const intent = classifyIntentWithContext(text, { taskCategory: category });
 	return {
 		text,
-		category: options.category?.trim() || structuredTaskCategory(text),
+		category,
 		priority: signal.emotion === "neutral" ? 3 : signal.urgency,
 		emotion: signal.emotion,
+		intentKind: intent.kind,
+		intentAction: intent.action,
+		intentConcepts: intent.concepts,
+		intentRiskHint: intent.riskHint,
+		intentConfidence: intent.confidence,
+		intentEvidence: intent.evidence,
 		...(options.source ? { source: options.source } : {}),
 		...(options.projectId ? { projectId: options.projectId } : {}),
 	};
@@ -304,6 +343,10 @@ export function formatStructuredTaskQueueDetail(
 	if (!tasks.length) return "Cola estructurada vacía.";
 	return `Cola estructurada (${tasks.length}):\n\n${tasks
 		.map((task) => {
+			const primaryConcept = primaryIntentConcept(task.intentConcepts);
+			const intent = task.intentKind
+				? ` | intent: ${task.intentKind}/${primaryConcept}/${task.intentRiskHint ?? "low"}`
+				: "";
 			const guard = task.guardStatus
 				? ` | guard: ${task.guardStatus}${task.guardRisk ? `/${task.guardRisk}` : ""}`
 				: "";
@@ -311,9 +354,17 @@ export function formatStructuredTaskQueueDetail(
 				task.guardStatus === "needs_confirmation"
 					? `\nAprobar: /queue_approve ${task.id}\nRechazar: /queue_reject ${task.id}`
 					: "";
-			return `${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${guard} | ${task.createdAt}\n${summarizeTaskText(task.text)}${approvalHint}`;
+			return `${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${intent}${guard} | ${task.createdAt}\n${summarizeTaskText(task.text)}${approvalHint}`;
 		})
 		.join("\n\n")}`;
+}
+
+function primaryIntentConcept(concepts: string[] | undefined): string {
+	return (
+		concepts?.find((concept) => concept !== "task" && concept !== "queue") ??
+		concepts?.[0] ??
+		"unknown"
+	);
 }
 
 function summarizeTaskText(text: string): string {

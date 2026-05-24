@@ -503,8 +503,39 @@ test("createCliTask active bloquea login high con confirmación", async () => {
 		assert.equal(task.guardStatus, "needs_confirmation");
 		assert.equal(task.guardRisk, "high");
 		assert.match(formatted, /Tarea pausada: requiere confirmación humana/u);
+		assert.match(formatted, /Intención:/u);
+		assert.match(formatted, /task\/auth\/high/u);
 		assert.match(formatted, /idu-pi idu-queue-approve/u);
 		assert.match(formatted, /idu-pi idu-queue-reject/u);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("createCliTask active usa intención humana aunque preflight sea low", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-cli-task-intent-"));
+	try {
+		const workspaceRoot = join(root, "workspace");
+		configureIduSessionStore({ workspaceRoot });
+		activateIduSession("pi-telegram-bridge");
+		const task = createCliTask("bug", "borrar base de datos y schema", {
+			projectId: "pi-telegram-bridge",
+			structuredTaskQueue: new StructuredTaskQueue({ workspaceRoot }),
+			labDbRepository: new LabDbRepository(
+				join(workspaceRoot, "reports", "lab.db"),
+			),
+			preflight: (request) => ({
+				...fakePreflight(request.replace(/login/gu, "")),
+				risk: "low",
+				okToProceed: true,
+				requiresHumanConfirmation: false,
+			}),
+		});
+
+		assert.equal(task.intentRiskHint, "blocker");
+		assert.equal(task.guardStatus, "needs_confirmation");
+		assert.equal(task.guardRisk, "blocker");
+		assert.match(task.guardReason ?? "", /intent blocker/u);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
