@@ -153,6 +153,7 @@ const TYPO_REPLACEMENTS: Array<[RegExp, string]> = [
 	[/\bsec?ion\b/gu, "sesion"],
 	[/\bsession\b/gu, "session"],
 	[/\bsegimos\b/gu, "seguimos"],
+	[/\bnuevamnet\b/gu, "nuevamente"],
 	[/\bmirda\b/gu, "mierda"],
 	[/\bcontrasena\b/gu, "contraseña"],
 ];

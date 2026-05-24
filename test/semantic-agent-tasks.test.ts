@@ -192,6 +192,128 @@ test("criticalBugs y sugerencias generan categorías y prioridades esperadas", (
 	}
 });
 
+test("buildSemanticAgentTaskPlan groups noisy findings by semantic domain", () => {
+	const root = tempRoot();
+	try {
+		writeDraft(root, {
+			criticalBugs: [
+				{
+					title: "First code bug",
+					severity: "critical",
+					evidence: "one failing test",
+				},
+				{
+					title: "Second code bug",
+					severity: "high",
+					evidence: "another failing test",
+				},
+				{ title: "Third code bug", severity: "high", evidence: "worker error" },
+			],
+			suggestedAgentTasks: [
+				"Revisar calidad de código",
+				"Revisar otro bug de código",
+			],
+		});
+		const plan = buildSemanticAgentTaskPlan("latest", join(root, "reports"));
+		const codeQuality = plan.candidates.filter(
+			(candidate) => candidate.type === "code_quality",
+		);
+
+		assert.equal(codeQuality.length, 1);
+		assert.match(codeQuality[0]?.text ?? "", /Hallazgos agrupados: 5/u);
+		assert.match(codeQuality[0]?.text ?? "", /Top 3 ejemplos:/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("buildSemanticAgentTaskPlan preserves same-domain evidence before grouping", () => {
+	const root = tempRoot();
+	try {
+		writeDraft(root, {
+			criticalBugs: [
+				{
+					title: "Database schema drift",
+					severity: "high",
+					evidence: "migration mismatch in users table",
+				},
+				{
+					title: "Database backup failure",
+					severity: "critical",
+					evidence: "sqlite backup failed overnight",
+				},
+			],
+			suggestedAgentTasks: [],
+			suggestedRuleUpdates: [],
+			suggestedSkillUpdates: [],
+			architecturalRisks: [],
+			classifierQualityReview: {
+				emotionCorrect: "ok",
+				categoryCorrect: "ok",
+				priorityCorrect: "ok",
+				intentCorrect: "ok",
+				guardrailCorrect: "ok",
+				falsePositives: [],
+				falseNegatives: [],
+				errorPatterns: [],
+				recommendedRules: [],
+			},
+		});
+		const plan = buildSemanticAgentTaskPlan("latest", join(root, "reports"));
+		const database = findCandidate(plan.candidates, "database");
+
+		assert.match(database.text, /Hallazgos agrupados: 2/u);
+		assert.match(database.text, /migration mismatch in users table/u);
+		assert.match(database.text, /sqlite backup failed overnight/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("createSemanticAgentTasks creates at most seven grouped tasks by default", () => {
+	const root = tempRoot();
+	try {
+		writeDraft(root, {
+			criticalBugs: [
+				{ title: "Auth outage", severity: "critical", evidence: "login down" },
+				{
+					title: "Database corrupt",
+					severity: "critical",
+					evidence: "db broken",
+				},
+				{ title: "Code bug one", severity: "high", evidence: "test fail" },
+				{ title: "UI broken", severity: "high", evidence: "button fail" },
+				{ title: "Perf slow", severity: "high", evidence: "slow response" },
+			],
+			suggestedAgentTasks: [
+				"Revisar seguridad auth/login",
+				"Revisar arquitectura de DB",
+				"Revisar classifier de intención humana",
+				"Revisar Project Core vs código real",
+				"Revisar performance",
+				"Documentar runbook",
+				"Revisar UX",
+				"Revisar calidad de código",
+			],
+			suggestedSkillUpdates: ["Limpiar skill obsoleta"],
+		});
+		const queue = new StructuredTaskQueue({
+			filePath: join(root, "tasks.jsonl"),
+		});
+		const result = createSemanticAgentTasks({
+			pathOrLatest: "latest",
+			reportsPath: join(root, "reports"),
+			queue,
+		});
+
+		assert.ok(result.plan.candidates.length <= 7);
+		assert.equal(result.created.length, result.plan.candidates.length);
+		assert.ok(result.created.length <= 7);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("createSemanticAgentTasks crea StructuredTask review source semantic-audit y deduplica", () => {
 	const root = tempRoot();
 	try {

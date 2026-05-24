@@ -71,6 +71,7 @@ test("classifyIntentDeterministic detects database failure bug reports", () => {
 		"arreglar db",
 		"seguimos con fallas en base de datos",
 		"segimos con fallas en las bases de datos debemos arreglarla",
+		"nuevamnet a fallado la base de datos",
 		"database keeps failing",
 	]) {
 		const result = classifyIntentDeterministic(text);
@@ -85,6 +86,18 @@ test("classifyIntentDeterministic detects database failure bug reports", () => {
 		assert.equal(result.concepts.includes("database"), true);
 		assert.equal(result.riskHints.includes("db_change"), true);
 	}
+});
+
+test("classifyIntentDeterministic normalizes nuevamnet as recurring database failure", () => {
+	const result = classifyIntentDeterministic(
+		"nuevamnet a fallado la base de datos",
+	);
+
+	assert.match(result.normalizedText, /nuevamente/u);
+	assert.equal(result.intent, "bug_report");
+	assert.equal(result.riskHint, "high");
+	assert.equal(result.concepts.includes("database"), true);
+	assert.equal(result.concepts.includes("recurring_failure"), true);
 });
 
 test("classifyIntentDeterministic separates approvals, rejections, status, and questions", () => {

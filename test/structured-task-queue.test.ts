@@ -197,6 +197,23 @@ test("structuredTaskPriority can use analyzeUserSignal urgency", () => {
 	assert.equal(structuredTaskPriority("Gracias, perfecto"), 2);
 });
 
+test("structuredTaskInputForText escalates recurring high-risk database bugs", () => {
+	const task = structuredTaskInputForText(
+		"Bug task. Symptom/context: nuevamnet a fallado la base de datos",
+		{
+			category: "bug",
+			originalText: "nuevamnet a fallado la base de datos",
+		},
+	);
+
+	assert.equal(task.intentKind, "bug_report");
+	assert.equal(task.intentRiskHint, "high");
+	assert.equal(task.intentConcepts?.includes("database"), true);
+	assert.equal(task.intentConcepts?.includes("recurring_failure"), true);
+	assert.equal(task.priority, 5);
+	assert.equal(task.emotion, "molesto");
+});
+
 test("structuredTaskPriority treats neutral as normal priority", () => {
 	assert.equal(structuredTaskPriority("revisar estado"), 3);
 });
@@ -262,9 +279,10 @@ test("formatStructuredTaskQueueDetail shows structured task fields", async () =>
 		const detail = formatStructuredTaskQueueDetail(queue.listTasks());
 
 		assert.match(detail, /Cola estructurada \(1\)/u);
-		assert.match(detail, /task-/u);
+		assert.match(detail, /T1 /u);
+		assert.match(detail, /task-[a-z0-9-]{16,}/u);
 		assert.match(detail, /pending/u);
-		assert.match(detail, /P3/u);
+		assert.match(detail, /P5/u);
 		assert.match(detail, /bug/u);
 		assert.match(detail, /auth/u);
 		assert.match(detail, /intent: bug_report\/auth\/high/u);
@@ -294,7 +312,11 @@ test("StructuredTaskQueue stores and formats guard state", async () => {
 			formatStructuredTaskQueueDetail([guarded]),
 			/guard: needs_confirmation\/high/u,
 		);
-		assert.match(formatStructuredTaskQueueDetail([guarded]), /queue_approve/u);
+		const detail = formatStructuredTaskQueueDetail([guarded]);
+		assert.match(detail, /queue_approve/u);
+		assert.match(detail, new RegExp(`queue_approve ${guarded.id}`, "u"));
+		assert.match(detail, /queue_reject/u);
+		assert.match(detail, new RegExp(`queue_reject ${guarded.id}`, "u"));
 	});
 });
 

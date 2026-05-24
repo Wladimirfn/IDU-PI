@@ -14,7 +14,7 @@ import {
 	type IntentRiskHint,
 } from "./human-intent.js";
 import type { ProjectPreflightRisk } from "./project-preflight.js";
-import { analyzeUserSignal } from "./user-signal.js";
+import { analyzeUserSignal, type UserEmotion } from "./user-signal.js";
 
 export type StructuredTaskStatus = "pending" | "running" | "done" | "failed";
 export type StructuredTaskGuardStatus =
@@ -255,7 +255,9 @@ export class StructuredTaskQueue {
 
 	private nextId(): string {
 		this.sequence += 1;
-		return `task-${this.now().getTime().toString(36)}-${this.sequence}`;
+		const timestamp = this.now().getTime().toString(36).padStart(11, "0");
+		const sequence = this.sequence.toString(36).padStart(4, "0");
+		return `task-${timestamp}-${sequence}`;
 	}
 
 	private load(): StructuredTask[] {
@@ -339,12 +341,14 @@ export function structuredTaskInputForText(
 			: classifyHumanIntentWithContext(analysisText, {
 					taskCategory: category,
 				});
+	const priority = priorityForIntentAndSignal(intent, signal.urgency);
+	const emotion = emotionForIntentAndSignal(intent.riskHint, signal.emotion);
 	return {
 		text,
 		...(options.originalText ? { originalText: options.originalText } : {}),
 		category,
-		priority: signal.emotion === "neutral" ? 3 : signal.urgency,
-		emotion: signal.emotion,
+		priority,
+		emotion,
 		intentKind: intent.kind,
 		intentAction: intent.action,
 		intentConcepts: intent.concepts,
@@ -369,7 +373,7 @@ export function formatStructuredTaskQueueDetail(
 	const rejectCommand =
 		options.rejectCommand ?? ((id: string) => `/queue_reject ${id}`);
 	return `Cola estructurada (${tasks.length}):\n\n${tasks
-		.map((task) => {
+		.map((task, index) => {
 			const primaryConcept = primaryIntentConcept(task.intentConcepts);
 			const intent = task.intentKind
 				? ` | intent: ${task.intentKind}/${primaryConcept}/${task.intentRiskHint ?? "low"}`
@@ -381,9 +385,44 @@ export function formatStructuredTaskQueueDetail(
 				task.guardStatus === "needs_confirmation"
 					? `\nAprobar: ${approveCommand(task.id)}\nRechazar: ${rejectCommand(task.id)}`
 					: "";
-			return `${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${intent}${guard} | ${task.createdAt}\n${summarizeTaskText(task.originalText ?? task.text)}${approvalHint}`;
+			return `T${index + 1} ${task.id} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${intent}${guard} | ${task.createdAt}\n${summarizeTaskText(task.originalText ?? task.text)}${approvalHint}`;
 		})
 		.join("\n\n")}`;
+}
+
+function priorityForIntentAndSignal(
+	intent: ReturnType<typeof classifyHumanIntentWithContext>,
+	signalUrgency: number,
+): number {
+	const signalPriority =
+		signalUrgency >= 1 && signalUrgency <= 5 ? signalUrgency : 3;
+	const riskPriority = (() => {
+		if (intent.riskHint === "blocker") return 5;
+		if (
+			intent.riskHint === "high" &&
+			intent.intent === "bug_report" &&
+			intent.concepts.some((concept) =>
+				["auth", "database", "schema", "recurring_failure"].includes(concept),
+			)
+		) {
+			return 5;
+		}
+		if (intent.riskHint === "high" && intent.intent === "bug_report") return 4;
+		if (intent.riskHint === "high") return 4;
+		if (intent.riskHint === "medium") return 3;
+		return 3;
+	})();
+	return Math.max(signalPriority, riskPriority);
+}
+
+function emotionForIntentAndSignal(
+	riskHint: IntentRiskHint,
+	signalEmotion: UserEmotion,
+): UserEmotion {
+	if (signalEmotion !== "neutral") return signalEmotion;
+	return riskHint === "high" || riskHint === "blocker"
+		? "frustrado"
+		: "neutral";
 }
 
 function primaryIntentConcept(concepts: string[] | undefined): string {

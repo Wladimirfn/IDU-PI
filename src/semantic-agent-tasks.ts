@@ -13,14 +13,11 @@ import type {
 export type SemanticAgentTaskType =
 	| "security"
 	| "database"
+	| "classifier_review"
 	| "architecture"
 	| "code_quality"
 	| "ui_ux"
-	| "performance"
-	| "classifier_review"
-	| "skill_review"
-	| "docs"
-	| "general_review";
+	| "skill_review";
 
 export type SemanticAgentTaskCandidate = {
 	type: SemanticAgentTaskType;
@@ -59,6 +56,7 @@ export type SemanticAgentTaskCreationResult = {
 };
 
 const MAX_TEXT = 300;
+const DEFAULT_MAX_TASKS_PER_CYCLE = 7;
 
 export function buildSemanticAgentTaskPlan(
 	pathOrLatest: string,
@@ -75,7 +73,7 @@ export function buildSemanticAgentTaskPlan(
 			candidates: [],
 		};
 	}
-	const candidates = dedupeCandidates(
+	const candidates = groupCandidatesByDomain(
 		candidatesFromDraft(review.draft, review),
 	);
 	return {
@@ -100,7 +98,10 @@ export function createSemanticAgentTasks(
 	if (!plan.validDraft) return { plan, created, skippedDuplicates };
 	const projectId = input.projectId ?? plan.projectId;
 	const existing = input.queue.listTasks();
-	for (const candidate of plan.candidates) {
+	for (const candidate of plan.candidates.slice(
+		0,
+		DEFAULT_MAX_TASKS_PER_CYCLE,
+	)) {
 		if (hasExistingDedupe(existing, candidate.dedupeKey, projectId)) {
 			skippedDuplicates.push(candidate);
 			continue;
@@ -291,12 +292,14 @@ function candidate(input: {
 	reason: string;
 	recommendation: string;
 	evidence: string;
+	dedupeKey?: string;
 }): SemanticAgentTaskCandidate {
 	const title = short(input.title);
 	const reason = short(input.reason);
 	const recommendation = short(input.recommendation);
 	const evidence = short(input.evidence);
-	const dedupeKey = dedupeKeyFor(input.type, title, evidence);
+	const dedupeKey =
+		input.dedupeKey ?? dedupeKeyFor(input.type, title, evidence);
 	const queuePriority = queuePriorityFor(input.priority);
 	const text = [
 		`Revisión SG5 semantic-audit — ${input.type}: ${title}`,
@@ -340,7 +343,7 @@ function taskInputForCandidate(
 
 function classifyType(
 	text: string,
-	fallback: SemanticAgentTaskType = "general_review",
+	fallback: SemanticAgentTaskType = "code_quality",
 ): SemanticAgentTaskType {
 	if (
 		/auth|login|session|security|seguridad|token|credential|permiso/iu.test(
@@ -373,11 +376,13 @@ function classifyType(
 	if (/skill|habilidad|cleanup|limpiar|obsolet|noise|ruido/iu.test(text)) {
 		return "skill_review";
 	}
-	if (/doc|readme|document/iu.test(text)) return "docs";
 	if (/ui|ux|interfaz|pantalla|button|form/iu.test(text)) return "ui_ux";
-	if (/performance|perf|slow|latenc|rendimiento/iu.test(text))
-		return "performance";
-	if (/bug|test|fail|error|c[oó]digo|code/iu.test(text)) return "code_quality";
+	if (
+		/doc|readme|document|performance|perf|slow|latenc|rendimiento|bug|test|fail|error|c[oó]digo|code/iu.test(
+			text,
+		)
+	)
+		return "code_quality";
 	return fallback;
 }
 
@@ -393,7 +398,6 @@ function priorityFor(type: SemanticAgentTaskType, text: string): number {
 	if (type === "classifier_review") return 4;
 	if (type === "architecture") return 4;
 	if (type === "skill_review") return 3;
-	if (type === "docs") return 2;
 	return 3;
 }
 
@@ -409,30 +413,64 @@ function recommendationFor(type: SemanticAgentTaskType): string {
 			return "Revisar reglas deterministic human-intent y falsos positivos/negativos.";
 		case "skill_review":
 			return "Revisar skills sugeridas; no modificar automáticamente.";
-		case "docs":
-			return "Revisar documentación o guías sin cambiar comportamiento.";
 		case "ui_ux":
 			return "Revisar flujo/interfaz con foco en UX y seguridad.";
-		case "performance":
-			return "Revisar cuello de botella con medición antes/después.";
 		case "code_quality":
-			return "Revisar bug/calidad de código con pruebas antes de aplicar cambios.";
-		case "general_review":
-			return "Revisar evidencia y decidir si requiere AgentLab manual.";
+			return "Revisar bug, documentación, performance o calidad de código con pruebas antes de aplicar cambios.";
 	}
 }
 
-function dedupeCandidates(
+function groupCandidatesByDomain(
 	candidates: SemanticAgentTaskCandidate[],
 ): SemanticAgentTaskCandidate[] {
-	const seen = new Set<string>();
-	const result: SemanticAgentTaskCandidate[] = [];
+	const groups = new Map<SemanticAgentTaskType, SemanticAgentTaskCandidate[]>();
 	for (const item of candidates) {
-		if (seen.has(item.dedupeKey)) continue;
-		seen.add(item.dedupeKey);
-		result.push(item);
+		const group = groups.get(item.type) ?? [];
+		group.push(item);
+		groups.set(item.type, group);
 	}
-	return result;
+	return [...groups.entries()]
+		.map(([type, items]) => groupedCandidate(type, items))
+		.sort((left, right) =>
+			left.queuePriority === right.queuePriority
+				? left.type.localeCompare(right.type)
+				: left.queuePriority - right.queuePriority,
+		);
+}
+
+function groupedCandidate(
+	type: SemanticAgentTaskType,
+	items: SemanticAgentTaskCandidate[],
+): SemanticAgentTaskCandidate {
+	const sorted = [...items].sort(
+		(left, right) => right.priority - left.priority,
+	);
+	const top = sorted[0] ?? items[0];
+	const priority = Math.max(...items.map((item) => item.priority));
+	const topExamples = sorted
+		.slice(0, 3)
+		.map((item, index) => `${index + 1}) ${item.title}`)
+		.join("; ");
+	const evidence = short(
+		items
+			.map((item) => item.evidence)
+			.filter(Boolean)
+			.slice(0, 5)
+			.join("; "),
+	);
+	return candidate({
+		type,
+		title: `${top.title} (${items.length} hallazgo${items.length === 1 ? "" : "s"})`,
+		reason: `Hallazgos agrupados: ${items.length}. Top 3 ejemplos: ${topExamples}`,
+		recommendation: top.recommendation || recommendationFor(type),
+		evidence: `Resumen: ${evidence}`,
+		priority,
+		dedupeKey: dedupeKeyFor(
+			type,
+			items.map((item) => item.title).join(" "),
+			evidence,
+		),
+	});
 }
 
 function hasExistingDedupe(

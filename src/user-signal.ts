@@ -44,7 +44,14 @@ const RULES: EmotionRule[] = [
 	{
 		emotion: "molesto",
 		urgency: 4,
-		keywords: ["por la mierda", "por la mirda", "maldita", "harto", "harta"],
+		keywords: [
+			"por la mierda",
+			"por la mirda",
+			"mierda",
+			"maldita",
+			"harto",
+			"harta",
+		],
 	},
 	{
 		emotion: "molesto",
@@ -52,6 +59,7 @@ const RULES: EmotionRule[] = [
 		keywords: [
 			"otra vez",
 			"nuevamente",
+			"nuevamnet",
 			"de nuevo",
 			"sigue fallando",
 			"volvió a fallar",
@@ -68,6 +76,11 @@ const RULES: EmotionRule[] = [
 		emotion: "cansado",
 		urgency: 3,
 		keywords: ["cansado", "agotado"],
+	},
+	{
+		emotion: "frustrado",
+		urgency: 4,
+		keywords: ["frustrado", "frustrada", "frustrating", "frustrated"],
 	},
 	{
 		emotion: "confundido",
