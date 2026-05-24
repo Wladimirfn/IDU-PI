@@ -175,14 +175,14 @@ export default function (pi: ExtensionAPI) {
 		description: "Crear tarea estructurada Idu-pi desde Pi CLI",
 		cliArgs: (args) => ["task", ...args.split(/\s+/u).filter(Boolean)],
 		requiresArgs: true,
-		usage: "/idu-task bug|feature|refactor|docs <detalle>",
+		usage: "/idu-task [bug|feature|refactor|docs] <detalle>",
 	});
 
 	registerIduCommand("task", {
 		description: "Alias legacy para /idu-task",
 		cliArgs: (args) => ["task", ...args.split(/\s+/u).filter(Boolean)],
 		requiresArgs: true,
-		usage: "/task bug|feature|refactor|docs <detalle>",
+		usage: "/task [bug|feature|refactor|docs] <detalle>",
 	});
 
 	registerIduCommand("idu-queue-detail", {

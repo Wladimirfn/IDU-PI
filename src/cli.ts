@@ -84,6 +84,7 @@ import {
 import {
 	buildTaskPrompt,
 	formatTaskTemplateHelp,
+	inferTaskTemplateKind,
 	type TaskTemplateKind,
 } from "./task-templates.js";
 import { existsSync } from "node:fs";
@@ -192,7 +193,10 @@ export function createCliRuntime(): CliRuntime {
 			}),
 		formatTask: formatCliTaskResult,
 		queueDetail: () =>
-			formatStructuredTaskQueueDetail(structuredTaskQueue.listTasks()),
+			formatStructuredTaskQueueDetail(structuredTaskQueue.listTasks(), {
+				approveCommand: (id) => `idu-pi idu-queue-approve ${id}`,
+				rejectCommand: (id) => `idu-pi idu-queue-reject ${id}`,
+			}),
 		queueClearStructured: () => structuredTaskQueue.clearPersisted(),
 		queueApprove: (id) => approveStructuredTaskById(structuredTaskQueue, id),
 		queueReject: (id) => rejectStructuredTaskById(structuredTaskQueue, id),
@@ -282,9 +286,19 @@ export async function runCliCommand(
 				);
 			case "idu-task":
 			case "task": {
-				const kind = rest[0] as TaskTemplateKind | undefined;
-				if (!kind) return ok(formatTaskTemplateHelp());
-				const details = rest.slice(1).join(" ").trim();
+				if (!rest.length) return ok(formatTaskTemplateHelp());
+				const first = rest[0] as TaskTemplateKind;
+				const knownKinds: TaskTemplateKind[] = [
+					"bug",
+					"feature",
+					"refactor",
+					"docs",
+				];
+				const hasExplicitKind = knownKinds.includes(first);
+				const details = (hasExplicitKind ? rest.slice(1) : rest)
+					.join(" ")
+					.trim();
+				const kind = hasExplicitKind ? first : inferTaskTemplateKind(details);
 				const task = activeRuntime.createTask(kind, details);
 				return ok(activeRuntime.formatTask(task));
 			}
@@ -648,7 +662,7 @@ export function helpText(): string {
 		"  idu-pi lab-review-plan postflight",
 		"  idu-pi idu-semantic-audit-status (Telegram: /semantic_audit_status)",
 		"  idu-pi idu-semantic-audit-run    (Telegram: /semantic_audit_run)",
-		'  idu-pi idu-task bug "detalle"    (Telegram: /task bug <detalle>)',
+		'  idu-pi idu-task [tipo] "detalle" (Telegram: /task bug <detalle>)',
 		"  idu-pi idu-queue-detail          (Telegram: /queue_detail)",
 		"  idu-pi idu-queue-clear-structured (Telegram: /queue_clear_structured)",
 		"  idu-pi idu-queue-approve <id>    (Telegram: /queue_approve <id>)",

@@ -48,6 +48,22 @@ test("classifyIntentDeterministic detects destructive database blocker intent", 
 	assert.equal(result.concepts.includes("deployment"), true);
 });
 
+test("classifyIntentDeterministic detects database failure bug reports", () => {
+	for (const text of [
+		"fallas en las bases de datos debemos arreglarla",
+		"arreglar db",
+		"seguimos con fallas en base de datos",
+	]) {
+		const result = classifyIntentDeterministic(text);
+
+		assert.equal(result.kind, "bug_report");
+		assert.equal(result.action, "require_confirmation");
+		assert.equal(result.riskHint, "high");
+		assert.equal(result.requiresHumanConfirmation, true);
+		assert.equal(result.concepts.includes("database"), true);
+	}
+});
+
 test("classifyIntentDeterministic separates approvals, rejections, status, and questions", () => {
 	assert.equal(
 		classifyIntentDeterministic("aprobá la tarea task-123").kind,

@@ -28,6 +28,7 @@ import type {
 	SemanticAuditStatusReport,
 } from "../src/semantic-audit-command.js";
 import {
+	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
 	type StructuredTask,
 } from "../src/structured-task-queue.js";
@@ -462,6 +463,83 @@ test("CLI task bug encola tarea sin AgentLabs", async () => {
 	});
 });
 
+test("CLI idu-task sin argumentos muestra ayuda sin fallar", async () => {
+	await withRuntime(async (runtime) => {
+		let createTaskCalled = false;
+		const result = await runCliCommand(["idu-task"], {
+			...runtime,
+			createTask: (kind, details) => {
+				createTaskCalled = true;
+				return runtime.createTask(kind, details);
+			},
+		});
+
+		assert.equal(result.exitCode, 0);
+		assert.equal(createTaskCalled, false);
+		assert.match(result.stdout, /Plantillas de tarea/u);
+		assert.equal(result.stderr, "");
+	});
+});
+
+test("CLI idu-task infiere bug de falla en base de datos", async () => {
+	await withRuntime(async (runtime) => {
+		let capturedKind = "";
+		let capturedDetails = "";
+		const result = await runCliCommand(
+			[
+				"idu-task",
+				"fallas",
+				"en",
+				"las",
+				"bases",
+				"de",
+				"datos",
+				"debemos",
+				"arreglarla",
+			],
+			{
+				...runtime,
+				createTask: (kind, details) => {
+					capturedKind = kind;
+					capturedDetails = details;
+					return fakeTask();
+				},
+			},
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.equal(capturedKind, "bug");
+		assert.equal(
+			capturedDetails,
+			"fallas en las bases de datos debemos arreglarla",
+		);
+		assert.match(result.stdout, /Idu-pi Task/u);
+	});
+});
+
+test("CLI idu-task infiere bug desde texto libre", async () => {
+	await withRuntime(async (runtime) => {
+		let capturedKind = "";
+		let capturedDetails = "";
+		const result = await runCliCommand(
+			["idu-task", "fallo", "nuevamente", "el", "login"],
+			{
+				...runtime,
+				createTask: (kind, details) => {
+					capturedKind = kind;
+					capturedDetails = details;
+					return fakeTask();
+				},
+			},
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.equal(capturedKind, "bug");
+		assert.equal(capturedDetails, "fallo nuevamente el login");
+		assert.match(result.stdout, /Idu-pi Task/u);
+	});
+});
+
 test("createCliTask inactive encola sin needs_confirmation", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-cli-task-inactive-"));
 	try {
@@ -547,6 +625,32 @@ test("CLI queue-detail muestra cola estructurada", async () => {
 
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Cola estructurada/u);
+	});
+});
+
+test("CLI queue-detail muestra comandos CLI para aprobación", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["idu-queue-detail"], {
+			...runtime,
+			queueDetail: () =>
+				formatStructuredTaskQueueDetail(
+					[
+						{
+							...fakeTask(),
+							guardStatus: "needs_confirmation",
+							guardRisk: "high",
+						},
+					],
+					{
+						approveCommand: (id) => `idu-pi idu-queue-approve ${id}`,
+						rejectCommand: (id) => `idu-pi idu-queue-reject ${id}`,
+					},
+				),
+		});
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Aprobar: idu-pi idu-queue-approve task-1/u);
+		assert.match(result.stdout, /Rechazar: idu-pi idu-queue-reject task-1/u);
 	});
 });
 

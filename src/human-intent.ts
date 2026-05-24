@@ -7,6 +7,7 @@ import {
 export type IntentConcept =
 	| "auth"
 	| "database"
+	| "schema"
 	| "ui"
 	| "docs"
 	| "tests"
@@ -24,6 +25,7 @@ export type IntentRiskHint = "low" | "medium" | "high" | "blocker";
 
 export type IntentKind =
 	| "task"
+	| "bug_report"
 	| "question"
 	| "status"
 	| "approval"
@@ -92,7 +94,20 @@ const CONCEPT_RULES: IntentRule[] = [
 	{
 		concept: "database",
 		riskHint: "high",
-		terms: ["base de datos", "database", "db", "sqlite", "schema", "tabla"],
+		terms: [
+			"base de datos",
+			"bases de datos",
+			"database",
+			"db",
+			"sqlite",
+			"tabla",
+			"tablas",
+		],
+	},
+	{
+		concept: "schema",
+		riskHint: "high",
+		terms: ["schema", "esquema", "migration", "migracion"],
 	},
 	{
 		concept: "deployment",
@@ -144,6 +159,21 @@ const CONCEPT_RULES: IntentRule[] = [
 		riskHint: "medium",
 		terms: ["review", "revisar", "auditar", "chequear"],
 	},
+];
+
+const BUG_TERMS = [
+	"falla",
+	"fallas",
+	"fallo",
+	"no funciona",
+	"error",
+	"rompe",
+	"rompio",
+	"roto",
+	"arreglar",
+	"arregla",
+	"resolver",
+	"problema",
 ];
 
 const DESTRUCTIVE_TERMS = [
@@ -234,6 +264,15 @@ export function classifyIntentDeterministic(
 		riskHint = maxRisk(riskHint, rule.riskHint);
 	}
 
+	const bugMatches = BUG_TERMS.filter((term) =>
+		includesTerm(normalizedText, term),
+	);
+	if (bugMatches.length > 0) evidence.push(...bugMatches);
+	const databaseBug =
+		bugMatches.length > 0 &&
+		concepts.some((concept) => concept === "database" || concept === "schema");
+	if (databaseBug) riskHint = maxRisk(riskHint, "high");
+
 	const destructiveMatches = DESTRUCTIVE_TERMS.filter((term) =>
 		includesTerm(normalizedText, term),
 	);
@@ -250,7 +289,9 @@ export function classifyIntentDeterministic(
 		}
 	}
 
-	const kind = detectKind(normalizedText, concepts);
+	const kind = databaseBug
+		? "bug_report"
+		: detectKind(normalizedText, concepts);
 	const requiresHumanConfirmation =
 		riskHint === "high" || riskHint === "blocker";
 	return {
@@ -348,7 +389,7 @@ function actionFor(
 	kind: IntentKind,
 	requiresHumanConfirmation: boolean,
 ): IntentAction {
-	if (requiresHumanConfirmation && kind === "task")
+	if (requiresHumanConfirmation && (kind === "task" || kind === "bug_report"))
 		return "require_confirmation";
 	switch (kind) {
 		case "approval":
@@ -366,6 +407,7 @@ function actionFor(
 		case "status":
 			return "inspect_status";
 		case "task":
+		case "bug_report":
 			return "enqueue";
 		case "unknown":
 			return "none";

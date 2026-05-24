@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
 	buildTaskPrompt,
 	formatTaskTemplateHelp,
+	inferTaskTemplateKind,
 	parseTaskTemplateCommand,
 } from "../src/task-templates.js";
 
@@ -16,6 +17,18 @@ test("parseTaskTemplateCommand extracts kind and details", () => {
 		details: "",
 	});
 	assert.equal(parseTaskTemplateCommand("/task nope"), undefined);
+});
+
+test("inferTaskTemplateKind treats database failures as bugs", () => {
+	assert.equal(
+		inferTaskTemplateKind("fallas en las bases de datos debemos arreglarla"),
+		"bug",
+	);
+	assert.equal(inferTaskTemplateKind("arreglar db"), "bug");
+	assert.equal(
+		inferTaskTemplateKind("seguimos con fallas en base de datos"),
+		"bug",
+	);
 });
 
 test("buildTaskPrompt creates focused templates", () => {

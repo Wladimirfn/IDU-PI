@@ -339,8 +339,16 @@ export function structuredTaskInputForText(
 
 export function formatStructuredTaskQueueDetail(
 	tasks: StructuredTask[],
+	options: {
+		approveCommand?: (id: string) => string;
+		rejectCommand?: (id: string) => string;
+	} = {},
 ): string {
 	if (!tasks.length) return "Cola estructurada vacía.";
+	const approveCommand =
+		options.approveCommand ?? ((id: string) => `/queue_approve ${id}`);
+	const rejectCommand =
+		options.rejectCommand ?? ((id: string) => `/queue_reject ${id}`);
 	return `Cola estructurada (${tasks.length}):\n\n${tasks
 		.map((task) => {
 			const primaryConcept = primaryIntentConcept(task.intentConcepts);
@@ -352,7 +360,7 @@ export function formatStructuredTaskQueueDetail(
 				: "";
 			const approvalHint =
 				task.guardStatus === "needs_confirmation"
-					? `\nAprobar: /queue_approve ${task.id}\nRechazar: /queue_reject ${task.id}`
+					? `\nAprobar: ${approveCommand(task.id)}\nRechazar: ${rejectCommand(task.id)}`
 					: "";
 			return `${task.id.slice(0, 12)} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${intent}${guard} | ${task.createdAt}\n${summarizeTaskText(task.text)}${approvalHint}`;
 		})

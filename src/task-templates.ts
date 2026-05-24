@@ -20,6 +20,36 @@ export function parseTaskTemplateCommand(
 	};
 }
 
+export function inferTaskTemplateKind(text: string): TaskTemplateKind {
+	const normalized = text.toLocaleLowerCase("es");
+	const mentionsDatabase =
+		/\b(base de datos|bases de datos|db|database|sqlite|tabla|tablas|schema)\b/u.test(
+			normalized,
+		);
+	const mentionsFailure =
+		/\b(bug|fall[aoó]s?|falla|fallas|error|rompi[oó]|rompe|roto|no funciona|crash|problema|arreglar|resolver)\b/u.test(
+			normalized,
+		);
+	if (mentionsDatabase && mentionsFailure) return "bug";
+	if (
+		/\b(bug|fall[aoó]s?|falla|fallas|error|rompi[oó]|rompe|roto|no funciona|crash|problema|login)\b/u.test(
+			normalized,
+		)
+	)
+		return "bug";
+	if (/\b(refactor|refactorizar|reestructurar|limpiar)\b/u.test(normalized))
+		return "refactor";
+	if (/\b(readme|docs?|documentaci[oó]n|gu[ií]a)\b/u.test(normalized))
+		return "docs";
+	if (
+		/\b(feature|funcionalidad|agregar|agrega|crear|crea|implementar|implementa|nuevo|nueva)\b/u.test(
+			normalized,
+		)
+	)
+		return "feature";
+	return "feature";
+}
+
 export function formatTaskTemplateHelp(): string {
 	return `Plantillas de tarea:
 
