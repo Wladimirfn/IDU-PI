@@ -73,6 +73,21 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/semantic_audit_run"],
 	},
 	{
+		command: "semantic_compact_draft",
+		description: "Crear draft de compactación semántica",
+		help: "/semantic_compact_draft - crear borrador supervisado sin aplicar reglas ni ejecutar AgentLabs",
+		usage: ["/semantic_compact_draft"],
+	},
+	{
+		command: "semantic_compact_review",
+		description: "Revisar draft de compactación semántica",
+		help: "/semantic_compact_review [latest|ruta] - revisar borrador sin aplicar memoria ni reglas",
+		usage: [
+			"/semantic_compact_review latest",
+			"/semantic_compact_review <ruta>",
+		],
+	},
+	{
 		command: "idu_define_project",
 		description: "Definir Project Core manual",
 		help: "/idu_define_project - iniciar wizard manual para crear config/project-core.json draft",

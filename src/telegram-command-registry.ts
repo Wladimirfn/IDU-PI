@@ -14,6 +14,8 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"idu_prepare",
 	"semantic_audit_status",
 	"semantic_audit_run",
+	"semantic_compact_draft",
+	"semantic_compact_review",
 	"idu_define_project",
 	"idu_core_status",
 	"idu_research_core",

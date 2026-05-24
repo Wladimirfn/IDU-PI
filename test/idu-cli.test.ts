@@ -27,6 +27,10 @@ import type {
 	SemanticAuditRunResult,
 	SemanticAuditStatusReport,
 } from "../src/semantic-audit-command.js";
+import type {
+	SaveSemanticCompactionDraftResult,
+	SemanticCompactionReview,
+} from "../src/semantic-compaction.js";
 import {
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
@@ -161,6 +165,76 @@ function fakeSemanticAuditRun(): SemanticAuditRunResult {
 	};
 }
 
+function fakeSemanticCompactionDraft(
+	workspaceRoot: string,
+): SaveSemanticCompactionDraftResult {
+	return {
+		path: join(
+			workspaceRoot,
+			"reports",
+			"semantic-compaction-draft-20260102-030405.json",
+		),
+		prompt: "safe compaction prompt",
+		draft: {
+			generatedAt: "2026-01-02T03:04:05.000Z",
+			projectId: "pi-telegram-bridge",
+			warning: "Borrador IA. No es fuente de verdad.",
+			sourceAuditRunIds: ["audit-1"],
+			inputSummary: { criticalFindings: 1 },
+			preservedRules: ["No borrar datos"],
+			criticalBugs: [{ title: "Critical auth bug" }],
+			humanDecisions: [],
+			reusableLessons: [],
+			architecturalRisks: [],
+			classifierQualityReview: {
+				emotionCorrect: "needs_review",
+				categoryCorrect: "needs_review",
+				priorityCorrect: "needs_review",
+				intentCorrect: "needs_review",
+				guardrailCorrect: "needs_review",
+				falsePositives: [],
+				falseNegatives: [],
+				errorPatterns: ["login typo"],
+				recommendedRules: ["Si falla + db → bug/database/high"],
+			},
+			misclassifiedExamples: [],
+			suggestedRuleUpdates: ["Si falla + db → bug/database/high"],
+			suggestedSkillUpdates: [],
+			suggestedMemoryItems: [],
+			suggestedAgentTasks: ["Revisar seguridad auth/login"],
+			noiseToIgnore: [],
+			openQuestions: [],
+		},
+	};
+}
+
+function fakeSemanticCompactionReview(
+	workspaceRoot: string,
+): SemanticCompactionReview {
+	const draft = fakeSemanticCompactionDraft(workspaceRoot).draft;
+	return {
+		path: join(
+			workspaceRoot,
+			"reports",
+			"semantic-compaction-draft-20260102-030405.json",
+		),
+		validDraft: true,
+		errors: [],
+		draft,
+		hasRawOutput: false,
+		summary: {
+			preservedRules: draft.preservedRules,
+			criticalBugs: ["Critical auth bug"],
+			classifierErrors: ["login typo"],
+			suggestedRuleUpdates: draft.suggestedRuleUpdates,
+			suggestedSkillUpdates: [],
+			suggestedAgentTasks: draft.suggestedAgentTasks,
+			noiseToIgnore: [],
+			openQuestions: [],
+		},
+	};
+}
+
 function fakeTask(): StructuredTask {
 	return {
 		id: "task-1",
@@ -281,6 +355,30 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				result.status,
 				"",
 				"No usé IA, no compacté memoria, no borré datos y no ejecuté AgentLabs.",
+			].join("\n"),
+		semanticCompactionDraft: () => fakeSemanticCompactionDraft(workspaceRoot),
+		formatSemanticCompactionDraft: (result) =>
+			[
+				"Semantic Compaction Draft",
+				"",
+				"Ruta:",
+				result.path,
+				"",
+				"No apliqué reglas, no creé semantic_memory_items, no borré datos y no ejecuté AgentLabs.",
+			].join("\n"),
+		semanticCompactionReview: () => fakeSemanticCompactionReview(workspaceRoot),
+		formatSemanticCompactionReview: (review) =>
+			[
+				"Semantic Compaction Review",
+				"",
+				"Draft válido:",
+				review.validDraft ? "sí" : "no",
+				"",
+				"suggestedRuleUpdates:",
+				review.summary.suggestedRuleUpdates.join("\n"),
+				"",
+				"suggestedAgentTasks:",
+				review.summary.suggestedAgentTasks.join("\n"),
 			].join("\n"),
 		createTask: fakeTask,
 		formatTask: (task) =>
@@ -446,6 +544,31 @@ test("CLI semantic-audit-run funciona", async () => {
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Semantic Audit Run/u);
 		assert.match(result.stdout, /No usé IA/u);
+	});
+});
+
+test("CLI semantic-compact-draft funciona", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["semantic-compact-draft"], runtime);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Semantic Compaction Draft/u);
+		assert.match(result.stdout, /semantic-compaction-draft/u);
+		assert.match(result.stdout, /no ejecuté AgentLabs/u);
+	});
+});
+
+test("CLI semantic-compact-review latest funciona", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(
+			["semantic-compact-review", "latest"],
+			runtime,
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Semantic Compaction Review/u);
+		assert.match(result.stdout, /suggestedRuleUpdates/u);
+		assert.match(result.stdout, /suggestedAgentTasks/u);
 	});
 });
 

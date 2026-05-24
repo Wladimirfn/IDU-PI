@@ -92,7 +92,7 @@ import {
 	deriveConstitutionFromProjectCore,
 	loadProjectConstitution,
 } from "./project-constitution.js";
-import { loadProjectCore } from "./project-core.js";
+import { formatProjectCoreForPrompt, loadProjectCore } from "./project-core.js";
 import {
 	formatProjectCoreResearchDraft,
 	formatProjectCoreResearchReview,
@@ -134,6 +134,12 @@ import {
 	formatSemanticAuditStatus,
 	runManualSemanticAudit,
 } from "./semantic-audit-command.js";
+import {
+	formatSemanticCompactionDraft,
+	formatSemanticCompactionReview,
+	reviewSemanticCompactionDraft,
+	saveSemanticCompactionDraft,
+} from "./semantic-compaction.js";
 import { findPiProcesses } from "./processes.js";
 import {
 	addProject,
@@ -979,6 +985,46 @@ function labDbPath(): string {
 	return join(config.agentWorkspaceRoot, "reports", "lab.db");
 }
 
+function reportsPath(): string {
+	return join(config.agentWorkspaceRoot, "reports");
+}
+
+function activeProjectPath(): string {
+	return getActiveProject(registry)?.path ?? currentCwd;
+}
+
+function semanticCompactionProjectContext(projectPath: string): {
+	projectCore?: string;
+	constitution?: string;
+} {
+	try {
+		const core = loadProjectCore(projectPath);
+		if (core.status !== "confirmed") return {};
+		const constitution = existsSync(
+			join(projectPath, "config", "project-constitution.json"),
+		)
+			? loadProjectConstitution(projectPath)
+			: deriveConstitutionFromProjectCore(core);
+		return {
+			projectCore: formatProjectCoreForPrompt(core),
+			constitution: JSON.stringify(
+				{
+					status: constitution.status,
+					principles: constitution.principles,
+					requiredPractices: constitution.requiredPractices,
+					forbiddenPractices: constitution.forbiddenPractices,
+					approvalRules: constitution.approvalRules,
+					validationGates: constitution.validationGates,
+				},
+				null,
+				2,
+			),
+		};
+	} catch {
+		return {};
+	}
+}
+
 function sourceSkillsDir(): string | undefined {
 	const sourceProject = registry.projects.find(
 		(project) => project.id === "sistema_de_mantencion",
@@ -1079,6 +1125,33 @@ bot.command("semantic_audit_run", async (ctx) => {
 				projectId: currentProjectId(),
 				repository: labDbRepository,
 			}),
+		),
+	);
+});
+
+bot.command("semantic_compact_draft", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatSemanticCompactionDraft(
+			saveSemanticCompactionDraft({
+				projectId: currentProjectId(),
+				dbPath: labDbPath(),
+				reportsPath: reportsPath(),
+				workspaceRoot: config.agentWorkspaceRoot,
+				...semanticCompactionProjectContext(activeProjectPath()),
+			}),
+		),
+	);
+});
+
+bot.command("semantic_compact_review", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatSemanticCompactionReview(
+			reviewSemanticCompactionDraft(pathOrLatest, reportsPath()),
 		),
 	);
 });

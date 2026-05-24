@@ -37,7 +37,7 @@ import {
 	inspectProjectConnection,
 	type ProjectConnectionReport,
 } from "./project-connection.js";
-import { loadProjectCore } from "./project-core.js";
+import { formatProjectCoreForPrompt, loadProjectCore } from "./project-core.js";
 import {
 	deriveConstitutionFromProjectCore,
 	loadProjectConstitution,
@@ -74,6 +74,14 @@ import {
 	type SemanticAuditRunResult,
 	type SemanticAuditStatusReport,
 } from "./semantic-audit-command.js";
+import {
+	formatSemanticCompactionDraft,
+	formatSemanticCompactionReview,
+	reviewSemanticCompactionDraft,
+	saveSemanticCompactionDraft,
+	type SaveSemanticCompactionDraftResult,
+	type SemanticCompactionReview,
+} from "./semantic-compaction.js";
 import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
@@ -117,6 +125,12 @@ export type CliRuntime = {
 	formatSemanticAuditStatus: (report: SemanticAuditStatusReport) => string;
 	semanticAuditRun: () => SemanticAuditRunResult;
 	formatSemanticAuditRun: (result: SemanticAuditRunResult) => string;
+	semanticCompactionDraft: () => SaveSemanticCompactionDraftResult;
+	formatSemanticCompactionDraft: (
+		result: SaveSemanticCompactionDraftResult,
+	) => string;
+	semanticCompactionReview: (pathOrLatest: string) => SemanticCompactionReview;
+	formatSemanticCompactionReview: (review: SemanticCompactionReview) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
 	queueDetail: () => string;
@@ -184,6 +198,21 @@ export function createCliRuntime(): CliRuntime {
 				repository: labDbRepository,
 			}),
 		formatSemanticAuditRun: formatSemanticAuditRunResult,
+		semanticCompactionDraft: () =>
+			saveSemanticCompactionDraft({
+				projectId: activeProject.id,
+				dbPath: join(config.agentWorkspaceRoot, "reports", "lab.db"),
+				reportsPath: join(config.agentWorkspaceRoot, "reports"),
+				workspaceRoot: config.agentWorkspaceRoot,
+				...semanticCompactionProjectContext(activeProject.path),
+			}),
+		formatSemanticCompactionDraft,
+		semanticCompactionReview: (pathOrLatest) =>
+			reviewSemanticCompactionDraft(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatSemanticCompactionReview,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -282,6 +311,20 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSemanticAuditRun(
 						activeRuntime.semanticAuditRun(),
+					),
+				);
+			case "idu-semantic-compact-draft":
+			case "semantic-compact-draft":
+				return ok(
+					activeRuntime.formatSemanticCompactionDraft(
+						activeRuntime.semanticCompactionDraft(),
+					),
+				);
+			case "idu-semantic-compact-review":
+			case "semantic-compact-review":
+				return ok(
+					activeRuntime.formatSemanticCompactionReview(
+						activeRuntime.semanticCompactionReview(requiredText(rest)),
 					),
 				);
 			case "idu-task":
@@ -532,6 +575,38 @@ export function createCliTask(
 	return task;
 }
 
+function semanticCompactionProjectContext(projectPath: string): {
+	projectCore?: string;
+	constitution?: string;
+} {
+	try {
+		const core = loadProjectCore(projectPath);
+		if (core.status !== "confirmed") return {};
+		const constitution = existsSync(
+			join(projectPath, "config", "project-constitution.json"),
+		)
+			? loadProjectConstitution(projectPath)
+			: deriveConstitutionFromProjectCore(core);
+		return {
+			projectCore: formatProjectCoreForPrompt(core),
+			constitution: JSON.stringify(
+				{
+					status: constitution.status,
+					principles: constitution.principles,
+					requiredPractices: constitution.requiredPractices,
+					forbiddenPractices: constitution.forbiddenPractices,
+					approvalRules: constitution.approvalRules,
+					validationGates: constitution.validationGates,
+				},
+				null,
+				2,
+			),
+		};
+	} catch {
+		return {};
+	}
+}
+
 function strongestGuardRisk(
 	preflightRisk: ProjectPreflightReport["risk"],
 	intentRisk: StructuredTask["intentRiskHint"],
@@ -664,6 +739,8 @@ export function helpText(): string {
 		"  idu-pi lab-review-plan postflight",
 		"  idu-pi idu-semantic-audit-status (Telegram: /semantic_audit_status)",
 		"  idu-pi idu-semantic-audit-run    (Telegram: /semantic_audit_run)",
+		"  idu-pi semantic-compact-draft    (Telegram: /semantic_compact_draft)",
+		"  idu-pi semantic-compact-review latest",
 		'  idu-pi idu-task [tipo] "detalle" (Telegram: /task bug <detalle>)',
 		"  idu-pi idu-queue-detail          (Telegram: /queue_detail)",
 		"  idu-pi idu-queue-clear-structured (Telegram: /queue_clear_structured)",

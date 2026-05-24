@@ -24,6 +24,8 @@ test("formatHelpText includes primary Telegram commands", () => {
 	assert.match(text, /\/idu_prepare/);
 	assert.match(text, /\/semantic_audit_status/);
 	assert.match(text, /\/semantic_audit_run/);
+	assert.match(text, /\/semantic_compact_draft/);
+	assert.match(text, /\/semantic_compact_review/);
 	assert.match(text, /\/preflight <solicitud>/);
 	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/postflight/);
@@ -52,6 +54,8 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/idu_prepare/);
 	assert.match(text, /\/semantic_audit_status/);
 	assert.match(text, /\/semantic_audit_run/);
+	assert.match(text, /\/semantic_compact_draft/);
+	assert.match(text, /\/semantic_compact_review latest/);
 	assert.match(text, /\/preflight <solicitud>/);
 	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/postflight/);
@@ -143,6 +147,12 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 		commands.some((entry) => entry.command === "semantic_audit_status"),
 	);
 	assert.ok(commands.some((entry) => entry.command === "semantic_audit_run"));
+	assert.ok(
+		commands.some((entry) => entry.command === "semantic_compact_draft"),
+	);
+	assert.ok(
+		commands.some((entry) => entry.command === "semantic_compact_review"),
+	);
 	assert.ok(commands.some((entry) => entry.command === "idu_define_project"));
 	assert.ok(commands.some((entry) => entry.command === "idu_core_status"));
 	assert.ok(commands.some((entry) => entry.command === "idu_research_core"));

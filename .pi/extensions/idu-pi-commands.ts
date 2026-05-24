@@ -254,4 +254,26 @@ export default function (pi: ExtensionAPI) {
 		description: "Alias Idu-pi para auditoría semántica manual",
 		cliArgs: () => ["semantic-audit-run"],
 	});
+
+	registerIduCommand("semantic-compact-draft", {
+		description: "Crear draft de compactación semántica Idu-pi",
+		cliArgs: () => ["semantic-compact-draft"],
+	});
+
+	registerIduCommand("semantic-compact-review", {
+		description: "Revisar draft de compactación semántica Idu-pi",
+		cliArgs: (args) => ["semantic-compact-review", args || "latest"],
+		usage: "/semantic-compact-review [latest|ruta]",
+	});
+
+	registerIduCommand("idu-semantic-compact-draft", {
+		description: "Alias Idu-pi para draft de compactación semántica",
+		cliArgs: () => ["semantic-compact-draft"],
+	});
+
+	registerIduCommand("idu-semantic-compact-review", {
+		description: "Alias Idu-pi para revisar compactación semántica",
+		cliArgs: (args) => ["semantic-compact-review", args || "latest"],
+		usage: "/idu-semantic-compact-review [latest|ruta]",
+	});
 }
