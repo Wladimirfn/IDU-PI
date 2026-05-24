@@ -980,6 +980,18 @@ test("CLI queue helpers exigen ID completo", async () => {
 	}
 });
 
+test("CLI comandos muestra catálogo local sin runtime", async () => {
+	const result = await runCliCommand(["comandos"]);
+
+	assert.equal(result.exitCode, 0);
+	assert.match(result.stdout, /CLI pnpm/u);
+	assert.match(result.stdout, /corepack pnpm cli -- semantic-compact-draft/u);
+	assert.match(
+		result.stdout,
+		/corepack pnpm cli -- semantic-agent-tasks-create latest/u,
+	);
+});
+
 test("comando desconocido muestra ayuda", async () => {
 	await withRuntime(async (runtime) => {
 		const result = await runCliCommand(["desconocido"], runtime);

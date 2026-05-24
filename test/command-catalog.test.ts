@@ -70,6 +70,12 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /CLI pnpm/);
 	assert.match(text, /corepack pnpm run setup/);
 	assert.match(text, /corepack pnpm test/);
+	assert.match(text, /corepack pnpm cli -- semantic-compact-draft/);
+	assert.match(text, /corepack pnpm cli -- semantic-compact-review latest/);
+	assert.match(text, /corepack pnpm cli -- semantic-agent-tasks-review latest/);
+	assert.match(text, /corepack pnpm cli -- semantic-agent-tasks-create latest/);
+	assert.match(text, /corepack pnpm cli -- idu-semantic-audit-status/);
+	assert.match(text, /corepack pnpm cli -- idu-queue-detail/);
 	assert.match(text, /Batch directos/);
 	assert.match(text, /start-pi-telegram-bridge\.bat/);
 	assert.match(text, /stop-pi-telegram-bridge\.bat/);

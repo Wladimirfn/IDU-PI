@@ -467,6 +467,58 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{ label: "Compilar", command: "corepack pnpm build" },
 	{ label: "Tests", command: "corepack pnpm test" },
 	{ label: "Limpiar outputs", command: "corepack pnpm clean" },
+	{ label: "Idu activo", command: "corepack pnpm cli -- idu" },
+	{ label: "Idu status", command: "corepack pnpm cli -- idu-status" },
+	{ label: "Idu off", command: "corepack pnpm cli -- idu-off" },
+	{ label: "Prepare seguro", command: "corepack pnpm cli -- prepare" },
+	{ label: "Preflight", command: 'corepack pnpm cli -- preflight "solicitud"' },
+	{ label: "Advisory", command: 'corepack pnpm cli -- advisory "solicitud"' },
+	{ label: "Postflight", command: "corepack pnpm cli -- postflight" },
+	{
+		label: "Lab review plan",
+		command: "corepack pnpm cli -- lab-review-plan postflight",
+	},
+	{
+		label: "Crear task",
+		command: 'corepack pnpm cli -- idu-task bug "detalle"',
+	},
+	{ label: "Queue detail", command: "corepack pnpm cli -- idu-queue-detail" },
+	{
+		label: "Queue clear",
+		command: "corepack pnpm cli -- idu-queue-clear-structured",
+	},
+	{
+		label: "Queue approve",
+		command: "corepack pnpm cli -- idu-queue-approve <id>",
+	},
+	{
+		label: "Queue reject",
+		command: "corepack pnpm cli -- idu-queue-reject <id>",
+	},
+	{
+		label: "Semantic audit status",
+		command: "corepack pnpm cli -- idu-semantic-audit-status",
+	},
+	{
+		label: "Semantic audit run",
+		command: "corepack pnpm cli -- idu-semantic-audit-run",
+	},
+	{
+		label: "Semantic compact draft",
+		command: "corepack pnpm cli -- semantic-compact-draft",
+	},
+	{
+		label: "Semantic compact review",
+		command: "corepack pnpm cli -- semantic-compact-review latest",
+	},
+	{
+		label: "Semantic agent tasks review",
+		command: "corepack pnpm cli -- semantic-agent-tasks-review latest",
+	},
+	{
+		label: "Semantic agent tasks create",
+		command: "corepack pnpm cli -- semantic-agent-tasks-create latest",
+	},
 ];
 
 export const BATCH_COMMANDS: LocalCommandEntry[] = [

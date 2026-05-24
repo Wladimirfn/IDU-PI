@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type BridgeConfig } from "./config.js";
+import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
 	activateIduSession,
@@ -277,6 +278,7 @@ export async function runCliCommand(
 		) {
 			return ok(helpText());
 		}
+		if (command === "comandos") return ok(formatCommandCatalog());
 		const activeRuntime = runtime ?? createCliRuntime();
 		configureIduSessionStore({ workspaceRoot: activeRuntime.workspaceRoot });
 		switch (command) {
