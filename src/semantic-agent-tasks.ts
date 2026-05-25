@@ -334,6 +334,7 @@ function taskInputForCandidate(
 		originalText: candidate.title,
 		category: "review",
 		priority: candidate.queuePriority,
+		semanticPriority: candidate.priority,
 		emotion: "neutral",
 		source: "semantic-audit",
 		projectId,

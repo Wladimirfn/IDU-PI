@@ -481,6 +481,7 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"",
 				"No ejecuté AgentLabs, no apliqué reglas, no borré memoria.",
 			].join("\n"),
+		supervisorOnIduActivation: () => undefined,
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
 			[
@@ -843,6 +844,8 @@ test("createCliTask inactive encola sin needs_confirmation", async () => {
 		configureIduSessionStore({ workspaceRoot });
 		const task = createCliTask("bug", "urgente login falla", {
 			projectId: "pi-telegram-bridge",
+			projectPath: root,
+			workspaceRoot,
 			structuredTaskQueue: new StructuredTaskQueue({ workspaceRoot }),
 			labDbRepository: new LabDbRepository(
 				join(workspaceRoot, "reports", "lab.db"),
@@ -866,6 +869,8 @@ test("createCliTask active bloquea login high con confirmación", async () => {
 		activateIduSession("pi-telegram-bridge");
 		const task = createCliTask("bug", "urgente login falla", {
 			projectId: "pi-telegram-bridge",
+			projectPath: root,
+			workspaceRoot,
 			structuredTaskQueue: new StructuredTaskQueue({ workspaceRoot }),
 			labDbRepository: new LabDbRepository(
 				join(workspaceRoot, "reports", "lab.db"),
@@ -894,6 +899,8 @@ test("createCliTask active usa intención humana aunque preflight sea low", asyn
 		activateIduSession("pi-telegram-bridge");
 		const task = createCliTask("bug", "borrar base de datos y schema", {
 			projectId: "pi-telegram-bridge",
+			projectPath: root,
+			workspaceRoot,
 			structuredTaskQueue: new StructuredTaskQueue({ workspaceRoot }),
 			labDbRepository: new LabDbRepository(
 				join(workspaceRoot, "reports", "lab.db"),

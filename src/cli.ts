@@ -97,6 +97,12 @@ import {
 	type IduSupervisorLoopResult,
 } from "./idu-supervisor-loop.js";
 import {
+	maybeRunSupervisorAfterPostflight,
+	maybeRunSupervisorAfterSemanticTrigger,
+	maybeRunSupervisorAfterTask,
+	maybeRunSupervisorOnIduActivation,
+} from "./idu-supervisor-hooks.js";
+import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
@@ -155,6 +161,7 @@ export type CliRuntime = {
 	) => string;
 	supervisorTick: () => IduSupervisorLoopResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
+	supervisorOnIduActivation: () => void;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
 	queueDetail: () => string;
@@ -185,7 +192,19 @@ export function createCliRuntime(): CliRuntime {
 	});
 	const labDbRepository = new LabDbRepository(
 		join(config.agentWorkspaceRoot, "reports", "lab.db"),
-		{ enableSemanticAuditTrigger: true },
+		{
+			enableSemanticAuditTrigger: true,
+			onSemanticAuditTrigger: (semanticTrigger) => {
+				maybeRunSupervisorAfterSemanticTrigger({
+					projectId: activeProject.id,
+					projectPath: activeProject.path,
+					workspaceRoot: config.agentWorkspaceRoot,
+					repository: labDbRepository,
+					queue: structuredTaskQueue,
+					semanticTrigger,
+				});
+			},
+		},
 	);
 	const context = { config, registry, activeProject, structuredTaskQueue };
 	return {
@@ -200,7 +219,18 @@ export function createCliRuntime(): CliRuntime {
 		advisory: (request) =>
 			buildProjectAdvisory(buildPreflightReport(request, context)),
 		formatAdvisory: formatProjectAdvisory,
-		postflight: () => buildPostflightReport(context),
+		postflight: () => {
+			const report = buildPostflightReport(context);
+			maybeRunSupervisorAfterPostflight({
+				projectId: activeProject.id,
+				projectPath: activeProject.path,
+				workspaceRoot: config.agentWorkspaceRoot,
+				repository: labDbRepository,
+				queue: structuredTaskQueue,
+				risk: report.risk,
+			});
+			return report;
+		},
 		formatPostflight: formatProjectPostflightReport,
 		prepare: () => runPrepare(context),
 		formatPrepare: formatIduPrepareResult,
@@ -266,9 +296,20 @@ export function createCliRuntime(): CliRuntime {
 				queue: structuredTaskQueue,
 			}),
 		formatSupervisorTick: formatIduSupervisorLoopResult,
+		supervisorOnIduActivation: () => {
+			maybeRunSupervisorOnIduActivation({
+				projectId: activeProject.id,
+				projectPath: activeProject.path,
+				workspaceRoot: config.agentWorkspaceRoot,
+				repository: labDbRepository,
+				queue: structuredTaskQueue,
+			});
+		},
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
+				projectPath: activeProject.path,
+				workspaceRoot: config.agentWorkspaceRoot,
 				structuredTaskQueue,
 				labDbRepository,
 				preflight: (request) => buildPreflightReport(request, context),
@@ -310,6 +351,7 @@ export async function runCliCommand(
 				);
 			case "idu": {
 				activateIduSession(activeRuntime.projectId);
+				activeRuntime.supervisorOnIduActivation();
 				return ok(
 					[
 						"Guardrails automáticos activados para el proyecto activo.",
@@ -586,6 +628,8 @@ export function createCliTask(
 	details: string,
 	context: {
 		projectId: string;
+		projectPath: string;
+		workspaceRoot: string;
 		structuredTaskQueue: StructuredTaskQueue;
 		labDbRepository: LabDbRepository;
 		preflight: (request: string) => ProjectPreflightReport;
@@ -645,6 +689,14 @@ export function createCliTask(
 	} catch {
 		// SQLite/semantic trigger is secondary; CLI task creation remains the source of truth.
 	}
+	maybeRunSupervisorAfterTask({
+		projectId: context.projectId,
+		projectPath: context.projectPath,
+		workspaceRoot: context.workspaceRoot,
+		repository: context.labDbRepository,
+		queue: context.structuredTaskQueue,
+		task,
+	});
 	return task;
 }
 

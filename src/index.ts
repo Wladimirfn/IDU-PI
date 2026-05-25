@@ -150,6 +150,12 @@ import {
 	formatIduSupervisorLoopResult,
 	runIduSupervisorLoop,
 } from "./idu-supervisor-loop.js";
+import {
+	maybeRunSupervisorAfterPostflight,
+	maybeRunSupervisorAfterSemanticTrigger,
+	maybeRunSupervisorAfterTask,
+	maybeRunSupervisorOnIduActivation,
+} from "./idu-supervisor-hooks.js";
 import { findPiProcesses } from "./processes.js";
 import {
 	addProject,
@@ -226,6 +232,16 @@ const agentRouter = new AgentRouter({
 const labReportStore = new LabReportStore(config.agentWorkspaceRoot);
 const labDbRepository = new LabDbRepository(labDbPath(), {
 	enableSemanticAuditTrigger: true,
+	onSemanticAuditTrigger: (semanticTrigger) => {
+		maybeRunSupervisorAfterSemanticTrigger({
+			projectId: currentProjectId(),
+			projectPath: activeProjectPath(),
+			workspaceRoot: config.agentWorkspaceRoot,
+			repository: labDbRepository,
+			queue: structuredTaskQueue,
+			semanticTrigger,
+		});
+	},
 });
 const taskQueue = new TaskQueue();
 const lastIduPrepareByProject = new Map<string, IduPrepareResult>();
@@ -723,10 +739,12 @@ async function guardTaskPrompt(
 			);
 		const reason =
 			error instanceof Error ? error.message : "preflight interno falló";
-		structuredTaskQueue.markNeedsConfirmation(task.id, {
-			guardRisk: "blocker",
-			guardReason: `preflight falló: ${reason}`,
-		});
+		const guardedTask =
+			structuredTaskQueue.markNeedsConfirmation(task.id, {
+				guardRisk: "blocker",
+				guardReason: `preflight falló: ${reason}`,
+			}) ?? task;
+		runSupervisorAfterStructuredTask(guardedTask);
 		if (options.enqueueLegacyOnBlock && !existingTask)
 			taskQueue.enqueue(prompt);
 		await replyLong(
@@ -769,10 +787,12 @@ async function guardTaskPrompt(
 		.join("; ");
 	if (guardRisk === "high" || guardRisk === "blocker") {
 		const task = existingTask ?? structuredTaskQueue.enqueueTask(taskInput);
-		structuredTaskQueue.markNeedsConfirmation(task.id, {
-			guardRisk,
-			guardReason: reason,
-		});
+		const guardedTask =
+			structuredTaskQueue.markNeedsConfirmation(task.id, {
+				guardRisk,
+				guardReason: reason,
+			}) ?? task;
+		runSupervisorAfterStructuredTask(guardedTask);
 		if (options.enqueueLegacyOnBlock && !existingTask)
 			taskQueue.enqueue(prompt);
 		await replyLong(
@@ -792,6 +812,19 @@ async function guardTaskPrompt(
 	if (existingTask)
 		structuredTaskQueue.markGuardClear(existingTask.id, guardRisk, reason);
 	return true;
+}
+
+function runSupervisorAfterStructuredTask(task: {
+	guardRisk?: ProjectPreflightReport["risk"];
+}): void {
+	maybeRunSupervisorAfterTask({
+		projectId: currentProjectId(),
+		projectPath: activeProjectPath(),
+		workspaceRoot: config.agentWorkspaceRoot,
+		repository: labDbRepository,
+		queue: structuredTaskQueue,
+		task,
+	});
 }
 
 function strongestGuardRisk(
@@ -862,7 +895,7 @@ async function runPrompt(
 			const projectId = currentProjectId();
 			const signal = analyzeStructuredTaskSignal(prompt);
 			try {
-				structuredTaskQueue.enqueueTask(
+				const task = structuredTaskQueue.enqueueTask(
 					structuredTaskInputForText(prompt, {
 						source: "telegram",
 						projectId,
@@ -870,6 +903,7 @@ async function runPrompt(
 						analyzer: () => signal,
 					}),
 				);
+				runSupervisorAfterStructuredTask(task);
 			} catch {
 				// La cola estructurada es secundaria; /queue legacy sigue siendo fuente visible.
 			}
@@ -1081,6 +1115,13 @@ bot.command("idu", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const projectId = currentProjectId();
 	activateIduSession(projectId);
+	maybeRunSupervisorOnIduActivation({
+		projectId,
+		projectPath: activeProjectPath(),
+		workspaceRoot: config.agentWorkspaceRoot,
+		repository: labDbRepository,
+		queue: structuredTaskQueue,
+	});
 	const report = inspectProjectConnection({
 		registry,
 		defaultCwd: config.defaultCwd,
@@ -1371,7 +1412,16 @@ bot.command("advisory", async (ctx) => {
 
 bot.command("postflight", async (ctx) => {
 	if (!(await guard(ctx))) return;
-	await replyLong(ctx, formatProjectPostflightReport(buildPostflightReport()));
+	const report = buildPostflightReport();
+	maybeRunSupervisorAfterPostflight({
+		projectId: currentProjectId(),
+		projectPath: activeProjectPath(),
+		workspaceRoot: config.agentWorkspaceRoot,
+		repository: labDbRepository,
+		queue: structuredTaskQueue,
+		risk: report.risk,
+	});
+	await replyLong(ctx, formatProjectPostflightReport(report));
 });
 
 bot.command("lab_review_plan", async (ctx) => {

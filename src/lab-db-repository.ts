@@ -24,11 +24,16 @@ import {
 	type SemanticAuditThresholds,
 	type SemanticMemoryItemInput,
 } from "./semantic-audit.js";
-import { maybeRunSemanticAuditTrigger } from "./semantic-audit-trigger.js";
+import {
+	checkSemanticAuditTrigger,
+	maybeRunSemanticAuditTrigger,
+	type SemanticAuditTriggerResult,
+} from "./semantic-audit-trigger.js";
 
 export type LabDbRepositoryOptions = {
 	enableSemanticAuditTrigger?: boolean;
 	semanticAuditTriggerThresholds?: SemanticAuditThresholds;
+	onSemanticAuditTrigger?: (result: SemanticAuditTriggerResult) => void;
 };
 
 export class LabDbRepository {
@@ -90,6 +95,33 @@ export class LabDbRepository {
 
 	private triggerSemanticAudit(projectId: string): void {
 		if (!this.options.enableSemanticAuditTrigger) return;
+		if (this.options.onSemanticAuditTrigger) {
+			try {
+				const decision = checkSemanticAuditTrigger({
+					projectId,
+					repository: this,
+					thresholds: this.options.semanticAuditTriggerThresholds,
+				});
+				this.options.onSemanticAuditTrigger({
+					projectId,
+					decision: decision.shouldRun ? "executed" : "skipped",
+					triggerReason: decision.triggerReason,
+					newEventCount: decision.newEventCount,
+					summary: decision.shouldRun
+						? "Umbral semántico detectado antes de registrar auditoría automática."
+						: "Auditoría automática omitida: no alcanzó umbral.",
+				});
+			} catch (error) {
+				this.options.onSemanticAuditTrigger({
+					projectId,
+					decision: "warning",
+					triggerReason: "error",
+					summary:
+						"No pude evaluar auditoría automática; el flujo principal continúa.",
+					warning: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
 		maybeRunSemanticAuditTrigger({
 			projectId,
 			repository: this,

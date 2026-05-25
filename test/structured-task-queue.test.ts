@@ -282,12 +282,65 @@ test("formatStructuredTaskQueueDetail shows structured task fields", async () =>
 		assert.match(detail, /T1 /u);
 		assert.match(detail, /task-[a-z0-9-]{16,}/u);
 		assert.match(detail, /pending/u);
-		assert.match(detail, /P5/u);
+		assert.match(detail, /P5 \(alta\)/u);
 		assert.match(detail, /bug/u);
 		assert.match(detail, /auth/u);
 		assert.match(detail, /intent: bug_report\/auth\/high/u);
 		assert.match(detail, /fallo el loggin/u);
 		assert.doesNotMatch(detail, /Use systematic debugging/u);
+	});
+});
+
+test("formatStructuredTaskQueueDetail shows semantic priority for SG5 tasks", async () => {
+	await withTempQueue((queue) => {
+		queue.enqueueTask({
+			text: "Revisión SG5 semantic-audit — security",
+			category: "review",
+			priority: 1,
+			semanticPriority: 5,
+			emotion: "neutral",
+			source: "semantic-audit",
+		});
+
+		const detail = formatStructuredTaskQueueDetail(queue.listTasks());
+
+		assert.match(detail, /P1 \(alta \/ semantic 5\)/u);
+	});
+});
+
+test("formatStructuredTaskQueueDetail derives semantic priority from SG5 text", async () => {
+	await withTempQueue((queue) => {
+		queue.enqueueTask({
+			text: [
+				"Revisión SG5 semantic-audit — security",
+				"Prioridad semántica: 5",
+				"Prioridad cola: 1",
+			].join("\n"),
+			category: "review",
+			priority: 1,
+			emotion: "neutral",
+			source: "semantic-audit",
+		});
+
+		const detail = formatStructuredTaskQueueDetail(queue.listTasks());
+
+		assert.match(detail, /P1 \(alta \/ semantic 5\)/u);
+	});
+});
+
+test("formatStructuredTaskQueueDetail shows clear normal priority labels", async () => {
+	await withTempQueue((queue) => {
+		queue.enqueueTask({
+			text: "Revisar docs",
+			category: "docs",
+			priority: 3,
+			emotion: "neutral",
+		});
+
+		const detail = formatStructuredTaskQueueDetail(queue.listTasks());
+
+		assert.match(detail, /P3 \(media\)/u);
+		assert.doesNotMatch(detail, /semantic/u);
 	});
 });
 

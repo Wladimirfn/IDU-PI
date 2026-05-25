@@ -29,6 +29,7 @@ export type StructuredTask = {
 	originalText?: string;
 	category: string;
 	priority: number;
+	semanticPriority?: number;
 	status: StructuredTaskStatus;
 	createdAt: string;
 	updatedAt: string;
@@ -52,6 +53,7 @@ export type StructuredTaskInput = {
 	originalText?: string;
 	category: string;
 	priority?: number;
+	semanticPriority?: number;
 	emotion?: string;
 	source?: string;
 	projectId?: string;
@@ -95,6 +97,9 @@ export class StructuredTaskQueue {
 			text,
 			category,
 			priority: input.priority ?? 100,
+			...(typeof input.semanticPriority === "number"
+				? { semanticPriority: input.semanticPriority }
+				: {}),
 			status: "pending",
 			createdAt: timestamp,
 			updatedAt: timestamp,
@@ -385,9 +390,39 @@ export function formatStructuredTaskQueueDetail(
 				task.guardStatus === "needs_confirmation"
 					? `\nAprobar: ${approveCommand(task.id)}\nRechazar: ${rejectCommand(task.id)}`
 					: "";
-			return `T${index + 1} ${task.id} | ${task.status} | P${task.priority} | ${task.category} | ${task.emotion ?? "neutral"}${intent}${guard} | ${task.createdAt}\n${summarizeTaskText(task.originalText ?? task.text)}${approvalHint}`;
+			return `T${index + 1} ${task.id} | ${task.status} | ${formatPriorityLabel(task)} | ${task.category} | ${task.emotion ?? "neutral"}${intent}${guard} | ${task.createdAt}\n${summarizeTaskText(task.originalText ?? task.text)}${approvalHint}`;
 		})
 		.join("\n\n")}`;
+}
+
+function formatPriorityLabel(task: StructuredTask): string {
+	const semanticPriority =
+		task.semanticPriority ?? semanticPriorityFromTaskText(task.text);
+	if (typeof semanticPriority === "number") {
+		return `P${task.priority} (${semanticPriorityLabel(semanticPriority)} / semantic ${semanticPriority})`;
+	}
+	return `P${task.priority} (${humanPriorityLabel(task.priority)})`;
+}
+
+function semanticPriorityFromTaskText(text: string): number | undefined {
+	const match = /Prioridad semántica: (\d+)/u.exec(text);
+	return match?.[1] ? Number(match[1]) : undefined;
+}
+
+function semanticPriorityLabel(priority: number): string {
+	if (priority >= 5) return "alta";
+	if (priority === 4) return "media-alta";
+	if (priority === 3) return "media";
+	if (priority === 2) return "baja";
+	return "muy baja";
+}
+
+function humanPriorityLabel(priority: number): string {
+	if (priority >= 5) return "alta";
+	if (priority === 4) return "media-alta";
+	if (priority === 3) return "media";
+	if (priority === 2) return "baja";
+	return "muy baja";
 }
 
 function priorityForIntentAndSignal(
