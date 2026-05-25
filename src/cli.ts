@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { loadConfig, type BridgeConfig } from "./config.js";
+import { AgentRouter } from "./agent-router.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -146,6 +147,14 @@ import {
 	type AgentLabReviewRequestPlan,
 	type AgentLabReviewRequestReview,
 } from "./agentlab-review-requests.js";
+import {
+	formatAgentLabReviewRunResult,
+	formatAgentLabReviewStatus,
+	getAgentLabReviewStatus,
+	runAgentLabReviewRequestFile,
+	type AgentLabReviewRunResult,
+	type AgentLabReviewStatus,
+} from "./agentlab-review-runner.js";
 import {
 	createSkillDraftsFromApprovedProposals,
 	formatSkillDraftCreationResult,
@@ -342,6 +351,10 @@ export type CliRuntime = {
 	formatAgentLabReviewRequestReview: (
 		review: AgentLabReviewRequestReview,
 	) => string;
+	agentLabReviewRun: (pathOrLatest: string) => Promise<AgentLabReviewRunResult>;
+	formatAgentLabReviewRunResult: (result: AgentLabReviewRunResult) => string;
+	agentLabReviewStatus: (pathOrLatest: string) => AgentLabReviewStatus;
+	formatAgentLabReviewStatus: (status: AgentLabReviewStatus) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
 	queueDetail: () => string;
@@ -387,6 +400,15 @@ export function createCliRuntime(): CliRuntime {
 			},
 		},
 	);
+	const agentRouter = new AgentRouter({
+		piBin: config.piBin,
+		basePiArgs: config.piArgs,
+		profiles: config.agentProfiles,
+		defaultProjectId: activeProject.id,
+		defaultCwd: activeProject.path,
+		workspaceRoot: config.agentWorkspaceRoot,
+		workspaceMode: config.agentWorkspaceMode,
+	});
 	const context = { config, registry, activeProject, structuredTaskQueue };
 	return {
 		projectId: activeProject.id,
@@ -649,6 +671,21 @@ export function createCliRuntime(): CliRuntime {
 				join(config.agentWorkspaceRoot, "reports"),
 			),
 		formatAgentLabReviewRequestReview,
+		agentLabReviewRun: (pathOrLatest) =>
+			runAgentLabReviewRequestFile({
+				pathOrLatest,
+				reportsPath: join(config.agentWorkspaceRoot, "reports"),
+				projectId: activeProject.id,
+				projectPath: activeProject.path,
+				router: agentRouter,
+			}),
+		formatAgentLabReviewRunResult,
+		agentLabReviewStatus: (pathOrLatest) =>
+			getAgentLabReviewStatus(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatAgentLabReviewStatus,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -756,6 +793,24 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatAgentLabReviewRequestReview(
 						activeRuntime.agentLabRequestReview(
+							rest.join(" ").trim() || "latest",
+						),
+					),
+				);
+			case "idu-agentlab-review-run":
+			case "agentlab-review-run":
+				return ok(
+					activeRuntime.formatAgentLabReviewRunResult(
+						await activeRuntime.agentLabReviewRun(
+							rest.join(" ").trim() || "latest",
+						),
+					),
+				);
+			case "idu-agentlab-review-status":
+			case "agentlab-review-status":
+				return ok(
+					activeRuntime.formatAgentLabReviewStatus(
+						activeRuntime.agentLabReviewStatus(
 							rest.join(" ").trim() || "latest",
 						),
 					),
@@ -1483,6 +1538,8 @@ export function helpText(): string {
 		"  idu-pi agentlab-request-create postflight",
 		"  idu-pi agentlab-request-create skill-draft latest",
 		"  idu-pi agentlab-request-review latest",
+		"  idu-pi agentlab-review-run latest",
+		"  idu-pi agentlab-review-status latest",
 		"  idu-pi idu-semantic-audit-status (Telegram: /semantic_audit_status)",
 		"  idu-pi idu-semantic-audit-run    (Telegram: /semantic_audit_run)",
 		"  idu-pi idu-semantic-compact-draft (Telegram: /semantic_compact_draft)",

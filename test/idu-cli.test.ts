@@ -50,6 +50,10 @@ import type {
 	AgentLabReviewRequestReview,
 } from "../src/agentlab-review-requests.js";
 import type {
+	AgentLabReviewRunResult,
+	AgentLabReviewStatus,
+} from "../src/agentlab-review-runner.js";
+import type {
 	SkillDraftCreationResult,
 	SkillDraftReview,
 } from "../src/skill-drafts.js";
@@ -668,6 +672,48 @@ function fakeAgentLabRequestReview(): AgentLabReviewRequestReview {
 	};
 }
 
+function fakeAgentLabReviewRun(): AgentLabReviewRunResult {
+	return {
+		generatedAt: "2026-05-25T00:00:00.000Z",
+		sourceRequestFile: "reports/agentlab-review-request-20260525-000000.json",
+		warning: "Revisión AgentLab. No aplica cambios.",
+		projectId: "pi-telegram-bridge",
+		path: "reports/agentlab-review-run-20260525-000000.json",
+		runs: [
+			{
+				requestId: "agentlab-pi-postflight-security-01",
+				specialty: "security",
+				status: "skipped",
+				agentId: "general",
+				workspace: "C:/clone",
+				commandsExecuted: [],
+				rawSummary: "Saltado: sin workspace clone.",
+				contractValidation: { valid: false, errors: [] },
+				findings: [],
+				recommendations: [],
+				testsSuggested: [],
+				requiresHumanApproval: true,
+			},
+		],
+		consolidatedSummary: "1 requests: 0 completed, 1 skipped, 0 failed.",
+		consolidatedFindings: [],
+		recommendedNext:
+			"Revisar reporte y decidir siguiente paso; no apliqué cambios.",
+		requiresHumanApproval: true,
+		safeNotes: ["No modifiqué repo real."],
+	};
+}
+
+function fakeAgentLabReviewStatus(): AgentLabReviewStatus {
+	return {
+		path: "reports/agentlab-review-run-20260525-000000.json",
+		name: "agentlab-review-run-20260525-000000.json",
+		valid: true,
+		errors: [],
+		result: fakeAgentLabReviewRun(),
+	};
+}
+
 function fakeSkillDraftCreation(): SkillDraftCreationResult {
 	const draft = {
 		proposalId: "skill-improvement-001",
@@ -1038,6 +1084,20 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"",
 				"security",
 			].join("\n"),
+		agentLabReviewRun: async () => fakeAgentLabReviewRun(),
+		formatAgentLabReviewRunResult: (result) =>
+			[
+				"AgentLab Review Run",
+				"",
+				"Ruta:",
+				result.path,
+				"",
+				"Skipped:",
+				"1",
+			].join("\n"),
+		agentLabReviewStatus: fakeAgentLabReviewStatus,
+		formatAgentLabReviewStatus: (status) =>
+			["AgentLab Review Status", "", "Archivo:", status.name].join("\n"),
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
 			[
@@ -1231,6 +1291,22 @@ test("CLI agentlab request commands funcionan", async () => {
 		assert.match(createSkillDraft.stdout, /agentlab-review-request/u);
 		assert.equal(review.exitCode, 0);
 		assert.match(review.stdout, /AgentLab Review Request Review/u);
+	});
+});
+
+test("CLI agentlab review run/status commands funcionan", async () => {
+	await withRuntime(async (runtime) => {
+		const run = await runCliCommand(["agentlab-review-run", "latest"], runtime);
+		const status = await runCliCommand(
+			["idu-agentlab-review-status", "latest"],
+			runtime,
+		);
+
+		assert.equal(run.exitCode, 0);
+		assert.match(run.stdout, /AgentLab Review Run/u);
+		assert.match(run.stdout, /agentlab-review-run/u);
+		assert.equal(status.exitCode, 0);
+		assert.match(status.stdout, /AgentLab Review Status/u);
 	});
 });
 

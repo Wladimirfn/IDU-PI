@@ -191,6 +191,12 @@ import {
 	reviewAgentLabReviewRequest,
 } from "./agentlab-review-requests.js";
 import {
+	formatAgentLabReviewRunResult,
+	formatAgentLabReviewStatus,
+	getAgentLabReviewStatus,
+	runAgentLabReviewRequestFile,
+} from "./agentlab-review-runner.js";
+import {
 	createSkillDraftsFromApprovedProposals,
 	formatSkillDraftCreationResult,
 	formatSkillDraftReview,
@@ -1299,6 +1305,34 @@ bot.command("agentlab_request_review", async (ctx) => {
 		ctx,
 		formatAgentLabReviewRequestReview(
 			reviewAgentLabReviewRequest(pathOrLatest, reportsPath()),
+		),
+	);
+});
+
+bot.command("agentlab_review_run", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatAgentLabReviewRunResult(
+			await runAgentLabReviewRequestFile({
+				pathOrLatest,
+				reportsPath: reportsPath(),
+				projectId: currentProjectId(),
+				projectPath: activeProjectPath(),
+				router: agentRouter,
+			}),
+		),
+	);
+});
+
+bot.command("agentlab_review_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatAgentLabReviewStatus(
+			getAgentLabReviewStatus(pathOrLatest, reportsPath()),
 		),
 	);
 });

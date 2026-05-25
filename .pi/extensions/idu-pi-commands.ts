@@ -191,6 +191,18 @@ export default function (pi: ExtensionAPI) {
 		usage: "/idu-agentlab-request-review [latest|ruta]",
 	});
 
+	registerIduCommand("idu-agentlab-review-run", {
+		description: "Ejecutar revisión AgentLab review-only",
+		cliArgs: (args) => ["agentlab-review-run", args || "latest"],
+		usage: "/idu-agentlab-review-run [latest|ruta]",
+	});
+
+	registerIduCommand("idu-agentlab-review-status", {
+		description: "Ver informe AgentLab review-only",
+		cliArgs: (args) => ["agentlab-review-status", args || "latest"],
+		usage: "/idu-agentlab-review-status [latest|ruta]",
+	});
+
 	registerIduCommand("idu-task", {
 		description: "Crear tarea estructurada Idu-pi desde Pi CLI",
 		cliArgs: (args) => ["idu-task", ...args.split(/\s+/u).filter(Boolean)],

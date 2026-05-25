@@ -85,6 +85,18 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		],
 	},
 	{
+		command: "agentlab_review_run",
+		description: "Ejecutar revisión AgentLab",
+		help: "/agentlab_review_run [latest|ruta] - ejecutar revisión AgentLab review-only en workspace clone",
+		usage: ["/agentlab_review_run latest", "/agentlab_review_run <ruta>"],
+	},
+	{
+		command: "agentlab_review_status",
+		description: "Ver informe AgentLab",
+		help: "/agentlab_review_status [latest|ruta] - ver informe consolidado sin escribir archivos",
+		usage: ["/agentlab_review_status latest", "/agentlab_review_status <ruta>"],
+	},
+	{
 		command: "semantic_audit_status",
 		description: "Ver auditoría semántica",
 		help: "/semantic_audit_status - revisar conteos, checkpoint y decisión de auditoría semántica sin IA",
@@ -674,6 +686,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{
 		label: "AgentLab request review",
 		command: "corepack pnpm cli -- agentlab-request-review latest",
+	},
+	{
+		label: "AgentLab review run",
+		command: "corepack pnpm cli -- agentlab-review-run latest",
+	},
+	{
+		label: "AgentLab review status",
+		command: "corepack pnpm cli -- agentlab-review-status latest",
 	},
 	{
 		label: "Semantic audit status",
