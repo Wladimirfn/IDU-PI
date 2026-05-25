@@ -1,164 +1,137 @@
 # Code Context
 
 ## Files Retrieved
-1. `src/semantic-compaction.ts` (lines 1-253, 305-694) - draft/review types, formatting, deterministic draft generation, safe draft path validation, sanitization.
-2. `src/semantic-agent-tasks.ts` (lines 1-579) - existing conversion from compaction draft suggestions into safe review tasks; strongest reusable pattern for LEARN-1.
-3. `src/cli.ts` (lines 1-320, 360-454, 703-729) - runtime dependencies, command dispatch, project context loading for compaction.
-4. `src/index.ts` (lines 1-260, 1028-1067, 1140-1258) - Telegram command wiring and shared bridge runtime helpers.
-5. `src/command-catalog.ts` (lines 1-130, 480-603) - Telegram command catalog, CLI local commands, formatting for `/help`, `/comandos`, BotFather API commands.
-6. `src/telegram-command-registry.ts` (imported by `src/index.ts`; no semantic-specific entries found) - session/work prompt registry, not the main semantic command registry.
-7. `src/idu-supervisor-loop.ts` (lines 1-331) - supervisor tick flow and safety contract; existing integration for semantic draft + agent-task creation.
-8. `src/structured-task-queue.ts` (lines 26-120) - persisted task shape and `enqueueTask` API used by semantic agent tasks.
-9. `test/semantic-compaction.test.ts` (lines 1-266) - tests for draft creation/review, sanitization, latest/path rejection, rawOutput invalidation.
-10. `test/semantic-agent-tasks.test.ts` (lines 1-357) - tests for draft-to-task planning, grouping, dedupe, queue writes.
-11. `test/semantic-compaction-command-wiring.test.ts` (lines 1-14) - source-level Telegram wiring guard; verifies no apply command.
-12. `test/semantic-agent-tasks-command-wiring.test.ts` (lines 1-13) - source-level Telegram wiring guard; verifies no AgentLabs apply command.
-13. `test/idu-cli.test.ts` (lines 656-724) - CLI command tests for semantic audit/compact/agent-tasks.
-14. `test/idu-supervisor-loop.test.ts` (lines 227-331) - supervisor loop tests for thresholds, draft/task toggles, safety flags.
-15. `package.json` (lines 1-23) - test command: `pnpm test` builds then runs node tests.
+1. `src/supervisor-improvement-proposals.ts` (lines 1-512) - core LEARN-1 implementation: proposal schema, creation/review APIs, formatting, sorting/dedupe, JSON output naming.
+2. `test/supervisor-improvement-proposals.test.ts` (lines 1-430) - unit coverage for valid/invalid drafts, proposal generation, safety guarantees, dedupe, max limit, file creation.
+3. `test/supervisor-improvement-proposals-command-wiring.test.ts` (lines 1-20) - wiring regression that checks Telegram/Pi extension commands exist and no apply command exists.
+4. `src/semantic-compaction.ts` (lines 1-620) - reusable draft path/JSON validation used by LEARN-1 and likely needed by LEARN-2.
+5. `src/cli.ts` (lines 90-190, 300-510, 860-930) - CLI runtime type, factory wiring, command switch, required args, help text.
+6. `src/index.ts` (lines 145-164, 1250-1290, 1910-1980) - Telegram imports/handlers for supervisor improvements plus existing `/report <id> [decision]` decision pattern.
+7. `src/command-catalog.ts` (lines 100-140, 540-565) - Telegram catalog entries and local command catalog entries.
+8. `src/telegram-command-registry.ts` (lines 1-45) - public Telegram command allowlist/registry entries.
+9. `.pi/extensions/idu-pi-commands.ts` (lines 1-300) - Pi extension command registration pattern and existing supervisor improvement commands.
+10. `test/idu-cli.test.ts` (lines 500-550, 780-835) - CLI fake runtime and existing supervisor improvement command tests.
+11. `src/lab-db.ts` (lines 120-155, 374-419) - existing SQLite `proposals` table/status fields; possibly reusable but not used by LEARN-1 JSON proposals.
+12. `src/lab-reports.ts` (lines 1-110) - existing JSONL decision-status store pattern used by `/report` decisions.
+13. `package.json` (lines 1-24) - build/test command (`pnpm test`).
 
 ## Key Code
 
-### Draft/review model and safety fields
-`src/semantic-compaction.ts` exposes the core draft/review types and public review function:
+LEARN-1 core public API is in `src/supervisor-improvement-proposals.ts`:
 
 ```ts
-export type SemanticCompactionDraft = {
-  generatedAt: string;
-  projectId: string;
-  warning: "Borrador IA. No es fuente de verdad.";
-  sourceAuditRunIds: string[];
-  inputSummary: Record<string, unknown>;
-  preservedRules: string[];
-  criticalBugs: Array<Record<string, unknown>>;
-  humanDecisions: string[];
-  reusableLessons: string[];
-  architecturalRisks: string[];
-  classifierQualityReview: SemanticCompactionClassifierQualityReview;
-  misclassifiedExamples: SemanticCompactionClassificationSample[];
-  suggestedRuleUpdates: string[];
-  suggestedSkillUpdates: string[];
-  suggestedMemoryItems: string[];
-  suggestedAgentTasks: string[];
-  noiseToIgnore: string[];
-  openQuestions: string[];
-  rawOutput?: string;
+export type SupervisorImprovementAction =
+  | "approve_for_agent_review"
+  | "approve_for_manual_apply"
+  | "reject"
+  | "defer";
+export type SupervisorImprovementStatus =
+  | "proposed"
+  | "approved"
+  | "rejected"
+  | "deferred";
+
+export type SupervisorImprovementProposal = {
+  id: string;
+  type: SupervisorImprovementProposalType;
+  title: string;
+  description: string;
+  evidence: string[];
+  sourceDraftPath: string;
+  riskLevel: SupervisorImprovementRisk;
+  expectedBenefit: SupervisorImprovementBenefit[];
+  requiresHumanApproval: true;
+  suggestedAction: SupervisorImprovementAction;
+  status: SupervisorImprovementStatus;
+  createdAt: string;
 };
 ```
 
-`reviewSemanticCompactionDraft(pathOrLatest, reportsPath)` validates warning, rejects `rawOutput`, normalizes arrays, and summarizes `suggestedRuleUpdates`, `suggestedSkillUpdates`, and `suggestedAgentTasks`. Reuse this instead of parsing JSON directly.
+Important behavior:
+- `buildSupervisorImprovementPlan(pathOrLatest, reportsPath)` calls `reviewSemanticCompactionDraft`; invalid drafts return `validDraft: false`, errors, and no proposals.
+- `createSupervisorImprovementProposals(...)` writes only `reports/supervisor-improvement-proposals-YYYYMMDD-HHMMSS.json` with warning, source draft path, project id, and proposals. It does not mutate rules/skills/code.
+- Proposal IDs are assigned only in memory at build time: `improvement-001`, etc. The JSON file has no top-level run id.
+- `formatSupervisorImprovementPlan` currently tells the user to create proposals only; there is no decision/apply flow yet.
 
-### Existing draft path validation
-`src/semantic-compaction.ts` lines 481-526 implements the safest current path behavior:
-
-- accepts `latest` by scanning `reportsPath` for `semantic-compaction-draft-*.json`, sorted lexically;
-- resolves relative paths under `reportsPath`;
-- rejects outside paths via `relative(reportsPath, candidate)` checks;
-- rejects empty/self paths;
-- requires basename regex `^semantic-compaction-draft-\d{8}-\d{6}\.json$`;
-- checks existence.
-
-Best LEARN-1 approach: call `reviewSemanticCompactionDraft()` and fail closed when `validDraft === false`. If another feature needs path resolution directly, export a small public helper from `semantic-compaction.ts`; do not duplicate a weaker resolver.
-
-### Existing conversion from draft proposals to safe work items
-`src/semantic-agent-tasks.ts` already turns draft content into review-only queue tasks:
-
-- `buildSemanticAgentTaskPlan(pathOrLatest, reportsPath)` -> validates draft via `reviewSemanticCompactionDraft()` and builds grouped candidates.
-- `createSemanticAgentTasks(input)` -> writes `StructuredTask`s to `StructuredTaskQueue`, max 7 by default, dedupes by `Dedupe:` marker.
-- Candidate text always includes `No ejecutar cambios sin aprobación humana.`
-- Queue source is `semantic-audit`; category is `review`; semantic priority maps to queue priority 1..5.
-
-Important helpers are private but reusable by pattern: `classifyType`, `priorityFor`, `recommendationFor`, `groupCandidatesByDomain`, `dedupeKeyFor`, `domainKeyFor`, `short`.
-
-### CLI pattern
-`src/cli.ts` pattern for adding a command:
-
-1. Import public feature functions/types near lines 77-93.
-2. Extend `CliRuntime` with function + formatter slots near lines 144-160.
-3. Add runtime implementation in `createCliRuntime()` near lines 243-283 using `join(config.agentWorkspaceRoot, "reports")` and active project id.
-4. Add aliases in `runCliCommand` switch near lines 398-438, usually both `idu-...` and shorter alias.
-5. Add help text near lines 863-871.
-
-Existing required-argument commands use `requiredText(rest)`. Telegram defaults path args to `latest`; CLI currently requires explicit `latest` for review/create.
-
-### Telegram pattern
-`src/index.ts` pattern for adding a Telegram command:
+Reusable path/JSON validation is in `src/semantic-compaction.ts`:
 
 ```ts
-bot.command("semantic_agent_tasks_review", async (ctx) => {
-  if (!(await guard(ctx))) return;
-  const pathOrLatest = ctx.match?.trim() || "latest";
-  await replyLong(ctx, formatSemanticAgentTaskPlan(buildSemanticAgentTaskPlan(pathOrLatest, reportsPath())));
-});
-```
-
-Shared helpers:
-
-- `guard(ctx)` authorization (`src/index.ts` lines 410-413).
-- `reportsPath()` = `join(config.agentWorkspaceRoot, "reports")` (`src/index.ts` lines 1032-1034).
-- `labDbPath()` for DB (`src/index.ts` lines 1028-1030).
-- `currentProjectId()` and `activeProjectPath()` for project context.
-- `semanticCompactionProjectContext()` is read-only and suppresses failures; it loads Project Core/Constitution only for prompt context, not mutation.
-
-### Command catalog pattern
-Add a `TELEGRAM_COMMANDS` entry with `command`, `description`, `help`, and `usage`. Add matching `CLI_COMMANDS` local shortcut near semantic entries. `formatHelpText`, `telegramCommandsForApi`, and `formatCommandCatalog` derive output from these arrays.
-
-### Supervisor loop safety contract
-`src/idu-supervisor-loop.ts` already states safety flags:
-
-```ts
-safety: {
-  agentLabsExecuted: false;
-  rulesApplied: false;
-  memoryDeleted: false;
-  projectCoreModified: false;
+function resolveDraftPath(pathOrLatest, reportsPath, errors) {
+  if (pathOrLatest === "latest") { /* newest semantic-compaction-draft-* */ }
+  const candidate = resolve(isAbsolute(pathOrLatest) ? pathOrLatest : join(reportsPath, pathOrLatest));
+  const relativeToReports = relative(reportsPath, candidate);
+  if (relativeToReports.startsWith("..") || isAbsolute(relativeToReports) || relativeToReports === "") {
+    errors.push("La ruta debe estar dentro de AGENT_WORKSPACE_ROOT/reports.");
+    return undefined;
+  }
+  if (!isDraftFileName(basename(candidate))) {
+    errors.push("El archivo debe llamarse semantic-compaction-draft-*.json.");
+    return undefined;
+  }
 }
 ```
 
-The loop may create semantic drafts and queue review tasks, but does not execute AgentLabs, apply rules, delete memory, or modify Project Core. Any LEARN-1 “improvement proposal” path should preserve this model.
+Validation gotchas:
+- Only `latest` resolves automatically, and only for `semantic-compaction-draft-*.json` files.
+- Absolute or relative paths must stay inside `reportsPath`.
+- Empty relative path is rejected.
+- Draft must have warning `Borrador IA. No es fuente de verdad.`, `generatedAt`, `projectId`, and no `rawOutput`.
+- `normalizeDraft` tolerates missing arrays/objects by coercing to empty/default values.
+
+Existing command wiring pattern:
+- CLI imports functions and extends `CliRuntime` (`src/cli.ts` lines 106-181).
+- Runtime factory binds `reportsPath` as `join(config.agentWorkspaceRoot, "reports")` (`src/cli.ts` lines 326-337).
+- `runCliCommand` switch supports both `idu-supervisor-improvements-*` and shorter aliases (`src/cli.ts` lines 475-490).
+- Telegram handlers use `ctx.match?.trim() || "latest"`, `guard(ctx)`, `reportsPath()`, and `replyLong(...)` (`src/index.ts` lines 1265-1285).
+- Catalog/allowlist/ext all require explicit additions: `src/command-catalog.ts`, `src/telegram-command-registry.ts`, `.pi/extensions/idu-pi-commands.ts`.
+
+Existing decision-flow pattern to copy is `/report <id> [work|defer|ignore|save]` in `src/index.ts` lines 1935-1968: parse args, validate allowed decision, update JSONL store, set timestamp, reply with confirmation. For LEARN-2, use analogous explicit human decision commands, but against supervisor-improvement proposal JSON files.
 
 ## Architecture
 
-Semantic audit flow today:
+Current LEARN-1 flow:
+1. SG4 semantic compaction produces `reports/semantic-compaction-draft-YYYYMMDD-HHMMSS.json`.
+2. `buildSupervisorImprovementPlan` validates/reviews that draft through `reviewSemanticCompactionDraft`.
+3. It derives review-only proposals from draft fields (`suggestedRuleUpdates`, `suggestedSkillUpdates`, classifier review, preserved rules, Project Core risks, critical bugs/reusable lessons).
+4. `createSupervisorImprovementProposals` writes a separate JSON artifact in `reports/`.
+5. CLI, Telegram, Pi extension, command catalog expose only review/create commands.
 
-1. `LabDbRepository`/semantic audit stats determine thresholds.
-2. `saveSemanticCompactionDraft()` snapshots recent local signals from `lab.db` + `reports/tasks.jsonl`, sanitizes secrets and raw output, writes `reports/semantic-compaction-draft-YYYYMMDD-HHMMSS.json`.
-3. `reviewSemanticCompactionDraft()` safely resolves and validates a draft.
-4. `buildSemanticAgentTaskPlan()` reads a valid draft and maps suggestions/bugs/risks/classifier review into grouped review candidates.
-5. `createSemanticAgentTasks()` writes review-only `StructuredTask`s; dedupe is text-marker based.
-6. CLI and Telegram are thin wrappers around the same functions.
-7. Supervisor tick composes status -> optional audit run -> optional draft -> optional task creation, with explicit safety flags.
+Likely LEARN-2 integration points:
+1. Add decision/update functions in `src/supervisor-improvement-proposals.ts`, not a new unrelated module, because the schema/status/action types already exist there.
+2. Add a path resolver for `supervisor-improvement-proposals-*.json`. Do not reuse `resolveDraftPath` directly because it is private and hard-coded to `semantic-compaction-draft-*`; copy/extract the reports-contained path validation pattern.
+3. Add formatter(s) for decision result, similar to `formatSupervisorImprovementCreationResult`.
+4. Add `CliRuntime` methods and runtime bindings in `src/cli.ts`.
+5. Add CLI cases and help text in `src/cli.ts`.
+6. Add Telegram bot command(s) in `src/index.ts` with guard + `replyLong`.
+7. Add entries to `src/command-catalog.ts`, `src/telegram-command-registry.ts`, `.pi/extensions/idu-pi-commands.ts`.
+8. Add unit tests in `test/supervisor-improvement-proposals.test.ts` and wiring/CLI tests in `test/supervisor-improvement-proposals-command-wiring.test.ts` and `test/idu-cli.test.ts`.
 
-For LEARN-1, the least invasive implementation is a new semantic module that consumes only `reviewSemanticCompactionDraft()` output and produces review-only “supervisor improvement proposals” as either formatted read-only plan or `StructuredTask` review items. Avoid new DB tables or schema; avoid changing human-intent/project-core/constitution/skills. If persisted output is needed, prefer existing `StructuredTaskQueue` (like semantic agent tasks) over `proposals` DB table because `proposals` has `finding_id` FK coupling.
+Suggested LEARN-2 command shape:
+- Review decisions: `/supervisor_improvements_decide <latest|ruta> <proposal-id> <approve|reject|defer> [note]`
+- CLI: `idu-pi idu-supervisor-improvements-decide latest improvement-001 approve "reason"`
+- Keep it review-only: update proposal status/action metadata in JSON only; do not apply rules, skills, Project Core, or AgentLabs.
+
+Potential result JSON additions:
+- Existing proposal has `status`; update it to `approved|rejected|deferred`.
+- Consider adding optional fields: `decidedAt`, `decision`, `decisionNote`, `decidedBy`.
+- If adding fields to `SupervisorImprovementProposal`, update type/tests and ensure old JSON still parses if fields are absent.
 
 ## Start Here
 
-Start in `src/semantic-agent-tasks.ts`. It is the closest existing implementation: safe draft validation, transformation of compaction suggestions into review-only candidates, grouping/dedupe, queue persistence, and formatter patterns are already solved.
+Start in `src/supervisor-improvement-proposals.ts`. It owns the LEARN-1 schema and artifact writing, and it is the right place to add a safe `decideSupervisorImprovementProposal(...)` API plus path validation for `supervisor-improvement-proposals-*.json`.
 
-Then wire through `src/cli.ts`, `src/index.ts`, and `src/command-catalog.ts`; add tests mirroring `test/semantic-agent-tasks.test.ts`, `test/idu-cli.test.ts`, and the source-level Telegram wiring tests.
+## Gotchas
 
-## Safest path validation approach
+- There is intentionally no `supervisor_improvements_apply`; tests assert no apply command exists. LEARN-2 should remain a decision flow unless requirements explicitly say apply.
+- `latest` currently means latest semantic compaction draft for review/create. For decision flow, `latest` should probably mean latest `supervisor-improvement-proposals-*.json`, not latest semantic draft.
+- Proposal IDs (`improvement-001`) are stable only within a generated file. Always require a file/latest artifact plus proposal id.
+- Existing `SupervisorImprovementAction` includes `approve_for_agent_review`, `approve_for_manual_apply`, `reject`, `defer`; existing `Status` has `approved/rejected/deferred`. Decide whether user command maps to `status` only or also overwrites `suggestedAction`.
+- `createSupervisorImprovementProposals` returns no `path` if invalid/no proposals; decision flow must handle missing artifact/no proposals distinctly.
+- Existing private helpers (`timestamp`, `short`, `normalize`, semantic `resolveDraftPath`) are not exported.
+- Tests are in `test/`, not `tests/`.
+- Full validation command is `corepack pnpm test` (runs TypeScript build then node tests).
+- Engram save was requested if available, but no Engram/memory tool is exposed in this subagent runtime.
 
-Use `reviewSemanticCompactionDraft(pathOrLatest, reportsPath)` as the only entry point to draft files. It already validates location, filename, existence, JSON shape enough for current code, warning, and rawOutput. Do not accept arbitrary absolute paths outside reports. Do not relax filename regex. If the new feature needs to surface invalid paths, return the review errors and do not create tasks/proposals.
+## Supervisor coordination
 
-## Test patterns
-
-- Unit tests create temp roots with `mkdtempSync(join(tmpdir(), ...))`, write draft JSON under `reports/semantic-compaction-draft-20260102-030405.json`, then `rmSync(..., { recursive: true, force: true })`.
-- Path safety tests cover outside path and invalid basename.
-- Formatter tests assert safe notices (`No ejecuté AgentLabs`, no apply/mutation).
-- Queue tests use `new StructuredTaskQueue({ filePath: join(root, "tasks.jsonl") })`, assert category/source/projectId/dedupe and duplicate skip behavior.
-- CLI tests inject a fake `CliRuntime` and call `runCliCommand([...], runtime)`.
-- Telegram wiring tests are source-text assertions on `src/index.ts` to ensure commands exist and no `*_apply`/AgentLabs path was added.
-- Supervisor tests use dependency injection (`saveSemanticCompactionDraft`, `buildSemanticAgentTaskPlan`, `createSemanticAgentTasks`) and assert flags remain false.
-
-## Risks
-
-- Existing `resolveDraftPath` is private; copying it risks divergence. Prefer public `reviewSemanticCompactionDraft()` or export a helper deliberately.
-- “Apply supervisor improvement proposals” wording is dangerous: existing safety language forbids applying rules/skills/memory automatically. Interpret as “create review-only proposals/tasks” unless supervisor explicitly approves more.
-- `suggestedMemoryItems` currently appears in drafts but is not included in review summary formatter; a LEARN-1 feature that needs it should read from `review.draft.suggestedMemoryItems`, not `review.summary`.
-- `suggestedSkillUpdates` must not mutate skills under the stated constraints; only surface as review items.
-- `suggestedRuleUpdates` likely relates to human-intent rules, but constraints forbid human-intent mutation; only queue/report.
-- `projectCore`/constitution helpers are read-only, but constraints forbid mutation; do not touch `config/project-core.json` or constitution files.
-- `semantic-agent-tasks` uses source `semantic-audit`; if adding supervisor-specific proposals, choose a stable source string and update tests/dedupe expectations.
-- CLI review commands currently require explicit arg while Telegram defaults to `latest`; decide whether new CLI command follows required arg or defaults. Existing pattern favors required CLI arg for review/create.
-- Engram memory tools were not available in this subagent toolset, so findings were not saved there.
+No blocker. No files were edited except this requested `context.md` artifact.
