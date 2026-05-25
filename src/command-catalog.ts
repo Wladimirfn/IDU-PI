@@ -112,6 +112,24 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		],
 	},
 	{
+		command: "supervisor_improvements_review",
+		description: "Revisar mejoras del supervisor",
+		help: "/supervisor_improvements_review [latest|ruta] - ver propuestas de mejora sin aplicar reglas, skills ni Project Core",
+		usage: [
+			"/supervisor_improvements_review latest",
+			"/supervisor_improvements_review <ruta>",
+		],
+	},
+	{
+		command: "supervisor_improvements_create",
+		description: "Crear propuestas review-only",
+		help: "/supervisor_improvements_create [latest|ruta] - guardar propuestas en reports sin mutar código ni ejecutar AgentLabs",
+		usage: [
+			"/supervisor_improvements_create latest",
+			"/supervisor_improvements_create <ruta>",
+		],
+	},
+	{
 		command: "idu_define_project",
 		description: "Definir Project Core manual",
 		help: "/idu_define_project - iniciar wizard manual para crear config/project-core.json draft",
@@ -528,6 +546,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{
 		label: "Semantic agent tasks create",
 		command: "corepack pnpm cli -- idu-semantic-agent-tasks-create latest",
+	},
+	{
+		label: "Supervisor improvements review",
+		command: "corepack pnpm cli -- idu-supervisor-improvements-review latest",
+	},
+	{
+		label: "Supervisor improvements create",
+		command: "corepack pnpm cli -- idu-supervisor-improvements-create latest",
 	},
 ];
 

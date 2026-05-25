@@ -156,6 +156,12 @@ import {
 	maybeRunSupervisorAfterTask,
 	maybeRunSupervisorOnIduActivation,
 } from "./idu-supervisor-hooks.js";
+import {
+	buildSupervisorImprovementPlan,
+	createSupervisorImprovementProposals,
+	formatSupervisorImprovementCreationResult,
+	formatSupervisorImprovementPlan,
+} from "./supervisor-improvement-proposals.js";
 import { findPiProcesses } from "./processes.js";
 import {
 	addProject,
@@ -1252,6 +1258,28 @@ bot.command("semantic_agent_tasks_create", async (ctx) => {
 				queue: structuredTaskQueue,
 				projectId: currentProjectId(),
 			}),
+		),
+	);
+});
+
+bot.command("supervisor_improvements_review", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatSupervisorImprovementPlan(
+			buildSupervisorImprovementPlan(pathOrLatest, reportsPath()),
+		),
+	);
+});
+
+bot.command("supervisor_improvements_create", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatSupervisorImprovementCreationResult(
+			createSupervisorImprovementProposals(pathOrLatest, reportsPath()),
 		),
 	);
 });

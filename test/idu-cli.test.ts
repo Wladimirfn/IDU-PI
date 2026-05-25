@@ -36,6 +36,10 @@ import type {
 	SemanticAgentTaskPlan,
 } from "../src/semantic-agent-tasks.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
+import type {
+	SupervisorImprovementCreationResult,
+	SupervisorImprovementPlan,
+} from "../src/supervisor-improvement-proposals.js";
 import {
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
@@ -286,6 +290,41 @@ function fakeSemanticAgentTaskCreation(): SemanticAgentTaskCreationResult {
 	};
 }
 
+function fakeSupervisorImprovementPlan(): SupervisorImprovementPlan {
+	return {
+		draftPath: "semantic-compaction-draft-20260102-030405.json",
+		sourceDraftPath: "semantic-compaction-draft-20260102-030405.json",
+		draftName: "semantic-compaction-draft-20260102-030405.json",
+		projectId: "pi-telegram-bridge",
+		validDraft: true,
+		errors: [],
+		proposals: [
+			{
+				id: "pending",
+				type: "intent_rule_update",
+				title: "Clasificar fallas de base de datos como bug/database/high",
+				description: "Propuesta review-only de regla de intención.",
+				evidence: ["Si falla + db → bug/database/high"],
+				sourceDraftPath: "semantic-compaction-draft-20260102-030405.json",
+				riskLevel: "medium",
+				expectedBenefit: ["quality", "safety"],
+				suggestedAction: "approve_for_manual_apply",
+				requiresHumanApproval: true,
+				status: "proposed",
+				createdAt: "2026-05-24T00:00:00.000Z",
+			},
+		],
+	};
+}
+
+function fakeSupervisorImprovementCreation(): SupervisorImprovementCreationResult {
+	return {
+		plan: fakeSupervisorImprovementPlan(),
+		path: "reports/supervisor-improvement-proposals-20260524-000000.json",
+		created: fakeSupervisorImprovementPlan().proposals,
+	};
+}
+
 function fakeSupervisorResult(): IduSupervisorLoopResult {
 	return {
 		status: "completed",
@@ -482,6 +521,26 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"No ejecuté AgentLabs, no apliqué reglas, no borré memoria.",
 			].join("\n"),
 		supervisorOnIduActivation: () => undefined,
+		supervisorImprovementPlan: fakeSupervisorImprovementPlan,
+		formatSupervisorImprovementPlan: (plan) =>
+			[
+				"Supervisor Improvement Proposals",
+				"",
+				"Propuestas:",
+				String(plan.proposals.length),
+				"",
+				"No apliqué reglas ni modifiqué skills.",
+			].join("\n"),
+		supervisorImprovementCreate: fakeSupervisorImprovementCreation,
+		formatSupervisorImprovementCreationResult: (result) =>
+			[
+				"Supervisor Improvement Proposals Created",
+				"",
+				"Ruta:",
+				result.path,
+				"",
+				"No apliqué reglas, no modifiqué skills y no ejecuté AgentLabs.",
+			].join("\n"),
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
 			[
@@ -723,6 +782,52 @@ test("CLI semantic-agent-tasks-create latest funciona", async () => {
 		assert.match(result.stdout, /Semantic Agent Tasks Created/u);
 		assert.match(result.stdout, /task-sg5-1/u);
 		assert.match(result.stdout, /No ejecuté AgentLabs/u);
+	});
+});
+
+test("CLI idu-supervisor-improvements-review latest funciona", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(
+			["idu-supervisor-improvements-review", "latest"],
+			runtime,
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Supervisor Improvement Proposals/u);
+		assert.match(result.stdout, /Propuestas:\n1/u);
+		assert.match(result.stdout, /No apliqué reglas/u);
+	});
+});
+
+test("CLI idu-supervisor-improvements-create latest funciona", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(
+			["idu-supervisor-improvements-create", "latest"],
+			runtime,
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Supervisor Improvement Proposals Created/u);
+		assert.match(result.stdout, /supervisor-improvement-proposals/u);
+		assert.match(result.stdout, /no ejecuté AgentLabs/u);
+	});
+});
+
+test("CLI supervisor-improvements aliases siguen funcionando", async () => {
+	await withRuntime(async (runtime) => {
+		const review = await runCliCommand(
+			["supervisor-improvements-review", "latest"],
+			runtime,
+		);
+		const create = await runCliCommand(
+			["supervisor-improvements-create", "latest"],
+			runtime,
+		);
+
+		assert.equal(review.exitCode, 0);
+		assert.equal(create.exitCode, 0);
+		assert.match(review.stdout, /Supervisor Improvement Proposals/u);
+		assert.match(create.stdout, /Supervisor Improvement Proposals Created/u);
 	});
 });
 

@@ -103,6 +103,14 @@ import {
 	maybeRunSupervisorOnIduActivation,
 } from "./idu-supervisor-hooks.js";
 import {
+	buildSupervisorImprovementPlan,
+	createSupervisorImprovementProposals,
+	formatSupervisorImprovementCreationResult,
+	formatSupervisorImprovementPlan,
+	type SupervisorImprovementCreationResult,
+	type SupervisorImprovementPlan,
+} from "./supervisor-improvement-proposals.js";
+import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
@@ -162,6 +170,16 @@ export type CliRuntime = {
 	supervisorTick: () => IduSupervisorLoopResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
 	supervisorOnIduActivation: () => void;
+	supervisorImprovementPlan: (
+		pathOrLatest: string,
+	) => SupervisorImprovementPlan;
+	formatSupervisorImprovementPlan: (plan: SupervisorImprovementPlan) => string;
+	supervisorImprovementCreate: (
+		pathOrLatest: string,
+	) => SupervisorImprovementCreationResult;
+	formatSupervisorImprovementCreationResult: (
+		result: SupervisorImprovementCreationResult,
+	) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
 	queueDetail: () => string;
@@ -305,6 +323,18 @@ export function createCliRuntime(): CliRuntime {
 				queue: structuredTaskQueue,
 			});
 		},
+		supervisorImprovementPlan: (pathOrLatest) =>
+			buildSupervisorImprovementPlan(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatSupervisorImprovementPlan,
+		supervisorImprovementCreate: (pathOrLatest) =>
+			createSupervisorImprovementProposals(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatSupervisorImprovementCreationResult,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -441,6 +471,20 @@ export async function runCliCommand(
 			case "supervisor-tick":
 				return ok(
 					activeRuntime.formatSupervisorTick(activeRuntime.supervisorTick()),
+				);
+			case "idu-supervisor-improvements-review":
+			case "supervisor-improvements-review":
+				return ok(
+					activeRuntime.formatSupervisorImprovementPlan(
+						activeRuntime.supervisorImprovementPlan(requiredText(rest)),
+					),
+				);
+			case "idu-supervisor-improvements-create":
+			case "supervisor-improvements-create":
+				return ok(
+					activeRuntime.formatSupervisorImprovementCreationResult(
+						activeRuntime.supervisorImprovementCreate(requiredText(rest)),
+					),
 				);
 			case "idu-task":
 			case "task": {
@@ -859,6 +903,8 @@ export function helpText(): string {
 		"  idu-pi idu-status          (Telegram: /idu_status)",
 		"  idu-pi prepare             (Telegram: /idu_prepare)",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
+		"  idu-pi idu-supervisor-improvements-review latest",
+		"  idu-pi idu-supervisor-improvements-create latest",
 		'  idu-pi preflight "solicitud"',
 		'  idu-pi advisory "solicitud"',
 		"  idu-pi postflight",
@@ -878,6 +924,7 @@ export function helpText(): string {
 		"Notas:",
 		"- Usa AGENT_WORKSPACE_ROOT y el registro de proyectos del bridge.",
 		"- No usa IA, no ejecuta AgentLabs y no aplica project-flows.",
+		"- Las mejoras del supervisor son propuestas de revisión; no aplican reglas ni skills.",
 	].join("\n");
 }
 

@@ -240,4 +240,17 @@ export default function (pi: ExtensionAPI) {
 		cliArgs: (args) => ["idu-semantic-agent-tasks-create", args || "latest"],
 		usage: "/idu-semantic-agent-tasks-create [latest|ruta]",
 	});
+
+	registerIduCommand("idu-supervisor-improvements-review", {
+		description:
+			"Revisar propuestas de mejora del supervisor sin aplicar cambios",
+		cliArgs: (args) => ["supervisor-improvements-review", args || "latest"],
+		usage: "/idu-supervisor-improvements-review [latest|ruta]",
+	});
+
+	registerIduCommand("idu-supervisor-improvements-create", {
+		description: "Crear propuestas review-only del supervisor en reports",
+		cliArgs: (args) => ["supervisor-improvements-create", args || "latest"],
+		usage: "/idu-supervisor-improvements-create [latest|ruta]",
+	});
 }
