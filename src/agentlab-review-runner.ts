@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -23,8 +25,13 @@ import {
 	reviewAgentLabReviewRequest,
 	type AgentLabReviewRequestPlan,
 } from "./agentlab-review-requests.js";
+import { cleanAgentOutput, summarizeOutput } from "./lab-reports.js";
 
-export type AgentLabReviewRunStatus = "completed" | "skipped" | "failed";
+export type AgentLabReviewRunStatus =
+	| "completed"
+	| "skipped"
+	| "failed"
+	| "security_violation";
 
 export type AgentLabReviewRunSummary = {
 	requestId: string;
@@ -43,6 +50,8 @@ export type AgentLabReviewRunSummary = {
 	recommendations: AgentLabRecommendation[];
 	testsSuggested: string[];
 	requiresHumanApproval: boolean;
+	realRepoChangedFiles?: string[];
+	securityWarnings?: string[];
 };
 
 export type AgentLabReviewRunResult = {
@@ -83,6 +92,26 @@ export type RunAgentLabReviewRequestInput = {
 	router: AgentRouter;
 	profile?: AgentProfile;
 	now?: () => Date;
+};
+
+export type RealRepoSnapshot = {
+	ok: boolean;
+	projectPath: string;
+	head: string;
+	branch: string;
+	status: string;
+	trackedDiff: string;
+	stagedDiff: string;
+	untracked: Record<string, string>;
+	files: string[];
+	fileStates: Record<string, string>;
+	error?: string;
+};
+
+export type RealRepoDiff = {
+	changed: boolean;
+	changedFiles: string[];
+	errors: string[];
 };
 
 const WARNING = "Revisión AgentLab. No aplica cambios." as const;
@@ -181,7 +210,20 @@ export async function runAgentLabReviewRequest(
 			runtime.cwd,
 		);
 	}
+	const before = snapshotRealRepoState(input.projectPath);
+	if (!before.ok) {
+		return failedRun(
+			input.request,
+			profile,
+			runtime.cwd,
+			before.error ?? "No pude leer estado git del repo real.",
+			[
+				`security_violation: no pude tomar snapshot inicial del repo real: ${before.error ?? "error desconocido"}`,
+			],
+		);
+	}
 	const timeoutMs = Math.max(1, input.request.maxMinutes) * 60_000;
+	let run: AgentLabReviewRunSummary;
 	try {
 		const prompt = buildReviewPrompt(input.request, profile, input.projectPath);
 		const result = await Promise.race([
@@ -190,27 +232,28 @@ export async function runAgentLabReviewRequest(
 				setTimeout(() => reject(new Error("LAB_TIMEOUT")), timeoutMs).unref(),
 			),
 		]);
-		const parsed = parseAgentLabReviewReportFromOutput(
+		const parsed = extractAgentLabReviewReportFromOutput(
 			result.output,
 			input.request,
 		);
 		if (!result.ok) {
-			return failedRun(input.request, profile, runtime.cwd, result.output, [
+			run = failedRun(input.request, profile, runtime.cwd, result.output, [
 				"AgentLab retornó status failed.",
 				...parsed.errors,
 			]);
+		} else {
+			run = completedRun(
+				input.request,
+				profile,
+				runtime.cwd,
+				result.output,
+				parsed,
+			);
 		}
-		return completedRun(
-			input.request,
-			profile,
-			runtime.cwd,
-			result.output,
-			parsed,
-		);
 	} catch (error) {
 		const timeout = error instanceof Error && error.message === "LAB_TIMEOUT";
 		if (timeout) runtime.session.cancel();
-		return failedRun(
+		run = failedRun(
 			input.request,
 			profile,
 			runtime.cwd,
@@ -220,6 +263,17 @@ export async function runAgentLabReviewRequest(
 			[error instanceof Error ? error.message : String(error)],
 		);
 	}
+	const after = snapshotRealRepoState(input.projectPath);
+	const realRepoDiff = diffRealRepoState(before, after);
+	return realRepoDiff.changed
+		? securityViolationRun(
+				input.request,
+				profile,
+				runtime.cwd,
+				run,
+				realRepoDiff,
+			)
+		: run;
 }
 
 export function getAgentLabReviewStatus(
@@ -273,6 +327,8 @@ export function formatAgentLabReviewRunResult(
 		String(counts.skipped),
 		"Failed:",
 		String(counts.failed),
+		"Security violations:",
+		String(counts.security_violation),
 		"",
 		"Specialties:",
 		formatList([...new Set(result.runs.map((run) => run.specialty))]),
@@ -317,9 +373,13 @@ export function formatAgentLabReviewStatus(
 		"Estado por specialty:",
 		formatList(
 			status.result.runs.map(
-				(run) => `${run.specialty}: ${run.status} (${run.rawSummary})`,
+				(run) =>
+					`${run.specialty}: ${run.status} (${sanitizeAgentLabSummary(run.rawSummary)})`,
 			),
 		),
+		"",
+		"Security warnings:",
+		formatList(status.result.runs.flatMap((run) => run.securityWarnings ?? [])),
 		"",
 		"Findings:",
 		formatList(
@@ -345,6 +405,13 @@ export function parseAgentLabReviewReportFromOutput(
 	output: string,
 	request: AgentLabReviewRequest,
 ): { report?: AgentLabReviewReport; errors: string[] } {
+	return extractAgentLabReviewReportFromOutput(output, request);
+}
+
+export function extractAgentLabReviewReportFromOutput(
+	output: string,
+	request: AgentLabReviewRequest,
+): { report?: AgentLabReviewReport; errors: string[] } {
 	const errors: string[] = [];
 	for (const candidate of jsonCandidates(output)) {
 		try {
@@ -354,9 +421,11 @@ export function parseAgentLabReviewReportFromOutput(
 				request,
 			);
 			if (result.ok) return { report: result.report, errors: [] };
-			errors.push(...result.errors);
+			if (looksLikeReviewReport(parsed)) errors.push(...result.errors);
 		} catch (error) {
-			errors.push(error instanceof Error ? error.message : String(error));
+			if (looksLikeReviewReportJson(candidate)) {
+				errors.push(error instanceof Error ? error.message : String(error));
+			}
 		}
 	}
 	return {
@@ -544,6 +613,44 @@ function skippedRun(
 	};
 }
 
+function securityViolationRun(
+	request: AgentLabReviewRequest,
+	profile: AgentProfile,
+	workspace: string,
+	previousRun: AgentLabReviewRunSummary,
+	diff: RealRepoDiff,
+): AgentLabReviewRunSummary {
+	const warnings = [
+		"AgentLab intentó o causó cambios en repo real.",
+		...diff.changedFiles.map(
+			(file) => `Cambio detectado en repo real: ${file}`,
+		),
+		...diff.errors,
+	];
+	return {
+		requestId: request.id,
+		specialty: request.specialty,
+		status: "security_violation",
+		agentId: profile.id,
+		workspace,
+		commandsExecuted: previousRun.commandsExecuted,
+		rawSummary: "security_violation: AgentLab causó cambios en repo real.",
+		contractValidation: {
+			valid: false,
+			errors: [
+				"security_violation: cambios detectados en repo real",
+				...warnings,
+			],
+		},
+		findings: [],
+		recommendations: [],
+		testsSuggested: previousRun.testsSuggested,
+		requiresHumanApproval: true,
+		realRepoChangedFiles: diff.changedFiles,
+		securityWarnings: warnings,
+	};
+}
+
 function buildRunResult(input: {
 	generatedAt: string;
 	sourceRequestFile: string;
@@ -571,8 +678,173 @@ function buildRunResult(input: {
 			"No modifiqué repo real.",
 			"No hice commit ni push.",
 			"No apliqué skills, reglas, Project Core, Constitution ni flows.",
+			...(input.runs.some((run) => run.status === "security_violation")
+				? ["AgentLab intentó o causó cambios en repo real."]
+				: []),
 		],
 	};
+}
+
+export function snapshotRealRepoState(projectPath: string): RealRepoSnapshot {
+	try {
+		const head = runGit(projectPath, ["rev-parse", "HEAD"]).trim();
+		const branch = runGit(projectPath, [
+			"rev-parse",
+			"--abbrev-ref",
+			"HEAD",
+		]).trim();
+		const status = runGit(projectPath, ["status", "--porcelain=v1"]);
+		const trackedDiff = runGit(projectPath, ["diff", "--binary"]);
+		const stagedDiff = runGit(projectPath, ["diff", "--cached", "--binary"]);
+		const untrackedFiles = runGit(projectPath, [
+			"ls-files",
+			"--others",
+			"--exclude-standard",
+			"-z",
+		])
+			.split("\0")
+			.filter(Boolean)
+			.sort();
+		const untracked = Object.fromEntries(
+			untrackedFiles.map((file) => [file, fileHash(join(projectPath, file))]),
+		);
+		const files = snapshotFiles(
+			status,
+			trackedDiff,
+			stagedDiff,
+			untrackedFiles,
+		);
+		return {
+			ok: true,
+			projectPath,
+			head,
+			branch,
+			status,
+			trackedDiff,
+			stagedDiff,
+			untracked,
+			files,
+			fileStates: snapshotFileStates(projectPath, files),
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			projectPath,
+			head: "",
+			branch: "",
+			status: "",
+			trackedDiff: "",
+			stagedDiff: "",
+			untracked: {},
+			files: [],
+			fileStates: {},
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+export function diffRealRepoState(
+	before: RealRepoSnapshot,
+	after: RealRepoSnapshot,
+): RealRepoDiff {
+	const errors = [before, after]
+		.filter((snapshot) => !snapshot.ok)
+		.map(
+			(snapshot) => snapshot.error ?? "No pude leer estado git del repo real.",
+		);
+	if (errors.length) return { changed: true, changedFiles: [], errors };
+	const beforeSignature = snapshotSignature(before);
+	const afterSignature = snapshotSignature(after);
+	if (beforeSignature === afterSignature) {
+		return { changed: false, changedFiles: [], errors: [] };
+	}
+	const files = [...new Set([...before.files, ...after.files])].sort();
+	const changedFiles = files.filter(
+		(file) => before.fileStates[file] !== after.fileStates[file],
+	);
+	if (before.head !== after.head) changedFiles.unshift("HEAD");
+	if (before.branch !== after.branch) changedFiles.unshift("BRANCH");
+	const dedupedChangedFiles = [...new Set(changedFiles)].sort();
+
+	return {
+		changed: true,
+		changedFiles: dedupedChangedFiles,
+		errors: [],
+	};
+}
+
+export function assertRealRepoUnchanged(
+	before: RealRepoSnapshot,
+	after: RealRepoSnapshot,
+): void {
+	const diff = diffRealRepoState(before, after);
+	if (diff.changed) {
+		throw new Error(
+			`security_violation: cambios detectados en repo real: ${diff.changedFiles.join(", ") || diff.errors.join("; ")}`,
+		);
+	}
+}
+
+function runGit(cwd: string, args: string[]): string {
+	return execFileSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+}
+
+function fileHash(path: string): string {
+	return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function snapshotSignature(snapshot: RealRepoSnapshot): string {
+	return JSON.stringify({
+		head: snapshot.head,
+		branch: snapshot.branch,
+		fileStates: snapshot.fileStates,
+	});
+}
+
+function snapshotFileStates(
+	projectPath: string,
+	files: string[],
+): Record<string, string> {
+	return Object.fromEntries(
+		files.map((file) => [file, fileState(projectPath, file)]),
+	);
+}
+
+function fileState(projectPath: string, file: string): string {
+	const path = join(projectPath, file);
+	const content = existsSync(path) ? fileHash(path) : "missing";
+	return [
+		content,
+		runGit(projectPath, ["status", "--porcelain=v1", "--", file]),
+		runGit(projectPath, ["diff", "--binary", "--", file]),
+		runGit(projectPath, ["diff", "--cached", "--binary", "--", file]),
+	].join("\n---\n");
+}
+
+function snapshotFiles(
+	status: string,
+	trackedDiff: string,
+	stagedDiff: string,
+	untrackedFiles: string[],
+): string[] {
+	const files = new Set(untrackedFiles);
+	for (const line of status.split(/\r?\n/u).filter(Boolean)) {
+		const file = line
+			.slice(3)
+			.replace(/^.* -> /u, "")
+			.trim();
+		if (file) files.add(file);
+	}
+	for (const diff of [trackedDiff, stagedDiff]) {
+		for (const match of diff.matchAll(/^diff --git a\/(.*?) b\/(.*?)$/gmu)) {
+			if (match[2]) files.add(match[2]);
+		}
+	}
+	return [...files].sort();
 }
 
 function resolveRunPath(
@@ -654,11 +926,55 @@ function jsonCandidates(output: string): string[] {
 	for (const match of output.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu)) {
 		if (match[1]?.trim()) candidates.push(match[1].trim());
 	}
-	const first = output.indexOf("{");
-	const last = output.lastIndexOf("}");
-	if (first >= 0 && last > first)
-		candidates.push(output.slice(first, last + 1));
-	return candidates;
+	const starts = [...output.matchAll(/\{/gu)].map((match) => match.index ?? 0);
+	for (const start of starts) {
+		const end = balancedJsonObjectEnd(output, start);
+		if (end > start) candidates.push(output.slice(start, end + 1).trim());
+	}
+	return dedupe(candidates);
+}
+
+function balancedJsonObjectEnd(output: string, start: number): number {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let index = start; index < output.length; index++) {
+		const char = output[index];
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (char === "\\") {
+			escaped = inString;
+			continue;
+		}
+		if (char === '"') {
+			inString = !inString;
+			continue;
+		}
+		if (inString) continue;
+		if (char === "{") depth++;
+		if (char === "}") depth--;
+		if (depth === 0) return index;
+	}
+	return -1;
+}
+
+function looksLikeReviewReport(value: unknown): boolean {
+	const root = isRecord(value) ? value : undefined;
+	return Boolean(
+		root &&
+			("requestId" in root || "specialty" in root) &&
+			("qualityFindings" in root ||
+				"safetyFindings" in root ||
+				"summary" in root),
+	);
+}
+
+function looksLikeReviewReportJson(candidate: string): boolean {
+	return /"requestId"\s*:|"specialty"\s*:|"qualityFindings"\s*:|"safetyFindings"\s*:/u.test(
+		candidate,
+	);
 }
 
 function allFindings(report: AgentLabReviewReport): AgentLabFinding[] {
@@ -680,7 +996,7 @@ function highCriticalFindings(findings: AgentLabFinding[]): AgentLabFinding[] {
 
 function summaryForRuns(runs: AgentLabReviewRunSummary[]): string {
 	const counts = countRuns(runs);
-	return `${runs.length} requests: ${counts.completed} completed, ${counts.skipped} skipped, ${counts.failed} failed.`;
+	return `${runs.length} requests: ${counts.completed} completed, ${counts.skipped} skipped, ${counts.failed} failed, ${counts.security_violation} security_violation.`;
 }
 
 function countRuns(
@@ -690,14 +1006,18 @@ function countRuns(
 		completed: runs.filter((run) => run.status === "completed").length,
 		skipped: runs.filter((run) => run.status === "skipped").length,
 		failed: runs.filter((run) => run.status === "failed").length,
+		security_violation: runs.filter(
+			(run) => run.status === "security_violation",
+		).length,
 	};
 }
 
+export function sanitizeAgentLabSummary(output: string): string {
+	return summarizeOutput(cleanAgentOutput(output), 300);
+}
+
 function legacySummary(output: string): string {
-	return (
-		output.trim().split(/\r?\n/u).filter(Boolean).slice(0, 5).join("\n") ||
-		"Sin resumen."
-	);
+	return sanitizeAgentLabSummary(output) || "Sin resumen.";
 }
 
 function formatList(items: string[]): string {

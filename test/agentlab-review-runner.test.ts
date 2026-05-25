@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -31,6 +32,8 @@ class FakeSession implements AgentSession {
 		cwd: string,
 		private output: string,
 		busy = false,
+		private onPrompt?: () => void,
+		private ok = true,
 	) {
 		this.cwd = cwd;
 		this.busy = busy;
@@ -43,7 +46,8 @@ class FakeSession implements AgentSession {
 		_onProgress?: (event: PiRpcProgressEvent) => void,
 	): Promise<PiRpcPromptResult> {
 		this.prompts.push(message);
-		return { ok: true, output: this.output };
+		this.onPrompt?.();
+		return { ok: this.ok, output: this.output };
 	}
 	answerUiRequest(): boolean {
 		return false;
@@ -147,10 +151,12 @@ function routerWith(
 	output: string,
 	workspaceMode: "clone" | "direct" = "clone",
 	busy = false,
+	onPrompt?: (projectPath: string) => void,
+	projectPath = gitProject(),
+	ok = true,
 ) {
 	const sessions = new Map<string, FakeSession>();
 	const workspaceRoot = root();
-	const projectPath = root();
 	mkdirSync(projectPath, { recursive: true });
 	const router = new AgentRouter({
 		piBin: "pi",
@@ -161,7 +167,13 @@ function routerWith(
 		workspaceRoot,
 		workspaceMode,
 		createSession: (options) => {
-			const session = new FakeSession(options.cwd, output, busy);
+			const session = new FakeSession(
+				options.cwd,
+				output,
+				busy,
+				() => onPrompt?.(projectPath),
+				ok,
+			);
 			sessions.set(options.cwd, session);
 			return session;
 		},
@@ -172,6 +184,21 @@ function routerWith(
 		},
 	});
 	return { router, sessions, projectPath, workspaceRoot };
+}
+
+function git(args: string[], cwd: string): string {
+	return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+function gitProject(): string {
+	const projectPath = root();
+	git(["init"], projectPath);
+	git(["config", "user.email", "test@example.com"], projectPath);
+	git(["config", "user.name", "Test"], projectPath);
+	writeFileSync(join(projectPath, "tracked.txt"), "base\n", "utf8");
+	git(["add", "tracked.txt"], projectPath);
+	git(["commit", "-m", "init"], projectPath);
+	return projectPath;
 }
 
 test("run latest lee request válido", async () => {
@@ -299,16 +326,125 @@ test("run usa review-only y forbiddenActions", async () => {
 	assert.match(prompt, /Acciones prohibidas/u);
 });
 
-test("run no modifica repo real", async () => {
-	const { router, projectPath } = routerWith(validReport());
-	const sentinel = join(projectPath, "sentinel.txt");
-	writeFileSync(sentinel, "original", "utf8");
-	await runAgentLabReviewRequest({
+test("guard no falla si repo real queda igual", async () => {
+	const projectPath = gitProject();
+	const { router } = routerWith(
+		validReport(),
+		"clone",
+		false,
+		undefined,
+		projectPath,
+	);
+	const run = await runAgentLabReviewRequest({
 		router,
 		projectPath,
 		request: request("security"),
 	});
-	assert.equal(readFileSync(sentinel, "utf8"), "original");
+	assert.equal(run.status, "completed");
+	assert.equal(git(["status", "--porcelain"], projectPath), "");
+});
+
+test("guard detecta archivo nuevo en repo real", async () => {
+	const projectPath = gitProject();
+	writeFileSync(join(projectPath, "preexisting.txt"), "dirty before\n", "utf8");
+	const { router } = routerWith(
+		validReport(),
+		"clone",
+		false,
+		(path) => writeFileSync(join(path, "intruder.txt"), "bad\n", "utf8"),
+		projectPath,
+	);
+	const run = await runAgentLabReviewRequest({
+		router,
+		projectPath,
+		request: request("security"),
+	});
+	assert.equal(run.status, "security_violation");
+	assert.match(run.contractValidation.errors.join("\n"), /security_violation/u);
+	assert.deepEqual(run.realRepoChangedFiles, ["intruder.txt"]);
+	assert.equal(run.requiresHumanApproval, true);
+});
+
+test("guard detecta mutación limpia con commit en repo real", async () => {
+	const projectPath = gitProject();
+	const { router } = routerWith(
+		validReport(),
+		"clone",
+		false,
+		(path) => {
+			writeFileSync(join(path, "tracked.txt"), "committed mutation\n", "utf8");
+			git(["add", "tracked.txt"], path);
+			git(["commit", "-m", "agent mutation"], path);
+		},
+		projectPath,
+	);
+	const run = await runAgentLabReviewRequest({
+		router,
+		projectPath,
+		request: request("security"),
+	});
+	assert.equal(run.status, "security_violation");
+	assert.deepEqual(run.realRepoChangedFiles, ["HEAD"]);
+});
+
+test("guard ignora cambios previos pero detecta nuevas diferencias", async () => {
+	const projectPath = gitProject();
+	writeFileSync(join(projectPath, "tracked.txt"), "dirty before\n", "utf8");
+	const cleanRun = await runAgentLabReviewRequest({
+		...routerWith(validReport(), "clone", false, undefined, projectPath),
+		projectPath,
+		request: request("security"),
+	});
+	assert.equal(cleanRun.status, "completed");
+
+	const { router } = routerWith(
+		validReport(),
+		"clone",
+		false,
+		(path) => writeFileSync(join(path, "tracked.txt"), "dirty after\n", "utf8"),
+		projectPath,
+	);
+	const run = await runAgentLabReviewRequest({
+		router,
+		projectPath,
+		request: request("security"),
+	});
+	assert.equal(run.status, "security_violation");
+	assert.deepEqual(run.realRepoChangedFiles, ["tracked.txt"]);
+});
+
+test("guard funciona aunque AgentLab falle", async () => {
+	const projectPath = gitProject();
+	const { router } = routerWith(
+		"falló",
+		"clone",
+		false,
+		(path) => writeFileSync(join(path, "failed-change.txt"), "bad\n", "utf8"),
+		projectPath,
+		false,
+	);
+	const run = await runAgentLabReviewRequest({
+		router,
+		projectPath,
+		request: request("security"),
+	});
+	assert.equal(run.status, "security_violation");
+	assert.deepEqual(run.realRepoChangedFiles, ["failed-change.txt"]);
+});
+
+test("parser extrae JSON rodeado de tool logs", () => {
+	const output = [
+		"[tool:read] iniciando...",
+		"ruido antes",
+		validReport(),
+		'tool after {"tool":"read"}',
+	].join("\n");
+	const result = parseAgentLabReviewReportFromOutput(
+		output,
+		request("security"),
+	);
+	assert.equal(result.report?.summary, "Revisión completada.");
+	assert.equal(result.errors.length, 0);
 });
 
 test("report JSON válido se valida contra contrato", async () => {
@@ -324,8 +460,10 @@ test("report JSON válido se valida contra contrato", async () => {
 	assert.equal(run.findings.length, 1);
 });
 
-test("report texto legacy queda como partial sin inventar findings", async () => {
-	const { router, projectPath } = routerWith("Resumen legacy sin JSON");
+test("report texto legacy queda como partial limpio sin inventar findings", async () => {
+	const { router, projectPath } = routerWith(
+		"[tool:read] iniciando...\nResumen legacy sin JSON",
+	);
 	const run = await runAgentLabReviewRequest({
 		router,
 		projectPath,
@@ -334,6 +472,8 @@ test("report texto legacy queda como partial sin inventar findings", async () =>
 	assert.equal(run.status, "completed");
 	assert.equal(run.contractValidation.valid, false);
 	assert.equal(run.findings.length, 0);
+	assert.doesNotMatch(run.rawSummary, /\[tool:read\]/u);
+	assert.match(run.rawSummary, /Resumen legacy/u);
 });
 
 test("finding sin evidence no se acepta como válido", () => {
@@ -348,7 +488,9 @@ test("finding sin evidence no se acepta como válido", () => {
 });
 
 test("status latest lee informe", async () => {
-	const { router, projectPath, workspaceRoot } = routerWith(validReport());
+	const { router, projectPath, workspaceRoot } = routerWith(
+		validReport("agentlab-pi-telegram-bridge-manual-security-01"),
+	);
 	const reportsPath = join(workspaceRoot, "reports");
 	createAgentLabReviewRequests({
 		source: "manual",
@@ -367,7 +509,11 @@ test("status latest lee informe", async () => {
 	});
 	const status = getAgentLabReviewStatus("latest", reportsPath);
 	assert.equal(status.valid, true);
-	assert.match(formatAgentLabReviewStatus(status), /Estado por specialty/u);
+	const formatted = formatAgentLabReviewStatus(status);
+	assert.match(formatted, /Estado por specialty/u);
+	assert.match(formatted, /Agregar test/u);
+	assert.match(formatted, /Agregar test token inválido/u);
+	assert.doesNotMatch(formatted, /\[tool:/u);
 });
 
 test("format run muestra resumen", async () => {
