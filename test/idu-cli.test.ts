@@ -44,6 +44,7 @@ import type {
 	SupervisorImprovementDecisionResult,
 	SupervisorImprovementStatusResult,
 } from "../src/supervisor-improvement-decisions.js";
+import type { SkillImprovementDecisionResult } from "../src/skill-improvement-decisions.js";
 import type {
 	SkillImprovementCreationResult,
 	SkillImprovementPlan,
@@ -576,6 +577,43 @@ function fakeSkillImprovementCreation(): SkillImprovementCreationResult {
 	};
 }
 
+function fakeSkillImprovementDecision(
+	action: "approved" | "rejected" | "deferred",
+): SkillImprovementDecisionResult {
+	return {
+		action,
+		file: {
+			path: "reports/skill-improvement-proposals-20260525-000000.json",
+			name: "skill-improvement-proposals-20260525-000000.json",
+			warning:
+				"Propuestas revisables. No modificar skills sin aprobación humana.",
+			projectId: "pi-telegram-bridge",
+			proposals: [
+				{
+					...fakeSkillImprovementPlan().proposals[0]!,
+					status: action,
+					decisionLog: [
+						{
+							decision: action,
+							decidedAt: "2026-05-25T00:00:00.000Z",
+							source: "cli",
+						},
+					],
+				},
+			],
+		},
+		updated: [
+			{
+				...fakeSkillImprovementPlan().proposals[0]!,
+				status: action,
+			},
+		],
+		skipped: [],
+		backupPath:
+			"reports/skill-improvement-proposals.backup-20260525-000000.json",
+	};
+}
+
 function fakeSkillImprovementStatus(): SkillImprovementStatusResult {
 	return {
 		path: "reports/skill-improvement-proposals-20260525-000000.json",
@@ -850,6 +888,18 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"",
 				"proposed:",
 				String(status.countsByStatus.proposed),
+			].join("\n"),
+		skillImprovementApprove: () => fakeSkillImprovementDecision("approved"),
+		skillImprovementReject: () => fakeSkillImprovementDecision("rejected"),
+		skillImprovementDefer: () => fakeSkillImprovementDecision("deferred"),
+		formatSkillImprovementDecisionResult: (result) =>
+			[
+				"Skill Improvement Decision",
+				"",
+				"Acción:",
+				result.action,
+				"",
+				"Sólo registré decisión humana. No modifiqué skills.",
 			].join("\n"),
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
@@ -1161,6 +1211,42 @@ test("CLI skill-improvements commands funcionan", async () => {
 		assert.equal(status.exitCode, 0);
 		assert.match(status.stdout, /Skill Improvement Status/u);
 		assert.match(status.stdout, /proposed:\n1/u);
+	});
+});
+
+test("CLI skill-improvements decision commands funcionan", async () => {
+	await withRuntime(async (runtime) => {
+		const approved = await runCliCommand(
+			["skill-improvements-approve", "latest", "skill-improvement-001"],
+			runtime,
+		);
+		const rejected = await runCliCommand(
+			[
+				"idu-skill-improvements-reject",
+				"latest",
+				"skill-improvement-001",
+				"no aplica",
+			],
+			runtime,
+		);
+		const deferred = await runCliCommand(
+			[
+				"skill-improvements-defer",
+				"latest",
+				"skill-improvement-001",
+				"requiere evidencia",
+			],
+			runtime,
+		);
+
+		assert.equal(approved.exitCode, 0);
+		assert.match(approved.stdout, /Skill Improvement Decision/u);
+		assert.match(approved.stdout, /approved/u);
+		assert.match(approved.stdout, /No modifiqué skills/u);
+		assert.equal(rejected.exitCode, 0);
+		assert.match(rejected.stdout, /rejected/u);
+		assert.equal(deferred.exitCode, 0);
+		assert.match(deferred.stdout, /deferred/u);
 	});
 });
 

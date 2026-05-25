@@ -132,6 +132,13 @@ import {
 	type SkillImprovementStatusResult,
 } from "./skill-improvement-proposals.js";
 import {
+	approveSkillImprovementProposal,
+	deferSkillImprovementProposal,
+	formatSkillImprovementDecisionResult,
+	rejectSkillImprovementProposal,
+	type SkillImprovementDecisionResult,
+} from "./skill-improvement-decisions.js";
+import {
 	applySupervisorLearningRules,
 	disableSupervisorLearningRule,
 	enableSupervisorLearningRule,
@@ -287,6 +294,24 @@ export type CliRuntime = {
 	) => SkillImprovementStatusResult;
 	formatSkillImprovementStatus: (
 		status: SkillImprovementStatusResult,
+	) => string;
+	skillImprovementApprove: (
+		pathOrLatest: string,
+		proposalIdOrAll: string,
+		reason?: string,
+	) => SkillImprovementDecisionResult;
+	skillImprovementReject: (
+		pathOrLatest: string,
+		proposalIdOrAll: string,
+		reason?: string,
+	) => SkillImprovementDecisionResult;
+	skillImprovementDefer: (
+		pathOrLatest: string,
+		proposalIdOrAll: string,
+		reason?: string,
+	) => SkillImprovementDecisionResult;
+	formatSkillImprovementDecisionResult: (
+		result: SkillImprovementDecisionResult,
 	) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
@@ -531,6 +556,28 @@ export function createCliRuntime(): CliRuntime {
 				join(config.agentWorkspaceRoot, "reports"),
 			),
 		formatSkillImprovementStatus,
+		skillImprovementApprove: (pathOrLatest, proposalIdOrAll, reason) =>
+			approveSkillImprovementProposal(
+				pathOrLatest,
+				proposalIdOrAll,
+				join(config.agentWorkspaceRoot, "reports"),
+				{ source: "cli", reason },
+			),
+		skillImprovementReject: (pathOrLatest, proposalIdOrAll, reason) =>
+			rejectSkillImprovementProposal(
+				pathOrLatest,
+				proposalIdOrAll,
+				join(config.agentWorkspaceRoot, "reports"),
+				{ source: "cli", reason },
+			),
+		skillImprovementDefer: (pathOrLatest, proposalIdOrAll, reason) =>
+			deferSkillImprovementProposal(
+				pathOrLatest,
+				proposalIdOrAll,
+				join(config.agentWorkspaceRoot, "reports"),
+				{ source: "cli", reason },
+			),
+		formatSkillImprovementDecisionResult,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -809,6 +856,45 @@ export async function runCliCommand(
 						),
 					),
 				);
+			case "idu-skill-improvements-approve":
+			case "skill-improvements-approve": {
+				const decision = requiredDecisionParts(rest);
+				return ok(
+					activeRuntime.formatSkillImprovementDecisionResult(
+						activeRuntime.skillImprovementApprove(
+							decision.pathOrLatest,
+							decision.proposalIdOrAll,
+							decision.reason,
+						),
+					),
+				);
+			}
+			case "idu-skill-improvements-reject":
+			case "skill-improvements-reject": {
+				const decision = requiredDecisionParts(rest);
+				return ok(
+					activeRuntime.formatSkillImprovementDecisionResult(
+						activeRuntime.skillImprovementReject(
+							decision.pathOrLatest,
+							decision.proposalIdOrAll,
+							decision.reason,
+						),
+					),
+				);
+			}
+			case "idu-skill-improvements-defer":
+			case "skill-improvements-defer": {
+				const decision = requiredDecisionParts(rest);
+				return ok(
+					activeRuntime.formatSkillImprovementDecisionResult(
+						activeRuntime.skillImprovementDefer(
+							decision.pathOrLatest,
+							decision.proposalIdOrAll,
+							decision.reason,
+						),
+					),
+				);
+			}
 			case "idu-task":
 			case "task": {
 				if (!rest.length) return ok(formatTaskTemplateHelp());
@@ -1274,6 +1360,12 @@ export function helpText(): string {
 		"  idu-pi idu-skill-improvements-review latest",
 		"  idu-pi idu-skill-improvements-create latest",
 		"  idu-pi idu-skill-improvements-status latest",
+		"  idu-pi skill-improvements-approve latest <proposalId|all>",
+		"  idu-pi skill-improvements-reject latest <proposalId|all> [motivo]",
+		"  idu-pi skill-improvements-defer latest <proposalId|all> [motivo]",
+		"  idu-pi idu-skill-improvements-approve latest <proposalId|all>",
+		"  idu-pi idu-skill-improvements-reject latest <proposalId|all> [motivo]",
+		"  idu-pi idu-skill-improvements-defer latest <proposalId|all> [motivo]",
 		'  idu-pi preflight "solicitud"',
 		'  idu-pi advisory "solicitud"',
 		"  idu-pi postflight",

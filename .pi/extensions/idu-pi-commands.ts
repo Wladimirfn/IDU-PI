@@ -316,6 +316,36 @@ export default function (pi: ExtensionAPI) {
 		usage: "/idu-skill-improvements-status [latest|ruta]",
 	});
 
+	registerIduCommand("idu-skill-improvements-approve", {
+		description: "Aprobar propuesta de mejora de skill sin aplicarla",
+		cliArgs: (args) => [
+			"skill-improvements-approve",
+			...args.split(/\s+/u).filter(Boolean),
+		],
+		requiresArgs: true,
+		usage: "/idu-skill-improvements-approve latest <proposalId|all>",
+	});
+
+	registerIduCommand("idu-skill-improvements-reject", {
+		description: "Rechazar propuesta de mejora de skill sin borrarla",
+		cliArgs: (args) => [
+			"skill-improvements-reject",
+			...args.split(/\s+/u).filter(Boolean),
+		],
+		requiresArgs: true,
+		usage: "/idu-skill-improvements-reject latest <proposalId|all> [motivo]",
+	});
+
+	registerIduCommand("idu-skill-improvements-defer", {
+		description: "Diferir propuesta de mejora de skill sin aplicarla",
+		cliArgs: (args) => [
+			"skill-improvements-defer",
+			...args.split(/\s+/u).filter(Boolean),
+		],
+		requiresArgs: true,
+		usage: "/idu-skill-improvements-defer latest <proposalId|all> [motivo]",
+	});
+
 	registerIduCommand("idu-supervisor-learning-rules-status", {
 		description: "Ver reglas dinámicas del supervisor",
 		cliArgs: () => ["supervisor-learning-rules-status"],

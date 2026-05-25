@@ -192,6 +192,28 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		],
 	},
 	{
+		command: "skill_improvements_approve",
+		description: "Aprobar propuesta de skill",
+		help: "/skill_improvements_approve latest <proposalId|all> - registrar aprobación humana sin modificar skills",
+		usage: ["/skill_improvements_approve latest skill-improvement-001"],
+	},
+	{
+		command: "skill_improvements_reject",
+		description: "Rechazar propuesta de skill",
+		help: "/skill_improvements_reject latest <proposalId|all> [motivo] - registrar rechazo sin modificar skills",
+		usage: [
+			"/skill_improvements_reject latest skill-improvement-001 no aplica",
+		],
+	},
+	{
+		command: "skill_improvements_defer",
+		description: "Diferir propuesta de skill",
+		help: "/skill_improvements_defer latest <proposalId|all> [motivo] - registrar diferido sin modificar skills",
+		usage: [
+			"/skill_improvements_defer latest skill-improvement-001 requiere evidencia",
+		],
+	},
+	{
 		command: "supervisor_learning_rules_status",
 		description: "Ver reglas dinámicas",
 		help: "/supervisor_learning_rules_status - ver supervisor-learning-rules.json sin modificar nada",
@@ -681,6 +703,21 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{
 		label: "Skill improvements status",
 		command: "corepack pnpm cli -- idu-skill-improvements-status latest",
+	},
+	{
+		label: "Skill improvements approve",
+		command:
+			"corepack pnpm cli -- idu-skill-improvements-approve latest skill-improvement-001",
+	},
+	{
+		label: "Skill improvements reject",
+		command:
+			"corepack pnpm cli -- idu-skill-improvements-reject latest skill-improvement-001 motivo",
+	},
+	{
+		label: "Skill improvements defer",
+		command:
+			"corepack pnpm cli -- idu-skill-improvements-defer latest skill-improvement-001 motivo",
 	},
 	{
 		label: "Supervisor learning rules status",

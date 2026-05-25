@@ -179,6 +179,12 @@ import {
 	getSkillImprovementStatus,
 } from "./skill-improvement-proposals.js";
 import {
+	approveSkillImprovementProposal,
+	deferSkillImprovementProposal,
+	formatSkillImprovementDecisionResult,
+	rejectSkillImprovementProposal,
+} from "./skill-improvement-decisions.js";
+import {
 	applySupervisorLearningRules,
 	disableSupervisorLearningRule,
 	enableSupervisorLearningRule,
@@ -1454,6 +1460,54 @@ bot.command("skill_improvements_status", async (ctx) => {
 		ctx,
 		formatSkillImprovementStatus(
 			getSkillImprovementStatus(pathOrLatest, reportsPath()),
+		),
+	);
+});
+
+bot.command("skill_improvements_approve", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const parsed = parseSupervisorImprovementDecisionArgs(ctx.match);
+	await replyLong(
+		ctx,
+		formatSkillImprovementDecisionResult(
+			approveSkillImprovementProposal(
+				parsed.pathOrLatest,
+				parsed.proposalIdOrAll,
+				reportsPath(),
+				{ source: "telegram", reason: parsed.reason },
+			),
+		),
+	);
+});
+
+bot.command("skill_improvements_reject", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const parsed = parseSupervisorImprovementDecisionArgs(ctx.match);
+	await replyLong(
+		ctx,
+		formatSkillImprovementDecisionResult(
+			rejectSkillImprovementProposal(
+				parsed.pathOrLatest,
+				parsed.proposalIdOrAll,
+				reportsPath(),
+				{ source: "telegram", reason: parsed.reason },
+			),
+		),
+	);
+});
+
+bot.command("skill_improvements_defer", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const parsed = parseSupervisorImprovementDecisionArgs(ctx.match);
+	await replyLong(
+		ctx,
+		formatSkillImprovementDecisionResult(
+			deferSkillImprovementProposal(
+				parsed.pathOrLatest,
+				parsed.proposalIdOrAll,
+				reportsPath(),
+				{ source: "telegram", reason: parsed.reason },
+			),
 		),
 	);
 });
