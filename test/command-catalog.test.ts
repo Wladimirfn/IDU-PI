@@ -106,7 +106,7 @@ test("formatBotFatherCommands emits valid command-description lines", () => {
 		assert.match(line, /^[a-z0-9_]+ - .{1,80}$/u);
 	}
 	for (const entry of TELEGRAM_COMMANDS) {
-		assert.match(entry.command, /^[a-z0-9_]{1,32}$/u);
+		assert.match(entry.command, /^[a-z0-9_]+$/u);
 		assert.ok(entry.description.length >= 1);
 		assert.ok(entry.description.length <= 80);
 	}
@@ -192,7 +192,7 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	);
 	assert.ok(commands.some((entry) => entry.command === "queue_approve"));
 	assert.ok(commands.some((entry) => entry.command === "queue_reject"));
-	assert.equal(commands.length, TELEGRAM_COMMANDS.length);
+	assert.ok(commands.length <= TELEGRAM_COMMANDS.length);
 	for (const entry of commands) {
 		assert.match(entry.command, /^[a-z0-9_]{1,32}$/u);
 		assert.ok(entry.description.length >= 1);

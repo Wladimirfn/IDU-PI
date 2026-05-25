@@ -45,8 +45,11 @@ import type {
 	SupervisorImprovementStatusResult,
 } from "../src/supervisor-improvement-decisions.js";
 import type {
+	SupervisorLearningRuleDecisionResult,
 	SupervisorLearningRulesApplyResult,
+	SupervisorLearningRulesRollbackResult,
 	SupervisorLearningRulesStatus,
+	SupervisorLearningRulesTestResult,
 } from "../src/supervisor-learning-rules.js";
 import {
 	formatStructuredTaskQueueDetail,
@@ -449,9 +452,79 @@ function fakeSupervisorLearningRulesStatus(
 		exists: true,
 		ruleCount: 0,
 		enabledCount: 0,
+		disabledCount: 0,
 		types: [],
 		rules: [],
 		warnings: [],
+	};
+}
+
+function fakeSupervisorLearningRulesTest(
+	workspaceRoot: string,
+): SupervisorLearningRulesTestResult {
+	return {
+		path: join(workspaceRoot, "reports", "supervisor-learning-rules.json"),
+		exists: true,
+		cases: [],
+		warnings: [],
+	};
+}
+
+function fakeSupervisorLearningRuleDecision(
+	workspaceRoot: string,
+	action: "enabled" | "disabled",
+): SupervisorLearningRuleDecisionResult {
+	return {
+		path: join(workspaceRoot, "reports", "supervisor-learning-rules.json"),
+		backupPath: join(
+			workspaceRoot,
+			"reports",
+			"supervisor-learning-rules.backup-20260523-000000.json",
+		),
+		action,
+		rule: {
+			id: "learn-improvement-001",
+			type: "intent_rule",
+			sourceProposalId: "improvement-001",
+			sourceProposalFile:
+				"supervisor-improvement-proposals-20260523-000000.json",
+			enabled: action === "enabled",
+			description: "fake rule",
+			match: { phrases: ["login"], concepts: [] },
+			outcome: { concepts: [], riskHints: [] },
+			createdAt: "2026-05-23T00:00:00.000Z",
+			approvedBy: "human",
+		},
+		file: {
+			version: 1,
+			updatedAt: "2026-05-23T00:00:00.000Z",
+			sourceProposalFiles: [],
+			rules: [],
+		},
+	};
+}
+
+function fakeSupervisorLearningRulesRollback(
+	workspaceRoot: string,
+): SupervisorLearningRulesRollbackResult {
+	return {
+		path: join(workspaceRoot, "reports", "supervisor-learning-rules.json"),
+		backupPath: join(
+			workspaceRoot,
+			"reports",
+			"supervisor-learning-rules.backup-20260523-000001.json",
+		),
+		restoredFrom: join(
+			workspaceRoot,
+			"reports",
+			"supervisor-learning-rules.backup-20260523-000000.json",
+		),
+		file: {
+			version: 1,
+			updatedAt: "2026-05-23T00:00:00.000Z",
+			sourceProposalFiles: [],
+			rules: [],
+		},
 	};
 }
 
@@ -662,6 +735,25 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"Reglas:",
 				String(status.ruleCount),
 			].join("\n"),
+		supervisorLearningRulesTest: () =>
+			fakeSupervisorLearningRulesTest(workspaceRoot),
+		formatSupervisorLearningRulesTest: () =>
+			"Supervisor Learning Rules Test\n\nCasos:\n- ninguno",
+		supervisorLearningRulesDisable: () =>
+			fakeSupervisorLearningRuleDecision(workspaceRoot, "disabled"),
+		supervisorLearningRulesEnable: () =>
+			fakeSupervisorLearningRuleDecision(workspaceRoot, "enabled"),
+		formatSupervisorLearningRuleDecision: (result) =>
+			[
+				`Supervisor Learning Rule ${result.action}`,
+				"",
+				"Rule:",
+				result.rule.id,
+			].join("\n"),
+		supervisorLearningRulesRollback: () =>
+			fakeSupervisorLearningRulesRollback(workspaceRoot),
+		formatSupervisorLearningRulesRollback: () =>
+			"Supervisor Learning Rules Rollback\n\nRules:\n0",
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
 			[
@@ -1027,6 +1119,44 @@ test("CLI supervisor learning rules apply/status funcionan", async () => {
 		assert.equal(status.exitCode, 0);
 		assert.match(apply.stdout, /Supervisor Learning Rules Applied/u);
 		assert.match(status.stdout, /Supervisor Learning Rules Status/u);
+	});
+});
+
+test("CLI supervisor learning rules QA commands funcionan", async () => {
+	await withRuntime(async (runtime) => {
+		const testResult = await runCliCommand(
+			["idu-supervisor-learning-rules-test"],
+			runtime,
+		);
+		const disabled = await runCliCommand(
+			[
+				"idu-supervisor-learning-rules-disable",
+				"learn-improvement-001",
+				"ruidosa",
+			],
+			runtime,
+		);
+		const enabled = await runCliCommand(
+			[
+				"idu-supervisor-learning-rules-enable",
+				"learn-improvement-001",
+				"validada",
+			],
+			runtime,
+		);
+		const rollback = await runCliCommand(
+			["idu-supervisor-learning-rules-rollback", "latest"],
+			runtime,
+		);
+
+		assert.equal(testResult.exitCode, 0);
+		assert.equal(disabled.exitCode, 0);
+		assert.equal(enabled.exitCode, 0);
+		assert.equal(rollback.exitCode, 0);
+		assert.match(testResult.stdout, /Supervisor Learning Rules Test/u);
+		assert.match(disabled.stdout, /disabled/u);
+		assert.match(enabled.stdout, /enabled/u);
+		assert.match(rollback.stdout, /Supervisor Learning Rules Rollback/u);
 	});
 });
 

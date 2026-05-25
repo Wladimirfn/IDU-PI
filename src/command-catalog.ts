@@ -171,6 +171,30 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/supervisor_learning_rules_status"],
 	},
 	{
+		command: "supervisor_learning_rules_test",
+		description: "Probar reglas dinámicas",
+		help: "/supervisor_learning_rules_test - probar reglas contra casos internos sin escribir archivos",
+		usage: ["/supervisor_learning_rules_test"],
+	},
+	{
+		command: "supervisor_rules_disable",
+		description: "Desactivar regla dinámica",
+		help: "/supervisor_rules_disable <ruleId> [motivo] - desactivar regla y crear backup",
+		usage: ["/supervisor_rules_disable learn-improvement-001 ruidosa"],
+	},
+	{
+		command: "supervisor_learning_rules_enable",
+		description: "Reactivar regla dinámica",
+		help: "/supervisor_learning_rules_enable <ruleId> [motivo] - reactivar regla y crear backup",
+		usage: ["/supervisor_learning_rules_enable learn-improvement-001 validada"],
+	},
+	{
+		command: "supervisor_rules_rollback",
+		description: "Restaurar backup de reglas",
+		help: "/supervisor_rules_rollback latest - restaurar último backup validado",
+		usage: ["/supervisor_rules_rollback latest"],
+	},
+	{
 		command: "idu_define_project",
 		description: "Definir Project Core manual",
 		help: "/idu_define_project - iniciar wizard manual para crear config/project-core.json draft",
@@ -623,6 +647,25 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		label: "Supervisor learning rules status",
 		command: "corepack pnpm cli -- idu-supervisor-learning-rules-status",
 	},
+	{
+		label: "Supervisor learning rules test",
+		command: "corepack pnpm cli -- idu-supervisor-learning-rules-test",
+	},
+	{
+		label: "Supervisor learning rules disable",
+		command:
+			"corepack pnpm cli -- idu-supervisor-learning-rules-disable learn-improvement-001 ruidosa",
+	},
+	{
+		label: "Supervisor learning rules enable",
+		command:
+			"corepack pnpm cli -- idu-supervisor-learning-rules-enable learn-improvement-001 validada",
+	},
+	{
+		label: "Supervisor learning rules rollback",
+		command:
+			"corepack pnpm cli -- idu-supervisor-learning-rules-rollback latest",
+	},
 ];
 
 export const BATCH_COMMANDS: LocalCommandEntry[] = [
@@ -666,14 +709,18 @@ export function formatHelpText(): string {
 	return `Comandos:\n${TELEGRAM_COMMANDS.map((entry) => entry.help).join("\n")}\n\nDespués de /trabajos usá T1, T2...; en otros menús seguí la instrucción visible.\nPara ver usos con argumentos, CLI, Batch y PowerShell: /comandos`;
 }
 
+function telegramApiCommandEntries(): TelegramCommandEntry[] {
+	return TELEGRAM_COMMANDS.filter((entry) => entry.command.length <= 32);
+}
+
 export function formatBotFatherCommands(): string {
-	return TELEGRAM_COMMANDS.map(
-		(entry) => `${entry.command} - ${entry.description}`,
-	).join("\n");
+	return telegramApiCommandEntries()
+		.map((entry) => `${entry.command} - ${entry.description}`)
+		.join("\n");
 }
 
 export function telegramCommandsForApi(): TelegramApiCommand[] {
-	return TELEGRAM_COMMANDS.map(({ command, description }) => ({
+	return telegramApiCommandEntries().map(({ command, description }) => ({
 		command,
 		description,
 	}));

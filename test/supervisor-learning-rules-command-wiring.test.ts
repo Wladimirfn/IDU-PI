@@ -12,6 +12,10 @@ test("supervisor learning rules commands are wired safely", () => {
 	for (const command of [
 		"supervisor_improvements_apply",
 		"supervisor_learning_rules_status",
+		"supervisor_learning_rules_test",
+		"supervisor_rules_disable",
+		"supervisor_learning_rules_enable",
+		"supervisor_rules_rollback",
 	]) {
 		assert.ok(source.includes(`bot.command("${command}"`));
 		assert.ok(registry.includes(command));
@@ -20,10 +24,18 @@ test("supervisor learning rules commands are wired safely", () => {
 	for (const command of [
 		"idu-supervisor-improvements-apply",
 		"idu-supervisor-learning-rules-status",
+		"idu-supervisor-learning-rules-test",
+		"idu-supervisor-learning-rules-disable",
+		"idu-supervisor-learning-rules-enable",
+		"idu-supervisor-learning-rules-rollback",
 	]) {
 		assert.ok(cli.includes(command));
 		assert.ok(extension.includes(command));
 	}
 	assert.ok(source.includes("applySupervisorLearningRules"));
 	assert.ok(source.includes("getSupervisorLearningRulesStatus"));
+	assert.ok(source.includes("testSupervisorLearningRules"));
+	assert.ok(source.includes("disableSupervisorLearningRule"));
+	assert.ok(source.includes("enableSupervisorLearningRule"));
+	assert.ok(source.includes("rollbackSupervisorLearningRules"));
 });

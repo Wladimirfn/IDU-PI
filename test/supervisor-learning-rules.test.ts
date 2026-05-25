@@ -4,7 +4,9 @@ import {
 	mkdtempSync,
 	mkdirSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,10 +15,17 @@ import { test } from "node:test";
 import { classifyHumanIntent } from "../src/human-intent.js";
 import {
 	applySupervisorLearningRules,
+	disableSupervisorLearningRule,
+	enableSupervisorLearningRule,
+	formatSupervisorLearningRuleDecision,
 	formatSupervisorLearningRulesApplyResult,
+	formatSupervisorLearningRulesRollback,
 	formatSupervisorLearningRulesStatus,
+	formatSupervisorLearningRulesTest,
 	getSupervisorLearningRulesStatus,
 	learningRulesPath,
+	rollbackSupervisorLearningRules,
+	testSupervisorLearningRules,
 } from "../src/supervisor-learning-rules.js";
 
 const WARNING = "Propuestas revisables. No aplicar sin aprobación humana.";
@@ -412,6 +421,204 @@ test("learning rule no puede bajar riesgo high", () => {
 	} finally {
 		if (previous === undefined) delete process.env.AGENT_WORKSPACE_ROOT;
 		else process.env.AGENT_WORKSPACE_ROOT = previous;
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("status muestra reglas enabled y disabled", () => {
+	const root = tempRoot();
+	try {
+		writeProposalFile(root, [proposal()]);
+		applySupervisorLearningRules("latest", join(root, "reports"));
+		disableSupervisorLearningRule(
+			"learn-improvement-001",
+			join(root, "reports"),
+			{
+				source: "cli",
+				reason: "ruidosa",
+				now: () => new Date("2026-01-02T06:00:00.000Z"),
+			},
+		);
+
+		const status = getSupervisorLearningRulesStatus(join(root, "reports"));
+		const formatted = formatSupervisorLearningRulesStatus(status);
+
+		assert.equal(status.ruleCount, 1);
+		assert.equal(status.enabledCount, 0);
+		assert.equal(status.disabledCount, 1);
+		assert.match(formatted, /disabled: 1/u);
+		assert.match(formatted, /enabled=false/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("testSupervisorLearningRules ejecuta casos internos sin escribir", () => {
+	const root = tempRoot();
+	try {
+		writeProposalFile(root, [proposal()]);
+		applySupervisorLearningRules("latest", join(root, "reports"));
+		const path = learningRulesPath(join(root, "reports"));
+		const before = readFileSync(path, "utf8");
+		const beforeMtime = statSync(path).mtimeMs;
+
+		const result = testSupervisorLearningRules(join(root, "reports"));
+		const formatted = formatSupervisorLearningRulesTest(result);
+
+		assert.equal(result.cases.length, 5);
+		assert.ok(
+			result.cases.some((item) => item.input === "fallas en base de datos"),
+		);
+		assert.ok(result.cases.some((item) => item.matchedRules.length > 0));
+		assert.match(formatted, /Supervisor Learning Rules Test/u);
+		assert.equal(readFileSync(path, "utf8"), before);
+		assert.equal(statSync(path).mtimeMs, beforeMtime);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("disable cambia enabled=false y crea backup", () => {
+	const root = tempRoot();
+	try {
+		writeProposalFile(root, [proposal()]);
+		applySupervisorLearningRules("latest", join(root, "reports"));
+
+		const result = disableSupervisorLearningRule(
+			"learn-improvement-001",
+			join(root, "reports"),
+			{
+				source: "cli",
+				reason: "ruidosa",
+				now: () => new Date("2026-01-02T06:00:00.000Z"),
+			},
+		);
+
+		assert.equal(result.rule.enabled, false);
+		assert.equal(result.rule.decisionLog?.at(-1)?.action, "disabled");
+		assert.equal(existsSync(result.backupPath), true);
+		assert.match(formatSupervisorLearningRuleDecision(result), /disabled/u);
+		assert.equal(readRules(root).rules[0]?.enabled, false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("enable cambia enabled=true y crea backup", () => {
+	const root = tempRoot();
+	try {
+		writeProposalFile(root, [proposal()]);
+		applySupervisorLearningRules("latest", join(root, "reports"));
+		disableSupervisorLearningRule(
+			"learn-improvement-001",
+			join(root, "reports"),
+			{
+				source: "cli",
+				now: () => new Date("2026-01-02T06:00:00.000Z"),
+			},
+		);
+
+		const result = enableSupervisorLearningRule(
+			"learn-improvement-001",
+			join(root, "reports"),
+			{
+				source: "telegram",
+				reason: "validada",
+				now: () => new Date("2026-01-02T06:00:01.000Z"),
+			},
+		);
+
+		assert.equal(result.rule.enabled, true);
+		assert.equal(result.rule.decisionLog?.at(-1)?.action, "enabled");
+		assert.equal(result.rule.decisionLog?.at(-1)?.source, "telegram");
+		assert.equal(existsSync(result.backupPath), true);
+		assert.match(formatSupervisorLearningRuleDecision(result), /enabled/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("disable/enable ruleId inexistente falla", () => {
+	const root = tempRoot();
+	try {
+		writeProposalFile(root, [proposal()]);
+		applySupervisorLearningRules("latest", join(root, "reports"));
+
+		assert.throws(
+			() =>
+				disableSupervisorLearningRule("missing", join(root, "reports"), {
+					source: "cli",
+				}),
+			/ruleId no encontrado/u,
+		);
+		assert.throws(
+			() =>
+				enableSupervisorLearningRule("missing", join(root, "reports"), {
+					source: "cli",
+				}),
+			/ruleId no encontrado/u,
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("rollback latest restaura backup y crea backup actual", () => {
+	const root = tempRoot();
+	try {
+		writeProposalFile(root, [proposal()]);
+		applySupervisorLearningRules("latest", join(root, "reports"), {
+			now: () => new Date("2026-01-02T05:00:00.000Z"),
+		});
+		disableSupervisorLearningRule(
+			"learn-improvement-001",
+			join(root, "reports"),
+			{
+				source: "cli",
+				now: () => new Date("2026-01-02T06:00:00.000Z"),
+			},
+		);
+
+		const result = rollbackSupervisorLearningRules(
+			"latest",
+			join(root, "reports"),
+			{
+				now: () => new Date("2026-01-02T07:00:00.000Z"),
+			},
+		);
+
+		assert.equal(result.file.rules[0]?.enabled, true);
+		assert.equal(readRules(root).rules[0]?.enabled, true);
+		assert.equal(existsSync(result.backupPath), true);
+		assert.match(
+			result.restoredFrom,
+			/supervisor-learning-rules\.backup-20260102-060000\.json$/u,
+		);
+		assert.match(formatSupervisorLearningRulesRollback(result), /Rollback/u);
+		assert.ok(
+			readdirSync(join(root, "reports")).some(
+				(name) =>
+					name === "supervisor-learning-rules.backup-20260102-070000.json",
+			),
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("rollback rechaza rutas externas", () => {
+	const root = tempRoot();
+	try {
+		mkdirSync(join(root, "reports"), { recursive: true });
+		assert.throws(
+			() =>
+				rollbackSupervisorLearningRules(
+					join(root, "outside.json"),
+					join(root, "reports"),
+				),
+			/ruta externa|backup inválido/u,
+		);
+	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
 });

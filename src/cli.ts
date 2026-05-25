@@ -122,11 +122,21 @@ import {
 } from "./supervisor-improvement-decisions.js";
 import {
 	applySupervisorLearningRules,
+	disableSupervisorLearningRule,
+	enableSupervisorLearningRule,
+	formatSupervisorLearningRuleDecision,
 	formatSupervisorLearningRulesApplyResult,
+	formatSupervisorLearningRulesRollback,
 	formatSupervisorLearningRulesStatus,
+	formatSupervisorLearningRulesTest,
 	getSupervisorLearningRulesStatus,
+	rollbackSupervisorLearningRules,
+	testSupervisorLearningRules,
+	type SupervisorLearningRuleDecisionResult,
 	type SupervisorLearningRulesApplyResult,
+	type SupervisorLearningRulesRollbackResult,
 	type SupervisorLearningRulesStatus,
+	type SupervisorLearningRulesTestResult,
 } from "./supervisor-learning-rules.js";
 import {
 	analyzeStructuredTaskSignal,
@@ -231,6 +241,27 @@ export type CliRuntime = {
 	supervisorLearningRulesStatus: () => SupervisorLearningRulesStatus;
 	formatSupervisorLearningRulesStatus: (
 		status: SupervisorLearningRulesStatus,
+	) => string;
+	supervisorLearningRulesTest: () => SupervisorLearningRulesTestResult;
+	formatSupervisorLearningRulesTest: (
+		result: SupervisorLearningRulesTestResult,
+	) => string;
+	supervisorLearningRulesDisable: (
+		ruleId: string,
+		reason?: string,
+	) => SupervisorLearningRuleDecisionResult;
+	supervisorLearningRulesEnable: (
+		ruleId: string,
+		reason?: string,
+	) => SupervisorLearningRuleDecisionResult;
+	formatSupervisorLearningRuleDecision: (
+		result: SupervisorLearningRuleDecisionResult,
+	) => string;
+	supervisorLearningRulesRollback: (
+		backupPathOrLatest: string,
+	) => SupervisorLearningRulesRollbackResult;
+	formatSupervisorLearningRulesRollback: (
+		result: SupervisorLearningRulesRollbackResult,
 	) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
@@ -427,6 +458,28 @@ export function createCliRuntime(): CliRuntime {
 				join(config.agentWorkspaceRoot, "reports"),
 			),
 		formatSupervisorLearningRulesStatus,
+		supervisorLearningRulesTest: () =>
+			testSupervisorLearningRules(join(config.agentWorkspaceRoot, "reports")),
+		formatSupervisorLearningRulesTest,
+		supervisorLearningRulesDisable: (ruleId, reason) =>
+			disableSupervisorLearningRule(
+				ruleId,
+				join(config.agentWorkspaceRoot, "reports"),
+				{ source: "cli", reason },
+			),
+		supervisorLearningRulesEnable: (ruleId, reason) =>
+			enableSupervisorLearningRule(
+				ruleId,
+				join(config.agentWorkspaceRoot, "reports"),
+				{ source: "cli", reason },
+			),
+		formatSupervisorLearningRuleDecision,
+		supervisorLearningRulesRollback: (backupPathOrLatest) =>
+			rollbackSupervisorLearningRules(
+				backupPathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatSupervisorLearningRulesRollback,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -640,6 +693,46 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSupervisorLearningRulesStatus(
 						activeRuntime.supervisorLearningRulesStatus(),
+					),
+				);
+			case "idu-supervisor-learning-rules-test":
+			case "supervisor-learning-rules-test":
+				return ok(
+					activeRuntime.formatSupervisorLearningRulesTest(
+						activeRuntime.supervisorLearningRulesTest(),
+					),
+				);
+			case "idu-supervisor-learning-rules-disable":
+			case "supervisor-learning-rules-disable": {
+				const decision = requiredRuleDecisionParts(rest);
+				return ok(
+					activeRuntime.formatSupervisorLearningRuleDecision(
+						activeRuntime.supervisorLearningRulesDisable(
+							decision.ruleId,
+							decision.reason,
+						),
+					),
+				);
+			}
+			case "idu-supervisor-learning-rules-enable":
+			case "supervisor-learning-rules-enable": {
+				const decision = requiredRuleDecisionParts(rest);
+				return ok(
+					activeRuntime.formatSupervisorLearningRuleDecision(
+						activeRuntime.supervisorLearningRulesEnable(
+							decision.ruleId,
+							decision.reason,
+						),
+					),
+				);
+			}
+			case "idu-supervisor-learning-rules-rollback":
+			case "supervisor-learning-rules-rollback":
+				return ok(
+					activeRuntime.formatSupervisorLearningRulesRollback(
+						activeRuntime.supervisorLearningRulesRollback(
+							rest.join(" ").trim() || "latest",
+						),
 					),
 				);
 			case "idu-task":
@@ -1059,6 +1152,18 @@ function requiredDecisionParts(parts: string[]): {
 	};
 }
 
+function requiredRuleDecisionParts(parts: string[]): {
+	ruleId: string;
+	reason?: string;
+} {
+	const [ruleId = "", ...reasonParts] = parts;
+	if (!ruleId.trim()) {
+		throw new Error("Uso: supervisor-learning-rules-disable <ruleId> [motivo]");
+	}
+	const reason = reasonParts.join(" ").trim();
+	return { ruleId, ...(reason ? { reason } : {}) };
+}
+
 function ok(stdout: string): CliResult {
 	return { exitCode: 0, stdout, stderr: "" };
 }
@@ -1084,6 +1189,11 @@ export function helpText(): string {
 		"  idu-pi idu-supervisor-improvements-approve latest <proposalId|all>",
 		"  idu-pi idu-supervisor-improvements-reject latest <proposalId|all> [motivo]",
 		"  idu-pi idu-supervisor-improvements-defer latest <proposalId|all> [motivo]",
+		"  idu-pi idu-supervisor-learning-rules-status",
+		"  idu-pi idu-supervisor-learning-rules-test",
+		"  idu-pi idu-supervisor-learning-rules-disable <ruleId> [motivo]",
+		"  idu-pi idu-supervisor-learning-rules-enable <ruleId> [motivo]",
+		"  idu-pi idu-supervisor-learning-rules-rollback latest",
 		'  idu-pi preflight "solicitud"',
 		'  idu-pi advisory "solicitud"',
 		"  idu-pi postflight",

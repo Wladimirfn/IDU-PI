@@ -172,9 +172,16 @@ import {
 } from "./supervisor-improvement-decisions.js";
 import {
 	applySupervisorLearningRules,
+	disableSupervisorLearningRule,
+	enableSupervisorLearningRule,
+	formatSupervisorLearningRuleDecision,
 	formatSupervisorLearningRulesApplyResult,
+	formatSupervisorLearningRulesRollback,
 	formatSupervisorLearningRulesStatus,
+	formatSupervisorLearningRulesTest,
 	getSupervisorLearningRulesStatus,
+	rollbackSupervisorLearningRules,
+	testSupervisorLearningRules,
 } from "./supervisor-learning-rules.js";
 import { findPiProcesses } from "./processes.js";
 import {
@@ -458,6 +465,19 @@ function parseSupervisorImprovementDecisionArgs(match: string | undefined): {
 		proposalIdOrAll,
 		...(reason ? { reason } : {}),
 	};
+}
+
+function parseSupervisorLearningRuleDecisionArgs(match: string | undefined): {
+	ruleId: string;
+	reason?: string;
+} {
+	const [ruleId = "", ...reasonParts] = (match ?? "")
+		.trim()
+		.split(/\s+/u)
+		.filter(Boolean);
+	if (!ruleId) throw new Error("Uso: <ruleId> [motivo]");
+	const reason = reasonParts.join(" ").trim();
+	return { ruleId, ...(reason ? { reason } : {}) };
 }
 
 function buildPreflightReport(request: string): ProjectPreflightReport {
@@ -1397,6 +1417,55 @@ bot.command("supervisor_learning_rules_status", async (ctx) => {
 		ctx,
 		formatSupervisorLearningRulesStatus(
 			getSupervisorLearningRulesStatus(reportsPath()),
+		),
+	);
+});
+
+bot.command("supervisor_learning_rules_test", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatSupervisorLearningRulesTest(
+			testSupervisorLearningRules(reportsPath()),
+		),
+	);
+});
+
+bot.command("supervisor_rules_disable", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const parsed = parseSupervisorLearningRuleDecisionArgs(ctx.match);
+	await replyLong(
+		ctx,
+		formatSupervisorLearningRuleDecision(
+			disableSupervisorLearningRule(parsed.ruleId, reportsPath(), {
+				source: "telegram",
+				reason: parsed.reason,
+			}),
+		),
+	);
+});
+
+bot.command("supervisor_learning_rules_enable", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const parsed = parseSupervisorLearningRuleDecisionArgs(ctx.match);
+	await replyLong(
+		ctx,
+		formatSupervisorLearningRuleDecision(
+			enableSupervisorLearningRule(parsed.ruleId, reportsPath(), {
+				source: "telegram",
+				reason: parsed.reason,
+			}),
+		),
+	);
+});
+
+bot.command("supervisor_rules_rollback", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const backupPathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatSupervisorLearningRulesRollback(
+			rollbackSupervisorLearningRules(backupPathOrLatest, reportsPath()),
 		),
 	);
 });

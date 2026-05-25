@@ -303,4 +303,36 @@ export default function (pi: ExtensionAPI) {
 		cliArgs: () => ["supervisor-learning-rules-status"],
 		usage: "/idu-supervisor-learning-rules-status",
 	});
+
+	registerIduCommand("idu-supervisor-learning-rules-test", {
+		description: "Probar reglas dinámicas del supervisor",
+		cliArgs: () => ["supervisor-learning-rules-test"],
+		usage: "/idu-supervisor-learning-rules-test",
+	});
+
+	registerIduCommand("idu-supervisor-learning-rules-disable", {
+		description: "Desactivar una regla dinámica del supervisor",
+		cliArgs: (args) => [
+			"supervisor-learning-rules-disable",
+			...args.split(/\s+/u).filter(Boolean),
+		],
+		requiresArgs: true,
+		usage: "/idu-supervisor-learning-rules-disable <ruleId> [motivo]",
+	});
+
+	registerIduCommand("idu-supervisor-learning-rules-enable", {
+		description: "Reactivar una regla dinámica del supervisor",
+		cliArgs: (args) => [
+			"supervisor-learning-rules-enable",
+			...args.split(/\s+/u).filter(Boolean),
+		],
+		requiresArgs: true,
+		usage: "/idu-supervisor-learning-rules-enable <ruleId> [motivo]",
+	});
+
+	registerIduCommand("idu-supervisor-learning-rules-rollback", {
+		description: "Restaurar backup de reglas dinámicas del supervisor",
+		cliArgs: (args) => ["supervisor-learning-rules-rollback", args || "latest"],
+		usage: "/idu-supervisor-learning-rules-rollback [latest|backup]",
+	});
 }
