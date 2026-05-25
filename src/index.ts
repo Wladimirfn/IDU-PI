@@ -185,6 +185,12 @@ import {
 	rejectSkillImprovementProposal,
 } from "./skill-improvement-decisions.js";
 import {
+	createSkillDraftsFromApprovedProposals,
+	formatSkillDraftCreationResult,
+	formatSkillDraftReview,
+	reviewSkillDraft,
+} from "./skill-drafts.js";
+import {
 	applySupervisorLearningRules,
 	disableSupervisorLearningRule,
 	enableSupervisorLearningRule,
@@ -1509,6 +1515,26 @@ bot.command("skill_improvements_defer", async (ctx) => {
 				{ source: "telegram", reason: parsed.reason },
 			),
 		),
+	);
+});
+
+bot.command("skill_drafts_create", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatSkillDraftCreationResult(
+			createSkillDraftsFromApprovedProposals(pathOrLatest, reportsPath()),
+		),
+	);
+});
+
+bot.command("skill_drafts_review", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const pathOrLatest = ctx.match?.trim() || "latest";
+	await replyLong(
+		ctx,
+		formatSkillDraftReview(reviewSkillDraft(pathOrLatest, reportsPath())),
 	);
 });
 

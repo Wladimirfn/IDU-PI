@@ -139,6 +139,14 @@ import {
 	type SkillImprovementDecisionResult,
 } from "./skill-improvement-decisions.js";
 import {
+	createSkillDraftsFromApprovedProposals,
+	formatSkillDraftCreationResult,
+	formatSkillDraftReview,
+	reviewSkillDraft,
+	type SkillDraftCreationResult,
+	type SkillDraftReview,
+} from "./skill-drafts.js";
+import {
 	applySupervisorLearningRules,
 	disableSupervisorLearningRule,
 	enableSupervisorLearningRule,
@@ -313,6 +321,10 @@ export type CliRuntime = {
 	formatSkillImprovementDecisionResult: (
 		result: SkillImprovementDecisionResult,
 	) => string;
+	skillDraftsCreate: (pathOrLatest: string) => SkillDraftCreationResult;
+	formatSkillDraftCreationResult: (result: SkillDraftCreationResult) => string;
+	skillDraftReview: (pathOrLatest: string) => SkillDraftReview;
+	formatSkillDraftReview: (review: SkillDraftReview) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
 	queueDetail: () => string;
@@ -578,6 +590,18 @@ export function createCliRuntime(): CliRuntime {
 				{ source: "cli", reason },
 			),
 		formatSkillImprovementDecisionResult,
+		skillDraftsCreate: (pathOrLatest) =>
+			createSkillDraftsFromApprovedProposals(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatSkillDraftCreationResult,
+		skillDraftReview: (pathOrLatest) =>
+			reviewSkillDraft(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatSkillDraftReview,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -895,6 +919,20 @@ export async function runCliCommand(
 					),
 				);
 			}
+			case "idu-skill-drafts-create":
+			case "skill-drafts-create":
+				return ok(
+					activeRuntime.formatSkillDraftCreationResult(
+						activeRuntime.skillDraftsCreate(rest.join(" ").trim() || "latest"),
+					),
+				);
+			case "idu-skill-drafts-review":
+			case "skill-drafts-review":
+				return ok(
+					activeRuntime.formatSkillDraftReview(
+						activeRuntime.skillDraftReview(rest.join(" ").trim() || "latest"),
+					),
+				);
 			case "idu-task":
 			case "task": {
 				if (!rest.length) return ok(formatTaskTemplateHelp());
@@ -1366,6 +1404,10 @@ export function helpText(): string {
 		"  idu-pi idu-skill-improvements-approve latest <proposalId|all>",
 		"  idu-pi idu-skill-improvements-reject latest <proposalId|all> [motivo]",
 		"  idu-pi idu-skill-improvements-defer latest <proposalId|all> [motivo]",
+		"  idu-pi skill-drafts-create latest",
+		"  idu-pi skill-drafts-review latest",
+		"  idu-pi idu-skill-drafts-create latest",
+		"  idu-pi idu-skill-drafts-review latest",
 		'  idu-pi preflight "solicitud"',
 		'  idu-pi advisory "solicitud"',
 		"  idu-pi postflight",

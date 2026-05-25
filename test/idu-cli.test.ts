@@ -46,6 +46,10 @@ import type {
 } from "../src/supervisor-improvement-decisions.js";
 import type { SkillImprovementDecisionResult } from "../src/skill-improvement-decisions.js";
 import type {
+	SkillDraftCreationResult,
+	SkillDraftReview,
+} from "../src/skill-drafts.js";
+import type {
 	SkillImprovementCreationResult,
 	SkillImprovementPlan,
 	SkillImprovementStatusResult,
@@ -614,6 +618,47 @@ function fakeSkillImprovementDecision(
 	};
 }
 
+function fakeSkillDraftCreation(): SkillDraftCreationResult {
+	const draft = {
+		proposalId: "skill-improvement-001",
+		action: "create_skill" as const,
+		skillName: "security-auth-review",
+		targetPath: ".agents/skills/security-auth-review/SKILL.md",
+		title: "Crear skill security-auth-review",
+		purpose: "Draft for security-auth-review",
+		whenToUse: "Use for auth/login reviews.",
+		safetyRules: ["Do not modify skills automatically."],
+		inputsExpected: ["approved proposal"],
+		outputsExpected: ["reviewable draft"],
+		testsSuggested: ["run skill-check before apply"],
+		contentPreview: "---\nname: security-auth-review\n---",
+		requiresHumanApproval: true as const,
+	};
+	return {
+		path: "reports/skill-draft-20260525-000000.json",
+		plan: {
+			generatedAt: "2026-05-25T00:00:00.000Z",
+			sourceProposalFile: "skill-improvement-proposals-20260525-000000.json",
+			warning: "Borrador de skill. No es fuente de verdad.",
+			skillDrafts: [draft],
+			omittedProposals: [],
+		},
+		created: [draft],
+		omittedProposals: [],
+		notApplicable: [],
+	};
+}
+
+function fakeSkillDraftReview(): SkillDraftReview {
+	return {
+		path: "reports/skill-draft-20260525-000000.json",
+		name: "skill-draft-20260525-000000.json",
+		valid: true,
+		errors: [],
+		plan: fakeSkillDraftCreation().plan,
+	};
+}
+
 function fakeSkillImprovementStatus(): SkillImprovementStatusResult {
 	return {
 		path: "reports/skill-improvement-proposals-20260525-000000.json",
@@ -900,6 +945,28 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				result.action,
 				"",
 				"Sólo registré decisión humana. No modifiqué skills.",
+			].join("\n"),
+		skillDraftsCreate: fakeSkillDraftCreation,
+		formatSkillDraftCreationResult: (result) =>
+			[
+				"Skill Drafts Created",
+				"",
+				"Ruta:",
+				result.path,
+				"",
+				"No modifiqué skills reales, .agents ni .atl.",
+			].join("\n"),
+		skillDraftReview: fakeSkillDraftReview,
+		formatSkillDraftReview: (review) =>
+			[
+				"Skill Draft Review",
+				"",
+				"Archivo:",
+				review.name,
+				"",
+				"security-auth-review",
+				"",
+				"No modifiqué skills reales, .agents ni .atl.",
 			].join("\n"),
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
@@ -1247,6 +1314,27 @@ test("CLI skill-improvements decision commands funcionan", async () => {
 		assert.match(rejected.stdout, /rejected/u);
 		assert.equal(deferred.exitCode, 0);
 		assert.match(deferred.stdout, /deferred/u);
+	});
+});
+
+test("CLI skill-drafts commands funcionan", async () => {
+	await withRuntime(async (runtime) => {
+		const create = await runCliCommand(
+			["skill-drafts-create", "latest"],
+			runtime,
+		);
+		const review = await runCliCommand(
+			["idu-skill-drafts-review", "latest"],
+			runtime,
+		);
+
+		assert.equal(create.exitCode, 0);
+		assert.match(create.stdout, /Skill Drafts Created/u);
+		assert.match(create.stdout, /skill-draft/u);
+		assert.match(create.stdout, /No modifiqué skills reales/u);
+		assert.equal(review.exitCode, 0);
+		assert.match(review.stdout, /Skill Draft Review/u);
+		assert.match(review.stdout, /security-auth-review/u);
 	});
 });
 

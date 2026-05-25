@@ -32,6 +32,8 @@ test("formatHelpText includes primary Telegram commands", () => {
 	assert.match(text, /\/skill_improvements_review/);
 	assert.match(text, /\/skill_improvements_create/);
 	assert.match(text, /\/skill_improvements_status/);
+	assert.match(text, /\/skill_drafts_create/);
+	assert.match(text, /\/skill_drafts_review/);
 	assert.match(text, /\/preflight <solicitud>/);
 	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/postflight/);
@@ -68,6 +70,8 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/skill_improvements_review latest/);
 	assert.match(text, /\/skill_improvements_create latest/);
 	assert.match(text, /\/skill_improvements_status latest/);
+	assert.match(text, /\/skill_drafts_create latest/);
+	assert.match(text, /\/skill_drafts_review latest/);
 	assert.match(text, /\/preflight <solicitud>/);
 	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/postflight/);
@@ -102,6 +106,8 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 		text,
 		/corepack pnpm cli -- idu-skill-improvements-status latest/,
 	);
+	assert.match(text, /corepack pnpm cli -- idu-skill-drafts-create latest/);
+	assert.match(text, /corepack pnpm cli -- idu-skill-drafts-review latest/);
 	assert.match(text, /corepack pnpm cli -- idu-semantic-audit-status/);
 	assert.match(text, /corepack pnpm cli -- idu-queue-detail/);
 	assert.match(text, /Batch directos/);
@@ -200,6 +206,8 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	assert.ok(
 		commands.some((entry) => entry.command === "skill_improvements_status"),
 	);
+	assert.ok(commands.some((entry) => entry.command === "skill_drafts_create"));
+	assert.ok(commands.some((entry) => entry.command === "skill_drafts_review"));
 	assert.ok(commands.some((entry) => entry.command === "idu_define_project"));
 	assert.ok(commands.some((entry) => entry.command === "idu_core_status"));
 	assert.ok(commands.some((entry) => entry.command === "idu_research_core"));

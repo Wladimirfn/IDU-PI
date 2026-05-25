@@ -346,6 +346,18 @@ export default function (pi: ExtensionAPI) {
 		usage: "/idu-skill-improvements-defer latest <proposalId|all> [motivo]",
 	});
 
+	registerIduCommand("idu-skill-drafts-create", {
+		description: "Crear borradores de skills desde propuestas aprobadas",
+		cliArgs: (args) => ["skill-drafts-create", args || "latest"],
+		usage: "/idu-skill-drafts-create [latest|ruta]",
+	});
+
+	registerIduCommand("idu-skill-drafts-review", {
+		description: "Revisar borrador de skill sin aplicar cambios",
+		cliArgs: (args) => ["skill-drafts-review", args || "latest"],
+		usage: "/idu-skill-drafts-review [latest|ruta]",
+	});
+
 	registerIduCommand("idu-supervisor-learning-rules-status", {
 		description: "Ver reglas dinámicas del supervisor",
 		cliArgs: () => ["supervisor-learning-rules-status"],

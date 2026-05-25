@@ -32,6 +32,8 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"skill_improvements_approve",
 	"skill_improvements_reject",
 	"skill_improvements_defer",
+	"skill_drafts_create",
+	"skill_drafts_review",
 	"supervisor_learning_rules_status",
 	"supervisor_learning_rules_test",
 	"supervisor_rules_disable",

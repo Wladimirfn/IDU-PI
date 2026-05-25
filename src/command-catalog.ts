@@ -214,6 +214,18 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		],
 	},
 	{
+		command: "skill_drafts_create",
+		description: "Crear drafts de skills",
+		help: "/skill_drafts_create [latest|ruta] - crear borradores de skills desde propuestas aprobadas sin modificar skills reales",
+		usage: ["/skill_drafts_create latest", "/skill_drafts_create <ruta>"],
+	},
+	{
+		command: "skill_drafts_review",
+		description: "Revisar draft de skill",
+		help: "/skill_drafts_review [latest|ruta] - revisar borrador de skill sin aplicar cambios",
+		usage: ["/skill_drafts_review latest", "/skill_drafts_review <ruta>"],
+	},
+	{
 		command: "supervisor_learning_rules_status",
 		description: "Ver reglas dinámicas",
 		help: "/supervisor_learning_rules_status - ver supervisor-learning-rules.json sin modificar nada",
@@ -718,6 +730,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		label: "Skill improvements defer",
 		command:
 			"corepack pnpm cli -- idu-skill-improvements-defer latest skill-improvement-001 motivo",
+	},
+	{
+		label: "Skill drafts create",
+		command: "corepack pnpm cli -- idu-skill-drafts-create latest",
+	},
+	{
+		label: "Skill drafts review",
+		command: "corepack pnpm cli -- idu-skill-drafts-review latest",
 	},
 	{
 		label: "Supervisor learning rules status",
