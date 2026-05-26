@@ -54,6 +54,10 @@ import type {
 	AgentLabReviewStatus,
 } from "../src/agentlab-review-runner.js";
 import type {
+	AgentLabConsolidationResult,
+	AgentLabConsolidationStatus,
+} from "../src/agentlab-report-consolidation.js";
+import type {
 	SkillDraftCreationResult,
 	SkillDraftReview,
 } from "../src/skill-drafts.js";
@@ -714,6 +718,39 @@ function fakeAgentLabReviewStatus(): AgentLabReviewStatus {
 	};
 }
 
+function fakeAgentLabConsolidation(): AgentLabConsolidationResult {
+	return {
+		valid: true,
+		errors: [],
+		path: "reports/agentlab-consolidation-20260525-000000.json",
+		generatedAt: "2026-05-25T00:00:00.000Z",
+		sourceReviewRun: "reports/agentlab-review-run-20260525-000000.json",
+		projectId: "pi-telegram-bridge",
+		warning: "Consolidación AgentLab. No aplica cambios.",
+		summary: "runs: 1; findings: 1",
+		consolidatedFindings: [],
+		consolidatedRecommendations: [],
+		testsSuggested: [],
+		supervisorImprovementCandidates: [],
+		skillImprovementCandidates: [],
+		semanticMemoryCandidates: [],
+		agentTaskCandidates: [],
+		risks: [],
+		requiresHumanApproval: false,
+		recommendedNext: ["revisar consolidación"],
+	};
+}
+
+function fakeAgentLabConsolidationStatus(): AgentLabConsolidationStatus {
+	return {
+		path: "reports/agentlab-consolidation-20260525-000000.json",
+		name: "agentlab-consolidation-20260525-000000.json",
+		valid: true,
+		errors: [],
+		result: fakeAgentLabConsolidation(),
+	};
+}
+
 function fakeSkillDraftCreation(): SkillDraftCreationResult {
 	const draft = {
 		proposalId: "skill-improvement-001",
@@ -1098,6 +1135,24 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		agentLabReviewStatus: fakeAgentLabReviewStatus,
 		formatAgentLabReviewStatus: (status) =>
 			["AgentLab Review Status", "", "Archivo:", status.name].join("\n"),
+		agentLabReportConsolidate: fakeAgentLabConsolidation,
+		formatAgentLabConsolidationResult: (result) =>
+			[
+				"AgentLab Report Consolidation",
+				"",
+				"Ruta:",
+				result.path,
+				"",
+				"No apliqué cambios, no ejecuté AgentLabs, no modifiqué skills/Core/Constitution.",
+			].join("\n"),
+		agentLabReportConsolidationStatus: fakeAgentLabConsolidationStatus,
+		formatAgentLabConsolidationStatus: (status) =>
+			[
+				"AgentLab Report Consolidation Status",
+				"",
+				"Archivo:",
+				status.name,
+			].join("\n"),
 		semanticAgentTaskPlan: fakeSemanticAgentTaskPlan,
 		formatSemanticAgentTaskPlan: (plan) =>
 			[
@@ -1316,6 +1371,31 @@ test("CLI agentlab review run/status commands funcionan", async () => {
 		assert.match(run.stdout, /agentlab-review-run/u);
 		assert.equal(status.exitCode, 0);
 		assert.match(status.stdout, /AgentLab Review Status/u);
+	});
+});
+
+test("CLI agentlab report consolidation commands funcionan", async () => {
+	await withRuntime(async (runtime) => {
+		const consolidate = await runCliCommand(
+			["idu-agentlab-report-consolidate", "latest"],
+			runtime,
+		);
+		const alias = await runCliCommand(
+			["agentlab-report-consolidate", "latest"],
+			runtime,
+		);
+		const status = await runCliCommand(
+			["idu-agentlab-report-consolidation-status", "latest"],
+			runtime,
+		);
+
+		assert.equal(consolidate.exitCode, 0);
+		assert.match(consolidate.stdout, /AgentLab Report Consolidation/u);
+		assert.match(consolidate.stdout, /agentlab-consolidation/u);
+		assert.equal(alias.exitCode, 0);
+		assert.match(alias.stdout, /No apliqué cambios/u);
+		assert.equal(status.exitCode, 0);
+		assert.match(status.stdout, /AgentLab Report Consolidation Status/u);
 	});
 });
 

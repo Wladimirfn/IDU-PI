@@ -97,6 +97,21 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/agentlab_review_status latest", "/agentlab_review_status <ruta>"],
 	},
 	{
+		command: "agentlab_report_consolidate",
+		description: "Consolidar informe AgentLab",
+		help: "/agentlab_report_consolidate [latest|ruta] - consolidar hallazgos y candidates sin aplicar cambios",
+		usage: [
+			"/agentlab_report_consolidate latest",
+			"/agentlab_report_consolidate <ruta>",
+		],
+	},
+	{
+		command: "agentlab_report_status",
+		description: "Ver consolidación AgentLab",
+		help: "/agentlab_report_status [latest|ruta] - ver consolidación AgentLab sin aplicar cambios",
+		usage: ["/agentlab_report_status latest", "/agentlab_report_status <ruta>"],
+	},
+	{
 		command: "semantic_audit_status",
 		description: "Ver auditoría semántica",
 		help: "/semantic_audit_status - revisar conteos, checkpoint y decisión de auditoría semántica sin IA",
@@ -700,6 +715,15 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{
 		label: "AgentLab review status",
 		command: "corepack pnpm cli -- idu-agentlab-review-status latest",
+	},
+	{
+		label: "AgentLab report consolidate",
+		command: "corepack pnpm cli -- idu-agentlab-report-consolidate latest",
+	},
+	{
+		label: "AgentLab report consolidation status",
+		command:
+			"corepack pnpm cli -- idu-agentlab-report-consolidation-status latest",
 	},
 	{
 		label: "Semantic audit status",

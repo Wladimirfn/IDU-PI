@@ -17,6 +17,8 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"agentlab_request_review",
 	"agentlab_review_run",
 	"agentlab_review_status",
+	"agentlab_report_consolidate",
+	"agentlab_report_status",
 	"semantic_audit_status",
 	"semantic_audit_run",
 	"semantic_compact_draft",

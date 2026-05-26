@@ -27,6 +27,8 @@ test("formatHelpText includes primary Telegram commands", () => {
 	assert.match(text, /\/agentlab_request_review/);
 	assert.match(text, /\/agentlab_review_run/);
 	assert.match(text, /\/agentlab_review_status/);
+	assert.match(text, /\/agentlab_report_consolidate/);
+	assert.match(text, /\/agentlab_report_status/);
 	assert.match(text, /\/semantic_audit_status/);
 	assert.match(text, /\/semantic_audit_run/);
 	assert.match(text, /\/semantic_compact_draft/);
@@ -69,6 +71,8 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/agentlab_request_review latest/);
 	assert.match(text, /\/agentlab_review_run latest/);
 	assert.match(text, /\/agentlab_review_status latest/);
+	assert.match(text, /\/agentlab_report_consolidate latest/);
+	assert.match(text, /\/agentlab_report_status latest/);
 	assert.match(text, /\/semantic_audit_status/);
 	assert.match(text, /\/semantic_audit_run/);
 	assert.match(text, /\/semantic_compact_draft/);
@@ -123,6 +127,14 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /corepack pnpm cli -- idu-agentlab-request-review latest/);
 	assert.match(text, /corepack pnpm cli -- idu-agentlab-review-run latest/);
 	assert.match(text, /corepack pnpm cli -- idu-agentlab-review-status latest/);
+	assert.match(
+		text,
+		/corepack pnpm cli -- idu-agentlab-report-consolidate latest/,
+	);
+	assert.match(
+		text,
+		/corepack pnpm cli -- idu-agentlab-report-consolidation-status latest/,
+	);
 	assert.doesNotMatch(
 		text,
 		/corepack pnpm cli -- agentlab-request-create postflight/,
@@ -135,6 +147,10 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.doesNotMatch(
 		text,
 		/corepack pnpm cli -- agentlab-review-status latest/,
+	);
+	assert.doesNotMatch(
+		text,
+		/corepack pnpm cli -- agentlab-report-consolidate latest/,
 	);
 	assert.match(text, /corepack pnpm cli -- idu-semantic-audit-status/);
 	assert.match(text, /corepack pnpm cli -- idu-queue-detail/);

@@ -156,6 +156,14 @@ import {
 	type AgentLabReviewStatus,
 } from "./agentlab-review-runner.js";
 import {
+	consolidateAgentLabReviewRun,
+	formatAgentLabConsolidationResult,
+	formatAgentLabConsolidationStatus,
+	getAgentLabConsolidationStatus,
+	type AgentLabConsolidationResult,
+	type AgentLabConsolidationStatus,
+} from "./agentlab-report-consolidation.js";
+import {
 	createSkillDraftsFromApprovedProposals,
 	formatSkillDraftCreationResult,
 	formatSkillDraftReview,
@@ -355,6 +363,18 @@ export type CliRuntime = {
 	formatAgentLabReviewRunResult: (result: AgentLabReviewRunResult) => string;
 	agentLabReviewStatus: (pathOrLatest: string) => AgentLabReviewStatus;
 	formatAgentLabReviewStatus: (status: AgentLabReviewStatus) => string;
+	agentLabReportConsolidate: (
+		pathOrLatest: string,
+	) => AgentLabConsolidationResult;
+	formatAgentLabConsolidationResult: (
+		result: AgentLabConsolidationResult,
+	) => string;
+	agentLabReportConsolidationStatus: (
+		pathOrLatest: string,
+	) => AgentLabConsolidationStatus;
+	formatAgentLabConsolidationStatus: (
+		status: AgentLabConsolidationStatus,
+	) => string;
 	createTask: (kind: TaskTemplateKind, details: string) => StructuredTask;
 	formatTask: (task: StructuredTask) => string;
 	queueDetail: () => string;
@@ -686,6 +706,18 @@ export function createCliRuntime(): CliRuntime {
 				join(config.agentWorkspaceRoot, "reports"),
 			),
 		formatAgentLabReviewStatus,
+		agentLabReportConsolidate: (pathOrLatest) =>
+			consolidateAgentLabReviewRun(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatAgentLabConsolidationResult,
+		agentLabReportConsolidationStatus: (pathOrLatest) =>
+			getAgentLabConsolidationStatus(
+				pathOrLatest,
+				join(config.agentWorkspaceRoot, "reports"),
+			),
+		formatAgentLabConsolidationStatus,
 		createTask: (kind, details) =>
 			createCliTask(kind, details, {
 				projectId: activeProject.id,
@@ -816,6 +848,24 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatAgentLabReviewStatus(
 						activeRuntime.agentLabReviewStatus(
+							rest.join(" ").trim() || "latest",
+						),
+					),
+				);
+			case "idu-agentlab-report-consolidate":
+			case "agentlab-report-consolidate":
+				return ok(
+					activeRuntime.formatAgentLabConsolidationResult(
+						activeRuntime.agentLabReportConsolidate(
+							rest.join(" ").trim() || "latest",
+						),
+					),
+				);
+			case "idu-agentlab-report-consolidation-status":
+			case "agentlab-report-consolidation-status":
+				return ok(
+					activeRuntime.formatAgentLabConsolidationStatus(
+						activeRuntime.agentLabReportConsolidationStatus(
 							rest.join(" ").trim() || "latest",
 						),
 					),
@@ -1537,6 +1587,8 @@ export function helpText(): string {
 		"  idu-pi idu-agentlab-request-review latest",
 		"  idu-pi idu-agentlab-review-run latest",
 		"  idu-pi idu-agentlab-review-status latest",
+		"  idu-pi idu-agentlab-report-consolidate latest",
+		"  idu-pi idu-agentlab-report-consolidation-status latest",
 		"  idu-pi idu-semantic-audit-status (Telegram: /semantic_audit_status)",
 		"  idu-pi idu-semantic-audit-run    (Telegram: /semantic_audit_run)",
 		"  idu-pi idu-semantic-compact-draft (Telegram: /semantic_compact_draft)",
