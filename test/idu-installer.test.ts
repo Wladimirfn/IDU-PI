@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -17,6 +18,7 @@ import {
 	detectSystem,
 	detectTools,
 	formatIduSetupStatus,
+	formatInstallIduMcpConfigResult,
 	formatProjectEnrollResult,
 	formatProjectInstallStatus,
 	installIduMcpConfig,
@@ -82,6 +84,7 @@ test("mcp-init creates mcp.json and global slash extension when missing", () => 
 	});
 	assert.equal(result.status, "installed");
 	assert.equal(result.commandExtensionStatus, "installed");
+	assert.equal(result.commandExtensionBackupPath, undefined);
 	assert.equal(existsSync(join(root, "mcp.json")), true);
 	assert.equal(
 		existsSync(join(root, "extensions", "idu-pi-commands.ts")),
@@ -103,6 +106,200 @@ test("mcp-init creates mcp.json and global slash extension when missing", () => 
 	assert.equal(parsed.mcpServers["idu-pi"].args[0], mcpServerPath);
 	assert.equal(parsed.mcpServers["idu-pi"].directTools, true);
 	assert.equal(parsed.mcpServers["idu-pi"].cwd, root);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("mcp-init leaves matching global slash extension without backup", () => {
+	const root = tempDir();
+	const mcpServerPath = join(root, "dist", "src", "mcp-server.js");
+	const extensionSourcePath = join(root, "source-extension.ts");
+	writeFileSync(
+		extensionSourcePath,
+		'const IDU_PI_PACKAGE_ROOT: string = "__IDU_PI_PACKAGE_ROOT__";\n',
+		"utf8",
+	);
+	installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath,
+		extensionSourcePath,
+	});
+	const result = installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath,
+		extensionSourcePath,
+	});
+	assert.equal(result.commandExtensionStatus, "exists");
+	assert.equal(result.commandExtensionBackupPath, undefined);
+	assert.equal(
+		existsSync(
+			join(root, "extensions", "idu-pi-commands.backup-20260525-010203.ts"),
+		),
+		false,
+	);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("mcp-init backs up changed global slash extension before overwriting", () => {
+	const root = tempDir();
+	const extensionDir = join(root, "extensions");
+	mkdirSync(extensionDir, { recursive: true });
+	const extensionDestination = join(extensionDir, "idu-pi-commands.ts");
+	writeFileSync(extensionDestination, "old extension", "utf8");
+	const extensionSourcePath = join(root, "source-extension.ts");
+	writeFileSync(
+		extensionSourcePath,
+		'const IDU_PI_PACKAGE_ROOT: string = "__IDU_PI_PACKAGE_ROOT__";\n',
+		"utf8",
+	);
+	const result = installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath: join(root, "dist", "src", "mcp-server.js"),
+		extensionSourcePath,
+		now: () => new Date(2026, 4, 25, 1, 2, 3),
+	});
+	const expectedBackup = join(
+		extensionDir,
+		"idu-pi-commands.backup-20260525-010203.ts",
+	);
+	assert.equal(result.commandExtensionStatus, "installed");
+	assert.equal(result.commandExtensionBackupPath, expectedBackup);
+	assert.equal(readFileSync(expectedBackup, "utf8"), "old extension");
+	assert.match(
+		readFileSync(extensionDestination, "utf8"),
+		/IDU_PI_PACKAGE_ROOT/u,
+	);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("mcp-init force backs up changed global slash extension", () => {
+	const root = tempDir();
+	const extensionDir = join(root, "extensions");
+	mkdirSync(extensionDir, { recursive: true });
+	const extensionDestination = join(extensionDir, "idu-pi-commands.ts");
+	writeFileSync(extensionDestination, "old force extension", "utf8");
+	writeFileSync(
+		join(root, "mcp.json"),
+		JSON.stringify({ mcpServers: { "idu-pi": { command: "old" } } }),
+		"utf8",
+	);
+	const extensionSourcePath = join(root, "source-extension.ts");
+	writeFileSync(
+		extensionSourcePath,
+		'const IDU_PI_PACKAGE_ROOT: string = "__IDU_PI_PACKAGE_ROOT__";\n',
+		"utf8",
+	);
+	const result = installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath: join(root, "dist", "src", "mcp-server.js"),
+		extensionSourcePath,
+		force: true,
+		now: () => new Date(2026, 4, 25, 1, 2, 3),
+	});
+	const expectedBackup = join(
+		extensionDir,
+		"idu-pi-commands.backup-20260525-010203.ts",
+	);
+	assert.equal(result.status, "installed");
+	assert.equal(result.commandExtensionStatus, "installed");
+	assert.equal(result.commandExtensionBackupPath, expectedBackup);
+	assert.equal(readFileSync(expectedBackup, "utf8"), "old force extension");
+	assert.ok(result.backupPath);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("mcp-init dry-run does not write extension backup", () => {
+	const root = tempDir();
+	const extensionDir = join(root, "extensions");
+	mkdirSync(extensionDir, { recursive: true });
+	const extensionDestination = join(extensionDir, "idu-pi-commands.ts");
+	writeFileSync(extensionDestination, "old extension", "utf8");
+	const extensionSourcePath = join(root, "source-extension.ts");
+	writeFileSync(
+		extensionSourcePath,
+		'const IDU_PI_PACKAGE_ROOT: string = "__IDU_PI_PACKAGE_ROOT__";\n',
+		"utf8",
+	);
+	const result = installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath: join(root, "dist", "src", "mcp-server.js"),
+		extensionSourcePath,
+		dryRun: true,
+		now: () => new Date(2026, 4, 25, 1, 2, 3),
+	});
+	assert.equal(result.status, "dry_run");
+	assert.equal(result.commandExtensionStatus, "dry_run");
+	assert.equal(result.commandExtensionBackupPath, undefined);
+	assert.equal(readFileSync(extensionDestination, "utf8"), "old extension");
+	assert.equal(
+		existsSync(join(extensionDir, "idu-pi-commands.backup-20260525-010203.ts")),
+		false,
+	);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("mcp-init missing extension source does not touch existing destination", () => {
+	const root = tempDir();
+	const extensionDir = join(root, "extensions");
+	mkdirSync(extensionDir, { recursive: true });
+	const extensionDestination = join(extensionDir, "idu-pi-commands.ts");
+	writeFileSync(extensionDestination, "existing extension", "utf8");
+	const result = installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath: join(root, "dist", "src", "mcp-server.js"),
+		extensionSourcePath: join(root, "missing-source.ts"),
+		now: () => new Date(2026, 4, 25, 1, 2, 3),
+	});
+	assert.equal(result.commandExtensionStatus, "missing_source");
+	assert.equal(result.commandExtensionBackupPath, undefined);
+	assert.equal(
+		readFileSync(extensionDestination, "utf8"),
+		"existing extension",
+	);
+	assert.equal(
+		existsSync(join(extensionDir, "idu-pi-commands.backup-20260525-010203.ts")),
+		false,
+	);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("gitignore keeps source extension versionable and backup ignored", () => {
+	const sourceRule = execFileSync(
+		"git",
+		["check-ignore", "-v", "--no-index", ".pi/extensions/idu-pi-commands.ts"],
+		{ encoding: "utf8" },
+	);
+	assert.match(sourceRule, /!\.pi\/extensions\/idu-pi-commands\.ts/u);
+	const backupRule = execFileSync(
+		"git",
+		[
+			"check-ignore",
+			"-v",
+			"--no-index",
+			".pi/extensions/idu-pi-commands.backup-20260527-120000.ts",
+		],
+		{ encoding: "utf8" },
+	);
+	assert.match(backupRule, /\.pi\/extensions\/\*\.backup-\*\.ts/u);
+});
+
+test("setup formatter shows command extension backup path", () => {
+	const root = tempDir();
+	const text = formatInstallIduMcpConfigResult({
+		status: "installed",
+		mcpConfigPath: join(root, "mcp.json"),
+		backupPath: join(root, "mcp.backup-20260525-010203.json"),
+		commandExtensionPath: join(root, "extensions", "idu-pi-commands.ts"),
+		commandExtensionStatus: "installed",
+		commandExtensionBackupPath: join(
+			root,
+			"extensions",
+			"idu-pi-commands.backup-20260525-010203.ts",
+		),
+		config: { mcpServers: {} },
+		summary: "MCP idu-pi y comandos slash globales configurados.",
+	});
+	assert.match(text, /commandExtensionBackupPath:/u);
+	assert.match(text, /idu-pi-commands\.backup-20260525-010203\.ts/u);
 	rmSync(root, { recursive: true, force: true });
 });
 

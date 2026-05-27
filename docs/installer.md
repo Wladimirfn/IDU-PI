@@ -144,6 +144,7 @@ Reglas:
 - no reemplaza `mcpServers["idu-pi"]` si ya existe, salvo `--force`;
 - instala/verifica `extensions/idu-pi-commands.ts` para comandos slash globales;
 - crea backup `mcp.backup-YYYYMMDD-HHMMSS.json` antes de modificar un config existente;
+- crea backup `extensions/idu-pi-commands.backup-YYYYMMDD-HHMMSS.ts` antes de sobrescribir una extensión global existente con contenido distinto;
 - `setup mcp-print` imprime config sin escribir;
 - `setup mcp-init --dry-run` calcula sin escribir.
 

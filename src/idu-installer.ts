@@ -84,6 +84,7 @@ export type InstallIduMcpConfigResult = {
 		| "exists"
 		| "dry_run"
 		| "missing_source";
+	commandExtensionBackupPath?: string;
 	config: { mcpServers: Record<string, unknown> };
 	summary: string;
 };
@@ -232,6 +233,7 @@ export function installIduMcpConfig(
 		sourcePath: input.extensionSourcePath,
 		force: input.force,
 		dryRun: input.dryRun,
+		now: input.now,
 	});
 	if (input.dryRun) {
 		return {
@@ -239,6 +241,7 @@ export function installIduMcpConfig(
 			mcpConfigPath,
 			commandExtensionPath: extensionResult.path,
 			commandExtensionStatus: extensionResult.status,
+			commandExtensionBackupPath: extensionResult.backupPath,
 			config: next,
 			summary: "Dry-run: no escribí mcp.json ni extensión de comandos.",
 		};
@@ -249,6 +252,7 @@ export function installIduMcpConfig(
 			mcpConfigPath,
 			commandExtensionPath: extensionResult.path,
 			commandExtensionStatus: extensionResult.status,
+			commandExtensionBackupPath: extensionResult.backupPath,
 			config: existing,
 			summary:
 				"idu-pi ya existe en mcp.json; comandos slash globales verificados.",
@@ -263,6 +267,7 @@ export function installIduMcpConfig(
 		backupPath,
 		commandExtensionPath: extensionResult.path,
 		commandExtensionStatus: extensionResult.status,
+		commandExtensionBackupPath: extensionResult.backupPath,
 		config: next,
 		summary: "MCP idu-pi y comandos slash globales configurados.",
 	};
@@ -282,11 +287,13 @@ type CommandExtensionInstallInput = {
 	sourcePath?: string;
 	force?: boolean;
 	dryRun?: boolean;
+	now?: () => Date;
 };
 
 type CommandExtensionInstallResult = {
 	path: string;
 	status: "installed" | "exists" | "dry_run" | "missing_source";
+	backupPath?: string;
 };
 
 function installGlobalPiCommandExtension(
@@ -305,13 +312,15 @@ function installGlobalPiCommandExtension(
 		readFileSync(input.sourcePath, "utf8"),
 		input.packageRoot,
 	);
-	if (existsSync(destination) && !input.force) {
+	let backupPath: string | undefined;
+	if (existsSync(destination)) {
 		const current = readFileSync(destination, "utf8");
 		if (current === content) return { path: destination, status: "exists" };
+		backupPath = backupCommandExtensionFile(destination, input.now);
 	}
 	mkdirSync(dirname(destination), { recursive: true });
 	writeFileSync(destination, content, "utf8");
-	return { path: destination, status: "installed" };
+	return { path: destination, status: "installed", backupPath };
 }
 
 function renderGlobalCommandExtension(
@@ -385,6 +394,18 @@ export function formatPnpmPathHelp(
 		"",
 		"No modifico PATH automáticamente.",
 	].join("\n");
+}
+
+function backupCommandExtensionFile(
+	destination: string,
+	now: () => Date = () => new Date(),
+): string {
+	const backupPath = join(
+		dirname(destination),
+		`idu-pi-commands.backup-${timestamp(now())}.ts`,
+	);
+	writeFileSync(backupPath, readFileSync(destination, "utf8"), "utf8");
+	return backupPath;
 }
 
 export function backupAgentConfigFile(
@@ -530,6 +551,10 @@ export function formatInstallIduMcpConfigResult(
 		"",
 		"commandExtensionStatus:",
 		result.commandExtensionStatus ?? "—",
+		"",
+		"commandExtensionBackupPath:",
+		result.commandExtensionBackupPath ??
+			(result.commandExtensionStatus === "dry_run" ? "dry-run" : "—"),
 		"",
 		"backupPath:",
 		result.backupPath ?? "—",
