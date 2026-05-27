@@ -132,10 +132,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function registerIduAliases(name: string, config: CliCommand) {
-		registerIduCommand(name, config);
-		if (name.includes("-")) {
-			registerIduCommand(name.replace(/-/gu, "_"), config);
-		}
+		registerIduCommand(name.replace(/-/gu, "_"), config);
 	}
 
 	registerIduAliases("idu", {

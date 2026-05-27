@@ -58,6 +58,9 @@ idu-pi idu-status
 /idu
 /idu_status
 /idu_task bug "falla login"
+
+# Los slash commands se muestran con underscore para evitar duplicados;
+# los comandos CLI `idu-pi idu-status` con guion siguen existiendo.
 ```
 
 ## Preparación y gates
