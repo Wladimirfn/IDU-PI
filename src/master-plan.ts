@@ -22,7 +22,12 @@ import { loadProjectCore } from "./project-core.js";
 import { loadProjectFlows } from "./project-flows.js";
 import type { AgentLabSpecialty } from "./agentlab-supervisor-contract.js";
 
-export type MasterPlanStatus = "draft" | "approved" | "rejected" | "stale";
+export type MasterPlanStatus =
+	| "draft"
+	| "approved"
+	| "rejected"
+	| "stale"
+	| "incompatible";
 export type MasterPlanAutoDepthMode = "quick" | "standard" | "deep_required";
 
 export type MasterPlanAutoDepth = {
@@ -134,6 +139,7 @@ export type MasterPlanApproval = {
 
 export type MasterPlan = {
 	version: string;
+	schemaVersion: number;
 	projectId: string;
 	projectPath: string;
 	gitHead?: string;
@@ -198,10 +204,23 @@ export type MasterPlanDraftResult = {
 	memory: MasterPlanMemory;
 	jsonPath: string;
 	markdownPath: string;
+	automaticNote?: string;
 };
 
 export type MasterPlanStatusResult =
 	| { status: "missing"; exists: false; recommendedNext: string }
+	| {
+			status: "incompatible";
+			exists: true;
+			current?: MasterPlanCurrent;
+			currentPlanJson?: string;
+			currentPlanMd?: string;
+			projectId?: string;
+			projectPath?: string;
+			updatedAt?: string;
+			incompatibleReason: string;
+			recommendedNext: string;
+	  }
 	| (MasterPlanCurrent & { exists: true; staleReason?: string });
 
 export type MasterPlanReview = {
@@ -214,6 +233,7 @@ export type MasterPlanReview = {
 
 const CURRENT_FILE = "master-plan.current.json";
 const MEMORY_FILE = "master-plan.memory.json";
+const MASTER_PLAN_SCHEMA_VERSION = 2;
 const SKIPPED_DIRS = new Set([
 	".git",
 	"node_modules",
@@ -297,6 +317,7 @@ export function generateMasterPlanDraft(input: {
 	const inferredObjective = inferObjective(projectPath, signals);
 	const plan: MasterPlan = {
 		version: "1.0.0",
+		schemaVersion: MASTER_PLAN_SCHEMA_VERSION,
 		projectId: input.projectId,
 		projectPath,
 		...(input.gitHead ? { gitHead: input.gitHead } : {}),
@@ -384,6 +405,10 @@ export function getMasterPlanStatus(input: {
 			recommendedNext: "Ejecutar idu-pi idu para generar Plan Maestro draft.",
 		};
 	}
+	const compatibility = currentPlanCompatibility(stateRoot, current);
+	if (!compatibility.compatible) {
+		return incompatibleStatus(current, compatibility.reason);
+	}
 	if (
 		current.status === "approved" &&
 		input.currentGitHead &&
@@ -397,7 +422,7 @@ export function getMasterPlanStatus(input: {
 			updatedAt: new Date().toISOString(),
 		});
 		const plan = readPlan(
-			safePathInsideState(stateRoot, stale.currentPlanJson),
+			safePlanPathInsideReports(stateRoot, stale.currentPlanJson),
 		);
 		if (plan)
 			writeMemory(
@@ -421,8 +446,28 @@ export function reviewMasterPlan(input: {
 }): MasterPlanReview {
 	const stateRoot = resolve(input.stateRoot);
 	const current = readCurrent(stateRoot);
-	const jsonPath = resolvePlanPath(stateRoot, input.pathOrLatest, current);
-	const plan = requirePlan(jsonPath);
+	const pathResolution = resolvePlanPathForReview(
+		stateRoot,
+		input.pathOrLatest,
+		current,
+	);
+	if (!pathResolution.ok) {
+		if (input.pathOrLatest !== "latest") throw new Error(pathResolution.reason);
+		return incompatibleReview(stateRoot, current, pathResolution.reason);
+	}
+	const jsonPath = pathResolution.path;
+	const raw = readPlanRaw(jsonPath);
+	if (!raw)
+		return incompatibleReview(stateRoot, current, "JSON inválido o ilegible");
+	if (!isMasterPlanCompatible(raw)) {
+		return incompatibleReview(
+			stateRoot,
+			current,
+			masterPlanCompatibilityReason(raw),
+			jsonPath,
+		);
+	}
+	const plan = normalizeMasterPlan(raw);
 	const markdownPath =
 		current?.currentPlanJson === relativeFromState(stateRoot, jsonPath)
 			? safePathInsideState(stateRoot, current.currentPlanMd)
@@ -485,8 +530,20 @@ export function ensureMasterPlanForIdu(input: {
 	if (!status.exists || status.status === "rejected") {
 		return generateMasterPlanDraft(input);
 	}
+	if ("incompatibleReason" in status) {
+		return {
+			...generateMasterPlanDraft({
+				...input,
+				reason: `Plan Maestro anterior incompatible: ${status.incompatibleReason}`,
+			}),
+			automaticNote:
+				"Plan Maestro anterior incompatible con esquema actual; generé nuevo draft",
+		};
+	}
 	const plan = status.currentPlanJson
-		? readPlan(safePathInsideState(input.stateRoot, status.currentPlanJson))
+		? readPlan(
+				safePlanPathInsideReports(input.stateRoot, status.currentPlanJson),
+			)
 		: undefined;
 	return { status, plan };
 }
@@ -536,6 +593,7 @@ export function formatMasterPlanSummaryForIdu(
 		"Acción automática:",
 		...(isDraftResult
 			? [
+					...(result.automaticNote ? [`- ${result.automaticNote}`] : []),
 					"- Revisé estado aislado",
 					"- Analicé estructura básica",
 					"- Generé Plan Maestro draft",
@@ -545,6 +603,9 @@ export function formatMasterPlanSummaryForIdu(
 		"",
 		"Acción principal:",
 		...masterPlanActionLines(status, plan),
+		"",
+		"CLI interactivo:",
+		"Usá idu-pi y elegí Proyecto actual / Plan Maestro. Si falta esa pantalla, queda como siguiente etapa CLI-UX-PLAN-1.",
 	];
 	if (plan?.autoDepth.mode === "deep_required") {
 		lines.push(
@@ -578,6 +639,9 @@ function masterPlanActionLines(
 		return ["1. Rehacer: idu-pi master-plan-redraft latest"];
 	}
 	if (status === "rejected") {
+		return ["1. Rehacer: idu-pi master-plan-redraft latest"];
+	}
+	if (status === "incompatible") {
 		return ["1. Rehacer: idu-pi master-plan-redraft latest"];
 	}
 	return plan ? ["1. Ver detalles: idu-pi master-plan-review latest"] : [];
@@ -618,6 +682,20 @@ export function formatMasterPlanStatus(result: MasterPlanStatusResult): string {
 			"",
 			"Estado:",
 			"missing",
+			"",
+			"Siguiente:",
+			result.recommendedNext,
+		].join("\n");
+	}
+	if ("incompatibleReason" in result) {
+		return [
+			"Master Plan Status",
+			"",
+			"Estado:",
+			"incompatible",
+			"",
+			"Motivo:",
+			result.incompatibleReason,
 			"",
 			"Siguiente:",
 			result.recommendedNext,
@@ -744,6 +822,101 @@ export function formatMasterPlanMarkdown(plan: MasterPlan): string {
 
 function formatDataStoreForMarkdown(store: MasterPlanDataStore): string {
 	return `${store.name} (${store.type}, riesgo ${store.riskLevel}) — ${store.evidence.slice(0, 3).join(", ")}`;
+}
+
+function incompatibleReview(
+	stateRoot: string,
+	current: MasterPlanCurrent | undefined,
+	reason: string,
+	jsonPath = "",
+): MasterPlanReview {
+	const diagnosticPlan = diagnosticMasterPlan(stateRoot, current, reason);
+	return {
+		plan: diagnosticPlan,
+		current,
+		jsonPath,
+		markdown: [
+			"# Plan Maestro incompatible",
+			"",
+			"El Plan Maestro actual no es compatible con el esquema vigente.",
+			"",
+			"Motivo:",
+			`- ${reason}`,
+			"",
+			"Acción recomendada:",
+			"- idu-pi master-plan-redraft latest",
+			"",
+			"No regeneré automáticamente desde review; `/idu` sí puede generar un nuevo draft compatible.",
+		].join("\n"),
+	};
+}
+
+function diagnosticMasterPlan(
+	stateRoot: string,
+	current: MasterPlanCurrent | undefined,
+	reason: string,
+): MasterPlan {
+	return {
+		version: "1.0.0",
+		schemaVersion: MASTER_PLAN_SCHEMA_VERSION,
+		projectId: current?.projectId ?? "unknown",
+		projectPath: current?.projectPath ?? stateRoot,
+		generatedAt: new Date().toISOString(),
+		status: "incompatible",
+		autoDepth: {
+			mode: "quick",
+			reason: "plan incompatible",
+			signals: [reason],
+			agentLabsSelected: [],
+			skippedAgentLabs: [],
+			tokenCostHint: "low",
+		},
+		source: {
+			projectCoreStatus: "unknown",
+			constitutionStatus: "unknown",
+			blueprintStatus: "unknown",
+			flowsStatus: "unknown",
+			scanStatus: "incompatible",
+		},
+		executiveSummary: "Plan Maestro incompatible con el esquema actual.",
+		inferredObjective: "Rehacer Plan Maestro compatible.",
+		problemStatement: reason,
+		scope: [],
+		outOfScope: [],
+		detectedModules: [],
+		detectedFlows: [],
+		dataStores: [],
+		architecture: {
+			projectKind: "unknown",
+			frontend: "no claro",
+			backend: "no claro",
+			database: "no detectada",
+			auth: "no detectado",
+			deployment: "no detectado",
+			packageManager: "unknown",
+			languages: [],
+			frameworks: [],
+			evidence: [],
+		},
+		securityModel: {
+			authDetected: false,
+			sessionDetected: false,
+			sensitiveFlows: [],
+			evidence: [],
+		},
+		toolingDetected: [],
+		ignoredTooling: [],
+		userRoles: [],
+		criticalRisks: [reason],
+		qualityRisks: [],
+		securityRisks: [],
+		architectureRisks: [],
+		openQuestions: [],
+		assumptions: [],
+		recommendedNext: ["Rehacer: idu-pi master-plan-redraft latest"],
+		sourceFiles: [],
+		agentLabReviews: [],
+	};
 }
 
 function formatFlowForMarkdown(flow: MasterPlanFunctionalFlow): string {
@@ -916,7 +1089,11 @@ function collectProjectSignals(projectPath: string): ProjectSignals {
 				architectureEvidence,
 				securityEvidence,
 			});
-			if (/upload|import|file|storage|bpi/iu.test(`${rel} ${content}`))
+			if (
+				/upload|storage|preview|normalize|bpi|formData|multipart/iu.test(
+					`${rel} ${content}`,
+				)
+			)
 				uploadFiles.push(rel);
 			if (/report|dashboard|analytics|chart|export/iu.test(`${rel} ${content}`))
 				reportFiles.push(rel);
@@ -1324,50 +1501,64 @@ function inferFunctionalFlows(input: {
 	const flows: MasterPlanFunctionalFlow[] = [];
 	const dataStoreNames = input.dataStores.map((store) => store.type);
 	if (input.authFiles.length) {
+		const authEvidence = rankedEvidence(input.authFiles, [
+			/login/iu,
+			/auth/iu,
+			/session|token|jwt/iu,
+			/middleware/iu,
+		]);
 		flows.push({
 			name: "Login/acceso",
 			type: "auth",
-			from:
-				input.authFiles.find((file) => /\.html?$/u.test(file)) ??
-				input.authFiles[0]!,
-			through: input.authFiles
-				.filter((file) => !/\.html?$/u.test(file))
-				.slice(0, 5),
+			from: "usuario en pantalla login",
+			through: authEvidence.slice(0, 5),
 			to: "sesión/dashboard",
-			modules: modulesForEvidence(input.modules, input.authFiles),
+			modules: modulesForEvidence(input.modules, authEvidence),
 			dataStores: dataStoreNames.filter((store) =>
 				["supabase", "localStorage", "api"].includes(store),
 			),
 			triggers: ["login", "auth", "session"],
-			evidence: input.authFiles.slice(0, 8),
+			evidence: authEvidence.slice(0, 8),
 			riskLevel: "high",
 		});
 	}
 	if (input.uploadFiles.length) {
+		const uploadEvidence = rankedEvidence(input.uploadFiles, [
+			/upload|bpi/iu,
+			/preview/iu,
+			/normalize/iu,
+			/storage|supabase/iu,
+		]);
 		flows.push({
 			name: "Carga/ingesta de archivos",
 			type: "data_ingest",
-			from: input.uploadFiles[0]!,
-			through: input.uploadFiles.slice(1, 6),
+			from: "usuario carga archivo",
+			through: uploadEvidence.slice(0, 6),
 			to: dataStoreNames[0] ?? "persistencia por confirmar",
-			modules: modulesForEvidence(input.modules, input.uploadFiles),
+			modules: modulesForEvidence(input.modules, uploadEvidence),
 			dataStores: dataStoreNames,
-			triggers: ["upload", "import", "storage"],
-			evidence: input.uploadFiles.slice(0, 8),
+			triggers: ["upload", "preview", "normalize", "storage"],
+			evidence: uploadEvidence.slice(0, 8),
 			riskLevel: dataStoreNames.length ? "high" : "medium",
 		});
 	}
 	if (input.reportFiles.length) {
+		const reportEvidence = rankedEvidence(input.reportFiles, [
+			/report/iu,
+			/dashboard/iu,
+			/analytics|chart/iu,
+			/export/iu,
+		]);
 		flows.push({
 			name: "Reportes/visualización operativa",
 			type: "reporting",
-			from: input.reportFiles[0]!,
-			through: input.reportFiles.slice(1, 6),
+			from: "usuario solicita reporte",
+			through: reportEvidence.slice(0, 6),
 			to: "dashboard/reporte",
-			modules: modulesForEvidence(input.modules, input.reportFiles),
+			modules: modulesForEvidence(input.modules, reportEvidence),
 			dataStores: dataStoreNames,
 			triggers: ["report", "dashboard", "export"],
-			evidence: input.reportFiles.slice(0, 8),
+			evidence: reportEvidence.slice(0, 8),
 			riskLevel: dataStoreNames.length ? "medium" : "low",
 		});
 	}
@@ -1386,6 +1577,22 @@ function inferFunctionalFlows(input: {
 		});
 	}
 	return flows.slice(0, 10);
+}
+
+function rankedEvidence(files: string[], patterns: RegExp[]): string[] {
+	return unique(files).sort((left, right) => {
+		const rightScore = evidenceScore(right, patterns);
+		const leftScore = evidenceScore(left, patterns);
+		return rightScore - leftScore || left.localeCompare(right);
+	});
+}
+
+function evidenceScore(file: string, patterns: RegExp[]): number {
+	return patterns.reduce(
+		(score, pattern, index) =>
+			score + (pattern.test(file) ? patterns.length - index : 0),
+		0,
+	);
 }
 
 function modulesForEvidence(modules: string[], evidence: string[]): string[] {
@@ -1739,6 +1946,46 @@ function readCurrent(stateRoot: string): MasterPlanCurrent | undefined {
 	}
 }
 
+function incompatibleStatus(
+	current: MasterPlanCurrent,
+	reason: string,
+): MasterPlanStatusResult {
+	return {
+		status: "incompatible",
+		exists: true,
+		current,
+		currentPlanJson: current.currentPlanJson,
+		currentPlanMd: current.currentPlanMd,
+		projectId: current.projectId,
+		projectPath: current.projectPath,
+		updatedAt: current.updatedAt,
+		incompatibleReason: reason,
+		recommendedNext: "Rehacer: idu-pi master-plan-redraft latest",
+	};
+}
+
+function currentPlanCompatibility(
+	stateRoot: string,
+	current: MasterPlanCurrent,
+): { compatible: true } | { compatible: false; reason: string } {
+	let path: string;
+	try {
+		path = safePlanPathInsideReports(stateRoot, current.currentPlanJson);
+	} catch (error) {
+		return {
+			compatible: false,
+			reason: error instanceof Error ? error.message : String(error),
+		};
+	}
+	const raw = readPlanRaw(path);
+	if (!raw)
+		return { compatible: false, reason: "archivo inexistente o JSON inválido" };
+	if (!isMasterPlanCompatible(raw)) {
+		return { compatible: false, reason: masterPlanCompatibilityReason(raw) };
+	}
+	return { compatible: true };
+}
+
 function resolvePlanPath(
 	stateRoot: string,
 	pathOrLatest: string,
@@ -1746,9 +1993,27 @@ function resolvePlanPath(
 ): string {
 	if (pathOrLatest === "latest") {
 		if (!current) throw new Error("No existe master-plan.current.json");
-		return safePathInsideState(stateRoot, current.currentPlanJson);
+		return safePlanPathInsideReports(stateRoot, current.currentPlanJson);
 	}
-	return safePathInsideState(stateRoot, pathOrLatest);
+	return safePlanPathInsideReports(stateRoot, pathOrLatest);
+}
+
+function resolvePlanPathForReview(
+	stateRoot: string,
+	pathOrLatest: string,
+	current?: MasterPlanCurrent,
+): { ok: true; path: string } | { ok: false; reason: string } {
+	try {
+		return {
+			ok: true,
+			path: resolvePlanPath(stateRoot, pathOrLatest, current),
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			reason: error instanceof Error ? error.message : String(error),
+		};
+	}
 }
 
 function safePathInsideState(stateRoot: string, path: string): string {
@@ -1762,15 +2027,189 @@ function safePathInsideState(stateRoot: string, path: string): string {
 	return resolved;
 }
 
-function readPlan(path: string): MasterPlan | undefined {
+function safePlanPathInsideReports(stateRoot: string, path: string): string {
+	const resolved = safePathInsideState(stateRoot, path);
+	const relativePath = relative(stateRoot, resolved).replace(/\\/gu, "/");
+	if (!relativePath.startsWith("reports/") || !relativePath.endsWith(".json")) {
+		throw new Error("Master Plan fuera de stateRoot/reports");
+	}
+	return resolved;
+}
+
+function readPlanRaw(path: string): Partial<MasterPlan> | undefined {
 	try {
 		if (!existsSync(path)) return undefined;
-		return normalizeMasterPlan(
-			JSON.parse(readFileSync(path, "utf8")) as Partial<MasterPlan>,
-		);
+		return JSON.parse(readFileSync(path, "utf8")) as Partial<MasterPlan>;
 	} catch {
 		return undefined;
 	}
+}
+
+function readPlan(path: string): MasterPlan | undefined {
+	const raw = readPlanRaw(path);
+	return raw && isMasterPlanCompatible(raw)
+		? normalizeMasterPlan(raw)
+		: undefined;
+}
+
+export function isMasterPlanCompatible(plan: unknown): plan is MasterPlan {
+	if (!plan || typeof plan !== "object") return false;
+	return (
+		masterPlanCompatibilityReason(plan as Partial<MasterPlan>) === "compatible"
+	);
+}
+
+function masterPlanCompatibilityReason(plan: Partial<MasterPlan>): string {
+	if ((plan.schemaVersion ?? 0) < MASTER_PLAN_SCHEMA_VERSION)
+		return "schemaVersion menor que 2";
+	for (const key of [
+		"version",
+		"projectId",
+		"projectPath",
+		"generatedAt",
+		"status",
+		"executiveSummary",
+		"inferredObjective",
+		"problemStatement",
+	] as const) {
+		if (!hasText(plan[key])) return `${key} faltante`;
+	}
+	for (const key of [
+		"scope",
+		"outOfScope",
+		"detectedModules",
+		"userRoles",
+		"criticalRisks",
+		"qualityRisks",
+		"securityRisks",
+		"architectureRisks",
+		"openQuestions",
+		"assumptions",
+		"recommendedNext",
+		"sourceFiles",
+		"agentLabReviews",
+		"toolingDetected",
+		"ignoredTooling",
+	] as const) {
+		if (!Array.isArray(plan[key])) return `${key} faltante`;
+	}
+	if (!isMasterPlanStatus(plan.status)) return "status inválido";
+	if (!isCompatibleAutoDepth(plan.autoDepth)) return "autoDepth incompleto";
+	if (!isCompatibleSource(plan.source)) return "source incompleto";
+	if (!isCompatibleArchitecture(plan.architecture))
+		return "architecture incompleta";
+	if (!Array.isArray(plan.dataStores)) return "dataStores faltante";
+	if (!plan.dataStores.every(isCompatibleDataStore))
+		return "dataStores sin estructura completa";
+	if (!isCompatibleSecurityModel(plan.securityModel))
+		return "securityModel incompleto";
+	if (!Array.isArray(plan.detectedFlows)) return "detectedFlows faltante";
+	if (plan.detectedFlows.some((flow) => typeof flow === "string"))
+		return "detectedFlows usa strings legacy";
+	if (!plan.detectedFlows.every(isCompatibleFunctionalFlow))
+		return "detectedFlows sin estructura funcional completa";
+	return "compatible";
+}
+
+function hasText(value: unknown): value is string {
+	return typeof value === "string" && value.trim().length > 0;
+}
+
+function isMasterPlanStatus(status: unknown): status is MasterPlanStatus {
+	return ["draft", "approved", "rejected", "stale", "incompatible"].includes(
+		String(status),
+	);
+}
+
+function isCompatibleAutoDepth(
+	autoDepth: Partial<MasterPlanAutoDepth> | undefined,
+): autoDepth is MasterPlanAutoDepth {
+	return Boolean(
+		autoDepth &&
+			["quick", "standard", "deep_required"].includes(String(autoDepth.mode)) &&
+			hasText(autoDepth.reason) &&
+			Array.isArray(autoDepth.signals) &&
+			Array.isArray(autoDepth.agentLabsSelected) &&
+			Array.isArray(autoDepth.skippedAgentLabs) &&
+			hasText(autoDepth.tokenCostHint),
+	);
+}
+
+function isCompatibleSource(
+	source: Partial<MasterPlanSource> | undefined,
+): source is MasterPlanSource {
+	return Boolean(
+		source &&
+			hasText(source.projectCoreStatus) &&
+			hasText(source.constitutionStatus) &&
+			hasText(source.blueprintStatus) &&
+			hasText(source.flowsStatus) &&
+			hasText(source.scanStatus),
+	);
+}
+
+function isCompatibleArchitecture(
+	architecture: Partial<MasterPlanArchitecture> | undefined,
+): architecture is MasterPlanArchitecture {
+	return Boolean(
+		architecture &&
+			hasText(architecture.projectKind) &&
+			hasText(architecture.frontend) &&
+			hasText(architecture.backend) &&
+			hasText(architecture.database) &&
+			hasText(architecture.auth) &&
+			hasText(architecture.deployment) &&
+			hasText(architecture.packageManager) &&
+			Array.isArray(architecture.languages) &&
+			Array.isArray(architecture.frameworks) &&
+			Array.isArray(architecture.evidence),
+	);
+}
+
+function isCompatibleDataStore(store: unknown): store is MasterPlanDataStore {
+	return Boolean(
+		store &&
+			typeof store === "object" &&
+			hasText((store as Partial<MasterPlanDataStore>).name) &&
+			hasText((store as Partial<MasterPlanDataStore>).type) &&
+			Array.isArray((store as Partial<MasterPlanDataStore>).evidence) &&
+			["low", "medium", "high"].includes(
+				String((store as Partial<MasterPlanDataStore>).riskLevel),
+			),
+	);
+}
+
+function isCompatibleSecurityModel(
+	securityModel: Partial<MasterPlanSecurityModel> | undefined,
+): securityModel is MasterPlanSecurityModel {
+	return Boolean(
+		securityModel &&
+			typeof securityModel.authDetected === "boolean" &&
+			typeof securityModel.sessionDetected === "boolean" &&
+			Array.isArray(securityModel.sensitiveFlows) &&
+			Array.isArray(securityModel.evidence),
+	);
+}
+
+function isCompatibleFunctionalFlow(
+	flow: unknown,
+): flow is MasterPlanFunctionalFlow {
+	return Boolean(
+		flow &&
+			typeof flow === "object" &&
+			hasText((flow as Partial<MasterPlanFunctionalFlow>).name) &&
+			hasText((flow as Partial<MasterPlanFunctionalFlow>).type) &&
+			hasText((flow as Partial<MasterPlanFunctionalFlow>).from) &&
+			hasText((flow as Partial<MasterPlanFunctionalFlow>).to) &&
+			Array.isArray((flow as Partial<MasterPlanFunctionalFlow>).through) &&
+			Array.isArray((flow as Partial<MasterPlanFunctionalFlow>).modules) &&
+			Array.isArray((flow as Partial<MasterPlanFunctionalFlow>).dataStores) &&
+			Array.isArray((flow as Partial<MasterPlanFunctionalFlow>).triggers) &&
+			Array.isArray((flow as Partial<MasterPlanFunctionalFlow>).evidence) &&
+			["low", "medium", "high"].includes(
+				String((flow as Partial<MasterPlanFunctionalFlow>).riskLevel),
+			),
+	);
 }
 
 function normalizeMasterPlan(raw: Partial<MasterPlan>): MasterPlan {
@@ -1794,6 +2233,7 @@ function normalizeMasterPlan(raw: Partial<MasterPlan>): MasterPlan {
 	};
 	return {
 		...(raw as MasterPlan),
+		schemaVersion: raw.schemaVersion ?? MASTER_PLAN_SCHEMA_VERSION,
 		detectedModules: raw.detectedModules ?? [],
 		detectedFlows: normalizePlanFlows(
 			raw.detectedFlows,

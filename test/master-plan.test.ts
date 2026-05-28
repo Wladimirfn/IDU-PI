@@ -17,6 +17,7 @@ import {
 	approveMasterPlan,
 	classifyProjectPath,
 	ensureMasterPlanForIdu,
+	isMasterPlanCompatible,
 	formatMasterPlanReview,
 	formatMasterPlanSummaryForIdu,
 	generateMasterPlanDraft,
@@ -276,7 +277,7 @@ test("Plan Maestro separa tooling y detecta arquitectura datos auth y flujos fun
 	}
 });
 
-test("Plan Maestro legacy se normaliza sin crashear /idu", () => {
+test("Plan Maestro legacy se considera incompatible y /idu regenera", () => {
 	const root = tempRoot();
 	try {
 		const projectPath = join(root, "project");
@@ -340,15 +341,203 @@ test("Plan Maestro legacy se normaliza sin crashear /idu", () => {
 			"utf8",
 		);
 
+		const status = getMasterPlanStatus({ stateRoot });
+		assert.equal(status.status, "incompatible");
+		const raw = JSON.parse(
+			readFileSync(
+				join(stateRoot, "reports", "master-plan-legacy.json"),
+				"utf8",
+			),
+		);
+		assert.equal(isMasterPlanCompatible(raw), false);
 		const result = ensureMasterPlanForIdu({
 			projectId: "demo",
 			projectPath,
 			stateRoot,
 		});
+		assert.equal("current" in result, true);
+		if (!("current" in result)) throw new Error("expected regenerated draft");
 		const text = formatMasterPlanSummaryForIdu(result);
-		assert.match(text, /Arquitectura:/u);
-		assert.match(text, /Datos:/u);
-		assert.match(text, /Login\/acceso/u);
+		assert.equal(result.plan.schemaVersion, 2);
+		assert.notEqual(
+			result.current.currentPlanJson,
+			"reports/master-plan-legacy.json",
+		);
+		assert.equal(
+			existsSync(join(stateRoot, "reports", "master-plan-legacy.json")),
+			true,
+		);
+		assert.match(
+			text,
+			/Plan Maestro anterior incompatible con esquema actual/u,
+		);
+		assert.doesNotMatch(text, /Arquitectura:\n—/u);
+		assert.doesNotMatch(text, /AutoDepth:\n—/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("schema v2 malformado se invalida y /idu regenera", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		mkdirSync(join(stateRoot, "reports"), { recursive: true });
+		writeSmallProject(projectPath);
+		writeFileSync(
+			join(stateRoot, "reports", "bad-v2.json"),
+			JSON.stringify({
+				schemaVersion: 2,
+				executiveSummary: "bad but superficially v2",
+				inferredObjective: "bad objective",
+				autoDepth: { mode: "standard" },
+				architecture: { projectKind: "web", languages: ["TypeScript"] },
+				dataStores: [],
+				securityModel: {},
+				detectedFlows: [],
+				toolingDetected: [],
+			}),
+			"utf8",
+		);
+		writeFileSync(
+			join(stateRoot, "master-plan.current.json"),
+			JSON.stringify({
+				currentPlanJson: "reports/bad-v2.json",
+				currentPlanMd: "reports/bad-v2.md",
+				status: "draft",
+				projectId: "demo",
+				projectPath,
+				updatedAt: new Date().toISOString(),
+			}),
+			"utf8",
+		);
+
+		const raw = JSON.parse(
+			readFileSync(join(stateRoot, "reports", "bad-v2.json"), "utf8"),
+		);
+		assert.equal(isMasterPlanCompatible(raw), false);
+		const status = getMasterPlanStatus({ stateRoot });
+		assert.equal(status.status, "incompatible");
+		const result = ensureMasterPlanForIdu({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+		});
+		assert.equal("current" in result, true);
+		if (!("current" in result)) throw new Error("expected regenerated draft");
+		assert.equal(result.plan.schemaVersion, 2);
+		assert.notEqual(result.current.currentPlanJson, "reports/bad-v2.json");
+		assert.equal(existsSync(join(stateRoot, "reports", "bad-v2.json")), true);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current ausente o inválido fuerza nuevo draft compatible", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		mkdirSync(join(stateRoot, "reports"), { recursive: true });
+		writeSmallProject(projectPath);
+		writeFileSync(
+			join(stateRoot, "master-plan.current.json"),
+			JSON.stringify({
+				currentPlanJson: "reports/missing.json",
+				currentPlanMd: "reports/missing.md",
+				status: "draft",
+				projectId: "demo",
+				projectPath,
+				updatedAt: new Date().toISOString(),
+			}),
+			"utf8",
+		);
+		const missingStatus = getMasterPlanStatus({ stateRoot });
+		assert.equal(missingStatus.status, "incompatible");
+		const result = ensureMasterPlanForIdu({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+		});
+		assert.equal("current" in result, true);
+		if (!("current" in result)) throw new Error("expected regenerated draft");
+		assert.equal(result.plan.schemaVersion, 2);
+		assert.equal(
+			existsSync(join(stateRoot, result.current.currentPlanJson)),
+			true,
+		);
+
+		writeFileSync(
+			join(stateRoot, "master-plan.current.json"),
+			JSON.stringify({
+				currentPlanJson: "../escape.json",
+				currentPlanMd: "../escape.md",
+				status: "draft",
+				projectId: "demo",
+				projectPath,
+				updatedAt: new Date().toISOString(),
+			}),
+			"utf8",
+		);
+		const unsafeStatus = getMasterPlanStatus({ stateRoot });
+		assert.equal(unsafeStatus.status, "incompatible");
+		assert.equal("incompatibleReason" in unsafeStatus, true);
+		if (!("incompatibleReason" in unsafeStatus))
+			throw new Error("expected incompatible status");
+		assert.match(unsafeStatus.incompatibleReason, /fuera de stateRoot/u);
+		const regenerated = ensureMasterPlanForIdu({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+		});
+		assert.equal("current" in regenerated, true);
+		if (!("current" in regenerated))
+			throw new Error("expected regenerated draft");
+		assert.equal(regenerated.plan.schemaVersion, 2);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("master-plan-review latest diagnostica plan incompatible sin regenerar", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		mkdirSync(join(stateRoot, "reports"), { recursive: true });
+		writeSmallProject(projectPath);
+		writeFileSync(
+			join(stateRoot, "reports", "old.json"),
+			JSON.stringify({
+				version: "1.0.0",
+				status: "draft",
+				detectedFlows: ["src/login.ts"],
+			}),
+			"utf8",
+		);
+		writeFileSync(
+			join(stateRoot, "master-plan.current.json"),
+			JSON.stringify({
+				currentPlanJson: "reports/old.json",
+				currentPlanMd: "reports/old.md",
+				status: "draft",
+				projectId: "demo",
+				projectPath,
+				updatedAt: new Date().toISOString(),
+			}),
+			"utf8",
+		);
+
+		const review = reviewMasterPlan({ stateRoot, pathOrLatest: "latest" });
+		assert.match(formatMasterPlanReview(review), /Plan Maestro incompatible/u);
+		assert.match(formatMasterPlanReview(review), /master-plan-redraft latest/u);
+		assert.equal(
+			readdirSync(join(stateRoot, "reports")).filter((entry) =>
+				/^master-plan-/u.test(entry),
+			).length,
+			0,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -401,6 +590,7 @@ test("genera Plan Maestro draft en stateRoot/reports sin modificar repo del usua
 		});
 
 		assert.equal(result.plan.status, "draft");
+		assert.equal(result.plan.schemaVersion, 2);
 		assert.equal(result.plan.autoDepth.mode, "quick");
 		assert.equal(
 			existsSync(join(stateRoot, result.current.currentPlanJson)),
@@ -446,6 +636,10 @@ test("Plan Maestro ignora links rotos durante escaneo del proyecto", () => {
 		});
 
 		assert.equal(result.plan.status, "draft");
+		assert.equal(
+			result.plan.detectedFlows.every((flow) => typeof flow !== "string"),
+			true,
+		);
 		assert.equal(existsSync(join(stateRoot, "master-plan.current.json")), true);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -651,9 +845,11 @@ test("review rechaza rutas fuera de stateRoot", () => {
 			}),
 			"utf8",
 		);
-		assert.throws(
-			() => reviewMasterPlan({ stateRoot, pathOrLatest: "latest" }),
-			/Master Plan fuera de stateRoot/u,
+		assert.match(
+			formatMasterPlanReview(
+				reviewMasterPlan({ stateRoot, pathOrLatest: "latest" }),
+			),
+			/Plan Maestro incompatible/u,
 		);
 		assert.throws(
 			() =>
@@ -673,9 +869,9 @@ test("review rechaza rutas fuera de stateRoot", () => {
 			}),
 			"utf8",
 		);
-		assert.throws(
-			() => getMasterPlanStatus({ stateRoot, currentGitHead: "new-head" }),
-			/Master Plan fuera de stateRoot/u,
+		assert.equal(
+			getMasterPlanStatus({ stateRoot, currentGitHead: "new-head" }).status,
+			"incompatible",
 		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -728,16 +924,16 @@ test("memory es liviano y review/summary son humanos", () => {
 			}),
 			"utf8",
 		);
-		assert.throws(
-			() =>
-				ensureMasterPlanForIdu({
-					projectId: "demo",
-					projectPath,
-					stateRoot,
-					gitHead: "head1",
-				}),
-			/Master Plan fuera de stateRoot/u,
-		);
+		const regenerated = ensureMasterPlanForIdu({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+			gitHead: "head1",
+		});
+		assert.equal("current" in regenerated, true);
+		if (!("current" in regenerated))
+			throw new Error("expected regenerated draft");
+		assert.equal(regenerated.plan.schemaVersion, 2);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
