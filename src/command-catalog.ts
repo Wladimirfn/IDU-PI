@@ -37,6 +37,18 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		help: "/dashboard - panel operativo",
 	},
 	{
+		command: "idu_menu",
+		description: "Abrir menú remoto guiado",
+		help: "/idu_menu - abrir botones remotos del mismo CLI/supervisor",
+		usage: ["/idu_menu"],
+	},
+	{
+		command: "idu_projects",
+		description: "Cambiar proyecto remoto",
+		help: "/idu_projects - listar proyectos enrolados y activarlos con botones",
+		usage: ["/idu_projects"],
+	},
+	{
 		command: "idu",
 		description: "Activar guardrails Idu-pi",
 		help: "/idu - activar guardrails automáticos y ver conexión del proyecto activo",

@@ -2,7 +2,7 @@
 
 Telegram es una interfaz de comodidad para operar Idu-pi desde chat. No es el núcleo del sistema.
 
-El núcleo es el supervisor. Telegram llama comandos del core, muestra estado, reenvía confirmaciones y permite operar desde el teléfono. Si Telegram cae, Idu-pi sigue teniendo CLI, reports y estado local.
+El núcleo es el CLI/supervisor. Telegram funciona como control remoto conversacional: muestra botones para no memorizar comandos, reenvía texto libre al mismo flujo del CLI/supervisor, muestra estado y reenvía confirmaciones. Si Telegram cae, Idu-pi sigue teniendo CLI, reports y estado local.
 
 ## Ayuda y catálogo
 
@@ -11,6 +11,8 @@ El núcleo es el supervisor. Telegram llama comandos del core, muestra estado, r
 | `/help` | Muestra comandos principales. |
 | `/comandos` | Muestra catálogo con argumentos, CLI, Batch y PowerShell. |
 | `/config sync_commands` | Sincroniza comandos visibles en Telegram con BotFather. |
+| `/idu_menu` | Abre menú remoto con botones para el mismo CLI/supervisor. |
+| `/idu_projects` | Lista proyectos enrolados y permite activar uno con botones. |
 
 La fuente operativa del catálogo vive en `src/command-catalog.ts`.
 
@@ -25,6 +27,16 @@ La fuente operativa del catálogo vive en `src/command-catalog.ts`.
 | `/idu_supervisor_tick` | Ejecuta ciclo supervisor seguro si corresponde. |
 
 `/idu` no significa “usar Telegram”. Significa activar el supervisor sobre el proyecto actual.
+
+## Menú remoto y proyectos
+
+| Comando | Uso |
+| --- | --- |
+| `/idu_menu` | Muestra botones humanos: activar supervisor, estado, preparar, tareas, diagnóstico, dashboard y proyectos. |
+| `/idu_projects` | Lista sólo proyectos ya enrolados y permite cambiar el proyecto activo. No auto-enrola. |
+| Texto libre | Se reenvía al mismo flujo conversacional del CLI/supervisor. |
+
+Los botones no crean un segundo core: apuntan a comandos existentes como `/idu`, `/idu_status`, `/idu_prepare`, `/queue_detail`, `/dashboard`, `/doctor`, `/projects` y `/useproject`.
 
 ## Configuración y Project Map
 

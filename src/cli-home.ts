@@ -2,7 +2,13 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalDirectory, isAllowedCwd } from "./config.js";
+import {
+	canonicalDirectory,
+	isAllowedCwd,
+	parseAgentProfiles,
+	type AgentProfile,
+} from "./config.js";
+import { profileModelLabel } from "./agent-router.js";
 import {
 	detectGlobalIduInstall,
 	detectTools,
@@ -56,6 +62,7 @@ export type CliHomeStatus = {
 	mcpInstalled: boolean;
 	commandExtensionInstalled: boolean;
 	globalInstall: GlobalIduInstallStatus;
+	agentProfiles: AgentProfile[];
 	project: CliHomeProjectStatus;
 	stdinInteractive: boolean;
 };
@@ -90,6 +97,7 @@ export function buildCliHomeStatus(
 		mcpInstalled,
 		commandExtensionInstalled,
 		globalInstall,
+		agentProfiles: safeParseAgentProfiles(env.PI_AGENT_PROFILES),
 		project: detectHomeProjectStatus({ ...options, cwd, env, exists }),
 		stdinInteractive: options.stdinInteractive ?? Boolean(process.stdin.isTTY),
 	};
@@ -129,24 +137,48 @@ function colorBrand(text: string): string {
 		.join("\n");
 }
 
+function safeParseAgentProfiles(raw?: string): AgentProfile[] {
+	try {
+		return parseAgentProfiles(raw);
+	} catch {
+		return parseAgentProfiles();
+	}
+}
+
+function findProfile(
+	profiles: AgentProfile[],
+	pattern: RegExp,
+): AgentProfile | undefined {
+	return profiles.find((profile) =>
+		pattern.test(`${profile.id}\n${profile.label}`),
+	);
+}
+
+function profileLabel(profile: AgentProfile | undefined): string {
+	if (!profile) return "(not set)";
+	return `${profile.label} / ${profileModelLabel(profile)}`;
+}
+
 export function formatMainMenu(status: CliHomeStatus): string {
 	return [
 		formatIduLogo(),
 		"",
 		`version: ${status.version}`,
 		"",
-		"1. Instalación",
-		"2. Estado",
-		"3. Proyecto actual",
-		"4. Configuración",
-		"5. Ayuda PATH",
-		"6. Exit",
+		"1. Configurar IDU-Pi",
+		"2. Proyecto actual",
+		"3. Telegram remoto",
+		"4. Modelos y perfiles",
+		"5. Supervisor",
+		"6. Tareas y cola",
+		"7. Diagnóstico",
+		"8. Exit",
 	].join("\n");
 }
 
 export function formatInstallationMenu(): string {
 	return [
-		"Instalación",
+		"Configurar IDU-Pi",
 		"",
 		"1. Verificar sistema",
 		"2. Instalar/actualizar MCP en Pi",
@@ -194,6 +226,138 @@ export function formatCliConfigurationStatus(status: CliHomeStatus): string {
 		"- idu-pi setup mcp-init",
 		"- idu-pi setup path-help",
 		"- idu-pi project status .",
+	].join("\n");
+}
+
+export function formatTelegramRemoteStatus(status: CliHomeStatus): string {
+	return [
+		"Telegram remoto",
+		"",
+		"Telegram es una interfaz remota opcional del flujo CLI/supervisor.",
+		"El core de IDU-Pi no depende de Telegram.",
+		"",
+		`package root: ${status.packageRoot}`,
+		`config esperada: ${join(status.packageRoot, ".env")}`,
+		"",
+		"Acciones disponibles por ahora:",
+		"- Configurar Telegram remoto: scripts/setup-env.mjs",
+		"- Iniciar Telegram remoto: scripts/start-bridge.ps1",
+		"- Detener Telegram remoto: scripts/stop-bridge.ps1",
+		"",
+		"MVP seguro: esta pantalla no inicia Telegram ni modifica .env.",
+	].join("\n");
+}
+
+export function formatModelProfilesMenu(): string {
+	return [
+		"Modelos y perfiles",
+		"",
+		"1. Ver perfiles actuales",
+		"2. Editar perfiles",
+		"3. Asignar modelos por rol",
+		"4. Validar configuración",
+		"5. Save",
+		"6. Descartar",
+		"7. ← Volver",
+		"8. Exit",
+	].join("\n");
+}
+
+export function formatModelProfilesStatus(status: CliHomeStatus): string {
+	const profiles = status.agentProfiles.length
+		? status.agentProfiles
+		: parseAgentProfiles();
+	const defaultProfile = profiles[0];
+	const labProfiles = profiles.slice(1);
+	const generalLab = labProfiles[0];
+	const securityLab =
+		findProfile(labProfiles, /seguridad|security|sec/iu) ?? generalLab;
+	const architectureLab =
+		findProfile(labProfiles, /arquitectura|architecture|arch/iu) ?? generalLab;
+	const performanceLab =
+		findProfile(labProfiles, /performance|perf|rendimiento/iu) ?? generalLab;
+	const codeQualityLab =
+		findProfile(labProfiles, /quality|calidad|code|general/iu) ?? generalLab;
+	return [
+		"Modelos y perfiles",
+		"",
+		"Assign Models",
+		"Assign models for IDU-Pi supervisor and AgentLabs.",
+		"",
+		"Current profiles:",
+		"",
+		...profiles.map(
+			(profile, index) =>
+				`  ${index === 0 ? "▸" : " "} ${profile.label} (${profile.id})  ${profileModelLabel(profile)}`,
+		),
+		"",
+		"Current assignments:",
+		"",
+		`  ▸ Supervisor principal       ${profileLabel(defaultProfile)}`,
+		`    Supervisor semántico       ${profileLabel(defaultProfile)}`,
+		`    Supervisor compactación    ${profileLabel(defaultProfile)}`,
+		`    AgentLab general           ${profileLabel(generalLab)}`,
+		`    AgentLab seguridad         ${profileLabel(securityLab)}`,
+		`    AgentLab arquitectura      ${profileLabel(architectureLab)}`,
+		`    AgentLab performance       ${profileLabel(performanceLab)}`,
+		`    AgentLab calidad código    ${profileLabel(codeQualityLab)}`,
+		"",
+		"Acciones disponibles en el menú:",
+		"- Ver perfiles actuales",
+		"- Editar perfiles",
+		"- Asignar modelos por rol",
+		"- Validar configuración",
+		"- Save / Descartar",
+		"",
+		"MVP seguro: las acciones editables muestran el flujo previsto. No modifica .env todavía.",
+	].join("\n");
+}
+
+export function formatSupervisorStatus(status: CliHomeStatus): string {
+	const project = status.project;
+	return [
+		"Supervisor",
+		"",
+		`session: ${project.supervisor}`,
+		`projectId: ${project.projectId}`,
+		`Project Core: ${project.projectCore}`,
+		`Constitution: ${project.constitution}`,
+		"",
+		"Acciones CLI:",
+		"- idu-pi idu",
+		"- idu-pi idu-status",
+		"- idu-pi idu-off",
+		"- idu-pi idu-supervisor-tick",
+		"",
+		"MVP seguro: esta pantalla no activa ni ejecuta el supervisor.",
+	].join("\n");
+}
+
+export function formatTaskQueueStatus(): string {
+	return [
+		"Tareas y cola",
+		"",
+		"Acciones CLI:",
+		'- idu-pi idu-task "detalle"',
+		"- idu-pi idu-queue-detail",
+		"- idu-pi idu-queue-approve <id>",
+		"- idu-pi idu-queue-reject <id>",
+		"- idu-pi idu-queue-clear-structured",
+		"",
+		"MVP seguro: esta pantalla no lee ni modifica la cola.",
+	].join("\n");
+}
+
+export function formatDiagnosticsStatus(status: CliHomeStatus): string {
+	return [
+		"Diagnóstico",
+		"",
+		formatCliSystemStatus(status),
+		"",
+		formatCliConfigurationStatus(status),
+		"",
+		"Ayuda PATH",
+		formatSetupPathHelp(),
 	].join("\n");
 }
 

@@ -107,12 +107,14 @@ node dist/src/cli.js
 El home muestra logo, estado del sistema, MCP, proyecto actual, supervisor, rutas de estado y acciones recomendadas. Si la terminal es interactiva, muestra un menú minimalista:
 
 ```text
-1. Instalación
-2. Estado
-3. Proyecto actual
-4. Configuración
-5. Ayuda PATH
-6. Exit
+1. Configurar IDU-Pi
+2. Proyecto actual
+3. Telegram remoto
+4. Modelos y perfiles
+5. Supervisor
+6. Tareas y cola
+7. Diagnóstico
+8. Exit
 ```
 
 Si no es interactivo, imprime el resumen y sale sin escribir archivos.
@@ -142,13 +144,17 @@ Guía: [Instalador, home CLI y estado por proyecto](docs/installer.md).
 
 ## Cómo se activa
 
-Desde Telegram:
+Desde Telegram, usá el menú remoto para no memorizar comandos:
 
 ```text
+/idu_menu
+/idu_projects
 /idu
 /idu_status
 /idu_off
 ```
+
+Telegram replica el mismo flujo CLI/supervisor: los botones son atajos a comandos existentes y el texto libre se reenvía como entrada humana al core.
 
 Desde CLI:
 

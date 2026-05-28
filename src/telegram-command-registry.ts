@@ -8,6 +8,8 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"comandos",
 	"status",
 	"dashboard",
+	"idu_menu",
+	"idu_projects",
 	"idu",
 	"idu_off",
 	"idu_status",

@@ -20,6 +20,8 @@ import {
 	formatIduLogo,
 	formatInstallationMenu,
 	formatMainMenu,
+	formatModelProfilesMenu,
+	formatModelProfilesStatus,
 	formatSetupPathHelp,
 } from "../src/cli-home.js";
 import { runCliCommand, runInteractiveHomeWithQuestion } from "../src/cli.js";
@@ -39,6 +41,7 @@ function snapshotEnv(): EnvSnapshot {
 		PNPM_HOME: process.env.PNPM_HOME,
 		PATH: process.env.PATH,
 		Path: process.env.Path,
+		PI_AGENT_PROFILES: process.env.PI_AGENT_PROFILES,
 	};
 }
 
@@ -189,16 +192,22 @@ test("home shows enrolled and unenrolled project states", () => {
 	}
 });
 
-test("main and installation menus render first-run options", () => {
+test("main and installation menus render unified control options", () => {
 	const status = buildCliHomeStatus({
 		env: { PATH: "" },
 		runner: () => undefined,
 		stdinInteractive: true,
 		version: "0.1.1",
 	});
-	assert.match(formatMainMenu(status), /1\. Instalación/u);
-	assert.match(formatMainMenu(status), /4\. Configuración/u);
-	assert.match(formatMainMenu(status), /6\. Exit/u);
+	const menu = formatMainMenu(status);
+	assert.match(menu, /1\. Configurar IDU-Pi/u);
+	assert.match(menu, /2\. Proyecto actual/u);
+	assert.match(menu, /3\. Telegram remoto/u);
+	assert.match(menu, /4\. Modelos y perfiles/u);
+	assert.match(menu, /5\. Supervisor/u);
+	assert.match(menu, /6\. Tareas y cola/u);
+	assert.match(menu, /7\. Diagnóstico/u);
+	assert.match(menu, /8\. Exit/u);
 	assert.match(formatInstallationMenu(), /Instalar\/actualizar MCP en Pi/u);
 	assert.match(
 		formatInstallationMenu(),
@@ -291,6 +300,63 @@ test("project status renderer shows enrolled and unregistered project states", (
 	});
 	assert.match(formatCliProjectStatus(registered), /enrolado: sí/u);
 	rmSync(root, { recursive: true, force: true });
+});
+
+test("model profile panel renders current profiles and planned Idu-pi roles", () => {
+	const status = buildCliHomeStatus({
+		env: {
+			PATH: "",
+			PI_AGENT_PROFILES:
+				"default|Pi default|--model nvidia/kimi-k2;barato|Barato|--model nvidia/deepseek-v3;seguridad|Seguridad|--model nvidia/qwen3-coder",
+		},
+		runner: () => undefined,
+		stdinInteractive: false,
+	});
+	const panel = formatModelProfilesStatus(status);
+	assert.match(panel, /Modelos y perfiles/u);
+	assert.match(panel, /Current profiles:/u);
+	assert.match(panel, /Pi default \(default\).*nvidia\/kimi-k2/u);
+	assert.match(panel, /Barato \(barato\).*nvidia\/deepseek-v3/u);
+	assert.match(panel, /Current assignments:/u);
+	assert.match(panel, /Supervisor principal.*Pi default/u);
+	assert.match(panel, /AgentLab general.*Barato/u);
+	assert.match(panel, /AgentLab seguridad.*Seguridad/u);
+	assert.match(panel, /No modifica \.env/u);
+});
+
+test("model profiles submenu exposes navigable actions", () => {
+	const menu = formatModelProfilesMenu();
+	assert.match(menu, /1\. Ver perfiles actuales/u);
+	assert.match(menu, /2\. Editar perfiles/u);
+	assert.match(menu, /3\. Asignar modelos por rol/u);
+	assert.match(menu, /4\. Validar configuración/u);
+	assert.match(menu, /5\. Save/u);
+	assert.match(menu, /7\. ← Volver/u);
+	assert.match(menu, /8\. Exit/u);
+});
+
+test("interactive home model option is non-mutating", async () => {
+	const root = tempDir();
+	const previous = snapshotEnv();
+	const previousCwd = process.cwd();
+	try {
+		process.chdir(root);
+		process.env.PI_AGENT_PROFILES =
+			"default|Pi default|--model nvidia/kimi-k2;barato|Barato|--model nvidia/deepseek-v3";
+		const before = readdirSync(root);
+		const answers = ["4", "1"];
+		const output = await runInteractiveHomeWithQuestion(
+			async () => answers.shift() ?? "7",
+		);
+		const after = readdirSync(root);
+		assert.match(output, /Modelos y perfiles/u);
+		assert.match(output, /Supervisor principal/u);
+		assert.deepEqual(after, before);
+	} finally {
+		process.chdir(previousCwd);
+		restoreEnv(previous);
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("home shows PATH help when pnpm global bin is not in PATH", () => {

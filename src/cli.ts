@@ -14,13 +14,17 @@ import {
 	applyPackageEnvDefaults,
 	buildCliHomeStatus,
 	formatCliHome,
-	formatCliConfigurationStatus,
 	formatCliProjectStatus,
-	formatCliSystemStatus,
+	formatDiagnosticsStatus,
 	formatIduLogo,
 	formatInstallationMenu,
 	formatMainMenu,
+	formatModelProfilesMenu,
+	formatModelProfilesStatus,
 	formatSetupPathHelp,
+	formatSupervisorStatus,
+	formatTaskQueueStatus,
+	formatTelegramRemoteStatus,
 	formatSetupWizardNonInteractive,
 	resolveCliPackageRoot,
 	resolveIduRegistryPath,
@@ -1882,18 +1886,10 @@ export async function runInteractiveHome(): Promise<string> {
 		});
 		const choice = await selectMenu("", mainMenuOptions(), status);
 		if (choice === "exit") return "Salida sin cambios.";
-		if (choice === "install") {
+		if (choice === "config") {
 			const result = await runInstallationMenuTui();
 			if (result === "__back") continue;
 			return result;
-		}
-		if (choice === "status") {
-			const result = await showTextView(
-				"Estado",
-				formatCliSystemStatus(status),
-			);
-			if (result === "back") continue;
-			return "Salida sin cambios.";
 		}
 		if (choice === "project") {
 			const result = await showTextView(
@@ -1903,16 +1899,40 @@ export async function runInteractiveHome(): Promise<string> {
 			if (result === "back") continue;
 			return "Salida sin cambios.";
 		}
-		if (choice === "config") {
+		if (choice === "telegram") {
 			const result = await showTextView(
-				"Configuración",
-				formatCliConfigurationStatus(status),
+				"Telegram remoto",
+				formatTelegramRemoteStatus(status),
 			);
 			if (result === "back") continue;
 			return "Salida sin cambios.";
 		}
-		if (choice === "path") {
-			const result = await showTextView("Ayuda PATH", formatSetupPathHelp());
+		if (choice === "models") {
+			const result = await runModelProfilesMenuTui(status);
+			if (result === "__back") continue;
+			return result;
+		}
+		if (choice === "supervisor") {
+			const result = await showTextView(
+				"Supervisor",
+				formatSupervisorStatus(status),
+			);
+			if (result === "back") continue;
+			return "Salida sin cambios.";
+		}
+		if (choice === "tasks") {
+			const result = await showTextView(
+				"Tareas y cola",
+				formatTaskQueueStatus(),
+			);
+			if (result === "back") continue;
+			return "Salida sin cambios.";
+		}
+		if (choice === "diagnostics") {
+			const result = await showTextView(
+				"Diagnóstico",
+				formatDiagnosticsStatus(status),
+			);
 			if (result === "back") continue;
 			return "Salida sin cambios.";
 		}
@@ -1922,11 +1942,13 @@ export async function runInteractiveHome(): Promise<string> {
 
 function mainMenuOptions(): MenuOption[] {
 	return [
-		{ label: "Instalación", value: "install" },
-		{ label: "Estado", value: "status" },
+		{ label: "Configurar IDU-Pi", value: "config" },
 		{ label: "Proyecto actual", value: "project" },
-		{ label: "Configuración", value: "config" },
-		{ label: "Ayuda PATH", value: "path" },
+		{ label: "Telegram remoto", value: "telegram" },
+		{ label: "Modelos y perfiles", value: "models" },
+		{ label: "Supervisor", value: "supervisor" },
+		{ label: "Tareas y cola", value: "tasks" },
+		{ label: "Diagnóstico", value: "diagnostics" },
 		{ label: "Exit", value: "exit" },
 	];
 }
@@ -1944,7 +1966,10 @@ function installationMenuOptions(): MenuOption[] {
 }
 
 async function runInstallationMenuTui(): Promise<string> {
-	const choice = await selectMenu("Instalación", installationMenuOptions());
+	const choice = await selectMenu(
+		"Configurar IDU-Pi",
+		installationMenuOptions(),
+	);
 	if (choice === "back") return "__back";
 	if (choice === "exit") return "Salida sin cambios.";
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -1956,6 +1981,56 @@ async function runInstallationMenuTui(): Promise<string> {
 		return "__back";
 	} finally {
 		rl.close();
+	}
+}
+
+function modelProfilesMenuOptions(): MenuOption[] {
+	return [
+		{ label: "Ver perfiles actuales", value: "status" },
+		{ label: "Editar perfiles", value: "edit" },
+		{ label: "Asignar modelos por rol", value: "assign" },
+		{ label: "Validar configuración", value: "validate" },
+		{ label: "Save", value: "save" },
+		{ label: "Descartar", value: "discard" },
+		{ label: "← Volver", value: "back" },
+		{ label: "Exit", value: "exit" },
+	];
+}
+
+async function runModelProfilesMenuTui(
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Promise<string> {
+	while (true) {
+		const choice = await selectMenu(
+			"Modelos y perfiles",
+			modelProfilesMenuOptions(),
+			undefined,
+			formatModelProfilesStatus(status),
+		);
+		if (choice === "back") return "__back";
+		if (choice === "exit") return "Salida sin cambios.";
+		if (choice === "status") {
+			const result = await showTextView(
+				"Perfiles actuales",
+				formatModelProfilesStatus(status),
+			);
+			if (result === "exit") return "Salida sin cambios.";
+			continue;
+		}
+		const messages: Record<string, string> = {
+			edit: "Editar perfiles va a usar un panel con Save/Descartar y backup antes de tocar configuración. Todavía no modifiqué .env.",
+			assign:
+				"Asignar modelos por rol va a guardar en stateRoot/model-assignments.json, no en .env. Todavía no escribí cambios.",
+			validate:
+				"Configuración válida para lectura: los perfiles cargaron y las asignaciones usan fallback seguro.",
+			save: "No hay cambios pendientes para guardar.",
+			discard: "Cambios descartados. No había cambios pendientes.",
+		};
+		const result = await showTextView(
+			"Modelos y perfiles",
+			messages[choice] ?? "Opción no reconocida.",
+		);
+		if (result === "exit") return "Salida sin cambios.";
 	}
 }
 
@@ -2067,17 +2142,8 @@ function panelLine(text: string, width: number, color = ""): string {
 	return `${ANSI_DARK_PURPLE}│${ANSI_RESET} ${color}${padded}${ANSI_RESET} ${ANSI_DARK_PURPLE}│${ANSI_RESET}`;
 }
 
-function contentLines(content: string, width: number): string[] {
-	const max = width - 2;
-	const lines = content.replace(/\r/gu, "").split("\n");
-	return lines.flatMap((line) => {
-		if (line.length <= max) return [line];
-		const chunks: string[] = [];
-		for (let index = 0; index < line.length; index += max) {
-			chunks.push(line.slice(index, index + max));
-		}
-		return chunks;
-	});
+function contentLines(content: string, _width: number): string[] {
+	return content.replace(/\r/gu, "").split("\n");
 }
 
 export async function runInteractiveHomeWithQuestion(
@@ -2089,18 +2155,43 @@ export async function runInteractiveHomeWithQuestion(
 		stdinInteractive: true,
 	});
 	print(formatMainMenu(status));
-	const choice = (await question("\nElegí una opción [1-6]: ")).trim();
-	if (choice === "6" || /^exit|salir$/iu.test(choice))
+	const choice = (await question("\nElegí una opción [1-8]: ")).trim();
+	if (choice === "8" || /^exit|salir$/iu.test(choice))
 		return "Salida sin cambios.";
 	if (choice === "1") return runInstallationMenu(question, print);
-	if (choice === "2") return formatCliSystemStatus(status);
-	if (choice === "3") return formatCliProjectStatus(status);
-	if (choice === "4") return formatCliConfigurationStatus(status);
-	if (choice === "5") return formatSetupPathHelp();
+	if (choice === "2") return formatCliProjectStatus(status);
+	if (choice === "3") return formatTelegramRemoteStatus(status);
+	if (choice === "4") return runModelProfilesMenu(question, print, status);
+	if (choice === "5") return formatSupervisorStatus(status);
+	if (choice === "6") return formatTaskQueueStatus();
+	if (choice === "7") return formatDiagnosticsStatus(status);
 	return [
 		"Opción no reconocida. No ejecuté acciones.",
 		"Usá `idu-pi` o `idu-pi setup wizard`.",
 	].join("\n");
+}
+
+async function runModelProfilesMenu(
+	question: CliQuestion,
+	print: CliPrint,
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Promise<string> {
+	print(formatModelProfilesMenu());
+	const choice = (await question("\nElegí una opción [1-8]: ")).trim();
+	if (choice === "7" || /^volver$/iu.test(choice)) return "Volver sin cambios.";
+	if (choice === "8" || /^exit|salir$/iu.test(choice))
+		return "Salida sin cambios.";
+	if (choice === "1") return formatModelProfilesStatus(status);
+	if (choice === "2")
+		return "Editar perfiles requiere el próximo panel editable con Save/Descartar. No modifiqué .env.";
+	if (choice === "3")
+		return "Asignar modelos por rol guardará en stateRoot/model-assignments.json. No escribí cambios.";
+	if (choice === "4")
+		return "Configuración válida para lectura: perfiles cargados y fallbacks seguros.";
+	if (choice === "5") return "No hay cambios pendientes para guardar.";
+	if (choice === "6")
+		return "Cambios descartados. No había cambios pendientes.";
+	return "Opción no reconocida. No ejecuté acciones.";
 }
 
 async function runInstallationMenu(

@@ -269,6 +269,14 @@ import {
 	parseUiCallbackData,
 	parseUiRequestAnswer,
 } from "./telegram-ui.js";
+import {
+	buildIduRemoteMenuKeyboard,
+	buildIduRemoteMenuText,
+	buildIduRemoteProjectKeyboard,
+	type IduRemoteCommand,
+	formatIduRemoteProjectList,
+	parseIduRemoteCallback,
+} from "./remote-menu.js";
 import { TaskQueue } from "./task-queue.js";
 import {
 	analyzeStructuredTaskSignal,
@@ -357,6 +365,98 @@ function activeProjectLabel(): string {
 	return project
 		? `${project.id} (${project.path})`
 		: `sin proyecto (${currentCwd})`;
+}
+
+async function replyIduRemoteMenu(ctx: Context): Promise<void> {
+	await ctx.reply(buildIduRemoteMenuText(activeProjectLabel()), {
+		reply_markup: buildIduRemoteMenuKeyboard(),
+	});
+}
+
+async function replyIduRemoteProjects(ctx: Context): Promise<void> {
+	await ctx.reply(formatIduRemoteProjectList(registry), {
+		reply_markup: buildIduRemoteProjectKeyboard(registry),
+	});
+}
+
+async function activateRemoteProject(
+	ctx: Context,
+	projectId: string,
+): Promise<void> {
+	const project = setActiveProject(registry, projectId, config.allowedRoots);
+	saveRegistry(registry);
+	switchProjectContext(project.path);
+	await ctx.reply(
+		`Proyecto activo actualizado:\n${project.id}\n${project.path}`,
+		{
+			reply_markup: buildIduRemoteMenuKeyboard(),
+		},
+	);
+}
+
+async function runIduRemoteCommand(
+	ctx: Context,
+	command: IduRemoteCommand,
+): Promise<void> {
+	if (command === "idu") {
+		const projectId = currentProjectId();
+		activateIduSession(projectId);
+		maybeRunSupervisorOnIduActivation({
+			projectId,
+			projectPath: activeProjectPath(),
+			workspaceRoot: config.agentWorkspaceRoot,
+			repository: labDbRepository,
+			queue: structuredTaskQueue,
+		});
+		const report = inspectProjectConnection({
+			registry,
+			defaultCwd: config.defaultCwd,
+			allowedRoots: config.allowedRoots,
+			workspaceRoot: config.agentWorkspaceRoot,
+		});
+		await replyLong(
+			ctx,
+			[
+				"Guardrails automáticos activados para el proyecto activo.",
+				"",
+				iduProjectDashboardText(report),
+			].join("\n"),
+		);
+		return;
+	}
+	if (command === "idu_status") {
+		await replyLong(
+			ctx,
+			formatIduSessionStatus(getIduSessionStatus(currentProjectId())),
+		);
+		return;
+	}
+	if (command === "idu_prepare") {
+		await ctx.reply(
+			"Atajo remoto seguro: escribí /idu_prepare para confirmar la preparación del proyecto activo.",
+		);
+		return;
+	}
+	if (command === "queue_detail") {
+		await replyLong(
+			ctx,
+			formatStructuredTaskQueueDetail(structuredTaskQueue.listTasks()),
+		);
+		return;
+	}
+	if (command === "dashboard") {
+		await ctx.reply(buildDashboardText(dashboardState()));
+		return;
+	}
+	if (command === "doctor") {
+		await replyLong(ctx, await formatDoctor(config, currentCwd));
+		return;
+	}
+	pendingAction = "useproject-id";
+	await replyLong(
+		ctx,
+		`Proyectos registrados:\n\n${formatProjectChoices() || "(ninguno)"}\n\nRespondé con número o id para activar un proyecto, o /cancel para salir.`,
+	);
 }
 
 function currentProjectId(): string {
@@ -1210,6 +1310,16 @@ bot.command("status", async (ctx) => {
 bot.command("dashboard", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	await ctx.reply(buildDashboardText(dashboardState()));
+});
+
+bot.command("idu_menu", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyIduRemoteMenu(ctx);
+});
+
+bot.command("idu_projects", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyIduRemoteProjects(ctx);
 });
 
 bot.command("idu", async (ctx) => {
@@ -2775,6 +2885,24 @@ async function sendPendingUiResponse(
 
 bot.on("callback_query:data", async (ctx) => {
 	if (!(await guard(ctx))) return;
+	const remoteCallback = parseIduRemoteCallback(ctx.callbackQuery.data);
+	if (remoteCallback) {
+		await ctx.answerCallbackQuery();
+		if (remoteCallback.type === "menu") {
+			await replyIduRemoteMenu(ctx);
+			return;
+		}
+		if (remoteCallback.type === "projects") {
+			await replyIduRemoteProjects(ctx);
+			return;
+		}
+		if (remoteCallback.type === "run") {
+			await runIduRemoteCommand(ctx, remoteCallback.command);
+			return;
+		}
+		await activateRemoteProject(ctx, remoteCallback.projectId);
+		return;
+	}
 	const callback = parseUiCallbackData(ctx.callbackQuery.data);
 	if (!callback) return;
 	await ctx.answerCallbackQuery();

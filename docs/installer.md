@@ -147,18 +147,22 @@ Muestra:
 - estado básico de Project Core;
 - comandos recomendados;
 - pantalla de configuración con package root, Pi agent dir, MCP config, extensión slash y registry;
+- panel no mutante de Telegram remoto;
+- panel no mutante de modelos/perfiles para supervisor y AgentLabs;
 - ayuda si el bin global de pnpm no está en `PATH`.
 
-Si stdin/stdout son interactivos, muestra el logo y menú principal:
+Si stdin/stdout son interactivos, muestra el logo y un único menú principal:
 
-1. Instalación
-2. Estado
-3. Proyecto actual
-4. Configuración
-5. Ayuda PATH
-6. Exit
+1. Configurar IDU-Pi
+2. Proyecto actual
+3. Telegram remoto
+4. Modelos y perfiles
+5. Supervisor
+6. Tareas y cola
+7. Diagnóstico
+8. Exit
 
-La opción **Instalación** abre un submenú seguro:
+La opción **Configurar IDU-Pi** abre un submenú seguro:
 
 1. Verificar sistema
 2. Instalar/actualizar MCP en Pi

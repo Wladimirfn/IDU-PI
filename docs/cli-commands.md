@@ -1,6 +1,6 @@
 # Comandos CLI de Idu-pi
 
-El CLI es la superficie principal para usar el core de Idu-pi. Telegram es una interfaz remota opcional para ejecutar comandos, revisar estado y confirmar decisiones sin estar en la terminal.
+El CLI es la superficie principal para usar el core de Idu-pi. Telegram es una interfaz remota opcional para ejecutar comandos, revisar estado, cambiar de proyecto enrolado y confirmar decisiones sin estar en la terminal. Telegram no tiene otro core: sus botones son atajos al mismo CLI/supervisor.
 
 Usá `idu-pi` para abrir el home CLI con estado y acciones recomendadas. Usá `idu-pi <comando>` si querés ejecutar un comando directo. Desde el repo, el equivalente es:
 
@@ -38,7 +38,7 @@ El bootstrap installer crea un shim local. Si falta en `PATH`, pregunta antes de
 
 | Comando | Uso |
 | --- | --- |
-| `idu-pi` | Muestra home CLI; en terminal interactiva abre wizard visual con Instalación/Estado/Proyecto/Configuración/PATH/Exit. |
+| `idu-pi` | Muestra home CLI; en terminal interactiva abre menú visual único con Configurar IDU-Pi/Proyecto/Telegram remoto/Modelos y perfiles/Supervisor/Tareas/Diagnóstico/Exit. |
 | `idu-pi home` | Muestra el mismo home CLI. |
 | `idu-pi setup` | Muestra estado de sistema/config y acciones recomendadas. |
 | `idu-pi setup status` | Igual que `setup`. |
