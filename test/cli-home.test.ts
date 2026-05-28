@@ -446,7 +446,10 @@ test("interactive model profile edit writes env with backup", async () => {
 		);
 		assert.match(output, /Perfiles guardados/u);
 		assert.match(readFileSync(envPath, "utf8"), /codex\|GPT Codex/u);
-		assert.match(readFileSync(envPath, "utf8"), new RegExp(`${tokenKey}=secret`, "u"));
+		assert.match(
+			readFileSync(envPath, "utf8"),
+			new RegExp(`${tokenKey}=secret`, "u"),
+		);
 		assert.ok(
 			readdirSync(root).some((entry) => entry.startsWith(".env.backup-")),
 		);

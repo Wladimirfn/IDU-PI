@@ -91,3 +91,5 @@ desktop.ini
 
 # Windows reserved accidental files
 NUL
+# Local Pi runtime state
+.atl/
