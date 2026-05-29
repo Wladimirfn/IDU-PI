@@ -11,6 +11,7 @@ import {
 	reviewAgentLabReviewRequest,
 } from "../src/agentlab-review-requests.js";
 import { formatAgentLabReviewRequestForPrompt } from "../src/agentlab-supervisor-contract.js";
+import { generateMasterPlanDraft } from "../src/master-plan.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
 
 function root(): string {
@@ -35,6 +36,42 @@ function postflight(changedFiles: string[]): ProjectPostflightReport {
 		requiresHumanConfirmation: true,
 		diffSummary: changedFiles.join("\n"),
 	};
+}
+
+function writeLargeProject(projectPath: string): void {
+	mkdirSync(join(projectPath, "src", "ui"), { recursive: true });
+	mkdirSync(join(projectPath, "db"), { recursive: true });
+	writeFileSync(
+		join(projectPath, "package.json"),
+		JSON.stringify({
+			dependencies: { express: "1.0.0", sqlite3: "1.0.0", react: "1.0.0" },
+		}),
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "src", "ui", "login.html"),
+		"<form id='login'></form>",
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "db", "schema.sql"),
+		"create table users(id int);",
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "src", "auth.ts"),
+		"export const login = () => true;",
+		"utf8",
+	);
+	for (let index = 0; index < 130; index += 1) {
+		const dir = join(projectPath, "src", `module-${index}`);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(
+			join(dir, `file-${index}.ts`),
+			"export const value = 'auth db security ui';\n",
+			"utf8",
+		);
+	}
 }
 
 function writeSkillDraft(reportsPath: string): void {
@@ -98,6 +135,110 @@ test("postflight high crea request security/database según impacto", () => {
 		/agentlab-review-request-\d{8}-\d{6}\.json$/u,
 	);
 	assert.ok(existsSync(security.path!));
+});
+
+test("master-plan deep_required crea requests desde Plan Maestro", () => {
+	const temp = root();
+	const projectPath = join(temp, "project");
+	const stateRoot = join(temp, "state");
+	writeLargeProject(projectPath);
+	generateMasterPlanDraft({
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		stateRoot,
+		gitHead: "abc123",
+	});
+
+	const result = createAgentLabReviewRequests({
+		source: "master_plan",
+		reportsPath: join(stateRoot, "reports"),
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		masterPlanPathOrLatest: "latest",
+		now,
+	});
+
+	assert.ok(result.requests.length > 0);
+	assert.equal(result.source, "master_plan");
+	assert.ok(
+		result.requests.some(
+			(request) => request.specialty === "project_understanding",
+		),
+	);
+	assert.ok(
+		result.requests.some((request) => request.specialty === "architecture"),
+	);
+	assert.ok(
+		result.requests.some((request) => request.specialty === "database"),
+	);
+	assert.ok(
+		result.requests.some((request) => request.specialty === "security"),
+	);
+	assert.ok(result.requests.some((request) => request.specialty === "ui_ux"));
+	assert.ok(
+		result.requests.every((request) => request.trigger === "master_plan"),
+	);
+	assert.ok(
+		result.requests.every(
+			(request) => request.tokenBudgetHint === "bounded-master-plan-review",
+		),
+	);
+	assert.ok(result.requests.every((request) => request.maxCommands <= 4));
+	assert.ok(
+		result.requests
+			.filter((request) => ["database", "security"].includes(request.specialty))
+			.every((request) => request.requiresHumanApproval),
+	);
+	assert.match(result.requests[0]!.contextSummary, /AutoDepth: deep_required/u);
+	assert.match(
+		result.requests[0]!.evidence.join("\n"),
+		/architecture|dataStore|security|flow/u,
+	);
+	assert.ok(
+		result.requests[0]!.filesToInspect.some((file) =>
+			/master-plan-.*\.json/u.test(file),
+		),
+	);
+});
+
+test("master-plan incompatible no crea requests", () => {
+	const temp = root();
+	const stateRoot = join(temp, "state");
+	const reportsPath = join(stateRoot, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	writeFileSync(
+		join(reportsPath, "master-plan-20260525-120000.json"),
+		`${JSON.stringify({ schemaVersion: 1, status: "draft" }, null, 2)}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "master-plan.current.json"),
+		`${JSON.stringify(
+			{
+				currentPlanJson: "reports/master-plan-20260525-120000.json",
+				currentPlanMd: "reports/master-plan-20260525-120000.md",
+				status: "draft",
+				projectId: "pi-telegram-bridge",
+				projectPath: temp,
+				updatedAt: now().toISOString(),
+			},
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+
+	const result = createAgentLabReviewRequests({
+		source: "master_plan",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath: temp,
+		masterPlanPathOrLatest: "latest",
+		now,
+	});
+
+	assert.equal(result.requests.length, 0);
+	assert.equal(result.errors.length, 0);
 });
 
 test("skill-draft crea request skill_review", () => {

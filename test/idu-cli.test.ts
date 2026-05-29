@@ -1494,6 +1494,10 @@ test("CLI agentlab request commands funcionan", async () => {
 			["idu-agentlab-request-create", "skill-draft", "latest"],
 			runtime,
 		);
+		const createMasterPlan = await runCliCommand(
+			["idu-agentlab-request-create", "master-plan", "latest"],
+			runtime,
+		);
 		const review = await runCliCommand(
 			["idu-agentlab-request-review", "latest"],
 			runtime,
@@ -1504,6 +1508,8 @@ test("CLI agentlab request commands funcionan", async () => {
 		assert.match(createPostflight.stdout, /No ejecuté AgentLabs/u);
 		assert.equal(createSkillDraft.exitCode, 0);
 		assert.match(createSkillDraft.stdout, /agentlab-review-request/u);
+		assert.equal(createMasterPlan.exitCode, 0);
+		assert.match(createMasterPlan.stdout, /agentlab-review-request/u);
 		assert.equal(review.exitCode, 0);
 		assert.match(review.stdout, /AgentLab Review Request Review/u);
 	});

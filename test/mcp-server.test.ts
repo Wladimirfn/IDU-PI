@@ -349,7 +349,12 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
 			projectId: "sistema_de_mantencion",
-			source: source === "skill-draft" ? "skill_draft" : "postflight",
+			source:
+				source === "skill-draft"
+					? "skill_draft"
+					: source === "master-plan"
+						? "master_plan"
+						: "postflight",
 			warning: "Solicitud AgentLab. No ejecuta revisión por sí sola.",
 			requests: [],
 			errors: [],

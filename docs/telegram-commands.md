@@ -153,7 +153,8 @@ La cola usa señales locales; no decide cambios críticos sola.
 
 | Comando | Uso |
 | --- | --- |
-| `/agentlab_request_create postflight` | Crea solicitud formal sin ejecutar AgentLab. |
+| `/agentlab_request_create postflight` | Crea solicitud formal desde postflight sin ejecutar AgentLab. |
+| `/agentlab_request_create master-plan latest` | Crea solicitudes deep review desde Plan Maestro sin ejecutar AgentLab. |
 | `/agentlab_request_create skill-draft latest` | Crea solicitud para revisar draft de skill. |
 | `/agentlab_request_review [latest|ruta]` | Valida solicitud sin ejecutar. |
 | `/agentlab_review_run [latest|ruta]` | Ejecuta review-only en workspace clone. |

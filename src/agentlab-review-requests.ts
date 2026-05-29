@@ -19,11 +19,17 @@ import {
 	type SemanticAgentTaskCandidate,
 	type SemanticAgentTaskPlan,
 } from "./semantic-agent-tasks.js";
+import {
+	reviewMasterPlan,
+	type MasterPlan,
+	type MasterPlanReview,
+} from "./master-plan.js";
 import { reviewSkillDraft, type SkillDraftPlan } from "./skill-drafts.js";
 
 export type AgentLabReviewRequestSource =
 	| "postflight"
 	| "skill_draft"
+	| "master_plan"
 	| "semantic_agent_tasks"
 	| "supervisor_improvements"
 	| "project_core_constitution"
@@ -54,6 +60,7 @@ export type CreateAgentLabReviewRequestsInput = {
 	projectPath: string;
 	postflightReport?: ProjectPostflightReport;
 	skillDraftPathOrLatest?: string;
+	masterPlanPathOrLatest?: string;
 	semanticAgentTaskPathOrLatest?: string;
 	semanticAgentTaskPlan?: SemanticAgentTaskPlan;
 	manualObjective?: string;
@@ -195,6 +202,8 @@ function buildRequests(
 			return requestsFromPostflight(input, createdAt);
 		case "skill_draft":
 			return requestsFromSkillDraft(input, createdAt);
+		case "master_plan":
+			return requestsFromMasterPlan(input, createdAt);
 		case "semantic_agent_tasks":
 			return requestsFromSemanticTasks(input, createdAt);
 		case "manual":
@@ -313,6 +322,73 @@ function requestsFromSkillDraft(
 	];
 }
 
+function requestsFromMasterPlan(
+	input: CreateAgentLabReviewRequestsInput,
+	createdAt: string,
+): AgentLabReviewRequest[] {
+	const review = reviewMasterPlan({
+		stateRoot: resolve(input.reportsPath, ".."),
+		pathOrLatest: input.masterPlanPathOrLatest ?? "latest",
+	});
+	if (
+		!review.plan ||
+		review.plan.schemaVersion < 2 ||
+		review.plan.status === "incompatible"
+	)
+		return [];
+	const plan = review.plan;
+	if (plan.autoDepth.mode === "quick" && !hasClearMasterPlanRisk(plan))
+		return [];
+	const specialties = masterPlanSpecialties(plan);
+	return specialties.map((specialty, index) =>
+		buildAgentLabReviewRequest({
+			id: requestId(input.projectId, "master-plan", specialty, index + 1),
+			projectId: input.projectId,
+			projectPath: input.projectPath,
+			specialty,
+			trigger: "master_plan",
+			objective: masterPlanObjective(plan, specialty),
+			contextSummary: masterPlanContext(review, plan),
+			evidence: masterPlanEvidence(plan, specialty),
+			filesToInspect: [review.jsonPath, ...plan.sourceFiles.slice(0, 8)],
+			flowsToCheck: plan.detectedFlows.map((flow) => flow.name).slice(0, 8),
+			rulesToCheck: [
+				...plan.criticalRisks,
+				...plan.securityRisks,
+				...plan.architectureRisks,
+			].slice(0, 8),
+			constraints: [
+				"Revisar sólo el Plan Maestro y evidencia referenciada.",
+				"No aplicar flujos, Project Core, Constitution ni cambios de código.",
+				"Reportar hallazgos con evidencia y recomendaciones accionables.",
+			],
+			allowedActions: [
+				"leer Plan Maestro",
+				"inspeccionar archivos de evidencia",
+				"proponer hallazgos review-only",
+			],
+			forbiddenActions: [
+				"no ejecutar cambios del Plan Maestro",
+				"no preparar commits",
+				"no modificar artefactos de proyecto",
+			],
+			maxCommands: plan.autoDepth.mode === "deep_required" ? 4 : 3,
+			maxMinutes: plan.autoDepth.mode === "deep_required" ? 12 : 8,
+			tokenBudgetHint: "bounded-master-plan-review",
+			expectedOutputs: [
+				"hallazgos del Plan Maestro con evidencia",
+				"riesgos confirmados o descartados",
+				"siguiente acción segura para Idu-pi",
+			],
+			createdAt,
+			requiresHumanApproval:
+				plan.autoDepth.mode === "deep_required" ||
+				specialty === "security" ||
+				specialty === "database",
+		}),
+	);
+}
+
 function requestsFromSemanticTasks(
 	input: CreateAgentLabReviewRequestsInput,
 	createdAt: string,
@@ -381,6 +457,122 @@ function requestsFromManual(
 			createdAt,
 		}),
 	);
+}
+
+function masterPlanSpecialties(plan: MasterPlan): AgentLabSpecialty[] {
+	if (plan.autoDepth.mode === "deep_required") {
+		return dedupeSpecialties([
+			"project_understanding",
+			"architecture",
+			...(plan.dataStores.length ? (["database"] as AgentLabSpecialty[]) : []),
+			...(plan.securityModel.authDetected
+				? (["security"] as AgentLabSpecialty[])
+				: []),
+			...(plan.detectedFlows.length || hasUiEvidence(plan)
+				? (["ui_ux"] as AgentLabSpecialty[])
+				: []),
+		]);
+	}
+	if (plan.autoDepth.mode === "standard") {
+		return dedupeSpecialties(plan.autoDepth.agentLabsSelected).slice(0, 3);
+	}
+	return dedupeSpecialties(plan.autoDepth.agentLabsSelected).slice(0, 1);
+}
+
+function hasClearMasterPlanRisk(plan: MasterPlan): boolean {
+	return (
+		plan.criticalRisks.length > 0 ||
+		plan.securityRisks.length > 0 ||
+		plan.dataStores.some((store) => store.riskLevel === "high") ||
+		plan.detectedFlows.some((flow) => flow.riskLevel === "high")
+	);
+}
+
+function hasUiEvidence(plan: MasterPlan): boolean {
+	return [
+		...plan.detectedModules,
+		...plan.sourceFiles,
+		...plan.architecture.evidence,
+	].some((item) =>
+		/ui|component|screen|page|html|react|vue|svelte|frontend/u.test(item),
+	);
+}
+
+function masterPlanObjective(
+	plan: MasterPlan,
+	specialty: AgentLabSpecialty,
+): string {
+	const suffix =
+		plan.autoDepth.mode === "deep_required"
+			? "deep_required"
+			: plan.autoDepth.mode;
+	switch (specialty) {
+		case "project_understanding":
+			return `Validar entendimiento del proyecto desde Plan Maestro ${suffix}`;
+		case "architecture":
+			return `Revisar arquitectura detectada en Plan Maestro ${suffix}`;
+		case "database":
+			return `Revisar data stores y riesgos de persistencia del Plan Maestro ${suffix}`;
+		case "security":
+			return `Revisar auth/session/security detectado en Plan Maestro ${suffix}`;
+		case "ui_ux":
+			return `Revisar flujos UI/UX detectados en Plan Maestro ${suffix}`;
+		default:
+			return `Revisar Plan Maestro ${suffix} para ${specialty}`;
+	}
+}
+
+function masterPlanContext(review: MasterPlanReview, plan: MasterPlan): string {
+	return [
+		`Plan path: ${review.jsonPath}`,
+		`AutoDepth: ${plan.autoDepth.mode} — ${plan.autoDepth.reason}`,
+		`Objective: ${plan.inferredObjective}`,
+		`Executive summary: ${plan.executiveSummary}`,
+		`Architecture: frontend=${plan.architecture.frontend}; backend=${plan.architecture.backend}; database=${plan.architecture.database}; auth=${plan.architecture.auth}`,
+		`Data stores: ${plan.dataStores.map((store) => `${store.name}:${store.type}:${store.riskLevel}`).join(", ") || "none"}`,
+		`Security: auth=${String(plan.securityModel.authDetected)} session=${String(plan.securityModel.sessionDetected)}`,
+		`Flows: ${plan.detectedFlows.map((flow) => `${flow.name}:${flow.type}:${flow.riskLevel}`).join(", ") || "none"}`,
+		`Recommended next: ${plan.recommendedNext.join("; ") || "none"}`,
+	].join("\n");
+}
+
+function masterPlanEvidence(
+	plan: MasterPlan,
+	specialty: AgentLabSpecialty,
+): string[] {
+	const common = [
+		...plan.architecture.evidence.map((item) => `architecture: ${item}`),
+		...plan.dataStores.flatMap((store) =>
+			store.evidence.map((item) => `dataStore ${store.name}: ${item}`),
+		),
+		...plan.securityModel.evidence.map((item) => `security: ${item}`),
+		...plan.detectedFlows.flatMap((flow) =>
+			flow.evidence.map((item) => `flow ${flow.name}: ${item}`),
+		),
+		...plan.criticalRisks.map((risk) => `criticalRisk: ${risk}`),
+		...plan.architectureRisks.map((risk) => `architectureRisk: ${risk}`),
+		...plan.securityRisks.map((risk) => `securityRisk: ${risk}`),
+	];
+	if (specialty === "database") {
+		return common.filter((item) =>
+			/data|database|store|db|sql|supabase|postgres|sqlite/u.test(item),
+		);
+	}
+	if (specialty === "security") {
+		return common.filter((item) =>
+			/auth|session|security|token|login|sensitive/u.test(item),
+		);
+	}
+	if (specialty === "ui_ux") {
+		return common.filter((item) =>
+			/flow|ui|screen|html|frontend|component/u.test(item),
+		);
+	}
+	return common.slice(0, 20);
+}
+
+function dedupeSpecialties(values: AgentLabSpecialty[]): AgentLabSpecialty[] {
+	return [...new Set(values)];
 }
 
 function groupSemanticCandidates(
@@ -515,6 +707,7 @@ function isSource(value: unknown): value is AgentLabReviewRequestSource {
 	return (
 		value === "postflight" ||
 		value === "skill_draft" ||
+		value === "master_plan" ||
 		value === "semantic_agent_tasks" ||
 		value === "supervisor_improvements" ||
 		value === "project_core_constitution" ||

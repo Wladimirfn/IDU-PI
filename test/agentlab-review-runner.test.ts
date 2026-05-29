@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
 import test from "node:test";
-import { AgentRouter, type AgentSession } from "../src/agent-router.js";
+import {
+	AgentRouter,
+	ensureCloneWorkspace,
+	type AgentSession,
+} from "../src/agent-router.js";
 import {
 	buildAgentLabReviewRequest,
 	type AgentLabSpecialty,
@@ -16,9 +20,11 @@ import {
 	formatAgentLabReviewStatus,
 	getAgentLabReviewStatus,
 	parseAgentLabReviewReportFromOutput,
+	diffRealRepoState,
 	runAgentLabReviewRequest,
 	runAgentLabReviewRequestFile,
 	selectAgentLabProfile,
+	snapshotRealRepoState,
 } from "../src/agentlab-review-runner.js";
 import type { AgentProfile } from "../src/config.js";
 import type { PiRpcProgressEvent, PiRpcPromptResult } from "../src/pi-rpc.js";
@@ -202,6 +208,53 @@ function gitProject(): string {
 	return projectPath;
 }
 
+test("snapshot repo real con directorio no lanza EISDIR", () => {
+	const projectPath = gitProject();
+	rmSync(join(projectPath, "tracked.txt"));
+	mkdirSync(join(projectPath, "tracked.txt"));
+	const snapshot = snapshotRealRepoState(projectPath);
+	assert.equal(snapshot.ok, true);
+	assert.match(snapshot.fileStates["tracked.txt"] ?? "", /^dir:/u);
+});
+
+test("snapshot repo real con symlink roto no rompe", (t) => {
+	const projectPath = gitProject();
+	try {
+		symlinkSync("missing-target", join(projectPath, "broken-link"), "file");
+	} catch {
+		t.skip("symlink no disponible en este entorno");
+		return;
+	}
+	const snapshot = snapshotRealRepoState(projectPath);
+	assert.equal(snapshot.ok, true);
+	assert.match(snapshot.fileStates["broken-link"] ?? "", /symlink:/u);
+	assert.ok(
+		snapshot.warnings.some((warning) => /broken_symlink/u.test(warning)),
+	);
+});
+
+test("snapshot repo real con archivo normal detecta cambios", () => {
+	const projectPath = gitProject();
+	const before = snapshotRealRepoState(projectPath);
+	writeFileSync(join(projectPath, "tracked.txt"), "changed\n", "utf8");
+	const after = snapshotRealRepoState(projectPath);
+	const diff = diffRealRepoState(before, after);
+	assert.equal(diff.changed, true);
+	assert.ok(diff.changedFiles.includes("tracked.txt"));
+});
+
+test("clone sandbox configura core.longpaths", () => {
+	const projectPath = gitProject();
+	const workspace = ensureCloneWorkspace(
+		root(),
+		"pi-telegram-bridge",
+		projectPath,
+		"security",
+	);
+	const value = git(["config", "--get", "core.longpaths"], workspace);
+	assert.equal(value, "true");
+});
+
 test("selectAgentLabProfile uses assigned role profile before specialty fallback", () => {
 	const { router } = routerWith(validReport());
 	const selected = selectAgentLabProfile(router, "security", {
@@ -254,6 +307,119 @@ test("run latest lee request válido", async () => {
 	});
 	assert.equal(result.runs[0]?.status, "completed");
 	assert.match(result.path ?? "", /agentlab-review-run-\d{8}-\d{6}\.json$/u);
+});
+
+test("run latest con request master_plan no queda en cero requests", async () => {
+	const { router, projectPath, workspaceRoot } = routerWith(validReport());
+	const reportsPath = join(workspaceRoot, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	const request = buildAgentLabReviewRequest({
+		id: "agentlab-pi-master-plan-architecture-01",
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		specialty: "architecture",
+		trigger: "master_plan",
+		objective: "Revisar Plan Maestro",
+		contextSummary: "Plan Maestro deep_required",
+		evidence: ["reports/master-plan-20260525-100000.json"],
+		filesToInspect: ["reports/master-plan-20260525-100000.json"],
+		flowsToCheck: [],
+		rulesToCheck: [],
+		tokenBudgetHint: "bounded-master-plan-review",
+		requiresHumanApproval: true,
+		createdAt: "2026-05-25T10:00:00.000Z",
+	});
+	writeFileSync(
+		join(reportsPath, "agentlab-review-request-20260525-100000.json"),
+		`${JSON.stringify(
+			{
+				generatedAt: "2026-05-25T10:00:00.000Z",
+				projectId: "pi-telegram-bridge",
+				source: "master_plan",
+				warning: "Solicitud AgentLab. No ejecuta revisión por sí sola.",
+				requests: [request],
+				errors: [],
+			},
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+
+	const result = await runAgentLabReviewRequestFile({
+		pathOrLatest: "latest",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		router,
+		now: () => new Date("2026-05-25T10:01:00.000Z"),
+	});
+
+	assert.equal(result.runs.length, 1);
+	assert.equal(result.runs[0]?.requestId, request.id);
+});
+
+test("run latest con 5 requests master_plan no falla por directorios", async () => {
+	const { router, projectPath, workspaceRoot } = routerWith("legacy summary");
+	mkdirSync(join(projectPath, "untracked-dir"));
+	const reportsPath = join(workspaceRoot, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	const requests = [
+		"project_understanding",
+		"architecture",
+		"database",
+		"security",
+		"ui_ux",
+	].map((specialty, index) =>
+		buildAgentLabReviewRequest({
+			id: `agentlab-master-plan-${specialty}-${index + 1}`,
+			projectId: "pi-telegram-bridge",
+			projectPath,
+			specialty: specialty as AgentLabSpecialty,
+			trigger: "master_plan",
+			objective: `Revisar ${specialty} desde Plan Maestro`,
+			contextSummary: "Plan Maestro deep_required",
+			evidence: ["reports/master-plan-20260525-100000.json"],
+			filesToInspect: ["reports/master-plan-20260525-100000.json"],
+			flowsToCheck: [],
+			rulesToCheck: [],
+			tokenBudgetHint: "bounded-master-plan-review",
+			requiresHumanApproval: true,
+			createdAt: "2026-05-25T10:00:00.000Z",
+		}),
+	);
+	writeFileSync(
+		join(reportsPath, "agentlab-review-request-20260525-100000.json"),
+		`${JSON.stringify(
+			{
+				generatedAt: "2026-05-25T10:00:00.000Z",
+				projectId: "pi-telegram-bridge",
+				source: "master_plan",
+				warning: "Solicitud AgentLab. No ejecuta revisión por sí sola.",
+				requests,
+				errors: [],
+			},
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+
+	const result = await runAgentLabReviewRequestFile({
+		pathOrLatest: "latest",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		router,
+		now: () => new Date("2026-05-25T10:01:00.000Z"),
+	});
+
+	assert.equal(result.runs.length, 5);
+	assert.equal(result.runs.filter((run) => run.status === "failed").length, 0);
+	assert.equal(
+		result.runs.filter((run) => run.status === "security_violation").length,
+		0,
+	);
 });
 
 test("ruta fuera de reports falla", () => {

@@ -57,11 +57,23 @@ function slug(input: string): string {
 	);
 }
 
+function gitEnv(): NodeJS.ProcessEnv {
+	return process.platform === "win32"
+		? {
+				...process.env,
+				GIT_CONFIG_COUNT: "1",
+				GIT_CONFIG_KEY_0: "core.longpaths",
+				GIT_CONFIG_VALUE_0: "true",
+			}
+		: process.env;
+}
+
 function runGit(cwd: string, args: string[]): string {
 	return execFileSync("git", args, {
 		cwd,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
+		env: gitEnv(),
 	}).trim();
 }
 
@@ -87,8 +99,10 @@ export function ensureCloneWorkspace(
 	if (!existsSync(workspace)) {
 		execFileSync("git", ["clone", "--no-hardlinks", targetCwd, workspace], {
 			stdio: ["ignore", "pipe", "pipe"],
+			env: gitEnv(),
 		});
 	}
+	runGit(workspace, ["config", "core.longpaths", "true"]);
 	runGit(workspace, [
 		"remote",
 		"set-url",

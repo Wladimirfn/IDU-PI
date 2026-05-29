@@ -214,6 +214,7 @@ const TOOLS: IduMcpToolDefinition[] = [
 		{
 			source: requiredEnum("Fuente de solicitud.", [
 				"postflight",
+				"master-plan",
 				"skill-draft",
 			]),
 			selector: optionalString("Selector; usar latest por defecto."),

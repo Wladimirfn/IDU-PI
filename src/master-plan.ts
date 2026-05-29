@@ -746,7 +746,7 @@ function masterPlanActionLines(
 			"1. Ver detalles: idu-pi master-plan-review latest",
 			"2. Aprobar: idu-pi master-plan-approve latest",
 			"3. Rehacer: idu-pi master-plan-redraft latest",
-			"4. Preparar deep review: idu-pi agentlab-request-create postflight latest",
+			"4. Preparar deep review: idu-pi agentlab-request-create master-plan latest",
 		];
 	}
 	if (status === "approved") {

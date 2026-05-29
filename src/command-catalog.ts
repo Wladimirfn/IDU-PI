@@ -111,9 +111,10 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 	{
 		command: "agentlab_request_create",
 		description: "Crear solicitud AgentLab",
-		help: "/agentlab_request_create [postflight|skill-draft latest] - crear solicitudes formales sin ejecutar AgentLabs",
+		help: "/agentlab_request_create [postflight|master-plan latest|skill-draft latest] - crear solicitudes formales sin ejecutar AgentLabs",
 		usage: [
 			"/agentlab_request_create postflight",
+			"/agentlab_request_create master-plan latest",
 			"/agentlab_request_create skill-draft latest",
 		],
 	},

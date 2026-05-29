@@ -710,6 +710,14 @@ test("AutoDepth elige deep_required para proyecto grande y no ejecuta AgentLabs"
 			formatMasterPlanSummaryForIdu(result),
 			/Preparé recomendaciones para revisión profunda/u,
 		);
+		assert.match(
+			formatMasterPlanSummaryForIdu(result),
+			/agentlab-request-create master-plan latest/u,
+		);
+		assert.doesNotMatch(
+			formatMasterPlanSummaryForIdu(result),
+			/agentlab-request-create postflight latest/u,
+		);
 		assert.ok(result.plan.autoDepth.skippedAgentLabs.length >= 1);
 		assert.ok(
 			result.plan.agentLabReviews.every(

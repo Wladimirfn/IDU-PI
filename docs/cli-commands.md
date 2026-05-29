@@ -223,6 +223,7 @@ Los comandos de skills no modifican skills reales automáticamente.
 | Comando | Uso |
 | --- | --- |
 | `idu-pi idu-agentlab-request-create postflight` | Crea solicitudes formales desde postflight. |
+| `idu-pi idu-agentlab-request-create master-plan latest` | Crea solicitudes deep review desde Plan Maestro. |
 | `idu-pi idu-agentlab-request-create skill-draft latest` | Crea solicitud para revisar draft de skill. |
 | `idu-pi idu-agentlab-request-review latest` | Valida solicitud sin ejecutar AgentLab. |
 | `idu-pi idu-agentlab-review-run latest` | Ejecuta revisión review-only en workspace clone. |

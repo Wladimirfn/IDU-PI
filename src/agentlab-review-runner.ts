@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readFileSync,
 	readdirSync,
+	readlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -112,6 +114,7 @@ export type RealRepoSnapshot = {
 	untracked: Record<string, string>;
 	files: string[];
 	fileStates: Record<string, string>;
+	warnings: string[];
 	error?: string;
 };
 
@@ -756,8 +759,12 @@ export function snapshotRealRepoState(projectPath: string): RealRepoSnapshot {
 			.split("\0")
 			.filter(Boolean)
 			.sort();
+		const warnings: string[] = [];
 		const untracked = Object.fromEntries(
-			untrackedFiles.map((file) => [file, fileHash(join(projectPath, file))]),
+			untrackedFiles.map((file) => [
+				file,
+				safePathState(projectPath, file, warnings),
+			]),
 		);
 		const files = snapshotFiles(
 			status,
@@ -775,7 +782,8 @@ export function snapshotRealRepoState(projectPath: string): RealRepoSnapshot {
 			stagedDiff,
 			untracked,
 			files,
-			fileStates: snapshotFileStates(projectPath, files),
+			fileStates: snapshotFileStates(projectPath, files, warnings),
+			warnings,
 		};
 	} catch (error) {
 		return {
@@ -789,6 +797,7 @@ export function snapshotRealRepoState(projectPath: string): RealRepoSnapshot {
 			untracked: {},
 			files: [],
 			fileStates: {},
+			warnings: [],
 			error: error instanceof Error ? error.message : String(error),
 		};
 	}
@@ -836,11 +845,23 @@ export function assertRealRepoUnchanged(
 	}
 }
 
+function gitEnv(): NodeJS.ProcessEnv {
+	return process.platform === "win32"
+		? {
+				...process.env,
+				GIT_CONFIG_COUNT: "1",
+				GIT_CONFIG_KEY_0: "core.longpaths",
+				GIT_CONFIG_VALUE_0: "true",
+			}
+		: process.env;
+}
+
 function runGit(cwd: string, args: string[]): string {
 	return execFileSync("git", args, {
 		cwd,
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
+		env: gitEnv(),
 	});
 }
 
@@ -859,21 +880,83 @@ function snapshotSignature(snapshot: RealRepoSnapshot): string {
 function snapshotFileStates(
 	projectPath: string,
 	files: string[],
+	warnings: string[],
 ): Record<string, string> {
 	return Object.fromEntries(
-		files.map((file) => [file, fileState(projectPath, file)]),
+		files.map((file) => [file, fileState(projectPath, file, warnings)]),
 	);
 }
 
-function fileState(projectPath: string, file: string): string {
-	const path = join(projectPath, file);
-	const content = existsSync(path) ? fileHash(path) : "missing";
+function fileState(
+	projectPath: string,
+	file: string,
+	warnings: string[],
+): string {
+	const content = safePathState(projectPath, file, warnings);
 	return [
 		content,
 		runGit(projectPath, ["status", "--porcelain=v1", "--", file]),
 		runGit(projectPath, ["diff", "--binary", "--", file]),
 		runGit(projectPath, ["diff", "--cached", "--binary", "--", file]),
 	].join("\n---\n");
+}
+
+function safePathState(
+	projectPath: string,
+	file: string,
+	warnings: string[],
+): string {
+	const path = join(projectPath, file);
+	try {
+		const stat = lstatSync(path);
+		if (stat.isSymbolicLink()) {
+			if (!existsSync(path))
+				warnings.push(`snapshot_warning:broken_symlink:${file}`);
+			return `symlink:${safeReadlink(path, file, warnings)}`;
+		}
+		if (stat.isDirectory()) {
+			return `dir:mode=${stat.mode}:size=${stat.size}`;
+		}
+		if (!stat.isFile()) {
+			return `other:mode=${stat.mode}:size=${stat.size}`;
+		}
+		return `file:${fileHash(path)}`;
+	} catch (error) {
+		const code = errorCode(error);
+		if (isToleratedFsCode(code)) {
+			warnings.push(`snapshot_warning:${code ?? "UNKNOWN"}:${file}`);
+			return code === "ENOENT" ? "missing" : `unreadable:${code ?? "UNKNOWN"}`;
+		}
+		warnings.push(`snapshot_warning:${errorMessage(error)}:${file}`);
+		return `unreadable:${errorMessage(error)}`;
+	}
+}
+
+function safeReadlink(path: string, file: string, warnings: string[]): string {
+	try {
+		return readlinkSync(path);
+	} catch (error) {
+		warnings.push(
+			`snapshot_warning:${errorCode(error) ?? errorMessage(error)}:${file}`,
+		);
+		return "unreadable";
+	}
+}
+
+function isToleratedFsCode(code: string | undefined): boolean {
+	return Boolean(
+		code && ["EACCES", "EPERM", "ENOENT", "EISDIR"].includes(code),
+	);
+}
+
+function errorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? String((error as { code?: unknown }).code)
+		: undefined;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function snapshotFiles(

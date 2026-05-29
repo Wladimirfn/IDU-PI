@@ -26,6 +26,7 @@ export type AgentLabReviewTrigger =
 	| "postflight"
 	| "semantic_audit"
 	| "skill_draft"
+	| "master_plan"
 	| "project_core_review"
 	| "constitution_gate"
 	| "recurring_bug"
@@ -202,6 +203,7 @@ const TRIGGERS = new Set<AgentLabReviewTrigger>([
 	"postflight",
 	"semantic_audit",
 	"skill_draft",
+	"master_plan",
 	"project_core_review",
 	"constitution_gate",
 	"recurring_bug",

@@ -862,6 +862,15 @@ export function createCliRuntime(
 					skillDraftPathOrLatest: pathOrLatest ?? "latest",
 				});
 			}
+			if (source === "master-plan") {
+				return createAgentLabReviewRequests({
+					source: "master_plan",
+					reportsPath: reportsPath,
+					projectId: activeProject.id,
+					projectPath: activeProject.path,
+					masterPlanPathOrLatest: pathOrLatest ?? "latest",
+				});
+			}
 			throw new Error(
 				`Fuente no soportada para agentlab-request-create: ${source}`,
 			);
@@ -2023,6 +2032,7 @@ export function helpText(): string {
 		"  idu-pi idu-postflight",
 		"  idu-pi idu-lab-review-plan postflight",
 		"  idu-pi idu-agentlab-request-create postflight",
+		"  idu-pi idu-agentlab-request-create master-plan latest",
 		"  idu-pi idu-agentlab-request-create skill-draft latest",
 		"  idu-pi idu-agentlab-request-review latest",
 		"  idu-pi idu-agentlab-review-run latest  # ejecuta AgentLab review-only en clone/sandbox",

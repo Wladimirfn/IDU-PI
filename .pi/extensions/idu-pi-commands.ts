@@ -223,7 +223,8 @@ export default function (pi: ExtensionAPI) {
 			"idu-agentlab-request-create",
 			...args.split(/\s+/u).filter(Boolean),
 		],
-		usage: "/idu-agentlab-request-create [postflight|skill-draft latest]",
+		usage:
+			"/idu-agentlab-request-create [postflight|master-plan latest|skill-draft latest]",
 	});
 
 	registerIduAliases("idu-agentlab-request-review", {

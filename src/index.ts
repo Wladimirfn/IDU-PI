@@ -1581,7 +1581,11 @@ bot.command("agentlab_request_create", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const args = ctx.match?.trim().split(/\s+/u).filter(Boolean) ?? [];
 	const source = args[0] ?? "postflight";
-	if (source !== "postflight" && source !== "skill-draft") {
+	if (
+		source !== "postflight" &&
+		source !== "skill-draft" &&
+		source !== "master-plan"
+	) {
 		await replyLong(ctx, `Fuente no soportada: ${source}`);
 		return;
 	}
@@ -1589,7 +1593,12 @@ bot.command("agentlab_request_create", async (ctx) => {
 		ctx,
 		formatAgentLabReviewRequestPlan(
 			createAgentLabReviewRequests({
-				source: source === "postflight" ? "postflight" : "skill_draft",
+				source:
+					source === "postflight"
+						? "postflight"
+						: source === "skill-draft"
+							? "skill_draft"
+							: "master_plan",
 				reportsPath: reportsPath(),
 				projectId: currentProjectId(),
 				projectPath: activeProjectPath(),
@@ -1597,6 +1606,10 @@ bot.command("agentlab_request_create", async (ctx) => {
 					source === "postflight" ? buildPostflightReport() : undefined,
 				skillDraftPathOrLatest:
 					source === "skill-draft"
+						? args.slice(1).join(" ").trim() || "latest"
+						: undefined,
+				masterPlanPathOrLatest:
+					source === "master-plan"
 						? args.slice(1).join(" ").trim() || "latest"
 						: undefined,
 			}),
