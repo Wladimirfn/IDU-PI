@@ -2,6 +2,8 @@
 
 Idu-pi es un cerebelo supervisor de proyecto: ayuda a definir el plano, vigila la obra y coordina laboratorios de revisión sin reemplazar la decisión humana.
 
+Su destinatario principal es el orquestador. Idu-pi habla directo con el usuario sólo para crear/aprobar el plan y para fallas graves; el resto del tiempo reporta señales de alineación, riesgo, calidad, costo, tiempo, seguridad, emoción y aprendizaje al orquestador para que ejecute con foco.
+
 Idu-pi se usa principalmente desde CLI. Telegram es una interfaz remota opcional para operar ese mismo flujo cuando no estás en la terminal: comandos, estado y confirmaciones. El núcleo real es el supervisor que lee contexto del proyecto, aplica guardrails, registra reportes y prepara decisiones revisables.
 
 ## Qué problema resuelve
@@ -40,10 +42,12 @@ Nada crítico se aplica sin confirmación humana.
 ## Arquitectura simple
 
 ```text
-Humano ↔ Orquestador ↔ Idu-pi Supervisor ↔ AgentLabs ↔ reports / DB / memoria
-                         ↑
-                  CLI / Telegram remoto / futuras UI
+Humano → Orquestador → Subagentes / código
+              ↑
+           Idu-pi Supervisor → AgentLabs / reports / DB / memoria
 ```
+
+Idu-pi no compite con el orquestador: lo supervisa. Si detecta desvío del plan, falta de evidencia, costo excesivo, riesgo crítico o confusión del usuario, le avisa al orquestador con una recomendación accionable.
 
 Roles:
 
@@ -51,7 +55,7 @@ Roles:
 | --- | --- |
 | Humano | Define intención, aprueba decisiones críticas, commits, pushes y cambios de verdad. |
 | Orquestador | Ejecuta trabajo, coordina subagentes, aplica decisiones aprobadas. |
-| Idu-pi | Supervisa riesgo, contexto, memoria, reportes, propuestas y gates. |
+| Idu-pi | Supervisa plan, riesgo, contexto, memoria, reportes, propuestas, gates, costo, calidad, seguridad, emoción y aprendizaje. |
 | AgentLabs | Inspeccionan en sandbox como especialistas y reportan evidencia. |
 | Subagentes | Ejecutan tareas acotadas bajo coordinación del orquestador. |
 

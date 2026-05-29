@@ -552,11 +552,14 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 		const stateRoot = join(workspaceRoot, "projects", "sistema_de_mantencion");
 		assert.equal(existsSync(join(stateRoot, "master-plan.current.json")), true);
 		assert.equal(existsSync(join(stateRoot, "master-plan.memory.json")), true);
+		assert.equal(existsSync(join(stateRoot, "master-plan.json")), true);
+		assert.equal(existsSync(join(stateRoot, "master-plan.md")), true);
+		assert.equal(existsSync(join(stateRoot, "project-index.json")), true);
 		assert.equal(
 			readdirSync(join(stateRoot, "reports")).filter((entry) =>
 				/^master-plan-.*\.json$/u.test(entry),
 			).length,
-			1,
+			0,
 		);
 		assert.match(first.stdout, /Plan Maestro:/u);
 		assert.match(
@@ -582,7 +585,7 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 			readdirSync(join(stateRoot, "reports")).filter((entry) =>
 				/^master-plan-.*\.json$/u.test(entry),
 			).length,
-			1,
+			0,
 		);
 	} finally {
 		process.chdir(previousCwd);

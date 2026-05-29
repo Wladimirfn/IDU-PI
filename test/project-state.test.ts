@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
 	ensureProjectStateDirs,
 	formatProjectStatePaths,
+	formatProjectStateResetResult,
+	resetProjectState,
 	resolveProjectStatePaths,
 	safeProjectStateId,
 } from "../src/project-state.js";
@@ -62,6 +71,52 @@ test("ensureProjectStateDirs creates state directories without touching project 
 	assert.equal(existsSync(paths.agentLabReportsDir), true);
 	assert.equal(existsSync(paths.semanticAuditDir), true);
 	assert.equal(existsSync(projectPath), false);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("resetProjectState clears isolated stateRoot without deleting repo", () => {
+	const root = tempDir();
+	const workspaceRoot = join(root, "workspace");
+	const projectPath = join(root, "project");
+	mkdirSync(projectPath, { recursive: true });
+	writeFileSync(join(projectPath, "app.ts"), "repo", "utf8");
+	const paths = resolveProjectStatePaths({
+		workspaceRoot,
+		projectId: "app",
+		projectPath,
+	});
+	ensureProjectStateDirs(paths);
+	writeFileSync(join(paths.stateRoot, "master-plan.json"), "{}", "utf8");
+	writeFileSync(join(paths.reportsDir, "old.json"), "{}", "utf8");
+
+	const result = resetProjectState(paths);
+
+	assert.equal(existsSync(paths.stateRoot), true);
+	assert.deepEqual(readdirSync(paths.stateRoot), []);
+	assert.equal(existsSync(join(projectPath, "app.ts")), true);
+	assert.deepEqual(
+		result.deletedEntries.sort(),
+		[
+			"master-plan.json",
+			"reports",
+			"semantic-audit",
+			"workspaces",
+			"agentlabs",
+		].sort(),
+	);
+	assert.match(formatProjectStateResetResult(result), /StateRoot limpiado/u);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("resetProjectState refuses stateRoot inside real repo", () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	const paths = resolveProjectStatePaths({
+		workspaceRoot: projectPath,
+		projectId: "app",
+		projectPath,
+	});
+	assert.throws(() => resetProjectState(paths), /repo real/u);
 	rmSync(root, { recursive: true, force: true });
 });
 

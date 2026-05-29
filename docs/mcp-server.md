@@ -98,7 +98,7 @@ Cada herramienta acepta `projectPath` opcional.
 2. Si la ruta no está registrada, las herramientas de lectura/activación devuelven `unregistered_project` con diagnóstico claro. No escriben el registry automáticamente.
 3. Si `projectPath` no viene, usa el proyecto activo del registry.
 4. Si no hay proyecto activo, usa `process.cwd()` sólo como candidato y recomienda registrar el proyecto.
-5. El registry sólo se modifica desde herramientas explícitas: `idu_project_enroll` o `idu_bootstrap_project`.
+5. El registry sólo se modifica desde herramientas explícitas: `idu_project_enroll` o `idu_bootstrap_project`; `idu_project_reset_state` borra estado aislado pero deja el registry intacto.
 
 ## Herramientas disponibles
 
@@ -117,26 +117,29 @@ Todas devuelven JSON estructurado con:
 }
 ```
 
+Las herramientas que evalúan intención o supervisor (`idu_preflight`, `idu_advisory`, `idu_supervisor_tick`) agregan `data.alignmentAdvisory`: una señal compacta para el orquestador con `audience`, `severity`, `alignment`, `recommendedNext`, `requiresHuman` y `evidenceRefs`. Esto evita pasarle al usuario reportes largos cuando el destinatario real es el orquestador.
+
 Herramientas mínimas:
 
 | Tool | Propósito |
 | --- | --- |
 | `idu_project_status` | Lee si un proyecto está registrado y sus rutas de estado; no escribe archivos. |
 | `idu_project_enroll` | Registra explícitamente un proyecto y crea estado aislado; no crea drafts ni activa guardrails. |
+| `idu_project_reset_state` | Borra el contenido del `stateRoot` del proyecto registrado con `confirm=true`; no desregistra ni toca el repo real. |
 | `idu_bootstrap_project` | Bootstrap explícito: enrola, crea estado y, con `allowCreateDrafts=true`, crea Project Core/Constitution/blueprint/flows draft. |
 | `idu_start` | Entrada cómoda para proyectos registrados: activa guardrails y muestra estado; no enrola ni crea drafts. |
 | `idu_status` | Estado de conexión, sesión, config/alignment y próximo paso. |
 | `idu_activate` | Sólo activa guardrails automáticos sin enrolar, bootstrap, scan pesado ni AgentLabs. |
 | `idu_deactivate` | Apaga guardrails automáticos. |
 | `idu_prepare` | Ejecuta prepare seguro. |
-| `idu_preflight` | Evalúa riesgo/impacto de una solicitud humana. |
-| `idu_advisory` | Devuelve advisory seguro desde preflight. |
+| `idu_preflight` | Evalúa riesgo/impacto de una solicitud humana y devuelve advisory compacto para el orquestador. |
+| `idu_advisory` | Devuelve advisory seguro para el orquestador desde preflight. |
 | `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios. |
 | `idu_supervisor_tick` | Tick supervisor seguro con flags explícitos. |
 | `idu_task` | Interpreta intención humana y registra tarea estructurada. |
 | `idu_queue_detail` | Devuelve cola estructurada con ids completos y guardStatus. |
 | `idu_semantic_audit_status` | Lee stats/checkpoint/decisión de auditoría semántica. |
-| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs. |
+| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; para `source=master-plan` también ejecuta el deep review review-only en sandbox/clone. |
 | `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard. |
 | `idu_agentlab_review_status` | Lee estado de review AgentLab. |
 

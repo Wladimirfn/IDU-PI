@@ -59,6 +59,7 @@ export type AgentLabReviewRunSummary = {
 	requiresHumanApproval: boolean;
 	realRepoChangedFiles?: string[];
 	securityWarnings?: string[];
+	qualityWarnings?: string[];
 };
 
 export type AgentLabReviewRunResult = {
@@ -125,7 +126,8 @@ export type RealRepoDiff = {
 };
 
 const WARNING = "Revisión AgentLab. No aplica cambios." as const;
-const RUN_RE = /^agentlab-review-run-\d{8}-\d{6}\.json$/u;
+const RUN_CURRENT_FILE = "current.json";
+const RUN_RE = /^(?:current|agentlab-review-run-\d{8}-\d{6})\.json$/u;
 
 export async function runAgentLabReviewRequestFile(
 	input: RunAgentLabReviewRequestFileInput,
@@ -172,11 +174,9 @@ export async function runAgentLabReviewRequestFile(
 		projectId: input.projectId,
 		runs,
 	});
-	mkdirSync(input.reportsPath, { recursive: true });
-	const path = join(
-		input.reportsPath,
-		`agentlab-review-run-${timestamp(now)}.json`,
-	);
+	const directory = runArtifactsDir(input.reportsPath);
+	mkdirSync(directory, { recursive: true });
+	const path = join(directory, RUN_CURRENT_FILE);
 	writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`, "utf8");
 	return { ...result, path };
 }
@@ -277,6 +277,8 @@ export async function runAgentLabReviewRequest(
 				: "Ejecución falló.",
 			[error instanceof Error ? error.message : String(error)],
 		);
+	} finally {
+		runtime.session.stop("AgentLab review-only finalizado.");
 	}
 	const after = snapshotRealRepoState(input.projectPath);
 	const realRepoDiff = diffRealRepoState(before, after);
@@ -354,6 +356,9 @@ export function formatAgentLabReviewRunResult(
 		"Requires human approval:",
 		String(result.requiresHumanApproval),
 		"",
+		"Quality warnings:",
+		formatList(result.runs.flatMap((run) => run.qualityWarnings ?? [])),
+		"",
 		"Recommended next:",
 		result.recommendedNext,
 		"",
@@ -396,6 +401,9 @@ export function formatAgentLabReviewStatus(
 		"Security warnings:",
 		formatList(status.result.runs.flatMap((run) => run.securityWarnings ?? [])),
 		"",
+		"Quality warnings:",
+		formatList(status.result.runs.flatMap((run) => run.qualityWarnings ?? [])),
+		"",
 		"Findings:",
 		formatList(
 			status.result.consolidatedFindings.map((finding) => finding.title),
@@ -419,14 +427,14 @@ export function formatAgentLabReviewStatus(
 export function parseAgentLabReviewReportFromOutput(
 	output: string,
 	request: AgentLabReviewRequest,
-): { report?: AgentLabReviewReport; errors: string[] } {
+): { report?: AgentLabReviewReport; errors: string[]; qualityWarnings?: string[] } {
 	return extractAgentLabReviewReportFromOutput(output, request);
 }
 
 export function extractAgentLabReviewReportFromOutput(
 	output: string,
 	request: AgentLabReviewRequest,
-): { report?: AgentLabReviewReport; errors: string[] } {
+): { report?: AgentLabReviewReport; errors: string[]; qualityWarnings?: string[] } {
 	const errors: string[] = [];
 	for (const candidate of jsonCandidates(output)) {
 		try {
@@ -436,18 +444,272 @@ export function extractAgentLabReviewReportFromOutput(
 				request,
 			);
 			if (result.ok) return { report: result.report, errors: [] };
-			if (looksLikeReviewReport(parsed)) errors.push(...result.errors);
+			if (looksLikeReviewReport(parsed)) {
+				const repaired = repairAgentLabReviewReport(parsed, request, output);
+				const repairedResult = validateAgentLabReportAgainstSupervisorContract(
+					repaired,
+					request,
+				);
+				if (repairedResult.ok)
+					return {
+						report: repairedResult.report,
+						errors: [],
+						qualityWarnings: [
+							"AgentLab devolvió un reporte parcial; Idu-pi lo reparó antes de consolidar.",
+						],
+					};
+				errors.push(...result.errors);
+			}
 		} catch (error) {
 			if (looksLikeReviewReportJson(candidate)) {
 				errors.push(error instanceof Error ? error.message : String(error));
 			}
 		}
 	}
+	const fallback = fallbackAgentLabReviewReport(request, legacySummary(output));
+	const fallbackResult = validateAgentLabReportAgainstSupervisorContract(
+		fallback,
+		request,
+	);
+	if (fallbackResult.ok)
+		return {
+			report: fallbackResult.report,
+			errors: [],
+			qualityWarnings: [
+				"AgentLab no devolvió JSON válido; Idu-pi generó un reporte fallback sin hallazgos.",
+			],
+		};
 	return {
 		errors: errors.length
 			? dedupe(errors)
 			: ["No encontré AgentLabReviewReport JSON válido."],
 	};
+}
+
+function repairAgentLabReviewReport(
+	value: unknown,
+	request: AgentLabReviewRequest,
+	output: string,
+): AgentLabReviewReport {
+	const source = isRecord(value) ? value : {};
+	return {
+		...fallbackAgentLabReviewReport(request, legacySummary(output)),
+		id: stringValue(source.id) ?? `report-${request.id}`,
+		requestId: request.id,
+		projectId: request.projectId,
+		specialty: request.specialty,
+		status: statusValue(source.status),
+		summary: stringValue(source.summary) ?? legacySummary(output),
+		qualityFindings: repairFindings(source.qualityFindings, request, "quality"),
+		safetyFindings: repairFindings(source.safetyFindings, request, "safety"),
+		architectureFindings: repairFindings(
+			source.architectureFindings,
+			request,
+			"architecture",
+		),
+		tokenCostFindings: repairFindings(
+			source.tokenCostFindings,
+			request,
+			"token_cost",
+		),
+		timeFindings: repairFindings(source.timeFindings, request, "time"),
+		resourceFindings: repairFindings(
+			source.resourceFindings,
+			request,
+			"resources",
+		),
+		testsSuggested: nonEmptyStringArray(source.testsSuggested),
+		testsExecuted: nonEmptyStringArray(source.testsExecuted),
+		evidence: nonEmptyStringArray(source.evidence, fallbackEvidence(request)),
+		recommendations: repairRecommendations(source.recommendations, request),
+		proposedSupervisorActions: nonEmptyStringArray(
+			source.proposedSupervisorActions,
+		),
+		suggestedSkillUpdates: nonEmptyStringArray(source.suggestedSkillUpdates),
+		suggestedRuleUpdates: nonEmptyStringArray(source.suggestedRuleUpdates),
+		suggestedAgentTasks: nonEmptyStringArray(source.suggestedAgentTasks),
+		confidence: confidenceValue(source.confidence),
+		requiresHumanApproval:
+			typeof source.requiresHumanApproval === "boolean"
+				? source.requiresHumanApproval
+				: request.requiresHumanApproval,
+		createdAt: stringValue(source.createdAt) ?? new Date().toISOString(),
+	};
+}
+
+function fallbackAgentLabReviewReport(
+	request: AgentLabReviewRequest,
+	summary: string,
+): AgentLabReviewReport {
+	return {
+		id: `report-${request.id}`,
+		requestId: request.id,
+		projectId: request.projectId,
+		specialty: request.specialty,
+		status: "completed",
+		summary:
+			summary && summary !== "(sin salida)"
+				? summary
+				: "Sin hallazgos reportados por AgentLab.",
+		qualityFindings: [],
+		safetyFindings: [],
+		architectureFindings: [],
+		tokenCostFindings: [],
+		timeFindings: [],
+		resourceFindings: [],
+		testsSuggested: [],
+		testsExecuted: [],
+		evidence: fallbackEvidence(request),
+		recommendations: [],
+		proposedSupervisorActions: [],
+		suggestedSkillUpdates: [],
+		suggestedRuleUpdates: [],
+		suggestedAgentTasks: [],
+		confidence: "medium",
+		requiresHumanApproval: request.requiresHumanApproval,
+		createdAt: new Date().toISOString(),
+	};
+}
+
+function repairFindings(
+	value: unknown,
+	request: AgentLabReviewRequest,
+	category: string,
+): AgentLabFinding[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((item, index): AgentLabFinding[] => {
+		const source = isRecord(item) ? item : { title: String(item) };
+		const title = stringValue(source.title) ?? `Hallazgo ${index + 1}`;
+		const description = stringValue(source.description) ?? title;
+		return [
+			{
+				title,
+				description,
+				evidence: stringValue(source.evidence) ?? fallbackEvidence(request)[0]!,
+				severity: severityValue(source.severity),
+				confidence: confidenceValue(source.confidence),
+				category: stringValue(source.category) ?? category,
+				affectedFiles: nonEmptyStringArray(
+					source.affectedFiles,
+					request.filesToInspect.slice(0, 3),
+				),
+				affectedFlows: nonEmptyStringArray(source.affectedFlows),
+				relatedRules: nonEmptyStringArray(source.relatedRules),
+				controlPillars: repairControlPillars(source.controlPillars, category),
+			},
+		];
+	});
+}
+
+function repairRecommendations(
+	value: unknown,
+	request: AgentLabReviewRequest,
+): AgentLabRecommendation[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((item, index): AgentLabRecommendation[] => {
+		const source = isRecord(item) ? item : { title: String(item) };
+		const title = stringValue(source.title) ?? `Recomendación ${index + 1}`;
+		const description = stringValue(source.description) ?? title;
+		return [
+			{
+				title,
+				description,
+				rationale: stringValue(source.rationale) ?? description,
+				expectedBenefit: benefitValue(source.expectedBenefit),
+				risk: stringValue(source.risk) ?? "review_required",
+				requiresHumanApproval:
+					typeof source.requiresHumanApproval === "boolean"
+						? source.requiresHumanApproval
+						: request.requiresHumanApproval,
+				suggestedNextStep:
+					stringValue(source.suggestedNextStep) ?? "Revisar manualmente.",
+			},
+		];
+	});
+}
+
+function fallbackEvidence(request: AgentLabReviewRequest): string[] {
+	return (
+		nonEmptyStringArray(request.evidence) ??
+		nonEmptyStringArray(request.filesToInspect) ?? [request.objective]
+	);
+}
+
+function nonEmptyStringArray(
+	value: unknown,
+	fallback: string[] = [],
+): string[] {
+	if (!Array.isArray(value)) return fallback;
+	const values = value.filter(
+		(item): item is string =>
+			typeof item === "string" && item.trim().length > 0,
+	);
+	return values.length ? values : fallback;
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function statusValue(value: unknown): AgentLabReviewReport["status"] {
+	return value === "skipped" || value === "failed" ? value : "completed";
+}
+
+function severityValue(value: unknown): AgentLabFinding["severity"] {
+	return value === "critical" ||
+		value === "high" ||
+		value === "medium" ||
+		value === "low" ||
+		value === "info"
+		? value
+		: "medium";
+}
+
+function confidenceValue(value: unknown): AgentLabReviewReport["confidence"] {
+	return value === "low" || value === "high" ? value : "medium";
+}
+
+function benefitValue(
+	value: unknown,
+): AgentLabRecommendation["expectedBenefit"] {
+	return value === "quality" ||
+		value === "time" ||
+		value === "token_cost" ||
+		value === "safety" ||
+		value === "architecture_consistency" ||
+		value === "learning"
+		? value
+		: "quality";
+}
+
+function repairControlPillars(
+	value: unknown,
+	category: string,
+): AgentLabFinding["controlPillars"] {
+	const allowed = new Set<AgentLabFinding["controlPillars"][number]>([
+		"quality",
+		"time",
+		"token_cost",
+		"safety",
+		"reporting",
+		"resources",
+		"architecture_consistency",
+		"learning",
+	]);
+	if (Array.isArray(value)) {
+		const values = value.filter(
+			(item): item is AgentLabFinding["controlPillars"][number] =>
+				typeof item === "string" &&
+				allowed.has(item as AgentLabFinding["controlPillars"][number]),
+		);
+		if (values.length) return values;
+	}
+	if (category === "safety") return ["safety"];
+	if (category === "architecture") return ["architecture_consistency"];
+	if (category === "token_cost") return ["token_cost"];
+	if (category === "time") return ["time"];
+	if (category === "resources") return ["resources"];
+	return ["quality"];
 }
 
 function buildReviewPrompt(
@@ -476,8 +738,39 @@ function buildReviewPrompt(
 		...(context ? ["Contexto del proyecto real:", context.text, ""] : []),
 		formatAgentLabReviewRequestForPrompt(request),
 		"",
-		"Formato obligatorio preferido: AgentLabReviewReport JSON con arrays presentes aunque estén vacíos.",
+		"SALIDA OBLIGATORIA: devolvé sólo un JSON AgentLabReviewReport válido, sin markdown, sin comentarios y sin texto antes/después.",
+		"Todos los arrays deben existir aunque estén vacíos. Si no encontrás hallazgos, usá arrays vacíos pero mantené evidencia de archivos revisados.",
 		`requestId debe ser ${request.id}; projectId debe ser ${request.projectId}; specialty debe ser ${request.specialty}.`,
+		"Plantilla exacta mínima:",
+		JSON.stringify(
+			{
+				id: `report-${request.id}`,
+				requestId: request.id,
+				projectId: request.projectId,
+				specialty: request.specialty,
+				status: "completed",
+				summary: "Resumen breve de la revisión.",
+				qualityFindings: [],
+				safetyFindings: [],
+				architectureFindings: [],
+				tokenCostFindings: [],
+				timeFindings: [],
+				resourceFindings: [],
+				testsSuggested: [],
+				testsExecuted: [],
+				evidence: ["master-plan.json revisado"],
+				recommendations: [],
+				proposedSupervisorActions: [],
+				suggestedSkillUpdates: [],
+				suggestedRuleUpdates: [],
+				suggestedAgentTasks: [],
+				confidence: "medium",
+				requiresHumanApproval: request.requiresHumanApproval,
+				createdAt: new Date().toISOString(),
+			},
+			null,
+			2,
+		),
 	].join("\n");
 }
 
@@ -597,7 +890,11 @@ function completedRun(
 	profile: AgentProfile,
 	workspace: string,
 	output: string,
-	parsed: { report?: AgentLabReviewReport; errors: string[] },
+	parsed: {
+		report?: AgentLabReviewReport;
+		errors: string[];
+		qualityWarnings?: string[];
+	},
 ): AgentLabReviewRunSummary {
 	const reportFindings = parsed.report ? allFindings(parsed.report) : [];
 	return {
@@ -616,6 +913,9 @@ function completedRun(
 		findings: reportFindings,
 		recommendations: parsed.report?.recommendations ?? [],
 		testsSuggested: parsed.report?.testsSuggested ?? [],
+		...(parsed.qualityWarnings?.length
+				? { qualityWarnings: parsed.qualityWarnings }
+				: {}),
 		requiresHumanApproval:
 			parsed.report?.requiresHumanApproval ?? request.requiresHumanApproval,
 	};
@@ -993,34 +1293,33 @@ function resolveRunPath(
 			: {
 					valid: false,
 					path: reports,
-					errors: [
-						"No encontré archivos agentlab-review-run-*.json en reports.",
-					],
+					errors: ["No encontré runs AgentLab en agentlabs/runs ni reports."],
 				};
 	}
 	const trimmed = pathOrLatest.trim();
 	if (!trimmed)
 		return { valid: false, path: reports, errors: ["Falta ruta de run."] };
-	const candidate = resolve(
-		isAbsolute(trimmed) ? trimmed : join(reports, trimmed),
-	);
-	const relativeToReports = relative(reports, candidate);
+	const runDir = runArtifactsDir(reportsPath);
+	const candidate = resolveRunCandidate(reports, runDir, trimmed);
 	if (
-		relativeToReports === "" ||
-		relativeToReports.startsWith("..") ||
-		isAbsolute(relativeToReports)
+		!isInsideDirectory(candidate, runDir) &&
+		!isInsideDirectory(candidate, reports)
 	) {
 		return {
 			valid: false,
 			path: candidate,
-			errors: ["La ruta debe estar dentro de AGENT_WORKSPACE_ROOT/reports."],
+			errors: [
+				"La ruta debe estar dentro de stateRoot/agentlabs/runs o reports legacy.",
+			],
 		};
 	}
 	if (!RUN_RE.test(basename(candidate))) {
 		return {
 			valid: false,
 			path: candidate,
-			errors: ["El archivo debe llamarse agentlab-review-run-*.json."],
+			errors: [
+				"El archivo debe llamarse current.json o agentlab-review-run-*.json.",
+			],
 		};
 	}
 	if (!existsSync(candidate)) {
@@ -1033,13 +1332,49 @@ function resolveRunPath(
 	return { valid: true, path: candidate, errors: [] };
 }
 
+function resolveRunCandidate(
+	reports: string,
+	runDir: string,
+	requested: string,
+): string {
+	if (isAbsolute(requested)) return resolve(requested);
+	if (requested.startsWith("reports/"))
+		return resolve(join(reports, requested.slice("reports/".length)));
+	const canonical = resolve(join(runDir, requested));
+	const legacy = resolve(join(reports, requested));
+	return existsSync(canonical) || !existsSync(legacy) ? canonical : legacy;
+}
+
 function latestRunFile(reportsPath: string): string | undefined {
+	const runDir = runArtifactsDir(reportsPath);
+	const current = join(runDir, RUN_CURRENT_FILE);
+	if (existsSync(current)) return current;
+	if (existsSync(runDir)) {
+		const latest = readdirSync(runDir)
+			.filter((file) => RUN_RE.test(file))
+			.sort()
+			.at(-1);
+		if (latest) return join(runDir, latest);
+	}
 	if (!existsSync(reportsPath)) return undefined;
-	const latest = readdirSync(reportsPath)
-		.filter((file) => RUN_RE.test(file))
+	const legacy = readdirSync(reportsPath)
+		.filter((file) => /^agentlab-review-run-\d{8}-\d{6}\.json$/u.test(file))
 		.sort()
 		.at(-1);
-	return latest ? join(reportsPath, latest) : undefined;
+	return legacy ? join(reportsPath, legacy) : undefined;
+}
+
+function runArtifactsDir(reportsPath: string): string {
+	return join(resolve(reportsPath), "..", "agentlabs", "runs");
+}
+
+function isInsideDirectory(path: string, directory: string): boolean {
+	const relativePath = relative(resolve(directory), resolve(path));
+	return (
+		relativePath !== "" &&
+		!relativePath.startsWith("..") &&
+		!isAbsolute(relativePath)
+	);
 }
 
 function normalizeRunResult(value: unknown): AgentLabReviewRunResult {
@@ -1162,11 +1497,6 @@ function formatList(items: string[]): string {
 
 function dedupe(values: string[]): string[] {
 	return [...new Set(values)];
-}
-
-function timestamp(date: Date): string {
-	const pad = (value: number) => String(value).padStart(2, "0");
-	return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

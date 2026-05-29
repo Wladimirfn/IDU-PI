@@ -2,7 +2,7 @@
 
 El CLI es la superficie principal para usar el core de Idu-pi. Telegram es una interfaz remota opcional para ejecutar comandos, revisar estado, cambiar de proyecto enrolado y confirmar decisiones sin estar en la terminal. Telegram no tiene otro core: sus botones son atajos al mismo CLI/supervisor.
 
-Usá `idu-pi` para abrir el home CLI con estado y acciones recomendadas. Usá `idu-pi <comando>` si querés ejecutar un comando directo. Desde el repo, el equivalente es:
+Usá `idu-pi` para abrir el home CLI con estado y acciones recomendadas. Para usuarios normales, la acción principal es `idu-pi revisar`: Idu-pi prepara el deep review desde el Plan Maestro y lo ejecuta en sandbox sin tocar el repo real. Los comandos largos quedan para depuración/orquestadores avanzados. Desde el repo, el equivalente es:
 
 ```text
 corepack pnpm cli
@@ -50,6 +50,7 @@ El bootstrap installer crea un shim local. Si falta en `PATH`, pregunta antes de
 | `idu-pi project enroll <projectPath> [projectId]` | Registra proyecto y crea estado aislado. |
 | `idu-pi project status <projectPath>` | Muestra estado/rutas del proyecto. |
 | `idu-pi project state-path <projectPath>` | Imprime rutas aisladas esperadas. |
+| `idu-pi idu-project-reset-state --yes` | Borra todo el estado aislado (`stateRoot`) del proyecto activo/seleccionado; no desregistra ni toca el repo real. |
 
 Guía: [Instalador y estado por proyecto](installer.md).
 
@@ -108,7 +109,7 @@ idu-pi lab-review-plan postflight
 | `idu-pi master-plan-review latest` | Muestra el markdown del Plan Maestro. |
 | `idu-pi master-plan-approve latest` | Marca el plan como approved; no aplica flows. |
 | `idu-pi master-plan-reject latest [motivo]` | Marca el plan como rejected con motivo opcional. |
-| `idu-pi master-plan-redraft latest` | Crea un nuevo draft sin borrar el anterior. |
+| `idu-pi master-plan-redraft latest` | Rehace el draft actual actualizando el Plan Maestro canónico. |
 
 Aliases con prefijo Idu-pi:
 
@@ -123,10 +124,12 @@ idu-pi idu-master-plan-redraft latest
 Artefactos por proyecto:
 
 ```text
-<stateRoot>/reports/master-plan-YYYYMMDD-HHMMSS.json
-<stateRoot>/reports/master-plan-YYYYMMDD-HHMMSS.md
+<stateRoot>/master-plan.json
+<stateRoot>/master-plan.md
 <stateRoot>/master-plan.current.json
 <stateRoot>/master-plan.memory.json
+<stateRoot>/project-index.json
+<stateRoot>/agentlabs/
 ```
 
 ## Cola y tareas
@@ -222,8 +225,9 @@ Los comandos de skills no modifican skills reales automáticamente.
 
 | Comando | Uso |
 | --- | --- |
+| `idu-pi revisar` / `idu-pi review` / `idu-pi idu-review` | Revisión simple del proyecto: usa Plan Maestro `latest`, crea solicitudes y ejecuta deep review review-only en sandbox/clone. |
 | `idu-pi idu-agentlab-request-create postflight` | Crea solicitudes formales desde postflight. |
-| `idu-pi idu-agentlab-request-create master-plan latest` | Crea solicitudes deep review desde Plan Maestro. |
+| `idu-pi idu-agentlab-request-create master-plan latest` | Comando avanzado equivalente para Plan Maestro: crea solicitudes y ejecuta automáticamente el deep review review-only en sandbox/clone. |
 | `idu-pi idu-agentlab-request-create skill-draft latest` | Crea solicitud para revisar draft de skill. |
 | `idu-pi idu-agentlab-request-review latest` | Valida solicitud sin ejecutar AgentLab. |
 | `idu-pi idu-agentlab-review-run latest` | Ejecuta revisión review-only en workspace clone. |

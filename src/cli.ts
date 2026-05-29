@@ -33,7 +33,10 @@ import {
 } from "./cli-home.js";
 import {
 	formatProjectStatePaths,
+	formatProjectStateResetResult,
+	resetProjectState,
 	resolveProjectStatePaths,
+	type ProjectStateResetResult,
 } from "./project-state.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
@@ -484,6 +487,8 @@ export type CliRuntime = {
 	queueClearStructured: () => number;
 	queueApprove: (idOrPrefix: string) => StructuredTask | undefined;
 	queueReject: (idOrPrefix: string) => StructuredTask | undefined;
+	projectStateReset: (confirmed: boolean) => ProjectStateResetResult;
+	formatProjectStateResetResult: (result: ProjectStateResetResult) => string;
 	activeProfileId?: () => string;
 };
 
@@ -649,6 +654,22 @@ export function createCliRuntime(
 		formatPostflight: formatProjectPostflightReport,
 		prepare: () => runPrepare(context),
 		formatPrepare: formatIduPrepareResult,
+		projectStateReset: (confirmed) => {
+			if (!confirmed) {
+				throw new Error(
+					"Reset requiere confirmación explícita: agregá --yes al comando.",
+				);
+			}
+			return resetProjectState(
+				projectStatePaths ??
+					resolveProjectStatePaths({
+						workspaceRoot: config.agentWorkspaceRoot,
+						projectId: activeProject.id,
+						projectPath: activeProject.path,
+					}),
+			);
+		},
+		formatProjectStateResetResult,
 		masterPlanStatus: () =>
 			getMasterPlanStatus({
 				stateRoot: masterPlanStateRoot,
@@ -1008,6 +1029,13 @@ export async function runCliCommand(
 			case "idu-prepare":
 			case "prepare":
 				return ok(activeRuntime.formatPrepare(activeRuntime.prepare()));
+			case "idu-project-reset-state":
+			case "project-reset-state":
+				return ok(
+					activeRuntime.formatProjectStateResetResult(
+						activeRuntime.projectStateReset(rest.includes("--yes")),
+					),
+				);
 			case "idu-master-plan-status":
 			case "master-plan-status":
 				if (
@@ -1104,15 +1132,20 @@ export async function runCliCommand(
 					),
 				);
 			}
+			case "idu-review":
+			case "review":
+			case "revisar":
+				return ok(await runMasterPlanDeepReview(activeRuntime, "simple"));
 			case "idu-agentlab-request-create":
 			case "agentlab-request-create": {
 				const source = rest[0] ?? "postflight";
+				const selector = rest.slice(1).join(" ").trim() || "latest";
+				if (source === "master-plan") {
+					return ok(await runMasterPlanDeepReview(activeRuntime, "advanced", selector));
+				}
 				return ok(
 					activeRuntime.formatAgentLabReviewRequestPlan(
-						activeRuntime.agentLabRequestCreate(
-							source,
-							rest.slice(1).join(" ").trim() || "latest",
-						),
+						activeRuntime.agentLabRequestCreate(source, selector),
 					),
 				);
 			}
@@ -1992,6 +2025,34 @@ function fail(stderr: string): CliResult {
 	return { exitCode: 1, stdout: helpText(), stderr };
 }
 
+async function runMasterPlanDeepReview(
+	runtime: CliRuntime,
+	mode: "simple" | "advanced",
+	selector = "latest",
+): Promise<string> {
+	const plan = runtime.agentLabRequestCreate("master-plan", selector);
+	if (plan.errors.length > 0) return runtime.formatAgentLabReviewRequestPlan(plan);
+	const run = await runtime.agentLabReviewRun("latest");
+	if (mode === "simple") {
+		return [
+			"Idu-pi revisión del proyecto",
+			"",
+			`Requests: ${plan.requests.length}`,
+			"Deep review: ejecutado en sandbox/clone.",
+			"Repo real: sin modificar.",
+			"",
+			runtime.formatAgentLabReviewRunResult(run),
+		].join("\n");
+	}
+	return [
+		runtime.formatAgentLabReviewRequestPlan(plan),
+		"",
+		"Deep review ejecutado automáticamente desde Plan Maestro:",
+		"",
+		runtime.formatAgentLabReviewRunResult(run),
+	].join("\n");
+}
+
 export function helpText(): string {
 	return [
 		"Uso: idu-pi <comando> [args]",
@@ -2002,6 +2063,7 @@ export function helpText(): string {
 		"  idu-pi idu-off             (Telegram: /idu_off)",
 		"  idu-pi idu-status          (Telegram: /idu_status)",
 		"  idu-pi idu-prepare         (Telegram: /idu_prepare)",
+		"  idu-pi idu-project-reset-state --yes  # borra estado aislado; no toca repo real",
 		"  idu-pi idu-master-plan-status",
 		"  idu-pi idu-master-plan-review latest",
 		"  idu-pi idu-master-plan-approve latest",
@@ -2031,6 +2093,7 @@ export function helpText(): string {
 		'  idu-pi idu-advisory "solicitud"',
 		"  idu-pi idu-postflight",
 		"  idu-pi idu-lab-review-plan postflight",
+		"  idu-pi revisar",
 		"  idu-pi idu-agentlab-request-create postflight",
 		"  idu-pi idu-agentlab-request-create master-plan latest",
 		"  idu-pi idu-agentlab-request-create skill-draft latest",

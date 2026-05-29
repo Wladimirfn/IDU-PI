@@ -155,6 +155,15 @@ export default function (pi: ExtensionAPI) {
 		cliArgs: () => ["idu-prepare"],
 	});
 
+	registerIduAliases("idu-project-reset-state", {
+		description: "Borrar estado aislado del proyecto sin tocar repo real",
+		cliArgs: (args) => [
+			"idu-project-reset-state",
+			...args.split(/\s+/u).filter(Boolean),
+		],
+		usage: "/idu-project-reset-state --yes",
+	});
+
 	registerIduAliases("idu-preflight", {
 		description: "Evaluar riesgo preflight para una solicitud",
 		cliArgs: (args) => ["idu-preflight", args],
@@ -177,6 +186,12 @@ export default function (pi: ExtensionAPI) {
 	registerIduAliases("idu-supervisor-tick", {
 		description: "Ejecutar supervisor Idu-pi",
 		cliArgs: () => ["idu-supervisor-tick"],
+	});
+
+	registerIduAliases("idu-review", {
+		description: "Revisión simple del proyecto con Plan Maestro",
+		cliArgs: () => ["idu-review"],
+		usage: "/idu-review",
 	});
 
 	registerIduAliases("idu-master-plan-status", {

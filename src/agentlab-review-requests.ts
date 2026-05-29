@@ -69,7 +69,8 @@ export type CreateAgentLabReviewRequestsInput = {
 };
 
 const WARNING = "Solicitud AgentLab. No ejecuta revisión por sí sola." as const;
-const REQUEST_RE = /^agentlab-review-request-\d{8}-\d{6}\.json$/u;
+const REQUEST_CURRENT_FILE = "current.json";
+const REQUEST_RE = /^(?:current|agentlab-review-request-\d{8}-\d{6})\.json$/u;
 const HIGH_RISKS = new Set(["high", "blocker"]);
 
 export function createAgentLabReviewRequests(
@@ -78,7 +79,10 @@ export function createAgentLabReviewRequests(
 	const now = input.now?.() ?? new Date();
 	const generatedAt = now.toISOString();
 	const requests = buildRequests(input, generatedAt);
-	const errors = validateRequests(requests);
+	const errors = [
+		...emptyRequestErrors(input, requests),
+		...validateRequests(requests),
+	];
 	const plan: AgentLabReviewRequestPlan = {
 		generatedAt,
 		projectId: input.projectId,
@@ -87,9 +91,9 @@ export function createAgentLabReviewRequests(
 		requests,
 		errors,
 	};
-	mkdirSync(input.reportsPath, { recursive: true });
-	const fileName = `agentlab-review-request-${timestamp(now)}.json`;
-	const path = join(input.reportsPath, fileName);
+	const directory = requestArtifactsDir(input.reportsPath);
+	mkdirSync(directory, { recursive: true });
+	const path = join(directory, REQUEST_CURRENT_FILE);
 	writeFileSync(path, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 	return { ...plan, path };
 }
@@ -191,6 +195,39 @@ export function formatAgentLabReviewRequestReview(
 		"Nota segura:",
 		"Solicitud AgentLab solamente. No ejecuté AgentLabs ni modifiqué el repo real.",
 	].join("\n");
+}
+
+function emptyRequestErrors(
+	input: CreateAgentLabReviewRequestsInput,
+	requests: AgentLabReviewRequest[],
+): string[] {
+	if (requests.length > 0) return [];
+	if (input.source === "skill_draft") {
+		const selector = input.skillDraftPathOrLatest ?? "latest";
+		const review = reviewSkillDraft(selector, input.reportsPath);
+		return [
+			`No encontré skill draft válido para AgentLab (${selector}): ${review.errors.join("; ") || "sin drafts revisables"}.`,
+		];
+	}
+	if (input.source === "master_plan") {
+		const selector = input.masterPlanPathOrLatest ?? "latest";
+		const review = reviewMasterPlan({
+			stateRoot: resolve(input.reportsPath, ".."),
+			pathOrLatest: selector,
+		});
+		if (
+			review.plan.schemaVersion < 2 ||
+			review.plan.status === "incompatible"
+		) {
+			return [
+				`Plan Maestro incompatible para AgentLab (${selector}); regenerá /idu antes de crear requests.`,
+			];
+		}
+		return [
+			`Plan Maestro ${selector} no produjo requests AgentLab; revisá AutoDepth/riesgos antes de ejecutar AgentLabs.`,
+		];
+	}
+	return [];
 }
 
 function buildRequests(
@@ -624,7 +661,7 @@ function resolveRequestPath(
 					valid: false,
 					path: reports,
 					errors: [
-						"No encontré archivos agentlab-review-request-*.json en reports.",
+						"No encontré solicitudes AgentLab en agentlabs/requests ni reports.",
 					],
 				};
 	}
@@ -632,26 +669,27 @@ function resolveRequestPath(
 	if (!trimmed) {
 		return { valid: false, path: reports, errors: ["Falta ruta de request."] };
 	}
-	const candidate = resolve(
-		isAbsolute(trimmed) ? trimmed : join(reports, trimmed),
-	);
-	const relativeToReports = relative(reports, candidate);
+	const requestDir = requestArtifactsDir(reportsPath);
+	const candidate = resolveRequestCandidate(reports, requestDir, trimmed);
 	if (
-		relativeToReports === "" ||
-		relativeToReports.startsWith("..") ||
-		isAbsolute(relativeToReports)
+		!isInsideDirectory(candidate, requestDir) &&
+		!isInsideDirectory(candidate, reports)
 	) {
 		return {
 			valid: false,
 			path: candidate,
-			errors: ["La ruta debe estar dentro de AGENT_WORKSPACE_ROOT/reports."],
+			errors: [
+				"La ruta debe estar dentro de stateRoot/agentlabs/requests o reports legacy.",
+			],
 		};
 	}
 	if (!REQUEST_RE.test(basename(candidate))) {
 		return {
 			valid: false,
 			path: candidate,
-			errors: ["El archivo debe llamarse agentlab-review-request-*.json."],
+			errors: [
+				"El archivo debe llamarse current.json o agentlab-review-request-*.json.",
+			],
 		};
 	}
 	if (!existsSync(candidate)) {
@@ -664,13 +702,49 @@ function resolveRequestPath(
 	return { valid: true, path: candidate, errors: [] };
 }
 
+function resolveRequestCandidate(
+	reports: string,
+	requestDir: string,
+	requested: string,
+): string {
+	if (isAbsolute(requested)) return resolve(requested);
+	if (requested.startsWith("reports/"))
+		return resolve(join(reports, requested.slice("reports/".length)));
+	const canonical = resolve(join(requestDir, requested));
+	const legacy = resolve(join(reports, requested));
+	return existsSync(canonical) || !existsSync(legacy) ? canonical : legacy;
+}
+
 function latestRequestFile(reportsPath: string): string | undefined {
+	const requestDir = requestArtifactsDir(reportsPath);
+	const current = join(requestDir, REQUEST_CURRENT_FILE);
+	if (existsSync(current)) return current;
+	if (existsSync(requestDir)) {
+		const latest = readdirSync(requestDir)
+			.filter((file) => REQUEST_RE.test(file))
+			.sort()
+			.at(-1);
+		if (latest) return join(requestDir, latest);
+	}
 	if (!existsSync(reportsPath)) return undefined;
-	const latest = readdirSync(reportsPath)
-		.filter((file) => REQUEST_RE.test(file))
+	const legacy = readdirSync(reportsPath)
+		.filter((file) => /^agentlab-review-request-\d{8}-\d{6}\.json$/u.test(file))
 		.sort()
 		.at(-1);
-	return latest ? join(reportsPath, latest) : undefined;
+	return legacy ? join(reportsPath, legacy) : undefined;
+}
+
+function requestArtifactsDir(reportsPath: string): string {
+	return join(resolve(reportsPath), "..", "agentlabs", "requests");
+}
+
+function isInsideDirectory(path: string, directory: string): boolean {
+	const relativePath = relative(resolve(directory), resolve(path));
+	return (
+		relativePath !== "" &&
+		!relativePath.startsWith("..") &&
+		!isAbsolute(relativePath)
+	);
 }
 
 function normalizePlan(value: unknown): AgentLabReviewRequestPlan {
@@ -805,11 +879,6 @@ function slug(value: string): string {
 			.replace(/[^a-z0-9]+/gu, "-")
 			.replace(/^-|-$/gu, "") || "unknown"
 	);
-}
-
-function timestamp(date: Date): string {
-	const pad = (value: number) => String(value).padStart(2, "0");
-	return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

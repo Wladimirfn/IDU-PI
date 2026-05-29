@@ -137,12 +137,13 @@ Ejemplos:
 | `supervisor-improvement-proposals-*.json` | Propuestas de mejora. |
 | `skill-improvement-proposals-*.json` | Propuestas de skills. |
 | `skill-draft-*.json` | Drafts de skills, no skills reales. |
-| `agentlab-review-request-*.json` | Solicitudes formales AgentLab. |
-| `agentlab-review-run-*.json` | Resultados AgentLab review-only. |
-| `agentlab-consolidation-*.json` | Consolidación de reportes AgentLab. |
-| `master-plan-*.json` / `master-plan-*.md` | Plan Maestro draft/approved/stale generado por AutoDepth. |
+| `agentlabs/requests/current.json` | Solicitud formal AgentLab actual. |
+| `agentlabs/runs/current.json` | Resultado AgentLab review-only actual. |
+| `agentlabs/reports/consolidated-current.json` | Consolidación actual de reportes AgentLab. |
+| `master-plan.json` / `master-plan.md` | Plan Maestro canónico vivo generado por AutoDepth/Supervisor. |
+| `project-index.json` | Índice Supervisor del proyecto: tipos, áreas funcionales y ruido ignorado. |
 
-`reports/` es staging/revisión. No todo artifact es verdad ni decisión aplicada.
+`reports/` queda como staging/revisión y fallback legacy. AgentLabs dejan artefactos en `agentlabs/`; sólo el Supervisor actualiza el Plan Maestro canónico.
 
 ## SQLite / lab DB
 
@@ -187,13 +188,15 @@ Un draft puede venir de wizard o research. Sólo se vuelve fuente de verdad cuan
 
 ## Plan Maestro AutoDepth
 
-MASTER-PLAN-1 agrega un snapshot operativo derivado y revisable en `stateRoot`:
+MASTER-PLAN-CONSOLIDADO-1 usa un Plan Maestro vivo y canónico en `stateRoot`:
 
 ```text
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/reports/master-plan-*.json
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/reports/master-plan-*.md
+AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.json
+AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.md
 AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.current.json
 AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.memory.json
+AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/project-index.json
+AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/agentlabs/
 ```
 
 `src/master-plan.ts` genera este draft de forma determinista con señales baratas del proyecto. AutoDepth decide `quick`, `standard` o `deep_required`; en `deep_required` ejecuta una etapa segura automática y marca que el deep review costoso requiere aprobación humana. AgentLabs quedan seleccionados como metadata/request recomendada, no se ejecutan automáticamente. Aprobar el Plan Maestro no aplica flows ni confirma Project Core/Constitution.

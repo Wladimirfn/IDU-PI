@@ -889,6 +889,23 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		prepare: () => fakePrepare(projectPath),
 		formatPrepare: (result) =>
 			["Idu-pi Prepare", "", "Proyecto:", result.projectId].join("\n"),
+		projectStateReset: (confirmed) => {
+			if (!confirmed)
+				throw new Error(
+					"Reset requiere confirmación explícita: agregá --yes al comando.",
+				);
+			return {
+				projectId: "pi-telegram-bridge",
+				projectPath,
+				stateRoot: workspaceRoot,
+				deletedEntries: ["reports"],
+				recreatedRoot: true,
+				warning:
+					"Reset destructivo de estado aislado: no desregistra el proyecto ni toca el repo real.",
+			};
+		},
+		formatProjectStateResetResult: (result) =>
+			["Idu-pi project state reset", "", result.stateRoot].join("\n"),
 		masterPlanStatus: () =>
 			({
 				status: "draft",
@@ -1429,6 +1446,27 @@ test("cli prepare llama al flujo de idu_prepare", async () => {
 	});
 });
 
+test("cli project reset state exige --yes", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["idu-project-reset-state"], runtime);
+
+		assert.equal(result.exitCode, 1);
+		assert.match(result.stderr, /--yes/u);
+	});
+});
+
+test("cli project reset state funciona con --yes", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(
+			["idu-project-reset-state", "--yes"],
+			runtime,
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /project state reset/u);
+	});
+});
+
 test("cli preflight cambia login devuelve riesgo high", async () => {
 	await withRuntime(async (runtime) => {
 		const result = await runCliCommand(
@@ -1502,6 +1540,7 @@ test("CLI agentlab request commands funcionan", async () => {
 			["idu-agentlab-request-review", "latest"],
 			runtime,
 		);
+		const simpleReview = await runCliCommand(["revisar"], runtime);
 
 		assert.equal(createPostflight.exitCode, 0);
 		assert.match(createPostflight.stdout, /AgentLab Review Requests Created/u);
@@ -1510,8 +1549,15 @@ test("CLI agentlab request commands funcionan", async () => {
 		assert.match(createSkillDraft.stdout, /agentlab-review-request/u);
 		assert.equal(createMasterPlan.exitCode, 0);
 		assert.match(createMasterPlan.stdout, /agentlab-review-request/u);
+		assert.match(
+			createMasterPlan.stdout,
+			/Deep review ejecutado automáticamente/u,
+		);
 		assert.equal(review.exitCode, 0);
 		assert.match(review.stdout, /AgentLab Review Request Review/u);
+		assert.equal(simpleReview.exitCode, 0);
+		assert.match(simpleReview.stdout, /Idu-pi revisión del proyecto/u);
+		assert.match(simpleReview.stdout, /Repo real: sin modificar/u);
 	});
 });
 

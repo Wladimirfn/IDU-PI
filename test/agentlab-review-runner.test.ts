@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -306,7 +312,7 @@ test("run latest lee request válido", async () => {
 		now: () => new Date("2026-05-25T10:01:00.000Z"),
 	});
 	assert.equal(result.runs[0]?.status, "completed");
-	assert.match(result.path ?? "", /agentlab-review-run-\d{8}-\d{6}\.json$/u);
+	assert.match(result.path ?? "", /agentlabs[\\/]runs[\\/]current\.json$/u);
 });
 
 test("run latest con request master_plan no queda en cero requests", async () => {
@@ -422,6 +428,38 @@ test("run latest con 5 requests master_plan no falla por directorios", async () 
 	);
 });
 
+test("status ruta legacy relativa busca en reports", async () => {
+	const { router, projectPath, workspaceRoot } = routerWith(validReport());
+	const reportsPath = join(workspaceRoot, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	createAgentLabReviewRequests({
+		source: "manual",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		manualObjective: "revisar UI html components",
+		manualContext: "UI html components",
+		now: () => new Date("2026-05-25T10:00:00.000Z"),
+	});
+	const result = await runAgentLabReviewRequestFile({
+		pathOrLatest: "latest",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		router,
+		now: () => new Date("2026-05-25T10:01:00.000Z"),
+	});
+	const legacyName = "agentlab-review-run-20260525-100100.json";
+	writeFileSync(
+		join(reportsPath, legacyName),
+		readFileSync(result.path ?? "", "utf8"),
+		"utf8",
+	);
+	const status = getAgentLabReviewStatus(legacyName, reportsPath);
+	assert.equal(status.valid, true);
+	assert.equal(status.result?.runs[0]?.status, "completed");
+});
+
 test("ruta fuera de reports falla", () => {
 	const temp = root();
 	const status = getAgentLabReviewStatus(
@@ -429,10 +467,7 @@ test("ruta fuera de reports falla", () => {
 		join(temp, "reports"),
 	);
 	assert.equal(status.valid, false);
-	assert.match(
-		status.errors.join("\n"),
-		/dentro de AGENT_WORKSPACE_ROOT\/reports/u,
-	);
+	assert.match(status.errors.join("\n"), /agentlabs\/runs|reports legacy/u);
 });
 
 test("nombre inválido falla", () => {
@@ -521,6 +556,9 @@ test("run usa review-only y forbiddenActions", async () => {
 		/No modifiques labPrompt ni infraestructura de ejecución AgentLab/u,
 	);
 	assert.match(prompt, /Acciones prohibidas/u);
+	assert.match(prompt, /SALIDA OBLIGATORIA/u);
+	assert.match(prompt, /qualityFindings/u);
+	assert.match(prompt, /requiresHumanApproval/u);
 });
 
 test("guard no falla si repo real queda igual", async () => {
@@ -657,7 +695,7 @@ test("report JSON válido se valida contra contrato", async () => {
 	assert.equal(run.findings.length, 1);
 });
 
-test("report texto legacy queda como partial limpio sin inventar findings", async () => {
+test("report texto legacy se convierte en contrato válido sin inventar findings", async () => {
 	const { router, projectPath } = routerWith(
 		"[tool:read] iniciando...\nResumen legacy sin JSON",
 	);
@@ -667,21 +705,45 @@ test("report texto legacy queda como partial limpio sin inventar findings", asyn
 		request: request("security"),
 	});
 	assert.equal(run.status, "completed");
-	assert.equal(run.contractValidation.valid, false);
+	assert.equal(run.contractValidation.valid, true);
 	assert.equal(run.findings.length, 0);
+	assert.match(run.qualityWarnings?.join("\n") ?? "", /fallback/u);
 	assert.doesNotMatch(run.rawSummary, /\[tool:read\]/u);
 	assert.match(run.rawSummary, /Resumen legacy/u);
 });
 
-test("finding sin evidence no se acepta como válido", () => {
+test("report parcial se repara a contrato válido", () => {
+	const output = JSON.stringify({
+		requestId: "request-security",
+		projectId: "pi-telegram-bridge",
+		specialty: "security",
+		status: "completed",
+		summary: "Riesgo detectado.",
+		safetyFindings: [{ title: "Auth difuso", severity: "high" }],
+		recommendations: ["Revisar auth"],
+	});
+	const result = parseAgentLabReviewReportFromOutput(
+		output,
+		request("security"),
+	);
+	assert.equal(result.errors.length, 0);
+	assert.match(result.qualityWarnings?.join("\n") ?? "", /reparó/u);
+	assert.equal(result.report?.safetyFindings[0]?.evidence.length! > 0, true);
+	assert.equal(
+		result.report?.recommendations[0]?.suggestedNextStep,
+		"Revisar manualmente.",
+	);
+});
+
+test("finding sin evidence se repara con evidencia del request", () => {
 	const parsed = JSON.parse(validReport()) as Record<string, unknown>;
 	(parsed.safetyFindings as Record<string, unknown>[])[0]!.evidence = "";
 	const result = parseAgentLabReviewReportFromOutput(
 		JSON.stringify(parsed),
 		request("security"),
 	);
-	assert.equal(result.report, undefined);
-	assert.match(result.errors.join("\n"), /evidence/u);
+	assert.equal(result.errors.length, 0);
+	assert.equal(result.report?.safetyFindings[0]?.evidence, "src/auth.ts");
 });
 
 test("status latest lee informe", async () => {

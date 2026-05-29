@@ -156,6 +156,16 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			suggestedActions: [],
 		}),
 		formatPrepare: () => "prepare",
+		projectStateReset: () => ({
+			projectId: "sistema_de_mantencion",
+			projectPath,
+			stateRoot: "C:/idu/workspace/projects/sistema_de_mantencion",
+			deletedEntries: ["reports"],
+			recreatedRoot: true,
+			warning:
+				"Reset destructivo de estado aislado: no desregistra el proyecto ni toca el repo real.",
+		}),
+		formatProjectStateResetResult: () => "state reset",
 		labReviewPlan: () => {
 			throw new Error(UNUSED);
 		},
@@ -441,10 +451,11 @@ test("mcp server lists Idu-pi tools", async () => {
 	const tools = listIduMcpTools();
 	assert.ok(tools.some((tool) => tool.name === "idu_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_project_enroll"));
+	assert.ok(tools.some((tool) => tool.name === "idu_project_reset_state"));
 	assert.ok(tools.some((tool) => tool.name === "idu_bootstrap_project"));
 	assert.ok(tools.some((tool) => tool.name === "idu_start"));
 	assert.ok(tools.some((tool) => tool.name === "idu_agentlab_review_run"));
-	assert.equal(tools.length, 18);
+	assert.equal(tools.length, 19);
 });
 
 test("idu_status works with explicit projectPath", async () => {
@@ -498,6 +509,35 @@ test("idu_activate and idu_deactivate change session state", async () => {
 	assert.equal(deactivate.data.active, false);
 });
 
+test("idu_project_reset_state requires explicit confirmation", async () => {
+	const result = await callIduMcpTool(
+		"idu_project_reset_state",
+		{ projectPath: "C:/projects/sistema" },
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => registered("C:/projects/sistema"),
+		},
+	);
+	assert.equal(result.ok, false);
+	assert.match(result.errors.join("\n"), /confirm=true/u);
+});
+
+test("idu_project_reset_state clears isolated state with confirmation", async () => {
+	const result = await callIduMcpTool(
+		"idu_project_reset_state",
+		{ projectPath: "C:/projects/sistema", confirm: true },
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => registered("C:/projects/sistema"),
+		},
+	);
+	assert.equal(result.ok, true);
+	assert.equal(
+		result.data.stateRoot,
+		"C:/idu/workspace/projects/sistema_de_mantencion",
+	);
+});
+
 test("idu_preflight detects high auth/login risk", async () => {
 	const result = await callIduMcpTool(
 		"idu_preflight",
@@ -508,6 +548,14 @@ test("idu_preflight detects high auth/login risk", async () => {
 	assert.equal(result.data.risk, "high");
 	assert.equal(result.data.requiresHumanConfirmation, true);
 	assert.deepEqual(result.data.detectedImpact, ["auth/seguridad", "login"]);
+	assert.deepEqual(
+		(result.data.alignmentAdvisory as { audience: string; severity: string }).audience,
+		"orchestrator",
+	);
+	assert.equal(
+		(result.data.alignmentAdvisory as { severity: string }).severity,
+		"needs_approval",
+	);
 });
 
 test("idu_task respects active and inactive guardrails", async () => {
@@ -541,6 +589,14 @@ test("idu_supervisor_tick skips when inactive", async () => {
 	assert.equal(result.ok, true);
 	assert.equal(result.data.status, "skipped");
 	assert.equal(result.data.reason, "idu_inactive");
+	assert.equal(
+		(result.data.alignmentAdvisory as { audience: string }).audience,
+		"orchestrator",
+	);
+	assert.equal(
+		(result.data.alignmentAdvisory as { severity: string }).severity,
+		"warning",
+	);
 });
 
 test("idu_queue_detail returns complete ids and guard status", async () => {
@@ -582,6 +638,8 @@ test("MCP tool output always includes required JSON envelope", async () => {
 	]) {
 		assert.ok(key in result, key);
 	}
+	assert.ok("alignmentAdvisory" in result.data);
+	assert.equal("advisoryText" in result.data, false);
 });
 
 test("unregistered projectPath returns clear diagnostic", async () => {
@@ -879,7 +937,7 @@ test("idu_activate remains activate-only and does not bootstrap unregistered pro
 	}
 });
 
-test("agentlab review run is the only AgentLab execution tool and reports sandbox notes", async () => {
+test("postflight request create remains request-only and review-run reports sandbox notes", async () => {
 	const request = await callIduMcpTool(
 		"idu_agentlab_request_create",
 		{ source: "postflight", selector: "latest" },
@@ -889,6 +947,15 @@ test("agentlab review run is the only AgentLab execution tool and reports sandbo
 	assert.ok(
 		request.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
 	);
+
+	const masterPlan = await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{ source: "master-plan", selector: "latest" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(masterPlan.ok, true);
+	assert.match(masterPlan.summary, /deep review ejecutado/i);
+	assert.ok(masterPlan.data.run);
 
 	const run = await callIduMcpTool(
 		"idu_agentlab_review_run",

@@ -148,8 +148,10 @@ type RunSummaryLike = {
 };
 
 const WARNING = "Consolidación AgentLab. No aplica cambios." as const;
-const RUN_RE = /^agentlab-review-run-\d{8}-\d{6}\.json$/u;
-const CONSOLIDATION_RE = /^agentlab-consolidation-\d{8}-\d{6}\.json$/u;
+const CURRENT_FILE = "current.json";
+const RUN_RE = /^(?:current|agentlab-review-run-\d{8}-\d{6})\.json$/u;
+const CONSOLIDATION_RE =
+	/^(?:consolidated-current|agentlab-consolidation-\d{8}-\d{6})\.json$/u;
 const SEVERITY_ORDER: AgentLabFindingSeverity[] = [
 	"info",
 	"low",
@@ -239,11 +241,9 @@ export function consolidateAgentLabReviewRun(
 			"no aplicar cambios sin aprobación humana",
 		],
 	};
-	mkdirSync(reportsPath, { recursive: true });
-	const path = join(
-		reportsPath,
-		`agentlab-consolidation-${timestamp(now)}.json`,
-	);
+	const directory = agentLabArtifactDir(reportsPath, "agentlab-consolidation");
+	mkdirSync(directory, { recursive: true });
+	const path = join(directory, "consolidated-current.json");
 	writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`, "utf8");
 	return { ...result, path };
 }
@@ -821,31 +821,38 @@ function resolveReportPath(
 	| { valid: true; path: string; errors: [] }
 	| { valid: false; path: string; errors: string[] } {
 	const reports = resolve(reportsPath);
+	const artifactDir = agentLabArtifactDir(reportsPath, label);
 	const requested = pathOrLatest.trim() || "latest";
 	const path =
 		requested === "latest"
-			? latestFile(reports, fileRe)
-			: resolveCandidate(reports, requested);
+			? latestFile(reports, artifactDir, fileRe, label)
+			: resolveCandidate(reports, artifactDir, requested);
 	if (!path) {
 		return {
 			valid: false,
 			path: "",
-			errors: [`No encontré archivos ${label}-*.json en reports.`],
+			errors: [`No encontré archivos ${label} en agentlabs o reports legacy.`],
 		};
 	}
-	const rel = relative(reports, path);
-	if (rel.startsWith("..") || isAbsolute(rel)) {
+	if (
+		!isInsideDirectory(path, artifactDir) &&
+		!isInsideDirectory(path, reports)
+	) {
 		return {
 			valid: false,
 			path,
-			errors: ["El archivo debe estar dentro de reports."],
+			errors: [
+				"El archivo debe estar dentro de stateRoot/agentlabs o reports legacy.",
+			],
 		};
 	}
 	if (!fileRe.test(basename(path))) {
 		return {
 			valid: false,
 			path,
-			errors: [`El archivo debe llamarse ${label}-YYYYMMDD-HHMMSS.json.`],
+			errors: [
+				`El archivo debe llamarse current.json, consolidated-current.json o ${label}-YYYYMMDD-HHMMSS.json.`,
+			],
 		};
 	}
 	if (!existsSync(path))
@@ -853,20 +860,58 @@ function resolveReportPath(
 	return { valid: true, path, errors: [] };
 }
 
-function resolveCandidate(reports: string, requested: string): string {
+function resolveCandidate(
+	reports: string,
+	artifactDir: string,
+	requested: string,
+): string {
 	if (isAbsolute(requested)) return resolve(requested);
 	if (requested.startsWith("reports/"))
 		return resolve(join(reports, requested.slice("reports/".length)));
-	return resolve(join(reports, requested));
+	const canonical = resolve(join(artifactDir, requested));
+	const legacy = resolve(join(reports, requested));
+	return existsSync(canonical) || !existsSync(legacy) ? canonical : legacy;
 }
 
-function latestFile(reports: string, fileRe: RegExp): string | undefined {
+function latestFile(
+	reports: string,
+	artifactDir: string,
+	fileRe: RegExp,
+	label: string,
+): string | undefined {
+	const currentName =
+		label === "agentlab-consolidation"
+			? "consolidated-current.json"
+			: CURRENT_FILE;
+	const current = join(artifactDir, currentName);
+	if (existsSync(current)) return current;
+	if (existsSync(artifactDir)) {
+		const latest = readdirSync(artifactDir)
+			.filter((file) => fileRe.test(file))
+			.sort()
+			.at(-1);
+		if (latest) return join(artifactDir, latest);
+	}
 	if (!existsSync(reports)) return undefined;
-	const latest = readdirSync(reports)
+	const legacy = readdirSync(reports)
 		.filter((file) => fileRe.test(file))
 		.sort()
 		.at(-1);
-	return latest ? join(reports, latest) : undefined;
+	return legacy ? join(reports, legacy) : undefined;
+}
+
+function agentLabArtifactDir(reportsPath: string, label: string): string {
+	const bucket = label === "agentlab-review-run" ? "runs" : "reports";
+	return join(resolve(reportsPath), "..", "agentlabs", bucket);
+}
+
+function isInsideDirectory(path: string, directory: string): boolean {
+	const relativePath = relative(resolve(directory), resolve(path));
+	return (
+		relativePath !== "" &&
+		!relativePath.startsWith("..") &&
+		!isAbsolute(relativePath)
+	);
 }
 
 function readJson(
@@ -942,11 +987,6 @@ function formatFindingCounts(
 
 function formatList(items: string[]): string[] {
 	return items.length ? items.map((item) => `- ${item}`) : ["- ninguno"];
-}
-
-function timestamp(date: Date): string {
-	const pad = (value: number) => String(value).padStart(2, "0");
-	return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}-${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
 }
 
 function record(value: unknown): Record<string, unknown> {

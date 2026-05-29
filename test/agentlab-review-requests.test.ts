@@ -132,7 +132,7 @@ test("postflight high crea request security/database según impacto", () => {
 	assert.equal(database.requests[0]?.specialty, "database");
 	assert.match(
 		security.path ?? "",
-		/agentlab-review-request-\d{8}-\d{6}\.json$/u,
+		/agentlabs[\\/]requests[\\/]current\.json$/u,
 	);
 	assert.ok(existsSync(security.path!));
 });
@@ -196,7 +196,7 @@ test("master-plan deep_required crea requests desde Plan Maestro", () => {
 	);
 	assert.ok(
 		result.requests[0]!.filesToInspect.some((file) =>
-			/master-plan-.*\.json/u.test(file),
+			/master-plan\.json/u.test(file),
 		),
 	);
 });
@@ -238,7 +238,21 @@ test("master-plan incompatible no crea requests", () => {
 	});
 
 	assert.equal(result.requests.length, 0);
-	assert.equal(result.errors.length, 0);
+	assert.match(result.errors.join("\n"), /Plan Maestro incompatible/u);
+});
+
+test("skill-draft sin draft válido falla visible", () => {
+	const reportsPath = join(root(), "reports");
+	const result = createAgentLabReviewRequests({
+		source: "skill_draft",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath: root(),
+		skillDraftPathOrLatest: "latest",
+		now,
+	});
+	assert.equal(result.requests.length, 0);
+	assert.match(result.errors.join("\n"), /No encontré skill draft válido/u);
 });
 
 test("skill-draft crea request skill_review", () => {
@@ -356,16 +370,36 @@ test("review latest valida request", () => {
 	assert.match(formatAgentLabReviewRequestReview(review), /Specialties/u);
 });
 
+test("review ruta legacy relativa busca en reports", () => {
+	const reportsPath = join(root(), "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	const created = createAgentLabReviewRequests({
+		source: "manual",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath: root(),
+		manualObjective: "revisar UI html components",
+		manualContext: "UI html components",
+		now,
+	});
+	const legacyName = "agentlab-review-request-20260525-123456.json";
+	writeFileSync(
+		join(reportsPath, legacyName),
+		readFileSync(created.path ?? "", "utf8"),
+		"utf8",
+	);
+	const review = reviewAgentLabReviewRequest(legacyName, reportsPath);
+	assert.equal(review.valid, true);
+	assert.equal(review.plan?.requests[0]?.specialty, "ui_ux");
+});
+
 test("ruta fuera de reports falla", () => {
 	const temp = root();
 	const outside = join(temp, "agentlab-review-request-20260525-123456.json");
 	writeFileSync(outside, "{}\n", "utf8");
 	const review = reviewAgentLabReviewRequest(outside, join(temp, "reports"));
 	assert.equal(review.valid, false);
-	assert.match(
-		review.errors.join("\n"),
-		/dentro de AGENT_WORKSPACE_ROOT\/reports/u,
-	);
+	assert.match(review.errors.join("\n"), /agentlabs\/requests|reports legacy/u);
 });
 
 test("nombre inválido falla", () => {

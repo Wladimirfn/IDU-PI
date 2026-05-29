@@ -576,7 +576,7 @@ test("Supabase storage sin señales auth no marca login/session", () => {
 	}
 });
 
-test("genera Plan Maestro draft en stateRoot/reports sin modificar repo del usuario", () => {
+test("genera Plan Maestro canónico en stateRoot sin modificar repo del usuario", () => {
 	const root = tempRoot();
 	try {
 		const projectPath = join(root, "project");
@@ -605,10 +605,11 @@ test("genera Plan Maestro draft en stateRoot/reports sin modificar repo del usua
 		);
 		assert.equal(existsSync(join(stateRoot, "master-plan.current.json")), true);
 		assert.equal(existsSync(join(stateRoot, "master-plan.memory.json")), true);
-		assert.match(
-			result.current.currentPlanJson,
-			/reports[\\/]master-plan-.*\.json$/u,
-		);
+		assert.equal(result.current.currentPlanJson, "master-plan.json");
+		assert.equal(result.current.currentPlanMd, "master-plan.md");
+		assert.equal(existsSync(join(stateRoot, "project-index.json")), true);
+		assert.equal(existsSync(join(stateRoot, "agentlabs", "requests")), true);
+		assert.equal(existsSync(join(stateRoot, "agentlabs", "runs")), true);
 		assert.match(
 			readFileSync(join(stateRoot, result.current.currentPlanMd), "utf8"),
 			/# Plan Maestro Idu-pi/u,
@@ -712,7 +713,7 @@ test("AutoDepth elige deep_required para proyecto grande y no ejecuta AgentLabs"
 		);
 		assert.match(
 			formatMasterPlanSummaryForIdu(result),
-			/agentlab-request-create master-plan latest/u,
+			/Ejecutar deep review: idu-pi agentlab-request-create master-plan latest/u,
 		);
 		assert.doesNotMatch(
 			formatMasterPlanSummaryForIdu(result),
@@ -895,10 +896,8 @@ test("approve reject y redraft actualizan current sin borrar drafts anteriores",
 			gitHead: "head2",
 			reason: "rehacer",
 		});
-		assert.notEqual(
-			second.current.currentPlanJson,
-			first.current.currentPlanJson,
-		);
+		assert.equal(second.current.currentPlanJson, first.current.currentPlanJson);
+		assert.equal(second.current.currentPlanJson, "master-plan.json");
 		assert.equal(
 			existsSync(join(stateRoot, first.current.currentPlanJson)),
 			true,

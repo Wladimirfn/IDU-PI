@@ -648,8 +648,15 @@ test("Idu-pi supervisor cycle is accepted end-to-end without unsafe apply", asyn
 			false,
 		);
 		assert.equal(
-			reportFiles(paths.reportsPath, "agentlab-consolidation-").length,
-			1,
+			existsSync(
+				join(
+					paths.workspaceRoot,
+					"agentlabs",
+					"reports",
+					"consolidated-current.json",
+				),
+			),
+			true,
 		);
 	} finally {
 		rmSync(paths.root, { recursive: true, force: true });

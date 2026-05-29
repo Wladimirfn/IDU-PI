@@ -142,7 +142,7 @@ test("lee latest agentlab-review-run válido y guarda consolidación", () => {
 	assert.equal(result.projectId, "pi-telegram-bridge");
 	assert.match(
 		result.path ?? "",
-		/agentlab-consolidation-20260525-010203\.json$/u,
+		/agentlabs[\\/]reports[\\/]consolidated-current\.json$/u,
 	);
 	assert.equal(existsSync(result.path ?? ""), true);
 	assert.equal(result.warning, "Consolidación AgentLab. No aplica cambios.");
@@ -357,6 +357,35 @@ test("status latest muestra resumen", () => {
 	assert.match(text, /total findings: 1/u);
 	assert.match(text, /supervisor improvements: 1/u);
 	assert.match(text, /Recommended next:/u);
+});
+
+test("status latest ignora runs legacy al buscar consolidaciones", () => {
+	const reports = reportsRoot();
+	writeRun(reports);
+	const created = consolidateAgentLabReviewRun("latest", reports, {
+		now: () => new Date("2026-05-25T01:02:03.000Z"),
+	});
+	writeRun(reports, "agentlab-review-run-20260525-020000.json");
+	const status = getAgentLabConsolidationStatus("latest", reports);
+	assert.equal(status.valid, true);
+	assert.equal(status.result?.path, created.path);
+});
+
+test("status ruta legacy relativa busca en reports", () => {
+	const reports = reportsRoot();
+	writeRun(reports);
+	const created = consolidateAgentLabReviewRun("latest", reports, {
+		now: () => new Date("2026-05-25T01:02:03.000Z"),
+	});
+	const legacyName = "agentlab-consolidation-20260525-010203.json";
+	writeFileSync(
+		join(reports, legacyName),
+		readFileSync(created.path ?? "", "utf8"),
+		"utf8",
+	);
+	const status = getAgentLabConsolidationStatus(legacyName, reports);
+	assert.equal(status.valid, true);
+	assert.equal(status.result?.sourceReviewRun, created.sourceReviewRun);
 });
 
 test("format consolidate muestra nota segura", () => {

@@ -31,10 +31,10 @@ These are ignored and should stay local/generated:
   - `supervisor-improvement-proposals-*.json`
   - `skill-improvement-proposals-*.json`
   - `skill-draft-*.json`
-  - `agentlab-review-request-*.json`
-  - `agentlab-review-run-*.json`
-  - `agentlab-consolidation-*.json`
-  - `master-plan-*.json` / `master-plan-*.md` under project `stateRoot/reports`
+  - `agentlabs/requests/current.json`
+  - `agentlabs/runs/current.json`
+  - `agentlabs/reports/consolidated-current.json`
+  - `master-plan.json` / `master-plan.md` / `project-index.json` under project `stateRoot`
 
 ## Project-local config
 

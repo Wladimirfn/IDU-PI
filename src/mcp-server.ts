@@ -10,6 +10,11 @@ import {
 	projectInstallStatus,
 	type ProjectEnrollResult,
 } from "./idu-installer.js";
+import {
+	buildPreflightOrchestratorAdvisory,
+	buildProjectAdvisoryForOrchestrator,
+	buildSupervisorLoopOrchestratorAdvisory,
+} from "./orchestrator-advisory.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -29,6 +34,7 @@ type JsonObject = Record<string, unknown>;
 export type IduMcpToolName =
 	| "idu_project_status"
 	| "idu_project_enroll"
+	| "idu_project_reset_state"
 	| "idu_bootstrap_project"
 	| "idu_start"
 	| "idu_status"
@@ -122,6 +128,16 @@ const TOOLS: IduMcpToolDefinition[] = [
 		{
 			projectPath: requiredString("Ruta obligatoria del proyecto objetivo."),
 			projectId: optionalString("ID opcional del proyecto."),
+		},
+	),
+	tool(
+		"idu_project_reset_state",
+		"Borra todo el estado aislado del proyecto registrado sin desregistrar ni tocar el repo real. Requiere confirm=true.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			confirm: optionalBoolean(
+				"Debe ser true para ejecutar el borrado destructivo.",
+			),
 		},
 	),
 	tool(
@@ -765,6 +781,38 @@ async function dispatchTool(
 				safeNotes: resolution.safeNotes,
 			});
 		}
+		case "idu_project_reset_state": {
+			const confirmed = booleanArg(args, "confirm", false);
+			if (!confirmed) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Reset cancelado: falta confirm=true.",
+					data: { requiresConfirmation: true },
+					safeNotes: [
+						...resolution.safeNotes,
+						"No borré nada porque falta confirmación explícita.",
+					],
+					errors: ["Para borrar stateRoot enviá confirm=true."],
+				});
+			}
+			const result = runtime.projectStateReset(true);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `StateRoot limpiado: ${result.stateRoot}`,
+				data: result as unknown as JsonObject,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Borré sólo estado aislado de Idu-pi.",
+					"No desregistré el proyecto ni toqué el repo real.",
+				],
+			});
+		}
 		case "idu_prepare": {
 			const result = runtime.prepare();
 			return envelope({
@@ -784,13 +832,15 @@ async function dispatchTool(
 		case "idu_preflight": {
 			const request = requiredText(args, "request");
 			const report = runtime.preflight(request);
+			const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
-				summary: `Riesgo ${report.risk}: ${report.affectedAreas.join(", ") || "sin impacto detectado"}`,
+				summary: alignmentAdvisory.summary,
 				data: {
+					alignmentAdvisory,
 					risk: report.risk,
 					detectedImpact: report.affectedAreas,
 					rulesAffected: report.constitutionGate?.affectedRules ?? [],
@@ -808,21 +858,22 @@ async function dispatchTool(
 		case "idu_advisory": {
 			const request = requiredText(args, "request");
 			const advisory = runtime.advisory(request);
+			const alignmentAdvisory = buildProjectAdvisoryForOrchestrator(advisory);
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
-				summary: advisory.recommendation,
+				summary: alignmentAdvisory.summary,
 				data: {
-					advisoryText: runtime.formatAdvisory(advisory),
+					alignmentAdvisory,
 					risk: advisory.level,
 					suggestedNextSteps: advisory.actions,
 					advisory,
 				},
 				safeNotes: [
 					...resolution.safeNotes,
-					"Advisory solamente: no ejecuté scan, IA ni AgentLabs.",
+					"Advisory al orquestador: no ejecuté scan, IA ni AgentLabs.",
 				],
 			});
 		}
@@ -855,20 +906,22 @@ async function dispatchTool(
 				allowSemanticDraft,
 				allowAgentTaskPlan,
 			});
+			const alignmentAdvisory = buildSupervisorLoopOrchestratorAdvisory(result);
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
-				summary: result.summary,
+				summary: alignmentAdvisory.summary,
 				data: {
+					alignmentAdvisory,
 					stepsExecuted: result.steps.filter(
 						(step) => step.status !== "skipped",
 					),
 					skippedReasons: result.steps.filter(
 						(step) => step.status === "skipped",
 					),
-					safeNotes: result.recommendedNext,
+					recommendedNext: result.recommendedNext,
 					status: result.status,
 					reason: result.reason,
 					allowSemanticDraft,
@@ -957,6 +1010,30 @@ async function dispatchTool(
 			const source = requiredText(args, "source");
 			const selector = stringArg(args, "selector") ?? "latest";
 			const plan = runtime.agentLabRequestCreate(source, selector);
+			if (source === "master-plan" && plan.errors.length === 0) {
+				const run = await runtime.agentLabReviewRun("latest");
+				return envelope({
+					ok: true,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: `Solicitud creada y deep review ejecutado: ${run.consolidatedSummary}`,
+					data: {
+						requestFilePath: plan.path,
+						runFilePath: run.path,
+						specialties: [
+							...new Set(plan.requests.map((request) => request.specialty)),
+						],
+						plan,
+						run,
+					},
+					safeNotes: [
+						...resolution.safeNotes,
+						"Creé solicitud formal desde Plan Maestro y ejecuté AgentLabs review-only.",
+						"No hice commit/push ni toqué repo real.",
+					],
+				});
+			}
 			return envelope({
 				ok: plan.errors.length === 0,
 				tool: name,

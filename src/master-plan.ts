@@ -276,6 +276,9 @@ export type MasterPlanReview = {
 	markdownPath?: string;
 };
 
+const MASTER_PLAN_JSON_FILE = "master-plan.json";
+const MASTER_PLAN_MD_FILE = "master-plan.md";
+const PROJECT_INDEX_FILE = "project-index.json";
 const CURRENT_FILE = "master-plan.current.json";
 const MEMORY_FILE = "master-plan.memory.json";
 const PENDING_ACTION_FILE = "master-plan.pending-action.json";
@@ -357,6 +360,10 @@ export function generateMasterPlanDraft(input: {
 	const stateRoot = resolve(input.stateRoot);
 	const reportsDir = join(stateRoot, "reports");
 	mkdirSync(reportsDir, { recursive: true });
+	mkdirSync(join(stateRoot, "agentlabs", "requests"), { recursive: true });
+	mkdirSync(join(stateRoot, "agentlabs", "runs"), { recursive: true });
+	mkdirSync(join(stateRoot, "agentlabs", "reports"), { recursive: true });
+	mkdirSync(join(stateRoot, "agentlabs", "work"), { recursive: true });
 	const generatedAt = new Date().toISOString();
 	const signals = collectProjectSignals(projectPath);
 	const source = readSourceStatuses(projectPath, signals);
@@ -431,13 +438,13 @@ export function generateMasterPlanDraft(input: {
 			})),
 		],
 	};
-	const baseName = uniqueMasterPlanBaseName(reportsDir, generatedAt);
-	const relativeJson = `reports/${baseName}.json`;
-	const relativeMd = `reports/${baseName}.md`;
+	const relativeJson = MASTER_PLAN_JSON_FILE;
+	const relativeMd = MASTER_PLAN_MD_FILE;
 	const jsonPath = join(stateRoot, relativeJson);
 	const markdownPath = join(stateRoot, relativeMd);
 	writeFileSync(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 	writeFileSync(markdownPath, `${formatMasterPlanMarkdown(plan)}\n`, "utf8");
+	writeSupervisorProjectIndex(stateRoot, plan, signals);
 	const current = writeCurrent(stateRoot, {
 		currentPlanJson: relativeJson,
 		currentPlanMd: relativeMd,
@@ -481,9 +488,7 @@ export function getMasterPlanStatus(input: {
 			gitHead: input.currentGitHead,
 			updatedAt: new Date().toISOString(),
 		});
-		const plan = readPlan(
-			safePlanPathInsideReports(stateRoot, stale.currentPlanJson),
-		);
+		const plan = readPlan(safePlanPath(stateRoot, stale.currentPlanJson));
 		if (plan)
 			writeMemory(
 				stateRoot,
@@ -601,9 +606,7 @@ export function ensureMasterPlanForIdu(input: {
 		};
 	}
 	const plan = status.currentPlanJson
-		? readPlan(
-				safePlanPathInsideReports(input.stateRoot, status.currentPlanJson),
-			)
+		? readPlan(safePlanPath(input.stateRoot, status.currentPlanJson))
 		: undefined;
 	if (status.status === "draft")
 		writeMasterPlanPendingAction(input.stateRoot, status);
@@ -746,7 +749,7 @@ function masterPlanActionLines(
 			"1. Ver detalles: idu-pi master-plan-review latest",
 			"2. Aprobar: idu-pi master-plan-approve latest",
 			"3. Rehacer: idu-pi master-plan-redraft latest",
-			"4. Preparar deep review: idu-pi agentlab-request-create master-plan latest",
+			"4. Ejecutar deep review: idu-pi agentlab-request-create master-plan latest",
 		];
 	}
 	if (status === "approved") {
@@ -1074,6 +1077,7 @@ function updatePlanDecision(
 	const jsonPath = resolvePlanPath(stateRoot, pathOrLatest, current);
 	const plan = update(requirePlan(jsonPath));
 	writeFileSync(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+	writeSupervisorProjectIndex(stateRoot, plan);
 	const markdownPath =
 		current?.currentPlanJson === relativeFromState(stateRoot, jsonPath)
 			? safePathInsideState(stateRoot, current.currentPlanMd)
@@ -2020,24 +2024,6 @@ function recommendedNext(autoDepth: MasterPlanAutoDepth): string[] {
 	];
 }
 
-function uniqueMasterPlanBaseName(reportsDir: string, iso: string): string {
-	const stamp = iso
-		.replace(/[-:]/gu, "")
-		.replace(/T/u, "-")
-		.replace(/\.\d+Z$/u, "");
-	const base = `master-plan-${stamp}`;
-	let candidate = base;
-	let counter = 2;
-	while (
-		existsSync(join(reportsDir, `${candidate}.json`)) ||
-		existsSync(join(reportsDir, `${candidate}.md`))
-	) {
-		candidate = `${base}-${counter}`;
-		counter += 1;
-	}
-	return candidate;
-}
-
 function writeCurrent(
 	stateRoot: string,
 	current: MasterPlanCurrent,
@@ -2076,6 +2062,64 @@ function writeMemory(
 		"utf8",
 	);
 	return memory;
+}
+
+function writeSupervisorProjectIndex(
+	stateRoot: string,
+	plan: MasterPlan,
+	signals?: ProjectSignals,
+): void {
+	const fileTypes = new Map<string, number>();
+	for (const file of signals?.sourceFiles ?? plan.sourceFiles) {
+		const extension = extname(file).toLowerCase() || "[no-extension]";
+		fileTypes.set(extension, (fileTypes.get(extension) ?? 0) + 1);
+	}
+	const previousRevision = readSupervisorProjectIndexRevision(stateRoot);
+	const index = {
+		version: 1,
+		projectId: plan.projectId,
+		projectPath: plan.projectPath,
+		stateRoot,
+		masterPlanJson: MASTER_PLAN_JSON_FILE,
+		masterPlanMd: MASTER_PLAN_MD_FILE,
+		status: plan.status,
+		revision: previousRevision + 1,
+		updatedAt: new Date().toISOString(),
+		gitHead: plan.gitHead,
+		fileCount: signals?.fileCount ?? plan.sourceFiles.length,
+		directoryCount: signals?.directoryCount ?? 0,
+		fileTypes: Object.fromEntries([...fileTypes.entries()].sort()),
+		functionalAreas: {
+			architecture: plan.architecture.evidence.slice(0, 20),
+			dataStores: plan.dataStores.map((store) => store.name),
+			security: plan.securityModel.evidence.slice(0, 20),
+			flows: plan.detectedFlows.map((flow) => flow.name),
+			modules: plan.detectedModules.slice(0, 50),
+		},
+		ignoredNoise: plan.ignoredTooling,
+		toolingDetected: plan.toolingDetected,
+	};
+	writeFileSync(
+		join(stateRoot, PROJECT_INDEX_FILE),
+		`${JSON.stringify(index, null, 2)}\n`,
+		"utf8",
+	);
+}
+
+function readSupervisorProjectIndexRevision(stateRoot: string): number {
+	try {
+		const path = join(stateRoot, PROJECT_INDEX_FILE);
+		if (!existsSync(path)) return 0;
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as {
+			revision?: unknown;
+		};
+		return typeof parsed.revision === "number" &&
+			Number.isFinite(parsed.revision)
+			? parsed.revision
+			: 0;
+	} catch {
+		return 0;
+	}
 }
 
 function deepSafetyForAutoDepth(
@@ -2325,7 +2369,7 @@ function currentPlanCompatibility(
 ): { compatible: true } | { compatible: false; reason: string } {
 	let path: string;
 	try {
-		path = safePlanPathInsideReports(stateRoot, current.currentPlanJson);
+		path = safePlanPath(stateRoot, current.currentPlanJson);
 	} catch (error) {
 		return {
 			compatible: false,
@@ -2347,10 +2391,12 @@ function resolvePlanPath(
 	current?: MasterPlanCurrent,
 ): string {
 	if (pathOrLatest === "latest") {
-		if (!current) throw new Error("No existe master-plan.current.json");
-		return safePlanPathInsideReports(stateRoot, current.currentPlanJson);
+		if (current) return safePlanPath(stateRoot, current.currentPlanJson);
+		const canonical = join(resolve(stateRoot), MASTER_PLAN_JSON_FILE);
+		if (existsSync(canonical)) return canonical;
+		throw new Error("No existe master-plan.current.json");
 	}
-	return safePlanPathInsideReports(stateRoot, pathOrLatest);
+	return safePlanPath(stateRoot, pathOrLatest);
 }
 
 function resolvePlanPathForReview(
@@ -2382,13 +2428,21 @@ function safePathInsideState(stateRoot: string, path: string): string {
 	return resolved;
 }
 
-function safePlanPathInsideReports(stateRoot: string, path: string): string {
+function safePlanPath(stateRoot: string, path: string): string {
 	const resolved = safePathInsideState(stateRoot, path);
-	const relativePath = relative(stateRoot, resolved).replace(/\\/gu, "/");
-	if (!relativePath.startsWith("reports/") || !relativePath.endsWith(".json")) {
-		throw new Error("Master Plan fuera de stateRoot/reports");
+	const relativePath = relative(resolve(stateRoot), resolved).replace(
+		/\\/gu,
+		"/",
+	);
+	if (
+		relativePath === MASTER_PLAN_JSON_FILE ||
+		(relativePath.startsWith("reports/") && relativePath.endsWith(".json"))
+	) {
+		return resolved;
 	}
-	return resolved;
+	throw new Error(
+		"Master Plan fuera de stateRoot/master-plan.json o stateRoot/reports",
+	);
 }
 
 function readPlanRaw(path: string): Partial<MasterPlan> | undefined {
