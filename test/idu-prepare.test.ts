@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,6 +7,11 @@ import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectFlows } from "../src/project-flows.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import { formatIduPrepareResult, runIduPrepare } from "../src/idu-prepare.js";
+import {
+	saveProjectFlowsDraft,
+	scanProjectMap,
+	suggestProjectFlowsFromScan,
+} from "../src/project-map-scanner.js";
 
 function connection(
 	overrides: Partial<ProjectConnectionReport> = {},
@@ -379,6 +384,63 @@ test("runIduPrepare with suggested dataStores reports needs_review", () => {
 		"/config review_project_flows_draft latest",
 		"continuar bajo riesgo",
 	]);
+});
+
+test("runIduPrepare ignores scanner dataStore noise when evidence is filtered", () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-prepare-noise-"));
+	const reportsPath = mkdtempSync(join(tmpdir(), "idu-prepare-reports-"));
+	mkdirSync(join(projectPath, "docs"));
+	mkdirSync(join(projectPath, "examples"));
+	writeFileSync(
+		join(projectPath, "notes.js"),
+		`const planned = "supabase later";`,
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "docs", "storage.js"),
+		`const docs = "localStorage sessionStorage examples";`,
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "examples", "api.js"),
+		`const route = "/api/machines"; fetch('/api/reports');`,
+		"utf8",
+	);
+
+	const result = runIduPrepare({
+		projectId: "demo",
+		projectPath,
+		reportsPath,
+		inspectConnection: () => connection({ projectPath }),
+		initProjectConfig: () => {
+			throw new Error("should not init");
+		},
+		inspectProjectMap: () => ({ issues: [] }),
+		loadProjectFlows: () => flows(),
+		scanProjectMap: (loadedFlows) => scanProjectMap(projectPath, loadedFlows),
+		suggestProjectFlows: (loadedFlows) =>
+			suggestProjectFlowsFromScan(projectPath, loadedFlows),
+		draftProjectFlows: (suggestions) =>
+			saveProjectFlowsDraft(projectPath, suggestions, reportsPath),
+		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
+		postflight: () => postflight("low"),
+		createStructuredTask: () => ({ id: "task-1" }),
+	});
+
+	assert.equal(result.alignmentStatus, "aligned");
+	assert.equal(result.readiness, "aligned_ready");
+	assert.deepEqual(result.differencesDetected, {
+		screens: 0,
+		uiElements: 0,
+		dataStores: 0,
+		flows: 0,
+	});
+	assert.equal(
+		result.suggestedActions.includes(
+			"/config review_project_flows_draft latest",
+		),
+		false,
+	);
 });
 
 test("runIduPrepare without suggestions and low postflight reports aligned_ready", () => {

@@ -41,6 +41,8 @@ export type IduMcpToolName =
 	| "idu_activate"
 	| "idu_deactivate"
 	| "idu_prepare"
+	| "idu_orchestrator_procedure"
+	| "idu_task_context"
 	| "idu_preflight"
 	| "idu_advisory"
 	| "idu_postflight"
@@ -174,6 +176,28 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool("idu_prepare", "Ejecuta prepare seguro sin IA ni AgentLabs.", {
 		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 	}),
+	tool(
+		"idu_orchestrator_procedure",
+		"Devuelve procedimiento asesor para que el orquestador cree/actualice plan, implemente o audite sin que Idu-pi se imponga.",
+		{
+			purpose: requiredEnum("Propósito del procedimiento.", [
+				"create_plan",
+				"update_plan",
+				"implement_change",
+				"postflight_review",
+			]),
+			request: optionalString("Solicitud humana o resumen del cambio."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_task_context",
+		"Entrega contexto asesor para una tarea: contratos afectados, lecturas, labs audit-only y guía para subagentes del orquestador.",
+		{
+			request: requiredString("Texto de la tarea o cambio propuesto."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
 	tool("idu_preflight", "Evalúa riesgo e impacto de una solicitud humana.", {
 		request: requiredString("Texto humano a evaluar."),
 		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
@@ -683,6 +707,118 @@ async function handleProjectLifecycleTool(
 	}
 }
 
+function governanceConfigData(): JsonObject {
+	const config = loadConfig({ requireTelegram: false });
+	return {
+		...config.iduGovernance,
+		principle:
+			"Idu-pi MCP informa, audita y recomienda; el orquestador decide, ejecuta y comunica.",
+	};
+}
+
+function workerBoundaryData(): JsonObject {
+	return {
+		orchestratorOwns: [
+			"decisión final",
+			"comunicación con el usuario",
+			"subagentes worker/scout/reviewer",
+			"worktrees/sandboxes",
+			"implementación y tests",
+		],
+		iduPiOwns: [
+			"auditoría del proyecto",
+			"contratos operativos",
+			"Plan Maestro/Doc/reports en stateRoot",
+			"detección de drift y recomendaciones",
+		],
+		agentLabsOwn: [
+			"auditoría audit-only",
+			"pruebas de cambios",
+			"detección de desviaciones contra Plan Maestro",
+			"sugerencias de actualización de flujos",
+		],
+		agentLabsMustNot: [
+			"implementar features",
+			"editar repo real",
+			"crear workspaces propios dentro de stateRoot",
+			"hacer commit/push",
+		],
+	};
+}
+
+function buildOrchestratorProcedure(
+	purpose: string,
+	request: string,
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+): JsonObject {
+	const connection = runtime.inspectConnection();
+	const governanceConfig = governanceConfigData();
+	const workerBoundary = workerBoundaryData();
+	const baseSteps = [
+		"Consultar Idu-pi MCP para estado, contratos y riesgos.",
+		"Revalidar la auditoría con subagentes propios del orquestador.",
+		"Leer Plan Maestro y Doc/<project> antes de decidir.",
+		"Usar AgentLabs sólo como auditores/pruebas/drift, nunca como workers.",
+		"Comunicar al usuario la conclusión del orquestador: grave, leve, pendiente y próximo paso.",
+	];
+	const purposeSteps: Record<string, string[]> = {
+		create_plan: [
+			"Si no hay plan o está stale, ejecutar auditoría general del proyecto.",
+			"Pedir a subagentes del orquestador validar frontend, auth, datos, arquitectura y flujos.",
+			"Correr/reusar AgentLabs audit-only si la evidencia es insuficiente o hay riesgo high/critical.",
+			"Construir Plan Maestro con cumple/no cumple, contratos, violaciones y hitos.",
+			"Si falta evidencia, pedir auditoría profunda antes de cerrar como DRAFT_CONFIABLE.",
+		],
+		update_plan: [
+			"Comparar Plan Maestro/Doc contra repo y diff actual.",
+			"Detectar drift de contratos, flujos y violaciones.",
+			"Actualizar stateRoot Doc/Plan sólo con evidencia y mantener historial en reports.",
+		],
+		implement_change: [
+			"Llamar idu_task_context para obtener contratos afectados y lecturas obligatorias.",
+			"Delegar implementación a workers normales del orquestador con ese contexto.",
+			"Ejecutar postflight y auditorías audit-only antes de cerrar.",
+		],
+		postflight_review: [
+			"Inspeccionar diff y cambios locales.",
+			"Verificar contratos afectados y DoD.",
+			"Si hay drift, pedir AgentLab audit-only y proponer actualización de flujos/Doc.",
+		],
+	};
+	return {
+		summary: `Procedimiento asesor para ${purpose}`,
+		purpose,
+		request,
+		project: {
+			id: runtime.projectId,
+			path: runtime.projectPath,
+			resolutionStatus: resolution.status,
+			configStatus: connection.configStatus,
+			alignmentStatus: connection.alignmentStatus,
+		},
+		governanceConfig,
+		workerBoundary,
+		procedure: [...baseSteps, ...(purposeSteps[purpose] ?? [])],
+		mustConsult: [
+			"idu_status",
+			"idu_task_context antes de implementar",
+			"idu_postflight después del diff",
+			"idu_agentlab_* sólo si se requiere auditoría/prueba/drift",
+		],
+		mustNot: [
+			"No permitir que Idu-pi se imponga sin revalidación del orquestador.",
+			"No usar AgentLabs para codificar.",
+			"No crear workspaces permanentes en stateRoot.",
+			"No presentar Plan Maestro como confiable si falta evidencia crítica.",
+		],
+		recommendedNext:
+			connection.alignmentStatus === "aligned"
+				? "Continuar con idu_task_context o idu_postflight según etapa."
+				: connection.recommendedNext,
+	};
+}
+
 function configureProjectSessionStore(
 	statePaths: ProjectEnrollResult["statePaths"],
 ): void {
@@ -829,6 +965,57 @@ async function dispatchTool(
 				errors: result.errors,
 			});
 		}
+		case "idu_orchestrator_procedure": {
+			const purpose = requiredOneOf(args, "purpose", [
+				"create_plan",
+				"update_plan",
+				"implement_change",
+				"postflight_review",
+			]);
+			const request = stringArg(args, "request") ?? "";
+			const procedure = buildOrchestratorProcedure(
+				purpose,
+				request,
+				runtime,
+				resolution,
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: String(procedure.summary),
+				data: procedure,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Idu-pi MCP informa y guía; el orquestador decide y comunica al usuario.",
+					"AgentLabs son audit-only: no implementan ni crean workspaces.",
+				],
+			});
+		}
+		case "idu_task_context": {
+			const request = requiredText(args, "request");
+			const report = runtime.preflight(request);
+			const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Contexto asesor: ${alignmentAdvisory.recommendation}`,
+				data: {
+					alignmentAdvisory,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+					report,
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"No ejecuté AgentLabs ni escribí archivos.",
+					"El orquestador debe pasar este contexto a sus subagentes normales si decide implementar.",
+				],
+			});
+		}
 		case "idu_preflight": {
 			const request = requiredText(args, "request");
 			const report = runtime.preflight(request);
@@ -841,6 +1028,8 @@ async function dispatchTool(
 				summary: alignmentAdvisory.summary,
 				data: {
 					alignmentAdvisory,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
 					risk: report.risk,
 					detectedImpact: report.affectedAreas,
 					rulesAffected: report.constitutionGate?.affectedRules ?? [],
@@ -867,6 +1056,8 @@ async function dispatchTool(
 				summary: alignmentAdvisory.summary,
 				data: {
 					alignmentAdvisory,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
 					risk: advisory.level,
 					suggestedNextSteps: advisory.actions,
 					advisory,
@@ -886,6 +1077,8 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 				summary: report.recommendedNext,
 				data: {
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
 					changedFiles: report.changedFiles,
 					risk: report.risk,
 					gates: report.constitutionGate ?? null,
@@ -915,6 +1108,8 @@ async function dispatchTool(
 				summary: alignmentAdvisory.summary,
 				data: {
 					alignmentAdvisory,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
 					stepsExecuted: result.steps.filter(
 						(step) => step.status !== "skipped",
 					),
@@ -1007,33 +1202,13 @@ async function dispatchTool(
 			});
 		}
 		case "idu_agentlab_request_create": {
-			const source = requiredText(args, "source");
+			const source = requiredOneOf(args, "source", [
+				"postflight",
+				"master-plan",
+				"skill-draft",
+			]);
 			const selector = stringArg(args, "selector") ?? "latest";
 			const plan = runtime.agentLabRequestCreate(source, selector);
-			if (source === "master-plan" && plan.errors.length === 0) {
-				const run = await runtime.agentLabReviewRun("latest");
-				return envelope({
-					ok: true,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: `Solicitud creada y deep review ejecutado: ${run.consolidatedSummary}`,
-					data: {
-						requestFilePath: plan.path,
-						runFilePath: run.path,
-						specialties: [
-							...new Set(plan.requests.map((request) => request.specialty)),
-						],
-						plan,
-						run,
-					},
-					safeNotes: [
-						...resolution.safeNotes,
-						"Creé solicitud formal desde Plan Maestro y ejecuté AgentLabs review-only.",
-						"No hice commit/push ni toqué repo real.",
-					],
-				});
-			}
 			return envelope({
 				ok: plan.errors.length === 0,
 				tool: name,
@@ -1252,6 +1427,20 @@ function booleanArg(args: JsonObject, key: string, fallback: boolean): boolean {
 function requiredText(args: JsonObject, key: string): string {
 	const value = stringArg(args, key);
 	if (!value) throw new Error(`Missing required argument: ${key}`);
+	return value;
+}
+
+function requiredOneOf(
+	args: JsonObject,
+	key: string,
+	allowedValues: string[],
+): string {
+	const value = requiredText(args, key);
+	if (!allowedValues.includes(value)) {
+		throw new Error(
+			`Invalid argument ${key}: expected one of ${allowedValues.join(", ")}`,
+		);
+	}
 	return value;
 }
 

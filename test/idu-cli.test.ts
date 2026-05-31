@@ -1549,10 +1549,8 @@ test("CLI agentlab request commands funcionan", async () => {
 		assert.match(createSkillDraft.stdout, /agentlab-review-request/u);
 		assert.equal(createMasterPlan.exitCode, 0);
 		assert.match(createMasterPlan.stdout, /agentlab-review-request/u);
-		assert.match(
-			createMasterPlan.stdout,
-			/Deep review ejecutado automáticamente/u,
-		);
+		assert.match(createMasterPlan.stdout, /No ejecuté AgentLabs/u);
+		assert.doesNotMatch(createMasterPlan.stdout, /Deep review ejecutado/u);
 		assert.equal(review.exitCode, 0);
 		assert.match(review.stdout, /AgentLab Review Request Review/u);
 		assert.equal(simpleReview.exitCode, 0);

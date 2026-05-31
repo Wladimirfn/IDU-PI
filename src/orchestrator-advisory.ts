@@ -9,15 +9,27 @@ export type OrchestratorAdvisorySeverity =
 	| "warning"
 	| "needs_approval"
 	| "grave_failure";
+export type OrchestratorRecommendation =
+	| "allow"
+	| "warn"
+	| "ask_human"
+	| "needs_deeper_audit"
+	| "block";
 
 export type OrchestratorAdvisory = {
 	audience: OrchestratorAdvisoryAudience;
 	severity: OrchestratorAdvisorySeverity;
+	recommendation: OrchestratorRecommendation;
+	confidence: number;
 	summary: string;
 	alignment: string;
 	recommendedNext: string[];
 	requiresHuman: boolean;
 	evidenceRefs: string[];
+	contractsAffected: string[];
+	requiredReads: string[];
+	suggestedAgentLabs: string[];
+	orchestratorGuidance: string[];
 };
 
 export function buildPreflightOrchestratorAdvisory(
@@ -25,6 +37,7 @@ export function buildPreflightOrchestratorAdvisory(
 ): OrchestratorAdvisory {
 	const requiresHuman =
 		report.requiresHumanConfirmation || report.risk === "blocker";
+	const recommendation = recommendationFromPreflight(report);
 	return {
 		audience: "orchestrator",
 		severity:
@@ -32,9 +45,11 @@ export function buildPreflightOrchestratorAdvisory(
 				? "needs_approval"
 				: requiresHuman
 					? "needs_approval"
-					: report.risk === "medium"
+					: report.risk === "medium" || report.risk === "high"
 						? "warning"
 						: "info",
+		recommendation,
+		confidence: confidenceFromRisk(report.risk),
 		summary: requiresHuman
 			? "Supervisor detectó riesgo antes de ejecutar."
 			: "Supervisor no detectó bloqueo para esta intención.",
@@ -42,8 +57,9 @@ export function buildPreflightOrchestratorAdvisory(
 		recommendedNext: compactActions([
 			report.recommendedNext,
 			...(report.shouldRunAgentLab
-				? ["Pedir revisión AgentLab antes de aplicar."]
+				? ["Pedir revisión AgentLab audit-only antes de aplicar."]
 				: []),
+			"El orquestador debe revalidar esta recomendación con sus subagentes antes de implementar.",
 		]),
 		requiresHuman,
 		evidenceRefs: compactActions([
@@ -54,6 +70,10 @@ export function buildPreflightOrchestratorAdvisory(
 				(rule) => `rule:${rule}`,
 			),
 		]),
+		contractsAffected: contractAreasFromImpact(report.affectedAreas),
+		requiredReads: requiredReadsFromImpact(report.affectedAreas),
+		suggestedAgentLabs: suggestedLabsFromImpact(report.affectedAreas),
+		orchestratorGuidance: orchestratorGuidance(recommendation),
 	};
 }
 
@@ -62,6 +82,7 @@ export function buildProjectAdvisoryForOrchestrator(
 ): OrchestratorAdvisory {
 	const requiresHuman =
 		advisory.requiresHumanConfirmation || advisory.level === "blocker";
+	const recommendation = recommendationFromAdvisoryLevel(advisory.level);
 	return {
 		audience: "orchestrator",
 		severity:
@@ -72,6 +93,8 @@ export function buildProjectAdvisoryForOrchestrator(
 					: advisory.level === "warning" || advisory.level === "risk"
 						? "warning"
 						: "info",
+		recommendation,
+		confidence: advisory.level === "info" ? 0.7 : 0.85,
 		summary: advisory.title,
 		alignment: alignmentFromAreas(advisory.affectedAreas),
 		recommendedNext: compactActions([
@@ -86,12 +109,17 @@ export function buildProjectAdvisoryForOrchestrator(
 				(rule) => `rule:${rule}`,
 			),
 		]),
+		contractsAffected: contractAreasFromImpact(advisory.affectedAreas),
+		requiredReads: requiredReadsFromImpact(advisory.affectedAreas),
+		suggestedAgentLabs: suggestedLabsFromImpact(advisory.affectedAreas),
+		orchestratorGuidance: orchestratorGuidance(recommendation),
 	};
 }
 
 export function buildSupervisorLoopOrchestratorAdvisory(
 	result: IduSupervisorLoopResult,
 ): OrchestratorAdvisory {
+	const recommendation = result.status === "warning" ? "ask_human" : "warn";
 	return {
 		audience: "orchestrator",
 		severity:
@@ -100,6 +128,8 @@ export function buildSupervisorLoopOrchestratorAdvisory(
 				: result.reason === "idu_inactive"
 					? "warning"
 					: "info",
+		recommendation,
+		confidence: 0.75,
 		summary: result.summary,
 		alignment:
 			result.reason === "idu_inactive"
@@ -113,12 +143,18 @@ export function buildSupervisorLoopOrchestratorAdvisory(
 			...(result.reason ? [`reason:${result.reason}`] : []),
 			...result.steps.map((step) => `${step.name}:${step.status}`),
 		]),
+		contractsAffected: [],
+		requiredReads: [],
+		suggestedAgentLabs: [],
+		orchestratorGuidance: orchestratorGuidance(recommendation),
 	};
 }
 
 export function buildSupervisorHookOrchestratorAdvisory(
 	result: IduSupervisorHookResult,
 ): OrchestratorAdvisory {
+	const recommendation =
+		result.reason === "supervisor_failed" ? "ask_human" : "warn";
 	return {
 		audience: result.reason === "supervisor_failed" ? "human" : "orchestrator",
 		severity:
@@ -127,6 +163,8 @@ export function buildSupervisorHookOrchestratorAdvisory(
 				: result.status === "warning"
 					? "warning"
 					: "info",
+		recommendation,
+		confidence: result.reason === "supervisor_failed" ? 0.9 : 0.75,
 		summary: result.summary,
 		alignment:
 			result.reason === "supervisor_failed"
@@ -142,6 +180,10 @@ export function buildSupervisorHookOrchestratorAdvisory(
 			`status:${result.status}`,
 			...(result.reason ? [`reason:${result.reason}`] : []),
 		]),
+		contractsAffected: [],
+		requiredReads: [],
+		suggestedAgentLabs: [],
+		orchestratorGuidance: orchestratorGuidance(recommendation),
 	};
 }
 
@@ -149,6 +191,110 @@ function alignmentFromAreas(areas: string[]): string {
 	const relevant = areas.filter(Boolean);
 	if (!relevant.length) return "Sin desalineación visible contra el plan.";
 	return `La intención impacta: ${relevant.slice(0, 4).join(", ")}.`;
+}
+
+function recommendationFromPreflight(
+	report: ProjectPreflightReport,
+): OrchestratorRecommendation {
+	if (report.risk === "blocker") return "block";
+	if (report.requiresHumanConfirmation) return "ask_human";
+	if (report.shouldRunAgentLab) return "needs_deeper_audit";
+	if (report.risk === "high") return "needs_deeper_audit";
+	if (report.risk === "medium") return "warn";
+	return "allow";
+}
+
+function recommendationFromAdvisoryLevel(
+	level: ProjectAdvisory["level"],
+): OrchestratorRecommendation {
+	if (level === "blocker") return "block";
+	if (level === "risk") return "needs_deeper_audit";
+	if (level === "warning") return "warn";
+	return "allow";
+}
+
+function confidenceFromRisk(risk: ProjectPreflightReport["risk"]): number {
+	if (risk === "blocker") return 0.95;
+	if (risk === "high") return 0.85;
+	if (risk === "medium") return 0.75;
+	return 0.7;
+}
+
+function contractAreasFromImpact(areas: string[]): string[] {
+	const joined = areas.join(" ").toLowerCase();
+	return compactActions([
+		...(joined.match(/auth|login|session|token|security|seguridad/u)
+			? ["auth", "security"]
+			: []),
+		...(joined.match(/db|database|datos|schema|migraci|supabase|postgres/u)
+			? ["data"]
+			: []),
+		...(joined.match(/ui|frontend|html|css|button|form/u) ? ["frontend"] : []),
+		...(joined.match(/api|route|endpoint|backend/u) ? ["api"] : []),
+		...(areas.length ? ["agent"] : []),
+	]);
+}
+
+function requiredReadsFromImpact(areas: string[]): string[] {
+	const contracts = contractAreasFromImpact(areas);
+	return compactActions([
+		"Plan Maestro vigente",
+		"Doc/<project>/01-contratos-operativos.generado.md",
+		...(contracts.includes("auth")
+			? [
+					"Archivos de login/auth/session detectados",
+					"Políticas de sesión y permisos",
+				]
+			: []),
+		...(contracts.includes("data")
+			? ["Migraciones/schema/base de datos", "Contratos Datos/DB"]
+			: []),
+		...(contracts.includes("frontend")
+			? ["HTML/JS/CSS afectados", "Contrato Frontend/UI"]
+			: []),
+	]);
+}
+
+function suggestedLabsFromImpact(areas: string[]): string[] {
+	const contracts = contractAreasFromImpact(areas);
+	return compactActions([
+		...(contracts.includes("auth") || contracts.includes("security")
+			? ["security"]
+			: []),
+		...(contracts.includes("data") ? ["database"] : []),
+		...(contracts.includes("frontend") || contracts.includes("api")
+			? ["architecture"]
+			: []),
+		...(contracts.length ? ["code_quality"] : []),
+	]);
+}
+
+function orchestratorGuidance(
+	recommendation: OrchestratorRecommendation,
+): string[] {
+	return compactActions([
+		"Idu-pi informa; el orquestador decide tras revalidar con sus subagentes.",
+		"No uses AgentLabs para implementar; sólo para auditoría, pruebas y drift contra Plan Maestro.",
+		...(recommendation === "allow"
+			? ["Podés continuar con subagentes normales si el alcance es claro."]
+			: []),
+		...(recommendation === "warn"
+			? ["Continuá con cautela y registra contrato afectado en la tarea."]
+			: []),
+		...(recommendation === "needs_deeper_audit"
+			? [
+					"Revalida con subagente especializado o AgentLab audit-only antes de escribir.",
+				]
+			: []),
+		...(recommendation === "ask_human"
+			? ["Pedí decisión humana antes de cambios de alto impacto."]
+			: []),
+		...(recommendation === "block"
+			? [
+					"Pausá ejecución hasta resolver el bloqueo explícito o recibir excepción humana.",
+				]
+			: []),
+	]);
 }
 
 function compactActions(values: string[]): string[] {

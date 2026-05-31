@@ -466,6 +466,114 @@ test("suggestProjectFlowsFromScan suggests missing dataStore", () => {
 	);
 });
 
+test("scanner does not suggest supabase from textual mention only", () => {
+	const projectPath = tempProject();
+	writeFileSync(
+		join(projectPath, "notes.js"),
+		`// TODO: maybe use supabase later\nconst text = "supabase integration planned";`,
+		"utf8",
+	);
+	const flows = mappedFlows();
+	flows.dataStores = [];
+
+	const scan = scanProjectMap(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+
+	assert.equal(
+		scan.detected.dataStores.some((store) => store.type === "supabase"),
+		false,
+	);
+	assert.equal(
+		suggestions.dataStores.some((store) => store.type === "supabase"),
+		false,
+	);
+	assert.doesNotMatch(warningText(scan), /supabase|dataStore detectado/u);
+});
+
+test("scanner ignores storage mentions in docs and fixtures", () => {
+	const projectPath = tempProject();
+	mkdirSync(join(projectPath, "docs"));
+	mkdirSync(join(projectPath, "fixtures"));
+	writeFileSync(
+		join(projectPath, "docs", "storage.js"),
+		`const docs = "localStorage and sessionStorage are examples";`,
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "fixtures", "storage.js"),
+		`const fixture = { storage: "localStorage sessionStorage" };`,
+		"utf8",
+	);
+	const flows = mappedFlows();
+	flows.dataStores = [];
+
+	const scan = scanProjectMap(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+
+	assert.equal(scan.detected.dataStores.length, 0);
+	assert.equal(suggestions.dataStores.length, 0);
+	assert.doesNotMatch(warningText(scan), /localStorage|sessionStorage/u);
+});
+
+test("scanner ignores API examples and defaults as functional dataStores", () => {
+	const projectPath = tempProject();
+	mkdirSync(join(projectPath, "examples"));
+	mkdirSync(join(projectPath, "config"));
+	mkdirSync(join(projectPath, "defaults"));
+	writeFileSync(
+		join(projectPath, "examples", "default-api.js"),
+		`const machines = "/api/machines";\nconst reports = fetch('/api/reports');`,
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "config", "default-flows.json"),
+		JSON.stringify({ endpoints: ["/api/machines", "/api/reports"] }),
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "defaults", "api.js"),
+		`fetch('/api/machines');\nlocalStorage.setItem('demo', '1');`,
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, "api.defaults.js"),
+		`fetch('/api/reports');`,
+		"utf8",
+	);
+	const flows = mappedFlows();
+	flows.dataStores = [];
+
+	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const ids = suggestions.dataStores.map((store) => store.id);
+
+	assert.equal(ids.includes("api-machines"), false);
+	assert.equal(ids.includes("api-reports"), false);
+	assert.equal(
+		suggestions.dataStores.some((store) => store.type === "localStorage"),
+		false,
+	);
+});
+
+test("scanner keeps real runtime API and storage evidence", () => {
+	const projectPath = tempProject();
+	writeFileSync(
+		join(projectPath, "app.js"),
+		`fetch('/api/machines');\nlocalStorage.setItem('machines', '[]');`,
+		"utf8",
+	);
+	const flows = mappedFlows();
+	flows.dataStores = [];
+
+	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+
+	assert.ok(
+		suggestions.dataStores.some((store) => store.id === "api-machines"),
+	);
+	assert.ok(
+		suggestions.dataStores.some((store) => store.type === "localStorage"),
+	);
+});
+
 test("suggestProjectFlowsFromScan suggests simple flow from onclick", () => {
 	const projectPath = tempProject();
 	writeFixture(projectPath);

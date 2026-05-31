@@ -25,6 +25,12 @@ function config(root: string): BridgeConfig {
 			{ id: "default", label: "Default", provider: "pi", piArgs: [] },
 		],
 		agentWorkspaceMode: "clone",
+		iduGovernance: {
+			mcpAuthorityMode: "advisory",
+			agentLabMode: "audit_only",
+			workspaceOwner: "orchestrator",
+			autoRefreshLabProfiles: true,
+		},
 	};
 }
 

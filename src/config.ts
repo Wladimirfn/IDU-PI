@@ -17,6 +17,19 @@ export type AgentProfile = {
 };
 
 export type AgentWorkspaceMode = "direct" | "clone";
+// Default and supported production mode is advisory: Idu-pi informs/audits/recommends
+// while the orchestrator owns final decisions. "strict" is reserved for explicit
+// future critical-hazard deployments and currently only surfaces as configuration data.
+export type IduMcpAuthorityMode = "advisory" | "strict";
+export type IduAgentLabMode = "audit_only";
+export type IduWorkspaceOwner = "orchestrator";
+
+export type IduGovernanceConfig = {
+	mcpAuthorityMode: IduMcpAuthorityMode;
+	agentLabMode: IduAgentLabMode;
+	workspaceOwner: IduWorkspaceOwner;
+	autoRefreshLabProfiles: boolean;
+};
 
 export type BridgeConfig = {
 	telegramBotToken: string;
@@ -28,6 +41,7 @@ export type BridgeConfig = {
 	agentProfiles: AgentProfile[];
 	agentWorkspaceRoot: string;
 	agentWorkspaceMode: AgentWorkspaceMode;
+	iduGovernance: IduGovernanceConfig;
 };
 
 function required(name: string): string {
@@ -95,6 +109,23 @@ function parseWorkspaceMode(raw?: string): AgentWorkspaceMode {
 	throw new Error("AGENT_WORKSPACE_MODE must be direct or clone");
 }
 
+function parseIduMcpAuthorityMode(raw?: string): IduMcpAuthorityMode {
+	const value = raw?.trim().toLowerCase() || "advisory";
+	if (value === "advisory" || value === "strict") return value;
+	throw new Error("IDU_MCP_AUTHORITY_MODE must be advisory or strict");
+}
+
+function parseBooleanEnv(
+	raw: string | undefined,
+	defaultValue: boolean,
+): boolean {
+	const value = raw?.trim().toLowerCase();
+	if (!value) return defaultValue;
+	if (["1", "true", "yes", "on"].includes(value)) return true;
+	if (["0", "false", "no", "off"].includes(value)) return false;
+	throw new Error("Boolean env var must be true/false/1/0/yes/no/on/off");
+}
+
 export type LoadConfigOptions = {
 	requireTelegram?: boolean;
 };
@@ -134,6 +165,17 @@ export function loadConfig(options: LoadConfigOptions = {}): BridgeConfig {
 				join(homedir(), "Documents", "bridge-agents"),
 		),
 		agentWorkspaceMode: parseWorkspaceMode(process.env.AGENT_WORKSPACE_MODE),
+		iduGovernance: {
+			mcpAuthorityMode: parseIduMcpAuthorityMode(
+				process.env.IDU_MCP_AUTHORITY_MODE,
+			),
+			agentLabMode: "audit_only",
+			workspaceOwner: "orchestrator",
+			autoRefreshLabProfiles: parseBooleanEnv(
+				process.env.IDU_AGENTLAB_AUTO_REFRESH_PROFILES,
+				true,
+			),
+		},
 	};
 }
 

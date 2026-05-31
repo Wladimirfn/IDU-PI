@@ -925,32 +925,149 @@ function scanScriptText(
 		pushFunction(result, match[1], file);
 	}
 	for (const match of content.matchAll(/\bfetch\s*\(\s*["']([^"']+)["']/gu)) {
-		pushApiEndpoint(result, match[1], file);
+		if (isRuntimeDataStoreEvidence(file, content, "api", match[1]))
+			pushApiEndpoint(result, match[1], file);
 	}
 	for (const match of content.matchAll(/["'](\/api\/[^"']+)["']/gu)) {
-		pushApiEndpoint(result, match[1], file);
+		if (isRuntimeDataStoreEvidence(file, content, "api", match[1]))
+			pushApiEndpoint(result, match[1], file);
 	}
-	if (/\blocalStorage\b/u.test(content))
+	if (isRuntimeDataStoreEvidence(file, content, "localStorage", "localStorage"))
 		pushDataStore(result, "localStorage", "localStorage", file);
-	if (/\bsessionStorage\b/u.test(content))
+	if (
+		isRuntimeDataStoreEvidence(
+			file,
+			content,
+			"sessionStorage",
+			"sessionStorage",
+		)
+	)
 		pushDataStore(result, "sessionStorage", "sessionStorage", file);
-	if (/\bsupabase\b/u.test(content))
+	if (isRuntimeDataStoreEvidence(file, content, "supabase", "supabase"))
 		pushDataStore(result, "supabase", "supabase", file);
-	if (/\bsqlite\b|\.sqlite\b|\.db\b/iu.test(content))
+	if (isRuntimeDataStoreEvidence(file, content, "sqlite", "sqlite"))
 		pushDataStore(result, "sqlite", "sqlite", file);
 	for (const match of content.matchAll(/["']([^"']+\.json)["']/giu)) {
-		pushDataStore(result, "json", match[1], file);
+		if (isRuntimeDataStoreEvidence(file, content, "json", match[1]))
+			pushDataStore(result, "json", match[1], file);
 	}
 }
 
 function scanJsonFile(
 	file: string,
-	_content: string,
+	content: string,
 	result: ProjectMapScanResult,
 ): void {
-	if (!file.includes("package-lock") && !file.includes("pnpm-lock")) {
+	if (
+		!file.includes("package-lock") &&
+		!file.includes("pnpm-lock") &&
+		isRuntimeDataStoreEvidence(file, content, "json", file)
+	) {
 		pushDataStore(result, "json", file, file);
 	}
+}
+
+function isRuntimeDataStoreEvidence(
+	file: string,
+	content: string,
+	type: DetectedStorage["type"],
+	value: string,
+): boolean {
+	const sourceKind = dataStoreSourceKind(file);
+	if (sourceKind !== "runtime_store") return false;
+	switch (type) {
+		case "api":
+			return isRuntimeApiEvidence(content, value);
+		case "localStorage":
+			return /\blocalStorage\s*\.\s*(getItem|setItem|removeItem|clear)\s*\(/u.test(
+				content,
+			);
+		case "sessionStorage":
+			return /\bsessionStorage\s*\.\s*(getItem|setItem|removeItem|clear)\s*\(/u.test(
+				content,
+			);
+		case "supabase":
+			return /\bsupabase\s*\.\s*(from|auth|storage|rpc|channel)\s*\(/u.test(
+				content,
+			);
+		case "sqlite":
+			return /\b(open|connect|new)\w*\s*\([^)]*(sqlite|\.db)|\bsqlite3?\s*\.\s*(Database|open)\s*\(/iu.test(
+				content,
+			);
+		case "json":
+			return (
+				!isConfigOrDefaultJson(file) &&
+				/\b(readFile|writeFile|fetch)\s*\(/u.test(content) &&
+				content.includes(value)
+			);
+	}
+}
+
+function isRuntimeApiEvidence(content: string, value: string): boolean {
+	return (
+		new RegExp(`\\bfetch\\s*\\(\\s*["']${escapeRegExp(value)}["']`, "u").test(
+			content,
+		) ||
+		new RegExp(
+			`\\b(?:apiUrl|apiEndpoint|endpoint|url|route)\\b[^\n=]*=\\s*["']${escapeRegExp(value)}["']`,
+			"u",
+		).test(content)
+	);
+}
+
+function dataStoreSourceKind(
+	file: string,
+):
+	| "runtime_store"
+	| "config"
+	| "template/default"
+	| "draft/report"
+	| "test_fixture"
+	| "demo" {
+	const normalized = normalizePath(file);
+	const parts = normalized.split("/");
+	if (parts.includes("docs") || parts.includes("reports"))
+		return "draft/report";
+	if (
+		parts.includes("fixtures") ||
+		parts.includes("fixture") ||
+		parts.includes("test") ||
+		parts.includes("tests") ||
+		/\.(test|spec)\.[jt]sx?$/u.test(normalized)
+	) {
+		return "test_fixture";
+	}
+	if (
+		parts.includes("examples") ||
+		parts.includes("example") ||
+		parts.includes("demo")
+	)
+		return "demo";
+	if (
+		parts.includes("templates") ||
+		parts.includes("defaults") ||
+		/(^|[-_.])defaults?[-_.]/u.test(basename(normalized))
+	)
+		return "template/default";
+	if (parts.includes("config") || isConfigOrDefaultJson(normalized))
+		return "config";
+	return "runtime_store";
+}
+
+function isConfigOrDefaultJson(file: string): boolean {
+	const normalized = normalizePath(file);
+	return (
+		normalized.endsWith("package.json") ||
+		normalized.includes("tsconfig") ||
+		normalized.includes("project-flows") ||
+		normalized.includes("project-blueprint") ||
+		normalized.includes("project-core") ||
+		normalized.includes("project-constitution")
+	);
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function compareWithFlows(

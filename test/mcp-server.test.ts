@@ -455,7 +455,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_bootstrap_project"));
 	assert.ok(tools.some((tool) => tool.name === "idu_start"));
 	assert.ok(tools.some((tool) => tool.name === "idu_agentlab_review_run"));
-	assert.equal(tools.length, 19);
+	assert.ok(tools.some((tool) => tool.name === "idu_orchestrator_procedure"));
+	assert.ok(tools.some((tool) => tool.name === "idu_task_context"));
+	assert.equal(tools.length, 21);
 });
 
 test("idu_status works with explicit projectPath", async () => {
@@ -557,6 +559,68 @@ test("idu_preflight detects high auth/login risk", async () => {
 		(result.data.alignmentAdvisory as { severity: string }).severity,
 		"needs_approval",
 	);
+	assert.equal(
+		(result.data.alignmentAdvisory as { recommendation: string })
+			.recommendation,
+		"ask_human",
+	);
+	assert.equal(
+		(result.data.governanceConfig as { mcpAuthorityMode: string })
+			.mcpAuthorityMode,
+		"advisory",
+	);
+	assert.ok(
+		(
+			result.data.workerBoundary as { agentLabsMustNot: string[] }
+		).agentLabsMustNot.some((item) => /implementar/u.test(item)),
+	);
+});
+
+test("idu_orchestrator_procedure and task_context guide without implementing", async () => {
+	const procedure = await callIduMcpTool(
+		"idu_orchestrator_procedure",
+		{ purpose: "create_plan", request: "crear plan" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(procedure.ok, true);
+	assert.match(procedure.summary, /Procedimiento asesor/u);
+	assert.ok(
+		(procedure.data.procedure as string[]).some((step) =>
+			/revalidar/i.test(step),
+		),
+	);
+	assert.ok(
+		(procedure.data.mustNot as string[]).some((step) =>
+			/AgentLabs para codificar/u.test(step),
+		),
+	);
+
+	const context = await callIduMcpTool(
+		"idu_task_context",
+		{ request: "cambiar login" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(context.ok, true);
+	assert.match(context.summary, /Contexto asesor/u);
+	assert.equal(
+		(context.data.alignmentAdvisory as { recommendation: string })
+			.recommendation,
+		"ask_human",
+	);
+	assert.ok(
+		(context.data.alignmentAdvisory as { requiredReads: string[] })
+			.requiredReads.length > 0,
+	);
+});
+
+test("idu_orchestrator_procedure validates purpose at runtime", async () => {
+	const result = await callIduMcpTool(
+		"idu_orchestrator_procedure",
+		{ purpose: "unknown" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(result.ok, false);
+	assert.match(result.errors.join("\n"), /Invalid argument purpose/u);
 });
 
 test("idu_task respects active and inactive guardrails", async () => {
@@ -955,8 +1019,19 @@ test("postflight request create remains request-only and review-run reports sand
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(masterPlan.ok, true);
-	assert.match(masterPlan.summary, /deep review ejecutado/i);
-	assert.ok(masterPlan.data.run);
+	assert.match(masterPlan.summary, /Solicitud AgentLab creada/i);
+	assert.ok(!masterPlan.data.run);
+	assert.ok(
+		masterPlan.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
+	);
+
+	const invalid = await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{ source: "implement" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(invalid.ok, false);
+	assert.match(invalid.errors.join("\n"), /Invalid argument source/u);
 
 	const run = await callIduMcpTool(
 		"idu_agentlab_review_run",

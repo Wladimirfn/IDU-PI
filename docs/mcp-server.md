@@ -117,7 +117,9 @@ Todas devuelven JSON estructurado con:
 }
 ```
 
-Las herramientas que evalúan intención o supervisor (`idu_preflight`, `idu_advisory`, `idu_supervisor_tick`) agregan `data.alignmentAdvisory`: una señal compacta para el orquestador con `audience`, `severity`, `alignment`, `recommendedNext`, `requiresHuman` y `evidenceRefs`. Esto evita pasarle al usuario reportes largos cuando el destinatario real es el orquestador.
+Las herramientas que evalúan intención o supervisor (`idu_preflight`, `idu_advisory`, `idu_supervisor_tick`, `idu_task_context`) agregan `data.alignmentAdvisory`: una señal compacta para el orquestador con `audience`, `severity`, `alignment`, `recommendation`, `confidence`, `requiredReads`, `suggestedAgentLabs`, `orchestratorGuidance` y `evidenceRefs`. Esto evita pasarle al usuario reportes largos cuando el destinatario real es el orquestador.
+
+El modo de autoridad MCP por defecto es `IDU_MCP_AUTHORITY_MODE=advisory`: Idu-pi informa, audita y recomienda; el orquestador revalida, decide, ejecuta y comunica. El valor `strict` queda reservado para despliegues futuros con hazards críticos explícitos y hoy sólo se expone como dato de configuración, no como permiso para imponer decisiones.
 
 Herramientas mínimas:
 
@@ -132,6 +134,8 @@ Herramientas mínimas:
 | `idu_activate` | Sólo activa guardrails automáticos sin enrolar, bootstrap, scan pesado ni AgentLabs. |
 | `idu_deactivate` | Apaga guardrails automáticos. |
 | `idu_prepare` | Ejecuta prepare seguro. |
+| `idu_orchestrator_procedure` | Devuelve procedimiento asesor para crear/actualizar plan, implementar o revisar postflight sin reemplazar al orquestador. |
+| `idu_task_context` | Devuelve contratos afectados, lecturas requeridas, labs sugeridos audit-only y guía para subagentes del orquestador. |
 | `idu_preflight` | Evalúa riesgo/impacto de una solicitud humana y devuelve advisory compacto para el orquestador. |
 | `idu_advisory` | Devuelve advisory seguro para el orquestador desde preflight. |
 | `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios. |
@@ -139,7 +143,7 @@ Herramientas mínimas:
 | `idu_task` | Interpreta intención humana y registra tarea estructurada. |
 | `idu_queue_detail` | Devuelve cola estructurada con ids completos y guardStatus. |
 | `idu_semantic_audit_status` | Lee stats/checkpoint/decisión de auditoría semántica. |
-| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; para `source=master-plan` también ejecuta el deep review review-only en sandbox/clone. |
+| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. |
 | `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard. |
 | `idu_agentlab_review_status` | Lee estado de review AgentLab. |
 

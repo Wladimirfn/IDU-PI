@@ -1147,11 +1147,6 @@ export async function runCliCommand(
 			case "agentlab-request-create": {
 				const source = rest[0] ?? "postflight";
 				const selector = rest.slice(1).join(" ").trim() || "latest";
-				if (source === "master-plan") {
-					return ok(
-						await runMasterPlanDeepReview(activeRuntime, "advanced", selector),
-					);
-				}
 				return ok(
 					activeRuntime.formatAgentLabReviewRequestPlan(
 						activeRuntime.agentLabRequestCreate(source, selector),
@@ -1706,6 +1701,7 @@ function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
 		defaultCwd: context.config.defaultCwd,
 		allowedRoots: context.config.allowedRoots,
 		workspaceRoot: context.runtimeWorkspaceRoot,
+		projectId: context.activeProject.id,
 	});
 }
 
@@ -2175,7 +2171,7 @@ export function helpText(): string {
 		"  idu-pi idu-lab-review-plan postflight",
 		"  idu-pi revisar",
 		"  idu-pi idu-agentlab-request-create postflight",
-		"  idu-pi idu-agentlab-request-create master-plan latest",
+		"  idu-pi idu-agentlab-request-create master-plan latest  # crea solicitud; no ejecuta labs",
 		"  idu-pi idu-agentlab-request-create skill-draft latest",
 		"  idu-pi idu-agentlab-request-review latest",
 		"  idu-pi idu-agentlab-review-run latest  # ejecuta AgentLab review-only en clone/sandbox",
