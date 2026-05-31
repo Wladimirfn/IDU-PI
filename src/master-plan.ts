@@ -118,6 +118,38 @@ export type MasterPlanSecurityModel = {
 	evidence: string[];
 };
 
+export type MasterPlanDocNotebook = {
+	root: string;
+	status: "created" | "loaded" | "empty";
+	sources: string[];
+	summary: string;
+};
+
+export type MasterPlanOperationalContract = {
+	area: "frontend" | "auth" | "data" | "api" | "security" | "agent";
+	title: string;
+	rules: string[];
+	evidence: string[];
+	severity: "critical" | "high" | "medium" | "low";
+	mode: "block" | "ask_human" | "warn" | "allow";
+};
+
+export type MasterPlanContractViolation = {
+	area: MasterPlanOperationalContract["area"];
+	title: string;
+	evidence: string[];
+	impact: string[];
+	action: string[];
+	severity: "critical" | "high" | "medium" | "low";
+};
+
+export type MasterPlanWorkMilestone = {
+	name: string;
+	goal: string;
+	actions: string[];
+	exitCriteria: string[];
+};
+
 export type MasterPlanFunctionalFlow = {
 	name: string;
 	type:
@@ -208,6 +240,10 @@ export type MasterPlan = {
 	dataStores: MasterPlanDataStore[];
 	architecture: MasterPlanArchitecture;
 	securityModel: MasterPlanSecurityModel;
+	docNotebook: MasterPlanDocNotebook;
+	operationalContracts: MasterPlanOperationalContract[];
+	contractViolations: MasterPlanContractViolation[];
+	workMilestones: MasterPlanWorkMilestone[];
 	toolingDetected: string[];
 	ignoredTooling: string[];
 	userRoles: string[];
@@ -354,6 +390,12 @@ const TEXT_EXTENSIONS = new Set([
 	".php",
 ]);
 
+export type MasterPlanProgressEvent = {
+	stage: "scan" | "reverse_engineering" | "forge_plan" | "quarantine";
+	status: "running" | "ok" | "blocked";
+	message: string;
+};
+
 export function generateMasterPlanDraft(input: {
 	projectId: string;
 	projectPath: string;
@@ -361,6 +403,7 @@ export function generateMasterPlanDraft(input: {
 	gitHead?: string;
 	reason?: string;
 	memoryProvider?: MasterPlanMemoryProvider;
+	onProgress?: (event: MasterPlanProgressEvent) => void;
 }): MasterPlanDraftResult {
 	const projectPath = resolve(input.projectPath);
 	const stateRoot = resolve(input.stateRoot);
@@ -371,9 +414,30 @@ export function generateMasterPlanDraft(input: {
 	mkdirSync(join(stateRoot, "agentlabs", "reports"), { recursive: true });
 	mkdirSync(join(stateRoot, "agentlabs", "work"), { recursive: true });
 	const generatedAt = new Date().toISOString();
+	input.onProgress?.({
+		stage: "scan",
+		status: "running",
+		message: "Escaneando repositorio completo",
+	});
 	const signals = collectProjectSignals(projectPath);
+	input.onProgress?.({
+		stage: "scan",
+		status: "ok",
+		message: `Escaneo completo: ${signals.fileCount} archivos, ${signals.directoryCount} carpetas`,
+	});
+	input.onProgress?.({
+		stage: "reverse_engineering",
+		status: "running",
+		message: "Preparando ingeniería inversa de flujos y arquitectura",
+	});
 	const source = readSourceStatuses(projectPath, signals);
 	const autoDepth = decideAutoDepth(signals, source);
+	input.onProgress?.({
+		stage: "reverse_engineering",
+		status: "ok",
+		message:
+			"Flujos, datos, auth y arquitectura inferidos desde evidencia local",
+	});
 	const deepSafety = deepSafetyForAutoDepth(autoDepth);
 	const memoryContext = loadExternalProjectMemory({
 		projectId: input.projectId,
@@ -381,7 +445,23 @@ export function generateMasterPlanDraft(input: {
 		stateRoot,
 		provider: input.memoryProvider,
 	});
+	input.onProgress?.({
+		stage: "forge_plan",
+		status: "running",
+		message: "Forjando Plan Maestro A-Z y matriz de riesgos",
+	});
 	const inferredObjective = inferObjective(projectPath, signals);
+	const docNotebook = loadProjectDocNotebook(stateRoot, input.projectId);
+	const operationalContracts = inferOperationalContracts(signals, docNotebook);
+	const contractViolations = detectContractViolations(
+		projectPath,
+		signals,
+		operationalContracts,
+	);
+	const workMilestones = buildContractWorkMilestones(
+		contractViolations,
+		signals,
+	);
 	const plan: MasterPlan = {
 		version: "1.0.0",
 		schemaVersion: MASTER_PLAN_SCHEMA_VERSION,
@@ -406,16 +486,20 @@ export function generateMasterPlanDraft(input: {
 		problemStatement: buildProblemStatement(source, signals),
 		scope: inferScope(signals),
 		outOfScope: [
-			"Aplicar flows automáticamente",
-			"Confirmar Project Core o Constitution sin decisión humana",
-			"Ejecutar cambios de AgentLabs sobre el repo real",
-			"Hacer commit/push",
+			"Cambios funcionales sin plan aprobado",
+			"Modificar seguridad, datos o permisos sin validación explícita",
+			"Agregar dependencias o integraciones no justificadas",
+			"Publicar cambios sin verificación técnica previa",
 		],
 		detectedModules: signals.moduleCandidates,
 		detectedFlows: signals.flowCandidates,
 		dataStores: signals.dataStoreCandidates,
 		architecture: signals.architecture,
 		securityModel: signals.securityModel,
+		docNotebook,
+		operationalContracts,
+		contractViolations,
+		workMilestones,
 		toolingDetected: signals.toolingDetected,
 		ignoredTooling: signals.ignoredTooling,
 		userRoles: inferUserRoles(signals),
@@ -426,7 +510,7 @@ export function generateMasterPlanDraft(input: {
 		openQuestions: inferOpenQuestions(source, signals),
 		assumptions: inferAssumptions(signals, input.reason),
 		recommendedNext: recommendedNext(autoDepth),
-		sourceFiles: signals.sourceFiles.slice(0, 50),
+		sourceFiles: signals.sourceFiles,
 		agentLabReviews: [
 			...autoDepth.agentLabsSelected.map((specialty) => ({
 				specialty,
@@ -444,10 +528,22 @@ export function generateMasterPlanDraft(input: {
 			})),
 		],
 	};
+	input.onProgress?.({
+		stage: "forge_plan",
+		status: "ok",
+		message: "Plan Maestro A-Z preparado desde evidencia local",
+	});
+	input.onProgress?.({
+		stage: "quarantine",
+		status: "running",
+		message:
+			"Guardando artefactos en stateRoot y manteniendo repo real en cuarentena",
+	});
 	const relativeJson = MASTER_PLAN_JSON_FILE;
 	const relativeMd = MASTER_PLAN_MD_FILE;
 	const jsonPath = join(stateRoot, relativeJson);
 	const markdownPath = join(stateRoot, relativeMd);
+	writeProjectDocNotebook(stateRoot, plan);
 	writeFileSync(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 	writeFileSync(markdownPath, `${formatMasterPlanMarkdown(plan)}\n`, "utf8");
 	writeSupervisorProjectIndex(stateRoot, plan, signals);
@@ -462,6 +558,11 @@ export function generateMasterPlanDraft(input: {
 	});
 	writeMasterPlanPendingAction(stateRoot, current);
 	const memory = writeMemory(stateRoot, plan, current);
+	input.onProgress?.({
+		stage: "quarantine",
+		status: "ok",
+		message: "Artefactos guardados; repo real sin cambios automáticos",
+	});
 	return { plan, current, memory, jsonPath, markdownPath };
 }
 
@@ -701,6 +802,7 @@ export function redraftMasterPlan(input: {
 	stateRoot: string;
 	gitHead?: string;
 	reason?: string;
+	onProgress?: (event: MasterPlanProgressEvent) => void;
 }): MasterPlanDraftResult {
 	return generateMasterPlanDraft(input);
 }
@@ -710,6 +812,7 @@ export function ensureMasterPlanForIdu(input: {
 	projectPath: string;
 	stateRoot: string;
 	gitHead?: string;
+	onProgress?: (event: MasterPlanProgressEvent) => void;
 }):
 	| MasterPlanDraftResult
 	| { status: MasterPlanStatusResult; plan?: MasterPlan } {
@@ -839,6 +942,35 @@ export function formatIduSupervisorPlanReport(input: {
 			"2. No — dejar sólo el estado aislado y no tocar el repo.",
 		].join("\n");
 	}
+	const externalBlockers = plan ? externalContextBlockers(plan) : [];
+	if (plan && externalBlockers.length > 0) {
+		return [
+			`[idu-pi] ⚙️  Escaneando repositorio (${filesSignal} archivos, ${dirsSignal} carpetas)... [OK]`,
+			"[idu-pi] 📚  Clasificando archivos y dominios críticos... [OK]",
+			"[idu-pi] 🔐  Revisando seguridad/login/session... [OK]",
+			"[idu-pi] 🗄️  Revisando contexto externo obligatorio... [BLOCKED]",
+			"",
+			"No puedo cerrar el Plan Maestro todavía.",
+			"",
+			"Motivo:",
+			...externalBlockers.map((blocker) => `- ${blocker}`),
+			"",
+			"Avance:",
+			`- Repo local revisado: ${filesSignal}/${filesSignal} archivos`,
+			`- Lenguajes detectados: ${formatList(plan.architecture.languages)}`,
+			`- Frameworks/librerías detectadas: ${formatList(plan.architecture.frameworks)}`,
+			`- Login/session: ${plan.securityModel.authDetected ? "revisado con evidencia local" : "no detectado"}`,
+			`- Capa de datos local/config: ${plan.architecture.database}`,
+			"- Contexto remoto/externo: pendiente por conexión o credenciales seguras",
+			"",
+			"Para finalizar necesito:",
+			"1. Conectar el MCP/credenciales seguras del servicio externo detectado.",
+			"2. O autorizar explícitamente un plan parcial marcado como PARCIAL.",
+			"3. Cancelar y conservar sólo el estado aislado generado.",
+			"",
+			`Documentos preparados: JSON=${planJson} | MD=${planMd}`,
+		].join("\n");
+	}
 	const lines = [
 		`[idu-pi] ⚙️  Escaneando repositorio (${filesSignal} archivos, ${dirsSignal} carpetas)... [OK]`,
 		"[idu-pi] 🧠  Ejecutando ingeniería inversa de flujos y arquitectura... [OK]",
@@ -871,14 +1003,10 @@ export function formatIduSupervisorPlanReport(input: {
 		...topBullets(plan?.scope ?? [], 5),
 		"",
 		"🔴 FUERA DE ALCANCE",
-		...topBullets(plan?.outOfScope ?? [], 5),
+		...topBullets(plan ? visibleOutOfScope(plan) : [], 5),
 		"",
 		"3. CONSTITUCIÓN ARQUITECTÓNICA (Invariants)",
-		`- Frontend: ${plan?.architecture.frontend ?? "por confirmar"}`,
-		`- Backend: ${plan?.architecture.backend ?? "por confirmar"}`,
-		`- Capa de datos: ${plan?.architecture.database ?? "por confirmar"}`,
-		`- Autenticación: ${plan?.architecture.auth ?? "por confirmar"}`,
-		"- Supervisor: prohibido aplicar cambios, confirmar Project Core/Constitution, commitear o pushear sin aprobación humana.",
+		...(plan ? formatArchitectureInvariantLines(plan) : ["- por confirmar"]),
 		"",
 		"4. MAPA DE FLUJOS CRÍTICOS Y GATEWAYS",
 		...(plan?.detectedFlows
@@ -891,29 +1019,31 @@ export function formatIduSupervisorPlanReport(input: {
 			]) ?? ["- por confirmar"]),
 		"",
 		"5. MATRIZ DE RIESGOS Y DEUDA TÉCNICA",
-		...topBullets(
-			[
-				...(plan?.criticalRisks ?? []),
-				...(plan?.architectureRisks ?? []),
-				...(plan?.securityRisks ?? []),
-				...(plan?.qualityRisks ?? []),
-			],
-			8,
-		),
+		...topBullets(plan ? visibleProductRisks(plan) : [], 8),
 		"",
 		"6. CRITERIOS DE ACEPTACIÓN (Definition of Done)",
 		"- No se agregan dependencias sin autorización explícita.",
 		"- Cambios de auth/session requieren revisión de seguridad.",
 		"- Cambios de datos requieren migración/rollback o justificación explícita.",
 		"- Tests/linter/build deben pasar antes de cerrar tareas.",
-		"- El repo real queda protegido hasta aprobación humana.",
+		"- El plan aprobado cubre seguridad, datos y flujos críticos detectados.",
 		"",
-		"7. ORDEN DE OPERACIONES DEL SISTEMA IDU-PI",
-		"- Aprobar plan: fija esta versión como fuente de verdad para el orquestador.",
-		"- Desaprobar plan: rechaza el análisis actual y exige nuevo criterio.",
-		"- Trabajarlo interactivo: abre el Plan Maestro A-Z para lectura/edición guiada.",
-		"- Reevaluar en profundidad: fuerza nuevo análisis AgentLab extendido y reescribe el draft.",
+		"7. ORDEN DE OPERACIONES RECOMENDADO",
+		"- Congelar alcance y objetivo del plan.",
+		"- Validar primero seguridad/login/session y capa de datos.",
+		"- Ejecutar cambios por unidades pequeñas con pruebas verificables.",
+		"- Releer matriz de riesgos antes de delegar trabajo de agentes.",
 		"",
+		"8. CONTRATOS OPERATIVOS DEL PROYECTO",
+		...(plan ? formatContractSummaryLines(plan) : ["- por confirmar"]),
+		"",
+		"9. VIOLACIONES ACTUALES CONTRA CONTRATOS",
+		...(plan ? formatContractViolationLines(plan) : ["- por confirmar"]),
+		"",
+		"10. PLAN DE TRABAJO POR HITOS",
+		...(plan ? formatMilestoneLines(plan) : ["- por confirmar"]),
+		"",
+		`Cuaderno Idu-pi: ${plan?.docNotebook.root ?? "—"}`,
 		`Documentos: JSON=${planJson} | MD=${planMd}`,
 	];
 	if (requiresHumanCore) {
@@ -926,12 +1056,45 @@ export function formatIduSupervisorPlanReport(input: {
 	lines.push(
 		"",
 		"Elegí una opción ejecutiva:",
-		"1. Aprobar plan — aplica esta fuente de verdad y habilita trabajo de agentes bajo reglas.",
+		"1. Aprobar plan — fija esta fuente de verdad para ejecutar trabajo bajo reglas.",
 		"2. Desaprobar plan — rechaza el análisis, conserva evidencia y aborta este draft.",
 		"3. Trabajarlo interactivo — abre el Plan Maestro A-Z para lectura/edición guiada.",
 		"4. Reevaluar en profundidad — fuerza AgentLabs de análisis extendido y regenera el plan.",
 	);
 	return lines.join("\n");
+}
+
+function formatContractSummaryLines(plan: MasterPlan): string[] {
+	return plan.operationalContracts
+		.slice(0, 6)
+		.flatMap((contract) => [
+			`- ${contract.title} (${contract.mode}/${contract.severity})`,
+			...contract.rules.slice(0, 3).map((rule) => `  - ${rule}`),
+		]);
+}
+
+function formatContractViolationLines(plan: MasterPlan): string[] {
+	if (plan.contractViolations.length === 0)
+		return [
+			"- Sin violaciones automáticas detectadas; mantener revisión humana.",
+		];
+	return plan.contractViolations
+		.slice(0, 6)
+		.flatMap((violation) => [
+			`- ${violation.title} (${violation.severity})`,
+			`  Evidencia: ${violation.evidence.slice(0, 3).join(", ") || "—"}`,
+			`  Impacto: ${violation.impact.join(" ")}`,
+			`  Acción: ${violation.action.join(" ")}`,
+		]);
+}
+
+function formatMilestoneLines(plan: MasterPlan): string[] {
+	return plan.workMilestones
+		.slice(0, 5)
+		.flatMap((milestone) => [
+			`- ${milestone.name}: ${milestone.goal}`,
+			...milestone.actions.slice(0, 3).map((action) => `  - ${action}`),
+		]);
 }
 
 function productEvidenceCount(plan: MasterPlan): number {
@@ -944,6 +1107,476 @@ function productEvidenceCount(plan: MasterPlan): number {
 			!file.endsWith("project-flows.json") &&
 			!file.endsWith("project-constitution.json"),
 	).length;
+}
+
+function externalContextBlockers(plan: MasterPlan): string[] {
+	const externalStores = plan.dataStores.filter((store) =>
+		["supabase", "postgres"].includes(store.type),
+	);
+	if (externalStores.length === 0) return [];
+	const localSchemaEvidence = plan.sourceFiles.some((file) =>
+		/(^|\/)(supabase\/migrations|migrations?|schema\.(sql|prisma)|db\/|database\/)/iu.test(
+			file,
+		),
+	);
+	if (localSchemaEvidence) return [];
+	return externalStores.map((store) => {
+		const label = store.type === "supabase" ? "Supabase/Postgres" : store.name;
+		return `Base de datos externa detectada (${label}), pero falta conexión MCP/credenciales o schema local para validar estructura, permisos y políticas reales.`;
+	});
+}
+
+function formatArchitectureInvariantLines(plan: MasterPlan): string[] {
+	return [
+		`- Lenguajes: ${formatList(plan.architecture.languages)}`,
+		`- Frameworks/librerías: ${formatList(plan.architecture.frameworks)}`,
+		`- Frontend: ${normalizeUnknownArchitecture(plan.architecture.frontend)}`,
+		`- Backend: ${normalizeUnknownArchitecture(plan.architecture.backend)}`,
+		`- Capa de datos: ${normalizeUnknownArchitecture(plan.architecture.database)}`,
+		`- Autenticación: ${normalizeUnknownArchitecture(plan.architecture.auth)}`,
+		`- Despliegue: ${normalizeUnknownArchitecture(plan.architecture.deployment)}`,
+	];
+}
+
+function normalizeUnknownArchitecture(value: string): string {
+	if (value === "no claro") return "no detectado en el repo actual";
+	if (value === "no detectada") return "no detectada en el repo actual";
+	return value;
+}
+
+function visibleOutOfScope(plan: MasterPlan): string[] {
+	const visible = plan.outOfScope.filter(
+		(item) => !isSupervisorInternalRisk(item),
+	);
+	return visible.length > 0
+		? visible
+		: [
+				"Cambios funcionales sin plan aprobado",
+				"Modificar seguridad, datos o permisos sin validación explícita",
+				"Agregar dependencias o integraciones no justificadas",
+				"Publicar cambios sin verificación técnica previa",
+			];
+}
+
+function visibleProductRisks(plan: MasterPlan): string[] {
+	const raw = [
+		...plan.criticalRisks,
+		...plan.architectureRisks,
+		...plan.securityRisks,
+		...plan.qualityRisks,
+	].filter((risk) => !isSupervisorInternalRisk(risk));
+	const generated = [
+		...(plan.securityModel.authDetected
+			? [
+					"Auth/login/session detectado; cambios en acceso, permisos o tokens requieren revisión de seguridad.",
+				]
+			: []),
+		...(plan.dataStores.length > 0
+			? [
+					`Persistencia detectada (${plan.dataStores.map((store) => store.name).join(", ")}); cambios de datos requieren migración, rollback o validación equivalente.`,
+				]
+			: []),
+		...(plan.detectedFlows.some((flow) => flow.riskLevel === "high")
+			? [
+					"Flujos críticos detectados; validar entrada → procesamiento → persistencia/salida antes de modificar comportamiento.",
+				]
+			: []),
+		...(plan.qualityRisks.some((risk) => /No se detectaron tests/iu.test(risk))
+			? [
+					"Cobertura de tests no detectada; cambios funcionales necesitan verificación manual o pruebas nuevas.",
+				]
+			: []),
+	];
+	return dedupeStrings([...raw, ...generated]);
+}
+
+function isSupervisorInternalRisk(risk: string): boolean {
+	return /supervisor|deep review|project core|project-local|plan maestro|constituci[oó]n|fuente de verdad|agentlabs|habilitar agentes|firma humana|no se pudo validar|repo real|commit|push/iu.test(
+		risk,
+	);
+}
+
+function formatList(values: string[]): string {
+	return values.length > 0 ? values.join(", ") : "no detectado";
+}
+
+function projectDocRoot(stateRoot: string, projectId: string): string {
+	return join(stateRoot, "Doc", safeDocProjectName(projectId));
+}
+
+function safeDocProjectName(projectId: string): string {
+	return (
+		projectId
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/gu, "_")
+			.replace(/^_+|_+$/gu, "") || "project"
+	);
+}
+
+function emptyDocNotebook(
+	stateRoot: string,
+	projectId: string,
+): MasterPlanDocNotebook {
+	return {
+		root: projectDocRoot(stateRoot, projectId),
+		status: "empty",
+		sources: [],
+		summary: "Sin documentos normativos cargados todavía.",
+	};
+}
+
+function loadProjectDocNotebook(
+	stateRoot: string,
+	projectId: string,
+): MasterPlanDocNotebook {
+	const root = projectDocRoot(stateRoot, projectId);
+	mkdirSync(root, { recursive: true });
+	const sources = listMarkdownFiles(root).filter(
+		(file) => !basename(file).includes(".generado."),
+	);
+	if (sources.length === 0) {
+		return {
+			root,
+			status: "created",
+			sources: [],
+			summary:
+				"Cuaderno normativo creado. Agregá aquí reglas humanas, decisiones estructurales y documentos críticos del proyecto.",
+		};
+	}
+	const summary = sources
+		.slice(0, 6)
+		.map((file) => {
+			const text = safeReadText(file).replace(/\s+/gu, " ").trim();
+			return `${relative(root, file).replace(/\\/gu, "/")}: ${text.slice(0, 180)}`;
+		})
+		.join(" | ");
+	return {
+		root,
+		status: "loaded",
+		sources: sources.map((file) => relative(root, file).replace(/\\/gu, "/")),
+		summary,
+	};
+}
+
+function listMarkdownFiles(root: string): string[] {
+	if (!existsSync(root)) return [];
+	const files: string[] = [];
+	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		const path = join(root, entry.name);
+		if (entry.isDirectory()) files.push(...listMarkdownFiles(path));
+		if (entry.isFile() && /\.md$/iu.test(entry.name)) files.push(path);
+	}
+	return files.sort();
+}
+
+function inferOperationalContracts(
+	signals: ProjectSignals,
+	docNotebook: MasterPlanDocNotebook,
+): MasterPlanOperationalContract[] {
+	const evidence = [
+		...(docNotebook.sources.length
+			? docNotebook.sources.map((source) => `Doc/${source}`)
+			: ["Idu-pi base heuristics"]),
+	];
+	return [
+		{
+			area: "frontend",
+			title: "Contrato Frontend / UI",
+			rules: [
+				"HTML debe expresar estructura y semántica; no debe concentrar lógica de negocio.",
+				"JS inline, onclick/onchange inline y scripts mezclados en HTML quedan prohibidos salvo excepción documentada.",
+				"Eventos deben registrarse desde módulos JS; llamadas a API/DB deben vivir en capa service/client.",
+				"Render, eventos y persistencia deben separarse para que agentes no copien patrones mezclados.",
+			],
+			evidence,
+			severity: "high",
+			mode: "block",
+		},
+		{
+			area: "auth",
+			title: "Contrato Auth/Login",
+			rules: [
+				"Password, tokens y secretos nunca se loguean ni se exponen en URL/query string.",
+				"Session/token no debe persistirse sin política explícita de expiración, limpieza y amenaza aceptada.",
+				"Logout debe limpiar estado local y remoto relevante.",
+				"Rutas/pantallas privadas deben validar sesión antes de mostrar datos.",
+			],
+			evidence: [...evidence, ...signals.securityModel.evidence.slice(0, 5)],
+			severity: signals.hasAuth ? "critical" : "high",
+			mode: signals.hasAuth ? "block" : "ask_human",
+		},
+		{
+			area: "data",
+			title: "Contrato Datos/DB",
+			rules: [
+				"Cambios de estructura deben ser migraciones versionadas con rollback o justificación explícita.",
+				"Tablas críticas deben tener owner lógico, validación de tipos y reglas de integridad.",
+				"RLS/permisos son obligatorios si hay datos sensibles o Supabase/Postgres externo.",
+				"Reportes no deben leer estados parciales sin señalizar consistencia o corte temporal.",
+			],
+			evidence: [
+				...evidence,
+				...signals.dataStoreCandidates
+					.flatMap((store) => store.evidence)
+					.slice(0, 6),
+			],
+			severity: signals.hasDb ? "critical" : "medium",
+			mode: signals.hasDb ? "block" : "warn",
+		},
+		{
+			area: "agent",
+			title: "Contrato de ejecución para agentes",
+			rules: [
+				"Antes de modificar, el agente debe leer contratos del área afectada y archivos dueños.",
+				"Si una tarea viola contrato block/high, debe detenerse y pedir aprobación humana.",
+				"Cada cambio debe declarar evidencia, tests/verificación y riesgo residual.",
+			],
+			evidence,
+			severity: "high",
+			mode: "block",
+		},
+	];
+}
+
+function detectContractViolations(
+	projectPath: string,
+	signals: ProjectSignals,
+	_contracts: MasterPlanOperationalContract[],
+): MasterPlanContractViolation[] {
+	const violations: MasterPlanContractViolation[] = [];
+	const htmlInline = signals.sourceFiles.filter((file) => {
+		if (!/\.html?$/iu.test(file)) return false;
+		const content = safeReadText(join(projectPath, file));
+		return (
+			/<script[\s\S]*?>[\s\S]*?<\/script>/iu.test(content) ||
+			/\son[a-z]+\s*=/iu.test(content)
+		);
+	});
+	if (htmlInline.length > 0) {
+		violations.push({
+			area: "frontend",
+			title: "HTML mezcla estructura con lógica JS/eventos inline",
+			evidence: htmlInline.slice(0, 8),
+			impact: [
+				"Difícil de mantener y testear.",
+				"Agentes futuros pueden copiar el patrón y aumentar el desorden.",
+			],
+			action: [
+				"Separar vistas HTML de módulos JS.",
+				"Registrar eventos desde controllers/modules.",
+				"Mover fetch/Supabase a capa services/client.",
+			],
+			severity: "high",
+		});
+	}
+	const tokenExposure = signals.sourceFiles.filter((file) => {
+		const lower = file.toLowerCase();
+		if (!/\.(js|ts|html)$/iu.test(file)) return false;
+		const content = safeReadText(join(projectPath, file));
+		return /(localStorage|sessionStorage).*?(token|jwt|session)|(token|jwt).*?(searchParams|location\.search|query)/isu.test(
+			`${lower}\n${content}`,
+		);
+	});
+	if (tokenExposure.length > 0) {
+		violations.push({
+			area: "auth",
+			title:
+				"Token/session expuesto en cliente o URL sin política segura visible",
+			evidence: tokenExposure.slice(0, 8),
+			impact: [
+				"Riesgo de robo/reuso de sesión.",
+				"Rutas privadas pueden quedar expuestas si el token viaja en query string.",
+			],
+			action: [
+				"Definir política de sesión y expiración.",
+				"Eliminar token en query params.",
+				"Centralizar auth/session en módulo seguro.",
+			],
+			severity: "critical",
+		});
+	}
+	const supabaseMigrations = signals.sourceFiles.filter((file) =>
+		/^supabase\/migrations\/.*\.sql$/iu.test(file),
+	);
+	const migrationsWithoutRls = supabaseMigrations.filter((file) => {
+		const content = safeReadText(join(projectPath, file));
+		return (
+			/create\s+table/iu.test(content) &&
+			!/row\s+level\s+security|enable\s+rls/iu.test(content)
+		);
+	});
+	if (migrationsWithoutRls.length > 0) {
+		violations.push({
+			area: "data",
+			title: "Migraciones crean tablas sin evidencia cercana de RLS/permisos",
+			evidence: migrationsWithoutRls.slice(0, 8),
+			impact: [
+				"Datos sensibles pueden quedar accesibles sin política explícita.",
+				"Cambios futuros de DB pueden romper seguridad o consistencia.",
+			],
+			action: [
+				"Auditar RLS/policies por tabla crítica.",
+				"Documentar owner lógico y permisos esperados.",
+				"Agregar migración correctiva si falta política.",
+			],
+			severity: "critical",
+		});
+	}
+	return violations;
+}
+
+function buildContractWorkMilestones(
+	violations: MasterPlanContractViolation[],
+	signals: ProjectSignals,
+): MasterPlanWorkMilestone[] {
+	return [
+		{
+			name: "Hito 1 — Constitución operativa vigente",
+			goal: "Convertir Doc + evidencia del repo en contratos aceptados para guiar agentes.",
+			actions: [
+				"Revisar Doc del proyecto y completar reglas humanas faltantes.",
+				"Aprobar contratos frontend/auth/datos/agentes.",
+				"Marcar reglas block/warn/ask_human.",
+			],
+			exitCriteria: [
+				"Contratos operativos guardados en Doc del stateRoot.",
+				"Toda tarea nueva puede mapearse a un contrato o área explícita.",
+			],
+		},
+		...(violations.length
+			? [
+					{
+						name: "Hito 2 — Corrección de violaciones actuales",
+						goal: "Reducir deuda arquitectónica que induce a la IA a repetir malos patrones.",
+						actions: violations
+							.flatMap((violation) => violation.action)
+							.slice(0, 8),
+						exitCriteria: [
+							"Violaciones críticas/high tienen fix, plan de migración o excepción aprobada.",
+							"Nuevos cambios no agregan JS inline, exposición de token ni DB sin política.",
+						],
+					},
+				]
+			: []),
+		{
+			name: "Hito 3 — Continuar producto bajo contratos",
+			goal: "Seguir features manteniendo arquitectura, seguridad y datos dentro de márgenes aceptables.",
+			actions: [
+				...(signals.hasAuth
+					? ["Validar login/session antes de features dependientes."]
+					: []),
+				...(signals.hasDb
+					? ["Validar migraciones/rollback antes de tocar persistencia."]
+					: []),
+				"Ejecutar cambios en unidades pequeñas con tests y revisión de contrato.",
+			],
+			exitCriteria: [
+				"Cada PR/tarea declara contrato afectado y evidencia revisada.",
+				"Tests/build/lint o verificación equivalente pasan antes de cerrar.",
+			],
+		},
+	];
+}
+
+function writeProjectDocNotebook(stateRoot: string, plan: MasterPlan): void {
+	const root = projectDocRoot(stateRoot, plan.projectId);
+	mkdirSync(root, { recursive: true });
+	writeIfMissing(
+		join(root, "00-proposito.md"),
+		[
+			"# Propósito del proyecto",
+			"",
+			plan.inferredObjective,
+			"",
+			"Agregá acá decisiones humanas, contexto de negocio y criterios no negociables.",
+		].join("\n"),
+	);
+	writeIfMissing(
+		join(root, "README.md"),
+		[
+			`# Cuaderno Idu-pi — ${plan.projectId}`,
+			"",
+			"Este cuaderno es estado interno/normativo de Idu-pi para guiar agentes.",
+			"No es código del producto. Usalo para reglas, contratos, decisiones y documentación crítica.",
+		].join("\n"),
+	);
+	writeFileSync(
+		join(root, "01-contratos-operativos.generado.md"),
+		formatContractsMarkdown(plan),
+		"utf8",
+	);
+	writeFileSync(
+		join(root, "02-violaciones-detectadas.generado.md"),
+		formatViolationsMarkdown(plan),
+		"utf8",
+	);
+	writeFileSync(
+		join(root, "03-plan-de-trabajo-por-hitos.generado.md"),
+		formatMilestonesMarkdown(plan),
+		"utf8",
+	);
+}
+
+function writeIfMissing(path: string, content: string): void {
+	if (!existsSync(path)) writeFileSync(path, `${content}\n`, "utf8");
+}
+
+function formatContractsMarkdown(plan: MasterPlan): string {
+	return [
+		"# Contratos operativos del proyecto",
+		"",
+		`Fuente Doc: ${plan.docNotebook.root}`,
+		"",
+		...plan.operationalContracts.flatMap((contract) => [
+			`## ${contract.title}`,
+			`Área: ${contract.area} | Severidad: ${contract.severity} | Modo: ${contract.mode}`,
+			"",
+			...contract.rules.map((rule) => `- ${rule}`),
+			"",
+		]),
+	].join("\n");
+}
+
+function formatViolationsMarkdown(plan: MasterPlan): string {
+	return [
+		"# Violaciones detectadas contra contratos",
+		"",
+		...(plan.contractViolations.length
+			? plan.contractViolations.flatMap((violation) => [
+					`## ${violation.title}`,
+					`Área: ${violation.area} | Severidad: ${violation.severity}`,
+					"",
+					"Evidencia:",
+					...violation.evidence.map((item) => `- ${item}`),
+					"",
+					"Impacto:",
+					...violation.impact.map((item) => `- ${item}`),
+					"",
+					"Acción:",
+					...violation.action.map((item) => `- ${item}`),
+					"",
+				])
+			: ["Sin violaciones automáticas detectadas; mantener revisión humana."]),
+	].join("\n");
+}
+
+function formatMilestonesMarkdown(plan: MasterPlan): string {
+	return [
+		"# Plan de trabajo por hitos",
+		"",
+		...plan.workMilestones.flatMap((milestone) => [
+			`## ${milestone.name}`,
+			milestone.goal,
+			"",
+			"Acciones:",
+			...milestone.actions.map((item) => `- ${item}`),
+			"",
+			"Criterios de salida:",
+			...milestone.exitCriteria.map((item) => `- ${item}`),
+			"",
+		]),
+	].join("\n");
 }
 
 function signalValue(plan: MasterPlan, key: string): string {
@@ -1326,6 +1959,38 @@ export function formatMasterPlanMarkdown(plan: MasterPlan): string {
 			...plan.qualityRisks,
 		]),
 		"",
+		"## Cuaderno Idu-pi / Doc",
+		...bulletList([
+			`Root: ${plan.docNotebook.root}`,
+			`Status: ${plan.docNotebook.status}`,
+			`Summary: ${plan.docNotebook.summary}`,
+			...plan.docNotebook.sources.map((source) => `Fuente: ${source}`),
+		]),
+		"",
+		"## Contratos operativos",
+		...bulletList(
+			plan.operationalContracts.map(
+				(contract) =>
+					`${contract.title} (${contract.mode}/${contract.severity}) — ${contract.rules.join(" | ")}`,
+			),
+		),
+		"",
+		"## Violaciones contra contratos",
+		...bulletList(
+			plan.contractViolations.map(
+				(violation) =>
+					`${violation.title} [${violation.severity}] evidencia=${violation.evidence.join(", ")} acción=${violation.action.join(" | ")}`,
+			),
+		),
+		"",
+		"## Plan por hitos",
+		...bulletList(
+			plan.workMilestones.map(
+				(milestone) =>
+					`${milestone.name}: ${milestone.goal}; salida=${milestone.exitCriteria.join(" | ")}`,
+			),
+		),
+		"",
 		"## Preguntas abiertas",
 		...bulletList(plan.openQuestions),
 		"",
@@ -1426,6 +2091,10 @@ function diagnosticMasterPlan(
 			sensitiveFlows: [],
 			evidence: [],
 		},
+		docNotebook: emptyDocNotebook(stateRoot, current?.projectId ?? "unknown"),
+		operationalContracts: [],
+		contractViolations: [],
+		workMilestones: [],
 		toolingDetected: [],
 		ignoredTooling: [],
 		userRoles: [],
@@ -1721,7 +2390,7 @@ function collectProjectSignals(projectPath: string): ProjectSignals {
 		securityModel,
 		toolingDetected: [...toolingDetected].sort().slice(0, 20),
 		ignoredTooling: [...ignoredTooling].sort().slice(0, 20),
-		sourceFiles: files.slice(0, 200),
+		sourceFiles: files,
 	};
 }
 
@@ -2316,24 +2985,14 @@ function inferUserRoles(signals: ProjectSignals): string[] {
 }
 
 function inferCriticalRisks(
-	autoDepth: MasterPlanAutoDepth,
-	source: MasterPlanSource,
+	_autoDepth: MasterPlanAutoDepth,
+	_source: MasterPlanSource,
 	signals: ProjectSignals,
 ): string[] {
 	return unique([
-		...(autoDepth.mode === "deep_required"
-			? [
-					"Supervisor escaló análisis profundo por tamaño/riesgo y debe consolidar hallazgos antes de habilitar agentes.",
-				]
-			: []),
-		...(source.projectCoreStatus !== "confirmed"
-			? [
-					"Falta fuente de verdad operativa confirmada; el supervisor debe derivarla del código y dejarla lista para firma humana.",
-				]
-			: []),
 		...(signals.hasDb && signals.hasAuth
 			? [
-					"DB + auth detectados; el supervisor debe imponer gates de seguridad/datos antes de cualquier tarea de agente.",
+					"Datos persistentes y auth/login conviven; cambios en permisos, sesiones o persistencia pueden exponer información sensible.",
 				]
 			: []),
 	]);
@@ -2912,6 +3571,9 @@ function masterPlanCompatibilityReason(plan: Partial<MasterPlan>): string {
 		"assumptions",
 		"recommendedNext",
 		"sourceFiles",
+		"operationalContracts",
+		"contractViolations",
+		"workMilestones",
 		"agentLabReviews",
 		"toolingDetected",
 		"ignoredTooling",
@@ -2931,6 +3593,8 @@ function masterPlanCompatibilityReason(plan: Partial<MasterPlan>): string {
 		return "dataStores sin estructura completa";
 	if (!isCompatibleSecurityModel(plan.securityModel))
 		return "securityModel incompleto";
+	if (!isCompatibleDocNotebook(plan.docNotebook))
+		return "docNotebook incompleto";
 	if (!Array.isArray(plan.detectedFlows)) return "detectedFlows faltante";
 	if (plan.detectedFlows.some((flow) => typeof flow === "string"))
 		return "detectedFlows usa strings legacy";
@@ -3048,6 +3712,18 @@ function isCompatibleSecurityModel(
 	);
 }
 
+function isCompatibleDocNotebook(
+	docNotebook: Partial<MasterPlanDocNotebook> | undefined,
+): docNotebook is MasterPlanDocNotebook {
+	return Boolean(
+		docNotebook &&
+			hasText(docNotebook.root) &&
+			["created", "loaded", "empty"].includes(String(docNotebook.status)) &&
+			Array.isArray(docNotebook.sources) &&
+			typeof docNotebook.summary === "string",
+	);
+}
+
 function isCompatibleFunctionalFlow(
 	flow: unknown,
 ): flow is MasterPlanFunctionalFlow {
@@ -3105,6 +3781,12 @@ function normalizeMasterPlan(raw: Partial<MasterPlan>): MasterPlan {
 		dataStores,
 		architecture,
 		securityModel,
+		docNotebook:
+			raw.docNotebook ??
+			emptyDocNotebook(raw.projectPath ?? "", raw.projectId ?? "unknown"),
+		operationalContracts: raw.operationalContracts ?? [],
+		contractViolations: raw.contractViolations ?? [],
+		workMilestones: raw.workMilestones ?? [],
 		toolingDetected: raw.toolingDetected ?? [],
 		ignoredTooling: raw.ignoredTooling ?? [],
 		sourceFiles: raw.sourceFiles ?? [],

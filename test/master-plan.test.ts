@@ -19,6 +19,7 @@ import {
 	ensureMasterPlanForIdu,
 	handleMasterPlanNaturalDecision,
 	isMasterPlanCompatible,
+	formatIduSupervisorPlanReport,
 	formatMasterPlanReview,
 	formatMasterPlanSummaryForIdu,
 	generateMasterPlanDraft,
@@ -673,6 +674,151 @@ test("AutoDepth elige standard para proyecto mediano con DB UI y auth", () => {
 			result.plan.agentLabReviews.every(
 				(review) => review.status === "not_run" || review.status === "skipped",
 			),
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("/idu no bloquea por llamadas API internas locales", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		mkdirSync(join(projectPath, "src"), { recursive: true });
+		writeFileSync(
+			join(projectPath, "src", "index.html"),
+			"<main></main>",
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "src", "app.js"),
+			"fetch('/api/work-orders').then((response) => response.json());",
+			"utf8",
+		);
+
+		const result = generateMasterPlanDraft({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+			gitHead: "head1",
+		});
+		const text = formatIduSupervisorPlanReport({
+			bootstrap: { project: { id: "demo" }, criticalDecisions: [] },
+			masterPlan: result,
+			reviewHandled: false,
+		});
+
+		assert.doesNotMatch(text, /No puedo cerrar el Plan Maestro todavía/u);
+		assert.doesNotMatch(text, /falta conexión MCP\/credenciales/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("/idu bloquea plan final si falta contexto externo obligatorio", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		mkdirSync(join(projectPath, "src"), { recursive: true });
+		writeFileSync(
+			join(projectPath, "package.json"),
+			JSON.stringify({ dependencies: { "@supabase/supabase-js": "1.0.0" } }),
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "src", "login.js"),
+			"import { createClient } from '@supabase/supabase-js';\nexport const supabase = createClient('url', 'anon');\nlocalStorage.getItem('token');\n",
+			"utf8",
+		);
+
+		const result = generateMasterPlanDraft({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+			gitHead: "head1",
+		});
+		const text = formatIduSupervisorPlanReport({
+			bootstrap: { project: { id: "demo" }, criticalDecisions: [] },
+			masterPlan: result,
+			reviewHandled: false,
+		});
+
+		assert.match(text, /No puedo cerrar el Plan Maestro todavía/u);
+		assert.match(text, /Supabase\/Postgres/u);
+		assert.match(text, /Repo local revisado:/u);
+		assert.equal(
+			existsSync(
+				join(stateRoot, "Doc", "demo", "01-contratos-operativos.generado.md"),
+			),
+			true,
+		);
+		assert.doesNotMatch(text, /PLAN MAESTRO DE INGENIERÍA/u);
+		assert.doesNotMatch(text, /Supervisor escaló|Project Core|project-local/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("/idu muestra arquitectura y riesgos sin ruido interno del supervisor", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		mkdirSync(join(projectPath, "src"), { recursive: true });
+		mkdirSync(join(projectPath, "db"), { recursive: true });
+		writeFileSync(
+			join(projectPath, "package.json"),
+			JSON.stringify({ dependencies: { express: "1.0.0", sqlite3: "1.0.0" } }),
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "src", "login.html"),
+			"<form onclick='login()'></form><script>function login(){}</script>",
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "src", "auth.js"),
+			"localStorage.getItem('jwt');",
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "db", "schema.sql"),
+			"create table users(id int);",
+			"utf8",
+		);
+
+		const result = generateMasterPlanDraft({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+			gitHead: "head1",
+		});
+		const text = formatIduSupervisorPlanReport({
+			bootstrap: { project: { id: "demo" }, criticalDecisions: [] },
+			masterPlan: result,
+			reviewHandled: false,
+		});
+
+		assert.match(text, /PLAN MAESTRO DE INGENIERÍA/u);
+		assert.match(text, /Lenguajes: .*HTML/u);
+		assert.match(text, /Backend: Node\/Express/u);
+		assert.match(text, /Auth\/login\/session detectado/u);
+		assert.match(text, /8\. CONTRATOS OPERATIVOS DEL PROYECTO/u);
+		assert.match(text, /JS inline, onclick\/onchange inline/u);
+		assert.match(text, /9\. VIOLACIONES ACTUALES CONTRA CONTRATOS/u);
+		assert.match(text, /HTML mezcla estructura con lógica JS/u);
+		assert.match(text, /10\. PLAN DE TRABAJO POR HITOS/u);
+		assert.equal(
+			existsSync(
+				join(stateRoot, "Doc", "demo", "02-violaciones-detectadas.generado.md"),
+			),
+			true,
+		);
+		assert.doesNotMatch(
+			text,
+			/Supervisor:|Supervisor escaló|Project Core|project-local|Plan Maestro no materializada/u,
 		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

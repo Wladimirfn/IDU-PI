@@ -69,6 +69,7 @@ import {
 	rejectMasterPlan,
 	reviewMasterPlan,
 	type MasterPlanDraftResult,
+	type MasterPlanProgressEvent,
 	type MasterPlanReview,
 	type MasterPlanStatusResult,
 } from "./master-plan.js";
@@ -1500,6 +1501,11 @@ export async function runCliCommand(
 	}
 }
 
+function emitIduProgress(event: MasterPlanProgressEvent): void {
+	if (process.env.IDU_PI_PROGRESS !== "1") return;
+	process.stderr.write(`__IDU_PROGRESS__${JSON.stringify(event)}\n`);
+}
+
 async function runBootstrapIduCommand(): Promise<string> {
 	const config = loadConfig({ requireTelegram: false });
 	process.env.AGENT_WORKSPACE_ROOT ??= config.agentWorkspaceRoot;
@@ -1513,32 +1519,76 @@ async function runBootstrapIduCommand(): Promise<string> {
 		requireTelegramConfig: false,
 	});
 	activeRuntime.supervisorOnIduActivation();
+	let sawPlanProgress = false;
+	const onProgress = (event: MasterPlanProgressEvent) => {
+		sawPlanProgress = true;
+		emitIduProgress(event);
+	};
 	const masterPlan = ensureMasterPlanForIdu({
 		projectId: bootstrap.project.id,
 		projectPath: bootstrap.project.path,
 		stateRoot: bootstrap.statePaths.stateRoot,
 		gitHead: bootstrap.currentGitHead,
+		onProgress,
 	});
+	if (!sawPlanProgress) {
+		emitIduProgress({
+			stage: "scan",
+			status: "ok",
+			message: "Plan Maestro existente reutilizado; escaneo vigente",
+		});
+		emitIduProgress({
+			stage: "reverse_engineering",
+			status: "ok",
+			message: "Ingeniería inversa vigente reutilizada",
+		});
+		emitIduProgress({
+			stage: "forge_plan",
+			status: "ok",
+			message: "Plan Maestro vigente reutilizado",
+		});
+	}
 	let reviewHandled = false;
 	let displayMasterPlan = masterPlan;
 	if (
 		bootstrap.criticalDecisions.length === 0 &&
 		masterPlan.plan?.autoDepth.mode === "deep_required"
 	) {
+		emitIduProgress({
+			stage: "forge_plan",
+			status: "running",
+			message: "Ejecutando o reutilizando análisis profundo AgentLab",
+		});
 		await runOrReuseMasterPlanDeepReview(activeRuntime);
 		reviewHandled = true;
+		emitIduProgress({
+			stage: "forge_plan",
+			status: "ok",
+			message: "Análisis profundo consolidado en el Plan Maestro",
+		});
 		displayMasterPlan = ensureMasterPlanForIdu({
 			projectId: bootstrap.project.id,
 			projectPath: bootstrap.project.path,
 			stateRoot: bootstrap.statePaths.stateRoot,
 			gitHead: bootstrap.currentGitHead,
+			onProgress,
 		});
 	}
-	return formatIduSupervisorPlanReport({
+	const finalReport = formatIduSupervisorPlanReport({
 		bootstrap,
 		masterPlan: displayMasterPlan,
 		reviewHandled,
 	});
+	const finalBlocked =
+		/\[BLOCKED\]|No puedo cerrar el Plan Maestro todavía/u.test(finalReport);
+	emitIduProgress({
+		stage: "quarantine",
+		status: finalBlocked ? "blocked" : "ok",
+		message: finalBlocked
+			? "Repo real protegido; faltan conexiones externas para cerrar el plan"
+			: "Repo real protegido; reporte final listo",
+	});
+	return finalReport;
 }
 
 function handleSetupCommand(rest: string[]): string {
