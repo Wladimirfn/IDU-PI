@@ -826,6 +826,19 @@ export function formatIduSupervisorPlanReport(input: {
 	const resultLine = reliable
 		? "Plan fiable y actualizado. Sin cambios requeridos."
 		: "Plan preparado para firma humana. No aplico cambios al repo hasta que apruebes.";
+	if (plan && productEvidenceCount(plan) === 0) {
+		return [
+			`[idu-pi] ⚙️  Escaneando repositorio (${filesSignal} archivos, ${dirsSignal} carpetas)... [OK]`,
+			"[idu-pi] 🧭  No detecté código de producto todavía.",
+			"",
+			"Proyecto vacío o sólo con configuración Idu-pi.",
+			`Documentos preparados: JSON=${planJson} | MD=${planMd}`,
+			"",
+			"¿Creamos el proyecto base?",
+			"1. Sí — iniciar definición interactiva del Project Core y Plan Maestro.",
+			"2. No — dejar sólo el estado aislado y no tocar el repo.",
+		].join("\n");
+	}
 	const lines = [
 		`[idu-pi] ⚙️  Escaneando repositorio (${filesSignal} archivos, ${dirsSignal} carpetas)... [OK]`,
 		"[idu-pi] 🧠  Ejecutando ingeniería inversa de flujos y arquitectura... [OK]",
@@ -919,6 +932,18 @@ export function formatIduSupervisorPlanReport(input: {
 		"4. Reevaluar en profundidad — fuerza AgentLabs de análisis extendido y regenera el plan.",
 	);
 	return lines.join("\n");
+}
+
+function productEvidenceCount(plan: MasterPlan): number {
+	return plan.sourceFiles.filter(
+		(file) =>
+			!file.startsWith("config/") &&
+			!file.startsWith(".idu/") &&
+			!file.endsWith("project-core.json") &&
+			!file.endsWith("project-blueprint.json") &&
+			!file.endsWith("project-flows.json") &&
+			!file.endsWith("project-constitution.json"),
+	).length;
 }
 
 function signalValue(plan: MasterPlan, key: string): string {
@@ -2297,14 +2322,18 @@ function inferCriticalRisks(
 ): string[] {
 	return unique([
 		...(autoDepth.mode === "deep_required"
-			? ["Proyecto requiere deep review aprobado antes de gastar más contexto."]
+			? [
+					"Supervisor escaló análisis profundo por tamaño/riesgo y debe consolidar hallazgos antes de habilitar agentes.",
+				]
 			: []),
 		...(source.projectCoreStatus !== "confirmed"
-			? ["Project Core no confirmado; no es fuente de verdad."]
+			? [
+					"Falta fuente de verdad operativa confirmada; el supervisor debe derivarla del código y dejarla lista para firma humana.",
+				]
 			: []),
 		...(signals.hasDb && signals.hasAuth
 			? [
-					"DB + auth detectados; cambios high-risk requieren confirmación humana.",
+					"DB + auth detectados; el supervisor debe imponer gates de seguridad/datos antes de cualquier tarea de agente.",
 				]
 			: []),
 	]);

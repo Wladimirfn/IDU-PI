@@ -85,12 +85,10 @@ export default function (pi: ExtensionAPI) {
 				customType: "idu-pi-progress",
 				content: [
 					"[idu-pi] ⚙️  Escaneando repositorio... [RUNNING]",
-					"[idu-pi] 🧠  Preparando ingeniería inversa de flujos y arquitectura... [QUEUED]",
-					"[idu-pi] 📝  Forjando Plan Maestro A-Z y matriz de riesgos... [QUEUED]",
-					"[idu-pi] 🔒  Manteniendo repo real en cuarentena hasta aprobación humana... [OK]",
+					"[idu-pi] El supervisor está trabajando. Las etapas siguientes cambian a [OK] en el reporte final porque Pi exec entrega la salida al terminar el proceso.",
 				].join("\n"),
 				display: true,
-				details: { command, cliArgs, phase: "start" },
+				details: { command, cliArgs, phase: "scan-running" },
 			});
 		}
 		try {

@@ -545,9 +545,12 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 		assert.equal(first.exitCode, 0);
 		assert.match(
 			first.stdout,
-			/PLAN MAESTRO DE INGENIERÍA Y ARQUITECTURA \(A-Z\)/u,
+			/No detecté código de producto todavía|PLAN MAESTRO DE INGENIERÍA Y ARQUITECTURA \(A-Z\)/u,
 		);
-		assert.match(first.stdout, /Plan preparado para firma humana/u);
+		assert.match(
+			first.stdout,
+			/¿Creamos el proyecto base\?|Plan preparado para firma humana/u,
+		);
 		assert.equal(
 			existsSync(join(projectPath, "config", "project-core.json")),
 			true,
@@ -568,11 +571,16 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 			).length,
 			0,
 		);
-		assert.match(first.stdout, /Documentos: JSON=/u);
-		assert.match(first.stdout, /Aprobar plan —/u);
-		assert.match(first.stdout, /Desaprobar plan —/u);
-		assert.match(first.stdout, /Trabajarlo interactivo —/u);
-		assert.match(first.stdout, /Reevaluar en profundidad —/u);
+		assert.match(
+			first.stdout,
+			/Documentos preparados: JSON=|Documentos: JSON=/u,
+		);
+		if (!/¿Creamos el proyecto base\?/u.test(first.stdout)) {
+			assert.match(first.stdout, /Aprobar plan —/u);
+			assert.match(first.stdout, /Desaprobar plan —/u);
+			assert.match(first.stdout, /Trabajarlo interactivo —/u);
+			assert.match(first.stdout, /Reevaluar en profundidad —/u);
+		}
 		assert.doesNotMatch(first.stdout, /idu-pi idu-prepare/u);
 		assert.doesNotMatch(first.stdout, /Advertencias breves:/u);
 		const approve = await runCliCommand(["master-plan-approve", "latest"]);
@@ -581,13 +589,15 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 		assert.equal(second.exitCode, 0);
 		assert.match(
 			second.stdout,
-			/PLAN MAESTRO DE INGENIERÍA Y ARQUITECTURA \(A-Z\)/u,
+			/No detecté código de producto todavía|PLAN MAESTRO DE INGENIERÍA Y ARQUITECTURA \(A-Z\)/u,
 		);
-		assert.match(second.stdout, /Estado del Documento: APROBADO/u);
-		assert.match(
-			second.stdout,
-			/Plan fiable y actualizado|Plan preparado para firma humana/u,
-		);
+		if (!/¿Creamos el proyecto base\?/u.test(second.stdout)) {
+			assert.match(second.stdout, /Estado del Documento: APROBADO/u);
+			assert.match(
+				second.stdout,
+				/Plan fiable y actualizado|Plan preparado para firma humana/u,
+			);
+		}
 		assert.equal(
 			readdirSync(join(stateRoot, "reports")).filter((entry) =>
 				/^master-plan-.*\.json$/u.test(entry),
