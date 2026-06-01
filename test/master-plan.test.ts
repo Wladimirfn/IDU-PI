@@ -335,8 +335,50 @@ test("Plan Maestro renderiza documento normativo y separa flujos permanentes", (
 			gitHead: "head1",
 		});
 		const markdown = readFileSync(result.markdownPath, "utf8");
+		const review = reviewMasterPlan({ stateRoot, pathOrLatest: "latest" });
 		const flowArtifact = join(stateRoot, "master-plan.flows.json");
 
+		assert.notEqual(result.plan.inferredObjective, "Idu-pi");
+		assert.match(
+			result.plan.inferredObjective,
+			/supervisor\/auditor normativo/iu,
+		);
+		assert.match(result.plan.inferredObjective, /orquestador Pi/iu);
+		assert.match(result.plan.inferredObjective, /Plan Maestro/iu);
+		assert.match(result.plan.inferredObjective, /AgentLabs/iu);
+		assert.ok(
+			review.revisionAntesDeZarpar.questionsForUser.some((question) =>
+				/supervisor\/auditor normativo/iu.test(question),
+			),
+		);
+		assert.equal(
+			review.revisionAntesDeZarpar.questionsForUser.some((question) =>
+				/^¿Confirmás que el objetivo del proyecto es: Idu-pi\?$/u.test(
+					question,
+				),
+			),
+			false,
+		);
+		assert.ok(
+			review.revisionAntesDeZarpar.recommendedExternalSources.some((source) =>
+				/(posts? oficiales.*x|x\/twitter|twitter)/iu.test(source),
+			),
+		);
+		assert.ok(
+			review.revisionAntesDeZarpar.recommendedExternalSources.some((source) =>
+				/(reddit|comunidades? t[eé]cnicas?)/iu.test(source),
+			),
+		);
+		const librarianLab = review.revisionAntesDeZarpar.recommendedAgentLabs.find(
+			(lab) => /bibliotecario/iu.test(lab.name),
+		);
+		assert.ok(librarianLab);
+		assert.match(
+			librarianLab.purpose,
+			/documentaci[oó]n|noticias|advisories/iu,
+		);
+		assert.match(librarianLab.purpose, /orquestador/iu);
+		assert.match(librarianLab.purpose, /audit-only|auditor/iu);
 		assert.ok(markdown.includes("## Identidad del proyecto"));
 		assert.ok(
 			markdown.includes("## Documentación declarada vs realidad construida"),
@@ -385,7 +427,7 @@ test("revisionAntesDeZarpar usa Doc root sanitizado y distingue falta de herrami
 			canonicalClaims: [
 				...result.plan.canonicalClaims,
 				{
-					title: "Contrato humano aprobado",
+					title: "Contrato usuario aprobado legado",
 					statement: "El usuario aprobó objetivo y contratos mínimos.",
 					source: "human_approved",
 					status: "confirmed",
@@ -404,6 +446,18 @@ test("revisionAntesDeZarpar usa Doc root sanitizado y distingue falta de herrami
 			stateRoot,
 			pathOrLatest: "latest",
 		});
+		assert.equal(
+			missingSourceReview.plan.canonicalClaims.some(
+				(claim) => claim.source === "user_approved",
+			),
+			true,
+		);
+		assert.equal(
+			missingSourceReview.plan.canonicalClaims.some(
+				(claim) => claim.source === "human_approved",
+			),
+			false,
+		);
 		assert.equal(
 			missingSourceReview.revisionAntesDeZarpar.status,
 			"needs_tools",
@@ -1277,10 +1331,20 @@ test("approve reject y redraft actualizan current sin borrar drafts anteriores",
 			stateRoot,
 			pathOrLatest: "latest",
 			source: "cli",
+			reason: "usuario confirmó contratos",
 		});
 		assert.equal(approved.plan.status, "approved");
 		assert.equal(approved.current.status, "approved");
 		assert.equal(approved.plan.approval?.source, "cli");
+		assert.equal(approved.plan.approval?.reason, "usuario confirmó contratos");
+		assert.equal(
+			(
+				JSON.parse(
+					readFileSync(join(stateRoot, "master-plan.flows.json"), "utf8"),
+				) as { status: string }
+			).status,
+			"approved",
+		);
 
 		const rejected = rejectMasterPlan({
 			stateRoot,

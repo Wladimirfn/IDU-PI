@@ -178,6 +178,34 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 					flowArtifact: "master-plan.flows.json",
 				},
 			}) as never,
+		masterPlanApprove: (_selector, reason) =>
+			({
+				jsonPath:
+					"C:/idu/workspace/projects/sistema_de_mantencion/master-plan.json",
+				markdownPath:
+					"C:/idu/workspace/projects/sistema_de_mantencion/master-plan.md",
+				current: {},
+				memory: {},
+				plan: {
+					status: "approved",
+					flowArtifact: "master-plan.flows.json",
+					approval: { source: "mcp", reason },
+				},
+			}) as never,
+		masterPlanReject: (_selector, reason) =>
+			({
+				jsonPath:
+					"C:/idu/workspace/projects/sistema_de_mantencion/master-plan.json",
+				markdownPath:
+					"C:/idu/workspace/projects/sistema_de_mantencion/master-plan.md",
+				current: {},
+				memory: {},
+				plan: {
+					status: "rejected",
+					flowArtifact: "master-plan.flows.json",
+					approval: { reason },
+				},
+			}) as never,
 		masterPlanReview: () =>
 			({
 				current: {},
@@ -218,8 +246,65 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 					beforeSailingChecklist: ["Aprobar Plan Maestro."],
 				},
 				plan: {
-					status: "draft",
+					status: "approved",
+					executiveSummary:
+						"Sistema de mantenimiento aprobado para pruebas MCP.",
+					inferredObjective:
+						"Mantener gobernanza preventiva desde Plan Maestro aprobado.",
+					scope: ["Supervisar cambios con contratos"],
+					outOfScope: ["Implementar desde Idu-pi"],
+					flowArtifact: "master-plan.flows.json",
+					canonicalClaims: [
+						{
+							title: "Objetivo aprobado",
+							statement: "MCP asesora y el orquestador decide.",
+							source: "user_approved",
+							status: "confirmed",
+							confidence: 0.95,
+							evidence: ["Doc/04-contratos-aprobados.md"],
+						},
+					],
+					operationalContracts: [
+						{
+							area: "agent",
+							title: "Contrato de ejecución para agentes",
+							rules: [
+								"El orquestador decide e implementa con subagentes normales.",
+							],
+							evidence: ["Doc/01-contratos-operativos.generado.md"],
+							severity: "high",
+							mode: "block",
+						},
+					],
+					workMilestones: [
+						{
+							name: "Hito 1 — Loop preventivo",
+							goal: "Crear paquetes de trabajo gobernados antes de codificar.",
+							actions: ["Agregar snapshot", "Agregar acción candidata"],
+							exitCriteria: ["Worker recibe lineamientos antes de implementar"],
+						},
+					],
+					driftFindings: [
+						{
+							title: "Blueprint no confirmado",
+							severity: "medium",
+							recommendation: "Validar antes de tratar defaults como contrato.",
+							evidence: ["config/project-blueprint.json"],
+						},
+					],
+					projectFlows: [
+						{
+							name: "Flujo MCP advisory",
+							category: "entrypoint",
+							purpose: "MCP informa y recomienda; el orquestador decide.",
+							entrypoints: ["idu_task_context"],
+							rules: ["No commit/push", "No AgentLabs automáticos"],
+							evidence: ["docs/mcp-server.md"],
+						},
+					],
+					qualityRisks: ["Proyecto grande; riesgo de omitir módulos."],
 					criticalRisks: [],
+					recommendedNext: ["Agregar loop MCP preventivo."],
 				},
 			}) as never,
 		formatMasterPlanStatus: () => "master status",
@@ -529,7 +614,12 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_master_plan_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_master_plan_create"));
 	assert.ok(tools.some((tool) => tool.name === "idu_master_plan_review"));
-	assert.equal(tools.length, 24);
+	assert.ok(tools.some((tool) => tool.name === "idu_master_plan_approve"));
+	assert.ok(tools.some((tool) => tool.name === "idu_master_plan_reject"));
+	assert.ok(tools.some((tool) => tool.name === "idu_plan_snapshot"));
+	assert.ok(tools.some((tool) => tool.name === "idu_next_advisory_action"));
+	assert.ok(tools.some((tool) => tool.name === "idu_task_package_create"));
+	assert.equal(tools.length, 29);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -576,6 +666,33 @@ test("MCP exposes direct Master Plan lifecycle tools", async () => {
 		),
 		/seguridad/iu,
 	);
+
+	const approve = await callIduMcpTool(
+		"idu_master_plan_approve",
+		{ selector: "latest", reason: "usuario confirmó contratos" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(approve.ok, true);
+	assert.equal(approve.data.status, "approved");
+	assert.equal(
+		(approve.data.approval as { reason?: string }).reason,
+		"usuario confirmó contratos",
+	);
+	assert.match(approve.safeNotes.join("\n"), /No apliqué flows/iu);
+	assert.match(approve.safeNotes.join("\n"), /no toqué el repo real/iu);
+
+	const reject = await callIduMcpTool(
+		"idu_master_plan_reject",
+		{ selector: "latest", reason: "objetivo incorrecto" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(reject.ok, true);
+	assert.equal(reject.data.status, "rejected");
+	assert.equal(
+		(reject.data.approval as { reason?: string }).reason,
+		"objetivo incorrecto",
+	);
+	assert.match(reject.safeNotes.join("\n"), /No borré drafts/iu);
 });
 
 test("idu_status works with explicit projectPath", async () => {
@@ -729,6 +846,132 @@ test("idu_orchestrator_procedure and task_context guide without implementing", a
 		(context.data.alignmentAdvisory as { requiredReads: string[] })
 			.requiredReads.length > 0,
 	);
+});
+
+test("approved plan advisory loop returns snapshot, next action, and task package", async () => {
+	const options = {
+		runtimeFactory: factory(),
+		projectResolver: () => registered(),
+	};
+	const snapshot = await callIduMcpTool("idu_plan_snapshot", {}, options);
+	assert.equal(snapshot.ok, true);
+	assert.equal(snapshot.data.authority, "advisory");
+	assert.equal(snapshot.data.planStatus, "approved");
+	assert.match(String(snapshot.data.objective), /gobernanza preventiva/u);
+	assert.ok((snapshot.data.operationalContracts as unknown[]).length > 0);
+	assert.ok((snapshot.data.flows as unknown[]).length > 0);
+
+	const next = await callIduMcpTool(
+		"idu_next_advisory_action",
+		{ request: "mejorar MCP", maxScope: "small" },
+		options,
+	);
+	assert.equal(next.ok, true);
+	assert.equal(next.data.authority, "advisory");
+	assert.equal(next.data.implementationOwner, "orchestrator");
+	assert.equal(next.data.agentLabsRole, "audit_only");
+	const candidate = next.data.candidateAction as {
+		title: string;
+		contractsAffected: string[];
+		requiredReads: string[];
+		acceptanceCriteria: string[];
+	};
+	assert.match(candidate.title, /acción candidata|loop MCP|mejorar MCP/iu);
+	assert.ok(candidate.contractsAffected.includes("agent"));
+	assert.ok(candidate.requiredReads.some((read) => /Plan Maestro/u.test(read)));
+	assert.ok(candidate.acceptanceCriteria.length > 0);
+	assert.equal(
+		(next.data.agentLabPolicy as { execution: string }).execution,
+		"orchestrator_explicit_call_only",
+	);
+
+	const taskPackage = await callIduMcpTool(
+		"idu_task_package_create",
+		{ request: "mejorar MCP", actionId: "plan-action-test" },
+		options,
+	);
+	assert.equal(taskPackage.ok, true);
+	assert.equal(taskPackage.data.implementationOwner, "normal_subagents");
+	assert.equal(taskPackage.data.iduRole, "advisor_auditor");
+	assert.equal(taskPackage.data.agentLabsRole, "audit_only");
+	assert.deepEqual(taskPackage.data.preconditions, {
+		planApproved: true,
+		blocked: false,
+		blockers: [],
+		recommendation: "governance_review",
+	});
+	assert.equal(
+		(taskPackage.data.governanceReview as { required: boolean }).required,
+		true,
+	);
+	assert.ok(
+		(taskPackage.data.stopConditions as string[]).some((condition) =>
+			/AgentLab/u.test(condition),
+		),
+	);
+});
+
+test("task package blocks implementation when Plan Maestro is not approved", async () => {
+	const runtime = fakeRuntime();
+	runtime.masterPlanReview = () =>
+		({
+			current: {},
+			jsonPath: "C:/idu/workspace/projects/sistema/master-plan.json",
+			markdown: "# Plan Maestro draft",
+			revisionAntesDeZarpar: { recommendedAgentLabs: [] },
+			plan: {
+				status: "draft",
+				inferredObjective: "Objetivo pendiente.",
+				criticalRisks: [],
+				operationalContracts: [],
+				projectFlows: [],
+			},
+		}) as never;
+	const taskPackage = await callIduMcpTool(
+		"idu_task_package_create",
+		{ request: "crear loop automático" },
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	assert.equal(taskPackage.ok, true);
+	assert.equal(taskPackage.data.recommendation, "ask_human");
+	assert.deepEqual(taskPackage.data.preconditions, {
+		planApproved: false,
+		blocked: true,
+		blockers: ["Plan Maestro no aprobado"],
+		recommendation: "ask_human",
+	});
+	assert.equal(taskPackage.data.humanApprovalRequired, true);
+});
+
+test("idu_postflight reports advisory task trace without applying changes", async () => {
+	const result = await callIduMcpTool(
+		"idu_postflight",
+		{
+			actionId: "plan-action-test",
+			taskPackageId: "pkg-test",
+			expectedContracts: ["security", "data"],
+			expectedFiles: ["src/"],
+		},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(result.ok, true);
+	const trace = result.data.taskTrace as {
+		actionId: string;
+		taskPackageId: string;
+		matchesIntent: boolean;
+		observedContracts: string[];
+		missingExpectedContracts: string[];
+		contractDelta: Array<{ contract: string; status: string }>;
+	};
+	assert.equal(trace.actionId, "plan-action-test");
+	assert.equal(trace.taskPackageId, "pkg-test");
+	assert.equal(trace.matchesIntent, false);
+	assert.ok(trace.observedContracts.includes("security"));
+	assert.deepEqual(trace.missingExpectedContracts, ["data"]);
+	assert.deepEqual(trace.contractDelta, [
+		{ contract: "data", status: "expected_not_observed" },
+	]);
+	assert.match(result.safeNotes.join("\n"), /no cierra ni aplica/u);
 });
 
 test("idu_orchestrator_procedure validates purpose at runtime", async () => {

@@ -175,6 +175,7 @@ export type MasterPlanClaimSource =
 	| "project_config"
 	| "scanner_observed"
 	| "scanner_inferred"
+	| "user_approved"
 	| "human_approved"
 	| "agentlab_reviewed";
 
@@ -916,11 +917,16 @@ export function approveMasterPlan(input: {
 	stateRoot: string;
 	pathOrLatest: string;
 	source: "cli" | "pi" | "telegram" | "mcp";
+	reason?: string;
 }): MasterPlanDraftResult {
 	return updatePlanDecision(input.stateRoot, input.pathOrLatest, (plan) => ({
 		...plan,
 		status: "approved",
-		approval: { approvedAt: new Date().toISOString(), source: input.source },
+		approval: {
+			approvedAt: new Date().toISOString(),
+			source: input.source,
+			...(input.reason ? { reason: input.reason } : {}),
+		},
 	}));
 }
 
@@ -2127,7 +2133,7 @@ function buildRevisionAntesDeZarpar(
 	);
 	const hasSourceIndex = existsSync(sourceIndexPath);
 	const hasApprovedContract = plan.canonicalClaims.some(
-		(claim) => claim.source === "human_approved",
+		(claim) => claim.source === "user_approved",
 	);
 	const problems = dedupeStrings([
 		...(plan.status !== "approved"
@@ -2180,9 +2186,10 @@ function buildRevisionAntesDeZarpar(
 			"Doc/<project>/sources/local/ para PDFs, libros, normas, leyes y documentación humana descargada.",
 		]),
 		recommendedExternalSources: [
-			"npm security advisories para riesgos vivos de supply chain.",
-			"OWASP ASVS/Top 10 para contratos de seguridad web.",
-			"Documentación oficial de servicios externos usados por el proyecto.",
+			"Documentación oficial, changelogs, releases e issues de proyectos y servicios usados.",
+			"GitHub advisories, npm security advisories, CVE/NVD y OWASP ASVS/Top 10 para riesgos vivos de seguridad y supply chain.",
+			"Posts oficiales en X/Twitter, blogs oficiales de seguridad y noticias técnicas para detectar deprecaciones, incidentes y cambios de ecosistema.",
+			"Reddit y comunidades técnicas relevantes como señales comunitarias que informan riesgos, pero no aprueban contratos por sí solas.",
 		],
 		recommendedMcpTools: buildRecommendedMcpTools(plan),
 		recommendedAgentLabs: buildRecommendedAgentLabs(plan),
@@ -2361,6 +2368,18 @@ function buildRecommendedAgentLabs(
 ): MasterPlanRecommendedAgentLab[] {
 	if (plan.architecture.projectKind === "supervisor-runtime") {
 		return [
+			{
+				name: "AgentLab bibliotecario",
+				purpose:
+					"Auditor audit-only que lee documentación, noticias, advisories, posts oficiales y comunidades para mantener al orquestador informado sobre seguridad, deprecaciones, breaking changes, cambios de ecosistema y mejores prácticas.",
+				trigger:
+					"Antes de aprobar contratos nuevos, actualizar dependencias o declarar estable una integración externa.",
+				evidence: [
+					"docs/mcp-server.md",
+					"Doc/<project>/source-index.json",
+					"fuentes externas vivas",
+				],
+			},
 			{
 				name: "AgentLab seguridad",
 				purpose:
@@ -2569,7 +2588,7 @@ export function formatMasterPlanMarkdown(plan: MasterPlan): string {
 		"## Contratos aprobados",
 		...bulletList(
 			plan.canonicalClaims
-				.filter((claim) => claim.source === "human_approved")
+				.filter((claim) => claim.source === "user_approved")
 				.map(formatClaim),
 		),
 		"",
@@ -2731,6 +2750,7 @@ function updatePlanDecision(
 			? safePathInsideState(stateRoot, current.currentPlanMd)
 			: jsonPath.replace(/\.json$/u, ".md");
 	writeFileSync(markdownPath, `${formatMasterPlanMarkdown(plan)}\n`, "utf8");
+	writeMasterPlanFlowArtifact(stateRoot, plan);
 	const nextCurrent = writeCurrent(stateRoot, {
 		currentPlanJson: relativeFromState(stateRoot, jsonPath),
 		currentPlanMd: relativeFromState(stateRoot, markdownPath),
@@ -3196,6 +3216,7 @@ function parseCanonicalProjectDocumentation(
 	const architecture: Partial<MasterPlanArchitecture> = {};
 	const frameworks: string[] = [];
 	const dataStores: MasterPlanDataStore[] = [];
+	let canonicalObjective: string | undefined;
 	const addCanonicalStore = (type: MasterPlanDataStore["type"]): void => {
 		if (!dataStores.some((store) => store.type === type))
 			dataStores.push({
@@ -3217,6 +3238,8 @@ function parseCanonicalProjectDocumentation(
 		architecture.backend = "Core Idu-pi + MCP adapter";
 		architecture.database = "SQLite local + reports JSON/JSONL";
 		architecture.auth = "sin auth de producto";
+		canonicalObjective =
+			"Idu-pi es un supervisor/auditor normativo para el orquestador Pi: convierte intención humana, documentación, fuentes y evidencia del repositorio en Plan Maestro, contratos, riesgos, AgentLabs recomendados y checklist de ejecución segura.";
 		frameworks.push("MCP", "Telegram adapter", "Pi slash commands");
 		addCanonicalStore("sqlite");
 		addCanonicalStore("json");
@@ -3250,8 +3273,8 @@ function parseCanonicalProjectDocumentation(
 		?.trim();
 	return {
 		path,
-		...(titleObjective || boldObjective
-			? { objective: titleObjective ?? boldObjective }
+		...(canonicalObjective || titleObjective || boldObjective
+			? { objective: canonicalObjective ?? titleObjective ?? boldObjective }
 			: {}),
 		architecture,
 		dataStores,
@@ -4878,7 +4901,7 @@ function normalizeMasterPlan(raw: Partial<MasterPlan>): MasterPlan {
 		),
 		projectFlows: raw.projectFlows ?? [],
 		flowArtifact: raw.flowArtifact ?? "master-plan.flows.json",
-		canonicalClaims: raw.canonicalClaims ?? [],
+		canonicalClaims: normalizePlanClaims(raw.canonicalClaims),
 		observedReality: raw.observedReality ?? [],
 		driftFindings: raw.driftFindings ?? [],
 		dataStores,
@@ -4895,6 +4918,16 @@ function normalizeMasterPlan(raw: Partial<MasterPlan>): MasterPlan {
 		sourceFiles: raw.sourceFiles ?? [],
 		agentLabReviews: raw.agentLabReviews ?? [],
 	};
+}
+
+function normalizePlanClaims(
+	claims: MasterPlan["canonicalClaims"] | undefined,
+): MasterPlanClaim[] {
+	if (!Array.isArray(claims)) return [];
+	return claims.map((claim) => ({
+		...claim,
+		source: claim.source === "human_approved" ? "user_approved" : claim.source,
+	}));
 }
 
 function normalizePlanDataStores(

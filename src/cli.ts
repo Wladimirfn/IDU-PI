@@ -318,7 +318,11 @@ export type CliRuntime = {
 	formatPrepare: (result: IduPrepareResult) => string;
 	masterPlanStatus?: () => MasterPlanStatusResult;
 	masterPlanReview?: (pathOrLatest: string) => MasterPlanReview;
-	masterPlanApprove?: (pathOrLatest: string) => MasterPlanDraftResult;
+	masterPlanApprove?: (
+		pathOrLatest: string,
+		reason?: string,
+		source?: "cli" | "pi" | "telegram" | "mcp",
+	) => MasterPlanDraftResult;
 	masterPlanReject?: (
 		pathOrLatest: string,
 		reason?: string,
@@ -679,11 +683,12 @@ export function createCliRuntime(
 			}),
 		masterPlanReview: (pathOrLatest) =>
 			reviewMasterPlan({ stateRoot: masterPlanStateRoot, pathOrLatest }),
-		masterPlanApprove: (pathOrLatest) =>
+		masterPlanApprove: (pathOrLatest, reason, source = "cli") =>
 			approveMasterPlan({
 				stateRoot: masterPlanStateRoot,
 				pathOrLatest,
-				source: "cli",
+				source,
+				reason,
 			}),
 		masterPlanReject: (pathOrLatest, reason) =>
 			rejectMasterPlan({

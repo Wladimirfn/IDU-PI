@@ -69,6 +69,8 @@ Responsabilidades:
 - devolver JSON estructurado con `ok`, `tool`, `projectId`, `summary`, `data`, `safeNotes` y `errors`;
 - mantener seguridad: sin commit/push, sin cambios críticos automáticos y sin AgentLabs salvo `idu_agentlab_review_run` explícito.
 
+Después de un Plan Maestro aprobado, el MCP ofrece un loop preventivo para el orquestador: snapshot del plan, acción candidata advisory, paquete para subagentes normales, governance-review antes de codificar, postflight trazado y AgentLabs audit-only sólo si el orquestador los ejecuta explícitamente. Idu-pi no implementa ni reemplaza la decisión del orquestador.
+
 Guía: [MCP Server](mcp-server.md).
 
 ## Adaptador Telegram

@@ -44,6 +44,11 @@ export type IduMcpToolName =
 	| "idu_master_plan_status"
 	| "idu_master_plan_create"
 	| "idu_master_plan_review"
+	| "idu_master_plan_approve"
+	| "idu_master_plan_reject"
+	| "idu_plan_snapshot"
+	| "idu_next_advisory_action"
+	| "idu_task_package_create"
 	| "idu_orchestrator_procedure"
 	| "idu_task_context"
 	| "idu_preflight"
@@ -203,6 +208,56 @@ const TOOLS: IduMcpToolDefinition[] = [
 		},
 	),
 	tool(
+		"idu_master_plan_approve",
+		"Aprueba explícitamente el Plan Maestro seleccionado en stateRoot sin aplicar flows, ejecutar AgentLabs ni tocar el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+			reason: optionalString("Motivo/evidencia de aprobación."),
+		},
+	),
+	tool(
+		"idu_master_plan_reject",
+		"Rechaza explícitamente el Plan Maestro seleccionado en stateRoot sin borrar drafts ni tocar el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+			reason: optionalString("Motivo del rechazo."),
+		},
+	),
+	tool(
+		"idu_plan_snapshot",
+		"Devuelve snapshot compacto del Plan Maestro aprobado para que el orquestador cargue lineamientos sin reparsear todo el plan.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+		},
+	),
+	tool(
+		"idu_next_advisory_action",
+		"Propone una próxima acción candidata desde el Plan aprobado; no implementa ni ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: optionalString(
+				"Solicitud humana opcional para orientar la acción.",
+			),
+			mode: optionalString("Modo: from_plan o from_request."),
+			maxScope: optionalString("Alcance máximo sugerido: small o medium."),
+		},
+	),
+	tool(
+		"idu_task_package_create",
+		"Crea paquete de tarea para subagentes normales con brief obligatorio de governance-review antes de codificar.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: requiredString("Solicitud o acción candidata a empaquetar."),
+			actionId: optionalString("ID opcional de acción candidata."),
+			includePlanSnapshot: optionalBoolean(
+				"Incluye snapshot compacto del plan.",
+			),
+		},
+	),
+	tool(
 		"idu_orchestrator_procedure",
 		"Devuelve procedimiento asesor para que el orquestador cree/actualice plan, implemente o audite sin que Idu-pi se imponga.",
 		{
@@ -237,6 +292,18 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Inspecciona cambios locales y gates sin aplicar cambios.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			actionId: optionalString(
+				"ID opcional de acción candidata para trazabilidad.",
+			),
+			taskPackageId: optionalString(
+				"ID opcional de paquete de tarea para trazabilidad.",
+			),
+			expectedContracts: optionalStringArray(
+				"Contratos esperados para comparar contra el postflight.",
+			),
+			expectedFiles: optionalStringArray(
+				"Archivos esperados para detectar áreas inesperadas.",
+			),
 		},
 	),
 	tool(
@@ -1082,6 +1149,191 @@ async function dispatchTool(
 						: [],
 			});
 		}
+		case "idu_master_plan_approve": {
+			if (!runtime.masterPlanApprove) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const result = runtime.masterPlanApprove(
+				stringArg(args, "selector") ?? "latest",
+				stringArg(args, "reason"),
+				"mcp",
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Plan Maestro aprobado: ${result.plan.status}`,
+				data: {
+					status: result.plan.status,
+					jsonPath: result.jsonPath,
+					markdownPath: result.markdownPath,
+					flowArtifact: result.plan.flowArtifact,
+					approval: result.plan.approval,
+					plan: result.plan,
+				} as unknown as JsonObject,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Aprobé explícitamente sólo el Plan Maestro en stateRoot.",
+					"No apliqué flows, no ejecuté AgentLabs y no toqué el repo real.",
+				],
+			});
+		}
+		case "idu_master_plan_reject": {
+			if (!runtime.masterPlanReject) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const result = runtime.masterPlanReject(
+				stringArg(args, "selector") ?? "latest",
+				stringArg(args, "reason"),
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Plan Maestro rechazado: ${result.plan.status}`,
+				data: {
+					status: result.plan.status,
+					jsonPath: result.jsonPath,
+					markdownPath: result.markdownPath,
+					flowArtifact: result.plan.flowArtifact,
+					approval: result.plan.approval,
+					plan: result.plan,
+				} as unknown as JsonObject,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Rechacé explícitamente sólo el Plan Maestro en stateRoot.",
+					"No borré drafts, no ejecuté AgentLabs y no toqué el repo real.",
+				],
+			});
+		}
+		case "idu_plan_snapshot": {
+			if (!runtime.masterPlanReview) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const review = runtime.masterPlanReview(
+				stringArg(args, "selector") ?? "latest",
+			);
+			const snapshot = buildPlanSnapshot(review, runtime);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Snapshot Plan Maestro: ${snapshot.planStatus}`,
+				data: snapshot,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Snapshot compacto: no regeneré Plan Maestro ni ejecuté AgentLabs.",
+				],
+			});
+		}
+		case "idu_next_advisory_action": {
+			if (!runtime.masterPlanReview) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const request = stringArg(args, "request") ?? "";
+			const review = runtime.masterPlanReview("latest");
+			const advisoryAction = buildNextAdvisoryAction(
+				buildPlanSnapshot(review, runtime),
+				request,
+				stringArg(args, "mode") ?? "from_plan",
+				stringArg(args, "maxScope") ?? "small",
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Acción candidata: ${String((advisoryAction.candidateAction as JsonObject).title)}`,
+				data: advisoryAction,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Acción candidata solamente: Idu-pi no implementa.",
+					"No ejecuté AgentLabs; el orquestador decide llamadas explícitas.",
+				],
+			});
+		}
+		case "idu_task_package_create": {
+			if (!runtime.masterPlanReview) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const request = requiredText(args, "request");
+			const review = runtime.masterPlanReview("latest");
+			const snapshot = buildPlanSnapshot(review, runtime);
+			const advisoryAction = buildNextAdvisoryAction(
+				snapshot,
+				request,
+				"from_request",
+				"small",
+			);
+			const taskPackage = buildTaskPackage(
+				snapshot,
+				advisoryAction,
+				request,
+				stringArg(args, "actionId"),
+				booleanArg(args, "includePlanSnapshot", false),
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Paquete de tarea advisory: ${taskPackage.id}`,
+				data: taskPackage,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Paquete para subagentes normales; Idu-pi no implementa.",
+					"Governance-review del orquestador debe ocurrir antes del worker.",
+				],
+			});
+		}
 		case "idu_orchestrator_procedure": {
 			const purpose = requiredOneOf(args, "purpose", [
 				"create_plan",
@@ -1187,6 +1439,10 @@ async function dispatchTool(
 		}
 		case "idu_postflight": {
 			const report = runtime.postflight();
+			const actionId = stringArg(args, "actionId");
+			const taskPackageId = stringArg(args, "taskPackageId");
+			const expectedContracts = stringListArg(args, "expectedContracts");
+			const expectedFiles = stringListArg(args, "expectedFiles");
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1201,11 +1457,19 @@ async function dispatchTool(
 					gates: report.constitutionGate ?? null,
 					suggestedAgentLabs: report.suggestedAgentLabs,
 					requiresHumanConfirmation: report.requiresHumanConfirmation,
+					taskTrace: buildPostflightTaskTrace({
+						actionId,
+						taskPackageId,
+						expectedContracts,
+						expectedFiles,
+						report,
+					}),
 					report,
 				},
 				safeNotes: [
 					...resolution.safeNotes,
 					"Postflight lee estado git; no hace commit ni push.",
+					"Trazabilidad advisory: no cierra ni aplica cambios automáticamente.",
 				],
 			});
 		}
@@ -1410,8 +1674,331 @@ async function dispatchTool(
 	throw new Error(`Tool ${name} is handled before runtime dispatch.`);
 }
 
+type MasterPlanReviewResult = ReturnType<
+	NonNullable<CliRuntime["masterPlanReview"]>
+>;
+
+type PlanSnapshot = JsonObject & {
+	authority: "advisory";
+	planStatus: string;
+	objective: string;
+	operationalContracts: unknown[];
+	flows: unknown[];
+};
+
 function defaultRuntimeFactory(projectPath?: string): CliRuntime {
 	return createCliRuntime({ projectPath, requireTelegramConfig: false });
+}
+
+function buildPlanSnapshot(
+	review: MasterPlanReviewResult,
+	runtime: CliRuntime,
+): PlanSnapshot {
+	const plan = review.plan as unknown as JsonObject;
+	const status = String(plan.status ?? "unknown");
+	const criticalRisks = arrayField(plan, "criticalRisks");
+	const driftFindings = arrayField(plan, "driftFindings");
+	return {
+		authority: "advisory",
+		planStatus: status,
+		planApproved: status === "approved",
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		objective: String(
+			plan.inferredObjective ??
+				plan.executiveSummary ??
+				"Objetivo no definido.",
+		),
+		summary: String(plan.executiveSummary ?? ""),
+		approvedClaims: arrayField(plan, "canonicalClaims"),
+		operationalContracts: arrayField(plan, "operationalContracts"),
+		workMilestones: arrayField(plan, "workMilestones"),
+		driftFindings,
+		risks: dedupe([
+			...criticalRisks.map(String),
+			...arrayField(plan, "qualityRisks").map(String),
+			...arrayField(plan, "securityRisks").map(String),
+			...arrayField(plan, "architectureRisks").map(String),
+		]),
+		flows: arrayField(plan, "projectFlows"),
+		flowArtifact: String(plan.flowArtifact ?? "master-plan.flows.json"),
+		blockers:
+			status === "approved" ? criticalRisks : ["Plan Maestro no aprobado"],
+		recommendedNext: arrayField(plan, "recommendedNext"),
+		recommendedAgentLabs: arrayField(
+			(review.revisionAntesDeZarpar as JsonObject | undefined) ?? {},
+			"recommendedAgentLabs",
+		),
+		governanceConfig: governanceConfigData(),
+		workerBoundary: workerBoundaryData(),
+	};
+}
+
+function buildNextAdvisoryAction(
+	snapshot: PlanSnapshot,
+	request: string,
+	mode: string,
+	maxScope: string,
+): JsonObject {
+	const planApproved = snapshot.planStatus === "approved";
+	const title = request.trim()
+		? `Acción candidata: ${request.trim()}`
+		: (firstMilestoneAction(snapshot) ??
+			"Acción candidata desde Plan Maestro aprobado");
+	const contractsAffected = inferContractsFromSnapshot(snapshot, request);
+	const requiredReads = dedupe([
+		"Plan Maestro vigente",
+		"master-plan.flows.json",
+		"Doc/<project>/04-contratos-aprobados.md",
+		"Doc/<project>/01-contratos-operativos.generado.md",
+		...contractsAffected.map((area) => `Contrato ${area}`),
+	]);
+	return {
+		authority: "advisory",
+		recommendation: planApproved ? "warn" : "ask_human",
+		orchestratorDecisionRequired: true,
+		implementationOwner: "orchestrator",
+		iduRole: "advisor_auditor",
+		agentLabsRole: "audit_only",
+		mode,
+		maxScope,
+		candidateAction: {
+			id: stableActionId(title),
+			title,
+			whyNow: planApproved
+				? "El Plan Maestro está aprobado; corresponde avanzar en unidades pequeñas con governance-review preventivo."
+				: "El Plan Maestro aún no está aprobado; no conviene implementar sin aprobación.",
+			planRefs: ["master-plan.json", String(snapshot.flowArtifact)],
+			contractsAffected,
+			scope: [
+				"Preparar lineamientos de trabajo desde Plan Maestro aprobado.",
+				"Mantener implementación en subagentes normales del orquestador.",
+			],
+			nonGoals: [
+				"No implementar desde Idu-pi MCP.",
+				"No ejecutar AgentLabs automáticamente desde tools advisory.",
+				"No hacer commit/push ni tocar repo real fuera del worker normal.",
+			],
+			requiredReads,
+			acceptanceCriteria: [
+				"La acción declara contratos, flujos y criterios de verificación antes de codificar.",
+				"Un subagente governance-review del orquestador valida el paquete antes del worker.",
+				"AgentLabs quedan como audit-only y se ejecutan sólo por llamada explícita del orquestador.",
+			],
+			suggestedTests: [
+				"Test MCP lista herramientas advisory nuevas.",
+				"Test snapshot no escribe ni ejecuta AgentLabs.",
+				"Test task package incluye governance-review brief y stop conditions.",
+			],
+			stopConditions: [
+				"Aparece una herramienta de implementación como idu_apply o idu_implement.",
+				"La acción requiere cambiar datos/seguridad sin aprobación humana u orquestador.",
+				"Un AgentLab intenta codificar, modificar repo real o hacer commit/push.",
+			],
+		},
+		agentLabPolicy: {
+			mode: contractsAffected.some((contract) => contract === "security")
+				? "required_before_apply"
+				: "required_after_diff",
+			execution: "orchestrator_explicit_call_only",
+			specialties: dedupe([
+				...(contractsAffected.includes("security") ? ["security"] : []),
+				"architecture",
+				"code_quality",
+			]),
+			requiresHumanApproval: contractsAffected.includes("security"),
+			reason:
+				"MCP recomienda política; el orquestador decide si ejecuta AgentLabs audit-only antes o después del worker.",
+		},
+		orchestratorGuidance: [
+			"Enviar este paquete a un subagente governance-review antes de implementar.",
+			"Si governance-review pasa, delegar código a subagentes normales del orquestador.",
+			"Usar idu_postflight con actionId/taskPackageId después del diff.",
+		],
+	};
+}
+
+function buildTaskPackage(
+	snapshot: PlanSnapshot,
+	advisoryAction: JsonObject,
+	request: string,
+	actionId: string | undefined,
+	includePlanSnapshot: boolean,
+): JsonObject {
+	const candidate = advisoryAction.candidateAction as JsonObject;
+	const id = actionId ?? String(candidate.id ?? stableActionId(request));
+	const planApproved = snapshot.planStatus === "approved";
+	const blockers = arrayField(snapshot, "blockers").map(String);
+	return {
+		taskPackageVersion: 1,
+		id,
+		actionId: id,
+		authority: "advisory",
+		planStatus: snapshot.planStatus,
+		preconditions: {
+			planApproved,
+			blocked: !planApproved || blockers.length > 0,
+			blockers,
+			recommendation: planApproved ? "governance_review" : "ask_human",
+		},
+		recommendation: planApproved ? "warn" : "ask_human",
+		owner: "orchestrator",
+		implementationOwner: "normal_subagents",
+		iduRole: "advisor_auditor",
+		agentLabsRole: "audit_only",
+		orchestratorDecisionRequired: true,
+		objective: snapshot.objective,
+		request,
+		scope: arrayField(candidate, "scope"),
+		nonGoals: arrayField(candidate, "nonGoals"),
+		filesToRead: arrayField(candidate, "requiredReads"),
+		likelyFilesToChange: [],
+		contracts: arrayField(candidate, "contractsAffected"),
+		acceptanceCriteria: arrayField(candidate, "acceptanceCriteria"),
+		verification: arrayField(candidate, "suggestedTests"),
+		postflightRequired: true,
+		humanApprovalRequired:
+			!planApproved ||
+			Boolean(
+				(advisoryAction.agentLabPolicy as JsonObject | undefined)
+					?.requiresHumanApproval,
+			),
+		governanceReview: {
+			required: true,
+			reviewerRole: "orchestrator_subagent",
+			mustRead: [
+				"master-plan.json",
+				"master-plan.flows.json",
+				"Doc/<project>/04-contratos-aprobados.md",
+				"Doc/<project>/01-contratos-operativos.generado.md",
+			],
+			questions: [
+				"¿La acción respeta el objetivo aprobado?",
+				"¿Toca flujos permanentes?",
+				"¿Hay contratos block/critical afectados?",
+				"¿Hace falta AgentLab antes de implementar?",
+				"¿La tarea está suficientemente chica?",
+			],
+			passCriteria: [
+				"scope claro",
+				"nonGoals claros",
+				"contratos afectados identificados",
+				"tests/verificación definidos",
+				"sin violaciones críticas sin aprobación",
+			],
+		},
+		agentLabPolicy: advisoryAction.agentLabPolicy,
+		stopConditions: [
+			...arrayField(candidate, "stopConditions"),
+			"AgentLab requerido antes de aplicar sin decisión explícita del orquestador.",
+		],
+		...(includePlanSnapshot ? { planSnapshot: snapshot } : {}),
+	};
+}
+
+function arrayField(source: JsonObject, key: string): unknown[] {
+	const value = source[key];
+	return Array.isArray(value) ? value : [];
+}
+
+function firstMilestoneAction(snapshot: PlanSnapshot): string | undefined {
+	for (const milestone of arrayField(snapshot, "workMilestones")) {
+		if (!isRecord(milestone)) continue;
+		const actions = arrayField(milestone, "actions");
+		const first = actions.find((action) => typeof action === "string");
+		if (typeof first === "string" && first.trim()) return first.trim();
+	}
+	return undefined;
+}
+
+function inferContractsFromSnapshot(
+	snapshot: PlanSnapshot,
+	request: string,
+): string[] {
+	const text =
+		`${request} ${JSON.stringify(snapshot.operationalContracts)}`.toLowerCase();
+	return dedupe([
+		...(text.match(/auth|login|session|token|secret|seguridad|security/u)
+			? ["security"]
+			: []),
+		...(text.match(/db|database|datos|sqlite|json|schema|persist/u)
+			? ["data"]
+			: []),
+		...(text.match(/ui|frontend|html|css|pantalla/u) ? ["frontend"] : []),
+		...(text.match(/mcp|agent|orquestador|subagent|agentlab|governance/u)
+			? ["agent"]
+			: []),
+		"agent",
+	]);
+}
+
+function stableActionId(title: string): string {
+	const slug = title
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/gu, "")
+		.replace(/[^a-z0-9]+/gu, "-")
+		.replace(/^-|-$/gu, "")
+		.slice(0, 48);
+	return `plan-action-${slug || "next"}`;
+}
+
+function contractsFromPostflightImpact(areas: string[]): string[] {
+	const text = areas.join(" ").toLowerCase();
+	return dedupe([
+		...(text.match(/seguridad|auth|secret|env/u) ? ["security"] : []),
+		...(text.match(/db|storage|datos|schema/u) ? ["data"] : []),
+		...(text.match(/docs/u) ? ["docs"] : []),
+		...(text.match(/orquestaci|code|flujos|mapa/u) ? ["agent"] : []),
+		...(areas.length ? ["agent"] : []),
+	]);
+}
+
+function buildPostflightTaskTrace(input: {
+	actionId?: string;
+	taskPackageId?: string;
+	expectedContracts: string[];
+	expectedFiles: string[];
+	report: { changedFiles: string[]; impactedAreas: string[]; risk: string };
+}): JsonObject {
+	const unexpectedAreas = input.expectedFiles.length
+		? input.report.changedFiles.filter(
+				(file) =>
+					!input.expectedFiles.some((expected) =>
+						normalizePath(file).startsWith(normalizePath(expected)),
+					),
+			)
+		: [];
+	const observedContracts = contractsFromPostflightImpact(
+		input.report.impactedAreas,
+	);
+	const missingExpectedContracts = input.expectedContracts.filter(
+		(contract) => !observedContracts.includes(contract),
+	);
+	return {
+		actionId: input.actionId ?? null,
+		taskPackageId: input.taskPackageId ?? null,
+		matchesIntent:
+			unexpectedAreas.length === 0 && missingExpectedContracts.length === 0,
+		unexpectedAreas,
+		expectedContracts: input.expectedContracts,
+		observedContracts,
+		contractDelta: missingExpectedContracts.map((contract) => ({
+			contract,
+			status: "expected_not_observed",
+		})),
+		missingExpectedContracts,
+		objectiveProgress:
+			input.report.changedFiles.length === 0
+				? "none"
+				: input.report.risk === "low"
+					? "partial"
+					: "unclear",
+		nextAdvisory:
+			input.report.risk === "low"
+				? "Puede pasar a revisión del orquestador y AgentLab si la política lo requiere."
+				: "Revalidar contratos y considerar AgentLab audit-only antes de cerrar.",
+	};
 }
 
 function envelope(input: {
@@ -1473,6 +2060,10 @@ function requiredString(description: string): JsonObject {
 
 function optionalBoolean(description: string): JsonObject {
 	return { type: "boolean", description };
+}
+
+function optionalStringArray(description: string): JsonObject {
+	return { type: "array", items: { type: "string" }, description };
 }
 
 function requiredEnum(description: string, values: string[]): JsonObject {
@@ -1539,6 +2130,15 @@ function stringArg(args: JsonObject, key: string): string | undefined {
 function booleanArg(args: JsonObject, key: string, fallback: boolean): boolean {
 	const value = args[key];
 	return typeof value === "boolean" ? value : fallback;
+}
+
+function stringListArg(args: JsonObject, key: string): string[] {
+	const value = args[key];
+	if (!Array.isArray(value)) return [];
+	return value
+		.filter((item): item is string => typeof item === "string")
+		.map((item) => item.trim())
+		.filter(Boolean);
 }
 
 function requiredText(args: JsonObject, key: string): string {

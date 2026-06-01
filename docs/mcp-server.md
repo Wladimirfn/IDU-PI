@@ -121,7 +121,21 @@ Las herramientas que evalúan intención o supervisor (`idu_preflight`, `idu_adv
 
 El modo de autoridad MCP por defecto es `IDU_MCP_AUTHORITY_MODE=advisory`: Idu-pi informa, audita y recomienda; el orquestador revalida, decide, ejecuta y comunica. El valor `strict` queda reservado para despliegues futuros con hazards críticos explícitos y hoy sólo se expone como dato de configuración, no como permiso para imponer decisiones.
 
-`idu_master_plan_review` agrega `data.revisionAntesDeZarpar`: la revisión previa a navegar. Esta estructura resume entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes de información, fuentes externas vivas recomendadas, MCP/herramientas requeridas, AgentLabs sugeridos, problemas actuales, estrategia de arreglo, preguntas para el usuario y checklist antes de trabajo grande. Los contratos son acuerdos de readiness/recursos: objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes, AgentLabs, testing y entrega. La biblioteca de fuentes locales todavía no ingiere PDFs; cuando falta `Doc/<project>/source-index.json`, la revisión lo declara como recomendación/falta para una etapa posterior.
+`idu_master_plan_review` agrega `data.revisionAntesDeZarpar`: la revisión previa a navegar. Esta estructura resume entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes de información, fuentes externas vivas recomendadas, MCP/herramientas requeridas, AgentLabs sugeridos, problemas actuales, estrategia de arreglo, preguntas para el usuario y checklist antes de trabajo grande. `idu_master_plan_approve` e `idu_master_plan_reject` cierran ese ciclo de forma explícita: sólo cambian el estado del Plan Maestro y sus artefactos de gobernanza en `stateRoot`; no aplican flows, no ejecutan AgentLabs, no modifican el repo real y no hacen commit/push. Los contratos son acuerdos de readiness/recursos: objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes, AgentLabs, testing y entrega. La biblioteca de fuentes locales todavía no ingiere PDFs; cuando falta `Doc/<project>/source-index.json`, la revisión lo declara como recomendación/falta para una etapa posterior. Las fuentes externas vivas pueden incluir documentación oficial, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad. Esas señales informan riesgos y recomendaciones, pero no pasan a contratos aprobados sin validación humana/orquestador. Para este seguimiento, Idu-pi recomienda un AgentLab bibliotecario audit-only: lee documentación/noticias/advisories/comunidades y mantiene informado al orquestador sin implementar ni modificar el repo.
+
+Después de aprobar el Plan Maestro, el loop preventivo recomendado es:
+
+```text
+idu_plan_snapshot
+→ idu_next_advisory_action
+→ idu_task_package_create
+→ subagente governance-review del orquestador
+→ worker normal del orquestador
+→ idu_postflight con actionId/taskPackageId
+→ AgentLab audit-only si el orquestador decide ejecutarlo explícitamente
+```
+
+Las tools advisory nuevas no ejecutan cambios ni AgentLabs. Producen lineamientos, acciones candidatas y paquetes para subagentes normales. El paso `governance-review` ocurre antes de codificar para evitar rework: valida Plan Maestro, flujos, contratos, criterios de aceptación, stop conditions y política AgentLab. AgentLabs siguen siendo audit-only y sólo corren mediante `idu_agentlab_review_run` o llamada explícita equivalente del orquestador.
 
 Herramientas mínimas:
 
@@ -139,11 +153,16 @@ Herramientas mínimas:
 | `idu_master_plan_status` | Lee estado/rutas del Plan Maestro sin regenerar. |
 | `idu_master_plan_create` | Crea o regenera el Plan Maestro normativo en `stateRoot`, con docs declaradas vs realidad construida y flujos permanentes aparte. |
 | `idu_master_plan_review` | Revisa el Plan Maestro actual/selector y devuelve JSON estructurado más markdown, incluyendo `revisionAntesDeZarpar`. |
+| `idu_master_plan_approve` | Aprueba explícitamente el Plan Maestro seleccionado; actualiza artefactos de gobernanza en `stateRoot` sin aplicar flows ni tocar el repo real. |
+| `idu_master_plan_reject` | Rechaza explícitamente el Plan Maestro seleccionado con motivo opcional; no borra drafts ni toca el repo real. |
+| `idu_plan_snapshot` | Devuelve vista compacta del Plan aprobado: objetivo, contratos, flujos, riesgos, drift, blockers y AgentLabs recomendados. |
+| `idu_next_advisory_action` | Propone una próxima acción candidata desde Plan/request; no ordena, no implementa y no ejecuta AgentLabs. |
+| `idu_task_package_create` | Crea paquete para subagentes normales con brief obligatorio de governance-review previo al worker. |
 | `idu_orchestrator_procedure` | Devuelve procedimiento asesor para crear/actualizar plan, implementar o revisar postflight sin reemplazar al orquestador. |
 | `idu_task_context` | Devuelve contratos afectados, lecturas requeridas, labs sugeridos audit-only y guía para subagentes del orquestador. |
 | `idu_preflight` | Evalúa riesgo/impacto de una solicitud humana y devuelve advisory compacto para el orquestador. |
 | `idu_advisory` | Devuelve advisory seguro para el orquestador desde preflight. |
-| `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios. |
+| `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios; puede recibir `actionId`, `taskPackageId`, `expectedContracts` y `expectedFiles` para trazabilidad advisory. |
 | `idu_supervisor_tick` | Tick supervisor seguro con flags explícitos. |
 | `idu_task` | Interpreta intención humana y registra tarea estructurada. |
 | `idu_queue_detail` | Devuelve cola estructurada con ids completos y guardStatus. |

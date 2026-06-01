@@ -143,6 +143,11 @@ idu_start
 idu_master_plan_status
 idu_master_plan_create
 idu_master_plan_review
+idu_master_plan_approve
+idu_master_plan_reject
+idu_plan_snapshot
+idu_next_advisory_action
+idu_task_package_create
 idu_orchestrator_procedure
 idu_task_context
 idu_preflight
@@ -151,7 +156,7 @@ idu_agentlab_request_create
 idu_agentlab_review_run
 ```
 
-`idu_activate` sólo activa guardrails; no enrola ni crea drafts. `idu_master_plan_create` crea/regenera en `stateRoot` un Plan Maestro normativo que separa documentación declarada, realidad construida, drift, contratos y flujos permanentes (`master-plan.flows.json`). `idu_master_plan_review` devuelve además `revisionAntesDeZarpar`: una revisión honesta para el orquestador con entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. `idu_orchestrator_procedure` e `idu_task_context` devuelven severidad, confianza, evidencia, lecturas requeridas, contratos afectados, labs sugeridos y guía para subagentes. El orquestador revalida y decide. `idu_agentlab_request_create` sólo crea solicitud; los labs se ejecutan únicamente con `idu_agentlab_review_run`.
+`idu_activate` sólo activa guardrails; no enrola ni crea drafts. `idu_master_plan_create` crea/regenera en `stateRoot` un Plan Maestro normativo que separa documentación declarada, realidad construida, drift, contratos y flujos permanentes (`master-plan.flows.json`). `idu_master_plan_review` devuelve además `revisionAntesDeZarpar`: una revisión honesta para el orquestador con entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. `idu_master_plan_approve` y `idu_master_plan_reject` cierran explícitamente el ciclo normativo desde MCP: cambian sólo artefactos de gobernanza en `stateRoot`, no aplican flows, no ejecutan AgentLabs, no tocan el repo real y no hacen commit/push. Con un Plan aprobado, `idu_plan_snapshot`, `idu_next_advisory_action` e `idu_task_package_create` arman lineamientos preventivos para que el orquestador revise Plan/flows/contratos con un subagente governance-review antes de codificar. `idu_orchestrator_procedure` e `idu_task_context` devuelven severidad, confianza, evidencia, lecturas requeridas, contratos afectados, labs sugeridos y guía para subagentes. El orquestador revalida y decide. `idu_agentlab_request_create` sólo crea solicitud; los labs se ejecutan únicamente con `idu_agentlab_review_run` o llamada explícita del orquestador.
 
 Guía: [Instalador, home CLI y estado por proyecto](docs/installer.md).
 
@@ -203,7 +208,7 @@ AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces 
 
 Plan Maestro es el documento normativo vivo del proyecto. Responde qué es el repo, qué hace, cómo está construido, qué alcance tiene, qué requisitos debe cumplir, qué contratos gobiernan cambios y qué diferencia existe entre la documentación declarada y la realidad construida. Los flujos permanentes viven aparte en `master-plan.flows.json` para que puedan actualizarse junto al proyecto sin convertir el Plan Maestro en lista de tareas.
 
-La revisión del Plan Maestro incluye `revisionAntesDeZarpar`: contratos entendidos como acuerdos/recursos de preparación, no sólo prohibiciones. Cubre objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes de información, AgentLabs, testing y entrega. Si falta una biblioteca local de fuentes (`Doc/<project>/source-index.json` y `sources/local/` para PDFs, normas, leyes o libros), la revisión la marca como fuente recomendada antes de derivar normas fuertes.
+La revisión del Plan Maestro incluye `revisionAntesDeZarpar`: contratos entendidos como acuerdos/recursos de preparación, no sólo prohibiciones. Cubre objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes de información, AgentLabs, testing y entrega. Si falta una biblioteca local de fuentes (`Doc/<project>/source-index.json` y `sources/local/` para PDFs, normas, leyes o libros), la revisión la marca como fuente recomendada antes de derivar normas fuertes. Las fuentes externas vivas —docs oficiales, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad— sólo informan riesgos y recomendaciones; no se convierten automáticamente en contratos aprobados. Para esa inteligencia, Idu-pi recomienda un AgentLab bibliotecario audit-only que mantiene al orquestador informado sin implementar ni modificar el repo.
 
 ### Supervisor loop
 
