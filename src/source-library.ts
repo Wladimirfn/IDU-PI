@@ -184,7 +184,7 @@ export function getSourceLibraryStatus(input: {
 		refreshed.sources,
 		missingSources,
 		staleSources,
-		unindexedLocalFiles,
+		unindexedFiles(paths, refreshed.sources, unindexedLocalFiles),
 		errors,
 	);
 }
@@ -379,14 +379,18 @@ function validateIndex(
 	if (typeof record.updatedAt !== "string" || !record.updatedAt.trim())
 		errors.push("updatedAt is required");
 	const hasLegacySources =
-		Array.isArray(record.localSources) || Array.isArray(record.externalLiveSources);
+		Array.isArray(record.localSources) ||
+		Array.isArray(record.externalLiveSources);
 	if (record.contractPromotionAllowed !== false && !hasLegacySources)
 		errors.push("contractPromotionAllowed must be false");
 	if (!Array.isArray(record.sources) && !hasLegacySources)
 		errors.push("sources must be an array");
 	if (errors.length > 0) return { ok: false, errors };
 	const sources: SourceLibraryItem[] = [];
-	for (const [index, item] of (Array.isArray(record.sources) ? record.sources : []).entries()) {
+	for (const [index, item] of (Array.isArray(record.sources)
+		? record.sources
+		: []
+	).entries()) {
 		const result = validateItem(item, `sources[${index}]`);
 		if (result.ok) sources.push(result.item);
 		else errors.push(...result.errors);
@@ -569,6 +573,19 @@ function assertInside(root: string, target: string): string {
 		throw new Error(`Ruta fuera de Source Library: ${resolvedTarget}`);
 	}
 	return resolvedTarget;
+}
+
+function unindexedFiles(
+	paths: SourceLibraryPaths,
+	sources: SourceLibraryItem[],
+	localFiles: string[],
+): string[] {
+	const indexed = new Set(
+		sources.map((source) =>
+			assertInside(paths.root, join(paths.root, source.storedPath)),
+		),
+	);
+	return localFiles.filter((file) => !indexed.has(resolve(file)));
 }
 
 function listLocalFiles(directory: string): string[] {

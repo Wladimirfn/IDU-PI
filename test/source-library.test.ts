@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -38,6 +44,7 @@ test("status reports missing then add copies manual markdown only into stateRoot
 			now,
 		});
 		assert.equal(result.state, "ready");
+		assert.deepEqual(result.unindexedLocalFiles, []);
 		assert.equal(result.addedSource?.contractPromotionAllowed, false);
 		assert.equal(result.addedSource?.kind, "markdown");
 		assert.ok(result.addedSource?.extractedTextPath);
@@ -124,6 +131,7 @@ test("status detects stale and refresh persists recalculated status", () => {
 		writeFileSync(stored, "v2", "utf8");
 
 		const stale = getSourceLibraryStatus({ stateRoot, projectId: "Demo" });
+		assert.deepEqual(stale.unindexedLocalFiles, []);
 		assert.equal(stale.state, "stale");
 		assert.deepEqual(stale.staleSources, [added.addedSource!.id]);
 
