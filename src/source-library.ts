@@ -61,6 +61,7 @@ export type SourceLibraryIndex = {
 	updatedAt: string;
 	contractPromotionAllowed: false;
 	sources: SourceLibraryItem[];
+	[key: string]: unknown;
 };
 
 export type SourceLibraryPaths = {
@@ -377,12 +378,15 @@ function validateIndex(
 		errors.push("projectId is required");
 	if (typeof record.updatedAt !== "string" || !record.updatedAt.trim())
 		errors.push("updatedAt is required");
-	if (record.contractPromotionAllowed !== false)
+	const hasLegacySources =
+		Array.isArray(record.localSources) || Array.isArray(record.externalLiveSources);
+	if (record.contractPromotionAllowed !== false && !hasLegacySources)
 		errors.push("contractPromotionAllowed must be false");
-	if (!Array.isArray(record.sources)) errors.push("sources must be an array");
+	if (!Array.isArray(record.sources) && !hasLegacySources)
+		errors.push("sources must be an array");
 	if (errors.length > 0) return { ok: false, errors };
 	const sources: SourceLibraryItem[] = [];
-	for (const [index, item] of (record.sources as unknown[]).entries()) {
+	for (const [index, item] of (Array.isArray(record.sources) ? record.sources : []).entries()) {
 		const result = validateItem(item, `sources[${index}]`);
 		if (result.ok) sources.push(result.item);
 		else errors.push(...result.errors);
@@ -391,6 +395,7 @@ function validateIndex(
 	return {
 		ok: true,
 		index: {
+			...record,
 			version: 1,
 			projectId: record.projectId as string,
 			updatedAt: record.updatedAt as string,

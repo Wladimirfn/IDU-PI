@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -134,6 +134,56 @@ test("status detects stale and refresh persists recalculated status", () => {
 		});
 		assert.equal(refreshed.state, "stale");
 		assert.equal(refreshed.sources[0]?.status, "stale");
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test("legacy source-index is normalized and preserved when adding sources", () => {
+	const temp = root();
+	try {
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const paths = sourceLibraryPaths(stateRoot, "Demo");
+		mkdirSync(paths.root, { recursive: true });
+		writeFileSync(
+			paths.indexPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					projectId: "Demo",
+					updatedAt: "2026-06-01T00:00:00.000Z",
+					purpose: "legacy normative source index",
+					localSources: [{ id: "manual", status: "active" }],
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		assert.equal(
+			getSourceLibraryStatus({ stateRoot, projectId: "Demo" }).state,
+			"empty",
+		);
+
+		const source = join(temp, "manual.txt");
+		writeFileSync(source, "manual", "utf8");
+		const added = addSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			inputPath: source,
+			now,
+		});
+		assert.equal(added.state, "ready");
+		const saved = JSON.parse(readFileSync(paths.indexPath, "utf8")) as {
+			purpose?: string;
+			localSources?: unknown[];
+			contractPromotionAllowed?: boolean;
+			sources?: unknown[];
+		};
+		assert.equal(saved.purpose, "legacy normative source index");
+		assert.equal(saved.localSources?.length, 1);
+		assert.equal(saved.contractPromotionAllowed, false);
+		assert.equal(saved.sources?.length, 1);
 	} finally {
 		rmSync(temp, { recursive: true, force: true });
 	}
