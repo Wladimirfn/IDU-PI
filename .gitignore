@@ -74,6 +74,7 @@ openspec/
 
 # Local notes / generated plans
 plan.md
+subagent-artifacts/
 
 # Logs and temp files
 *.log
