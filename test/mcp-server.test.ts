@@ -951,6 +951,7 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 			taskPackageId: "pkg-test",
 			expectedContracts: ["security", "data"],
 			expectedFiles: ["src/"],
+			expectedChangeMode: "code",
 		},
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
@@ -959,12 +960,16 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 		actionId: string;
 		taskPackageId: string;
 		matchesIntent: boolean;
+		expectedChangeMode: string;
+		observedChangeMode: string;
 		observedContracts: string[];
 		missingExpectedContracts: string[];
 		contractDelta: Array<{ contract: string; status: string }>;
 	};
 	assert.equal(trace.actionId, "plan-action-test");
 	assert.equal(trace.taskPackageId, "pkg-test");
+	assert.equal(trace.expectedChangeMode, "code");
+	assert.equal(trace.observedChangeMode, "code");
 	assert.equal(trace.matchesIntent, false);
 	assert.ok(trace.observedContracts.includes("security"));
 	assert.deepEqual(trace.missingExpectedContracts, ["data"]);
@@ -972,6 +977,75 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 		{ contract: "data", status: "expected_not_observed" },
 	]);
 	assert.match(result.safeNotes.join("\n"), /no cierra ni aplica/u);
+});
+
+test("idu_postflight accepts expectedChangeMode and maps normalized contracts", async () => {
+	const runtime = fakeRuntime();
+	runtime.postflight = (): ProjectPostflightReport => ({
+		risk: "low",
+		changedFiles: ["src/lab-db.ts", "src/components/Button.tsx", "test/ui.test.ts"],
+		ignoredFiles: ["subagent-artifacts/review.md"],
+		observedChangeMode: "code",
+		impactedAreas: ["DB/storage", "UI", "orquestación", "tests"],
+		warnings: [],
+		recommendedNext: "Revisar cambios.",
+		shouldRunAgentLab: false,
+		suggestedAgentLabs: [],
+		requiresHumanConfirmation: false,
+	});
+	const result = await callIduMcpTool(
+		"idu_postflight",
+		{
+			expectedContracts: ["data", "frontend", "agent", "tests"],
+			expectedFiles: ["src/", "test/"],
+			expectedChangeMode: "code",
+		},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	const trace = result.data.taskTrace as {
+		matchesIntent: boolean;
+		ignoredFiles: string[];
+		observedContracts: string[];
+		missingExpectedContracts: string[];
+		modeDelta: unknown;
+	};
+	assert.equal(result.ok, true);
+	assert.equal(trace.matchesIntent, true);
+	assert.deepEqual(trace.ignoredFiles, ["subagent-artifacts/review.md"]);
+	assert.deepEqual(trace.missingExpectedContracts, []);
+	assert.equal(trace.modeDelta, null);
+	assert.ok(trace.observedContracts.includes("data"));
+	assert.ok(trace.observedContracts.includes("frontend"));
+	assert.ok(trace.observedContracts.includes("agent"));
+	assert.ok(trace.observedContracts.includes("tests"));
+});
+
+test("idu_postflight stays advisory with active session and no-op mode", async () => {
+	const runtime = fakeRuntime();
+	runtime.supervisorOnIduActivation();
+	runtime.postflight = (): ProjectPostflightReport => ({
+		risk: "low",
+		changedFiles: [],
+		ignoredFiles: ["subagent-artifacts/review.md"],
+		observedChangeMode: "no-op",
+		impactedAreas: [],
+		warnings: [],
+		recommendedNext: "Sin cambios locales detectados.",
+		shouldRunAgentLab: false,
+		suggestedAgentLabs: [],
+		requiresHumanConfirmation: false,
+	});
+	const result = await callIduMcpTool(
+		"idu_postflight",
+		{ expectedChangeMode: "no-op" },
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	const trace = result.data.taskTrace as { matchesIntent: boolean };
+	assert.equal(result.ok, true);
+	assert.equal(trace.matchesIntent, true);
+	assert.equal(result.data.requiresHumanConfirmation, false);
+	assert.deepEqual(result.data.suggestedAgentLabs, []);
+	assert.match(result.safeNotes.join("\n"), /no hace commit ni push/u);
 });
 
 test("idu_orchestrator_procedure validates purpose at runtime", async () => {

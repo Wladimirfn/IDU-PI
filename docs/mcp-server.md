@@ -139,6 +139,9 @@ Las tools advisory nuevas no ejecutan cambios ni AgentLabs. Producen lineamiento
 
 Para proyectos con persistencia, el Plan Maestro debe expresar gobernanza de datos: stores detectados/canónicos, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de artefactos SQLite/JSON/JSONL. Los flujos de ingesta, reporting y API deben apuntar a stores existentes; Idu-pi no inventa stores sin evidencia.
 
+
+`idu_postflight` separa cambios funcionales de ruido operativo: ignora artefactos locales de subagentes, informa `ignoredFiles`, clasifica `observedChangeMode` y normaliza contratos observados (`data`, `security`, `frontend`, `agent`, `docs`, `tests`). Esto reduce falsos positivos en loops no-op/docs/stateRoot sin degradar blockers reales como `.env` o runtime DB/JSONL trackeado.
+
 Herramientas mínimas:
 
 | Tool | Propósito |
@@ -164,7 +167,7 @@ Herramientas mínimas:
 | `idu_task_context` | Devuelve contratos afectados, lecturas requeridas, labs sugeridos audit-only y guía para subagentes del orquestador. |
 | `idu_preflight` | Evalúa riesgo/impacto de una solicitud humana y devuelve advisory compacto para el orquestador. |
 | `idu_advisory` | Devuelve advisory seguro para el orquestador desde preflight. |
-| `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios; puede recibir `actionId`, `taskPackageId`, `expectedContracts` y `expectedFiles` para trazabilidad advisory. |
+| `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios; puede recibir `actionId`, `taskPackageId`, `expectedContracts`, `expectedFiles` y `expectedChangeMode` (`no-op`, `docs`, `tests`, `code`, `stateRoot`) para trazabilidad advisory. |
 | `idu_supervisor_tick` | Tick supervisor seguro con flags explícitos. |
 | `idu_task` | Interpreta intención humana y registra tarea estructurada. |
 | `idu_queue_detail` | Devuelve cola estructurada con ids completos y guardStatus. |

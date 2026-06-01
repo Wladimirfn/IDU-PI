@@ -8,6 +8,7 @@ import {
 import type { ProjectFlows } from "./project-flows.js";
 
 export type ProjectPostflightRisk = "low" | "medium" | "high" | "blocker";
+export type ProjectChangeMode = "no-op" | "docs" | "tests" | "code" | "stateRoot";
 
 export type ProjectPostflightContext = {
 	projectPath: string;
@@ -21,6 +22,8 @@ export type ProjectPostflightContext = {
 export type ProjectPostflightReport = {
 	risk: ProjectPostflightRisk;
 	changedFiles: string[];
+	ignoredFiles?: string[];
+	observedChangeMode?: ProjectChangeMode;
 	impactedAreas: string[];
 	warnings: string[];
 	recommendedNext: string;
@@ -72,10 +75,18 @@ export function analyzeProjectPostflight(
 	const suggestedAgentLabs: string[] = [];
 	let risk: ProjectPostflightRisk = "low";
 
-	if (changedFiles.length === 0) {
+	const ignoredFiles = changedFiles.filter(isIgnorablePostflightFile);
+	const functionalChangedFiles = changedFiles.filter(
+		(file) => !isIgnorablePostflightFile(file),
+	);
+	const observedChangeMode = inferObservedChangeMode(functionalChangedFiles);
+
+	if (functionalChangedFiles.length === 0) {
 		return {
 			risk: "low",
 			changedFiles: [],
+			ignoredFiles,
+			observedChangeMode,
 			impactedAreas: [],
 			warnings: [],
 			recommendedNext: "Sin cambios locales detectados.",
@@ -86,7 +97,7 @@ export function analyzeProjectPostflight(
 		};
 	}
 
-	for (const file of changedFiles) {
+	for (const file of functionalChangedFiles) {
 		const categories = classifyFile(file);
 		for (const area of categories.areas) impactedAreas.push(area);
 		for (const warning of categories.warnings) warnings.push(warning);
@@ -108,7 +119,7 @@ export function analyzeProjectPostflight(
 
 	const constitutionGate = context.constitution
 		? evaluateConstitutionGates({
-				changedFiles,
+				changedFiles: functionalChangedFiles,
 				constitution: context.constitution,
 			})
 		: undefined;
@@ -124,7 +135,9 @@ export function analyzeProjectPostflight(
 
 	return {
 		risk,
-		changedFiles,
+		changedFiles: functionalChangedFiles,
+		ignoredFiles,
+		observedChangeMode,
 		impactedAreas: dedupe(impactedAreas),
 		warnings: dedupe(warnings),
 		recommendedNext: recommendedNext(risk, dedupe(impactedAreas)),
@@ -150,6 +163,12 @@ export function formatProjectPostflightReport(
 		"",
 		"Cambios detectados:",
 		formatList(report.changedFiles),
+		"",
+		"Archivos ignorados:",
+		formatList(report.ignoredFiles ?? []),
+		"",
+		"Modo observado:",
+		report.observedChangeMode ?? "code",
 		"",
 		"Impacto:",
 		formatList(report.impactedAreas),
@@ -210,6 +229,35 @@ function parsePorcelainFiles(output: string): string[] {
 	});
 }
 
+function isIgnorablePostflightFile(file: string): boolean {
+	const lower = normalizePath(file).toLowerCase();
+	return (
+		lower === "subagent-artifacts" ||
+		lower.startsWith("subagent-artifacts/") ||
+		lower.includes("/.pi/agent/sessions/") ||
+		lower.includes("/subagent-artifacts/")
+	);
+}
+
+function inferObservedChangeMode(files: string[]): ProjectChangeMode {
+	if (files.length === 0) return "no-op";
+	if (files.every((file) => isStateRootFile(file))) return "stateRoot";
+	if (files.every((file) => isDocsFile(file.toLowerCase()))) return "docs";
+	if (files.every((file) => isTestFile(file.toLowerCase()))) return "tests";
+	return "code";
+}
+
+function isStateRootFile(file: string): boolean {
+	const lower = normalizePath(file).toLowerCase();
+	return (
+		lower.includes("/bridge-agents/projects/") ||
+		lower.startsWith("reports/") ||
+		lower.startsWith("agentlabs/") ||
+		lower.startsWith("doc/") ||
+		lower.startsWith("master-plan")
+	);
+}
+
 function classifyFile(file: string): {
 	areas: string[];
 	warnings: string[];
@@ -225,10 +273,14 @@ function classifyFile(file: string): {
 		warnings.push("Archivo .env cambiado o trackeado; posible secreto.");
 		return { areas, warnings, risk: "blocker" };
 	}
-	if (/^reports\/(lab\.db|.*\.jsonl)$/u.test(lower)) {
+	if (/^reports\/(.*\.(db|sqlite|sqlite3|jsonl)|lab\.db)$/u.test(lower)) {
 		areas.push("runtime/tracked-artifacts");
 		warnings.push("Archivo runtime en reports trackeado o cambiado.");
 		return { areas, warnings, risk: "blocker" };
+	}
+	if (isStateRootFile(lower)) {
+		areas.push("stateRoot");
+		return { areas, warnings, risk: "low" };
 	}
 	if (isDocsFile(lower)) areas.push("docs");
 	if (isTestFile(lower)) areas.push("tests");
@@ -259,7 +311,7 @@ function classifyFile(file: string): {
 		areas.push("UI");
 		risk = maxRisk(risk, "medium");
 	}
-	if (isOrchestrationFile(lower)) {
+	if (!isTestFile(lower) && isOrchestrationFile(lower)) {
 		areas.push("orquestación");
 		warnings.push(`Cambio toca orquestación/handler principal: ${file}`);
 		risk = maxRisk(risk, lower === "src/index.ts" ? "high" : "medium");
@@ -308,11 +360,11 @@ function isFlowFile(file: string): boolean {
 }
 
 function isUiFile(file: string): boolean {
-	return /(\.html$|components\/|pages\/|app\/)/u.test(file);
+	return /(\.html$|\.css$|components\/|pages\/|app\/|screens\/|views\/)/u.test(file);
 }
 
 function isOrchestrationFile(file: string): boolean {
-	return /(^src\/index\.ts$|agent-router|(^|\/)lab[^/]*|queue|telegram-command-registry)/u.test(
+	return /(mcp-server|orchestrator|governance|master-plan|project-postflight|^src\/index\.ts$|agent-router|(^|\/)lab[^/]*|queue|telegram-command-registry)/u.test(
 		file,
 	);
 }

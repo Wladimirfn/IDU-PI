@@ -68,6 +68,7 @@ test("no changes is low risk", () => {
 	const report = reportFor([]);
 
 	assert.equal(report.risk, "low");
+	assert.equal(report.observedChangeMode, "no-op");
 	assert.equal(report.requiresHumanConfirmation, false);
 	assert.deepEqual(report.changedFiles, []);
 });
@@ -76,6 +77,7 @@ test("docs-only changes are low risk", () => {
 	const report = reportFor(["README.md", "docs/usage.md"]);
 
 	assert.equal(report.risk, "low");
+	assert.equal(report.observedChangeMode, "docs");
 	assert.deepEqual(report.impactedAreas, ["docs"]);
 });
 
@@ -83,6 +85,7 @@ test("test-only changes are low risk", () => {
 	const report = reportFor(["test/project-postflight.test.ts"]);
 
 	assert.equal(report.risk, "low");
+	assert.equal(report.observedChangeMode, "tests");
 	assert.deepEqual(report.impactedAreas, ["tests"]);
 });
 
@@ -118,10 +121,52 @@ test("changed .env is blocker", () => {
 });
 
 test("tracked runtime reports files are blocker", () => {
-	const report = reportFor(["reports/lab.db", "reports/tasks.jsonl"]);
+	const report = reportFor([
+		"reports/lab.db",
+		"reports/tasks.jsonl",
+		"reports/runtime.sqlite",
+	]);
 
 	assert.equal(report.risk, "blocker");
+	assert.equal(report.observedChangeMode, "stateRoot");
 	assert.ok(report.impactedAreas.includes("runtime/tracked-artifacts"));
+});
+
+test("stateRoot governance artifacts stay low risk", () => {
+	const report = reportFor([
+		"C:/Users/elmas/Documents/bridge-agents/projects/idu-pi/master-plan.json",
+	]);
+
+	assert.equal(report.risk, "low");
+	assert.equal(report.observedChangeMode, "stateRoot");
+	assert.deepEqual(report.impactedAreas, ["stateRoot"]);
+});
+
+test("untracked subagent artifacts are ignored as functional changes", () => {
+	const report = reportFor(["subagent-artifacts/review.md"]);
+
+	assert.equal(report.risk, "low");
+	assert.equal(report.observedChangeMode, "no-op");
+	assert.deepEqual(report.changedFiles, []);
+	assert.deepEqual(report.ignoredFiles, ["subagent-artifacts/review.md"]);
+});
+
+test("mixed code plus subagent artifacts keeps only functional files", () => {
+	const report = reportFor([
+		"src/project-postflight.ts",
+		"subagent-artifacts/review.md",
+	]);
+
+	assert.equal(report.observedChangeMode, "code");
+	assert.deepEqual(report.changedFiles, ["src/project-postflight.ts"]);
+	assert.deepEqual(report.ignoredFiles, ["subagent-artifacts/review.md"]);
+});
+
+test("frontend files are classified as UI impact", () => {
+	const report = reportFor(["src/components/Button.tsx", "app/page.css"]);
+
+	assert.equal(report.risk, "medium");
+	assert.ok(report.impactedAreas.includes("UI"));
 });
 
 test("index AgentRouter and lab changes are medium or high", () => {

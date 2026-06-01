@@ -304,6 +304,9 @@ const TOOLS: IduMcpToolDefinition[] = [
 			expectedFiles: optionalStringArray(
 				"Archivos esperados para detectar áreas inesperadas.",
 			),
+			expectedChangeMode: optionalString(
+				'Modo esperado del cambio: "no-op", "docs", "tests", "code" o "stateRoot".',
+			),
 		},
 	),
 	tool(
@@ -1443,6 +1446,7 @@ async function dispatchTool(
 			const taskPackageId = stringArg(args, "taskPackageId");
 			const expectedContracts = stringListArg(args, "expectedContracts");
 			const expectedFiles = stringListArg(args, "expectedFiles");
+			const expectedChangeMode = stringArg(args, "expectedChangeMode");
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1453,6 +1457,8 @@ async function dispatchTool(
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					changedFiles: report.changedFiles,
+					ignoredFiles: report.ignoredFiles ?? [],
+					observedChangeMode: report.observedChangeMode ?? "code",
 					risk: report.risk,
 					gates: report.constitutionGate ?? null,
 					suggestedAgentLabs: report.suggestedAgentLabs,
@@ -1462,6 +1468,7 @@ async function dispatchTool(
 						taskPackageId,
 						expectedContracts,
 						expectedFiles,
+						expectedChangeMode,
 						report,
 					}),
 					report,
@@ -1949,6 +1956,8 @@ function contractsFromPostflightImpact(areas: string[]): string[] {
 		...(text.match(/seguridad|auth|secret|env/u) ? ["security"] : []),
 		...(text.match(/db|storage|datos|schema/u) ? ["data"] : []),
 		...(text.match(/docs/u) ? ["docs"] : []),
+		...(text.match(/tests?/u) ? ["tests"] : []),
+		...(text.match(/ui|frontend|components|pages|html|css/u) ? ["frontend"] : []),
 		...(text.match(/orquestaci|code|flujos|mapa/u) ? ["agent"] : []),
 		...(areas.length ? ["agent"] : []),
 	]);
@@ -1959,7 +1968,14 @@ function buildPostflightTaskTrace(input: {
 	taskPackageId?: string;
 	expectedContracts: string[];
 	expectedFiles: string[];
-	report: { changedFiles: string[]; impactedAreas: string[]; risk: string };
+	expectedChangeMode?: string;
+	report: {
+		changedFiles: string[];
+		ignoredFiles?: string[];
+		observedChangeMode?: string;
+		impactedAreas: string[];
+		risk: string;
+	};
 }): JsonObject {
 	const unexpectedAreas = input.expectedFiles.length
 		? input.report.changedFiles.filter(
@@ -1975,12 +1991,24 @@ function buildPostflightTaskTrace(input: {
 	const missingExpectedContracts = input.expectedContracts.filter(
 		(contract) => !observedContracts.includes(contract),
 	);
+	const observedChangeMode = input.report.observedChangeMode ?? "code";
+	const modeMatches = input.expectedChangeMode
+		? input.expectedChangeMode === observedChangeMode
+		: true;
 	return {
 		actionId: input.actionId ?? null,
 		taskPackageId: input.taskPackageId ?? null,
 		matchesIntent:
-			unexpectedAreas.length === 0 && missingExpectedContracts.length === 0,
+			unexpectedAreas.length === 0 &&
+			missingExpectedContracts.length === 0 &&
+			modeMatches,
 		unexpectedAreas,
+		ignoredFiles: input.report.ignoredFiles ?? [],
+		expectedChangeMode: input.expectedChangeMode ?? null,
+		observedChangeMode,
+		modeDelta: modeMatches
+			? null
+			: { expected: input.expectedChangeMode, observed: observedChangeMode },
 		expectedContracts: input.expectedContracts,
 		observedContracts,
 		contractDelta: missingExpectedContracts.map((contract) => ({
