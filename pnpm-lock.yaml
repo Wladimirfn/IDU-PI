@@ -9,17 +9,17 @@ importers:
   .:
     dependencies:
       dotenv:
-        specifier: ^17.2.3
+        specifier: 17.4.2
         version: 17.4.2
       grammy:
-        specifier: ^1.38.4
+        specifier: 1.43.0
         version: 1.43.0
     devDependencies:
       '@types/node':
-        specifier: ^24.10.1
+        specifier: 24.12.4
         version: 24.12.4
       typescript:
-        specifier: ^5.9.3
+        specifier: 5.9.3
         version: 5.9.3
 
 packages:

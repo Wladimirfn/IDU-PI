@@ -136,6 +136,8 @@ Después de actualizar el `PATH` de usuario, cerrá y abrí una terminal nueva a
 
 - No ejecuta bootstrap remoto opaco ni scripts de dependencias.
 - Usa `pnpm-lock.yaml` con `--frozen-lockfile --ignore-scripts`; pnpm puede descargar paquetes fijados desde el registry/cache configurado.
+- Mantiene defensa repo-local contra `postinstall`: `.npmrc` para npm/compatibles y `pnpm-workspace.yaml` para pnpm 11 (`ignoreScripts`, `minimumReleaseAge`, `strictDepBuilds`, `onlyBuiltDependencies: []`).
+- Usa versiones exactas en `package.json`; evitá `latest`, `^` y `~` para dependencias runtime/dev.
 - No usa `irm | iex`.
 - No modifica `PATH` sin confirmación interactiva o `--add-path` explícito.
 - No lee ni muestra secretos de `.env`.

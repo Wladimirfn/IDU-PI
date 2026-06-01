@@ -1,4 +1,5 @@
-allowBuilds:
-  esbuild: set this to true or false
-onlyBuiltDependencies:
-  - esbuild
+ignoreScripts: true
+saveExact: true
+minimumReleaseAge: 4320
+strictDepBuilds: true
+onlyBuiltDependencies: []

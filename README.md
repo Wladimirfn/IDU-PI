@@ -18,6 +18,25 @@ Sirve para responder preguntas como:
 - ¿Hay reportes o aprendizajes previos que deberían compactarse?
 - ¿Conviene pedir una revisión AgentLab en sandbox?
 
+## Seguridad de dependencias
+
+Este repo asume que los scripts `postinstall` pueden ser un vector de ataque. Por eso la instalación segura combina varias barreras:
+
+| Capa | Medida |
+| --- | --- |
+| npm/compatibilidad | `.npmrc` con `ignore-scripts=true` y `save-exact=true`. |
+| pnpm 11 | `pnpm-workspace.yaml` con `ignoreScripts`, `minimumReleaseAge`, `strictDepBuilds` y `onlyBuiltDependencies: []`. |
+| Dependencias | Versiones exactas en `package.json`; sin `latest` ni rangos `^`. |
+| Publicación futura | `files` allowlist para no publicar archivos sensibles por accidente. |
+
+Comando recomendado para instalar:
+
+```text
+corepack pnpm install --frozen-lockfile --ignore-scripts
+```
+
+Si alguna dependencia futura necesita build nativo, no habilites scripts globalmente: agregá una excepción explícita y revisable en `pnpm-workspace.yaml`.
+
 ## Qué NO es
 
 - No es un bot de Telegram como núcleo del sistema; Telegram es una interfaz remota opcional del flujo CLI/supervisor.
@@ -128,7 +147,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -DryRun
 node scripts/install.mjs --dry-run
 ```
 
-El instalador no ejecuta bootstrap remoto opaco ni scripts de dependencias: usa `pnpm-lock.yaml` con `--frozen-lockfile --ignore-scripts`; pnpm puede descargar paquetes fijados desde el registry/cache configurado. No ejecuta Telegram/AgentLabs ni enrola proyectos. Si crea el shim local y falta en `PATH`, pregunta antes de agregarlo al `PATH` de usuario; para aceptarlo sin segunda pregunta usá `-Yes -AddPath`. Guía: [Instalación rápida segura](docs/quickstart-install.md).
+El instalador no ejecuta bootstrap remoto opaco ni scripts de dependencias: usa `pnpm-lock.yaml` con `--frozen-lockfile --ignore-scripts`; pnpm puede descargar paquetes fijados desde el registry/cache configurado. El repo además incluye defensa en profundidad para instalaciones manuales: `.npmrc` bloquea scripts en clientes npm/compatibles, `pnpm-workspace.yaml` declara `ignoreScripts`, `minimumReleaseAge`, `strictDepBuilds` y `onlyBuiltDependencies: []`, y `package.json` usa versiones exactas. No ejecuta Telegram/AgentLabs ni enrola proyectos. Si crea el shim local y falta en `PATH`, pregunta antes de agregarlo al `PATH` de usuario; para aceptarlo sin segunda pregunta usá `-Yes -AddPath`. Guía: [Instalación rápida segura](docs/quickstart-install.md).
 
 Para entrar sin memorizar comandos después de instalar:
 
