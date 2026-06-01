@@ -38,6 +38,16 @@ import {
 	resolveProjectStatePaths,
 	type ProjectStateResetResult,
 } from "./project-state.js";
+import {
+	addSourceLibraryItem,
+	formatSourceLibraryAddResult,
+	formatSourceLibraryRefreshResult,
+	formatSourceLibraryStatus,
+	getSourceLibraryStatus,
+	refreshSourceLibrary,
+	type SourceLibraryMutationResult,
+	type SourceLibraryStatus,
+} from "./source-library.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -331,6 +341,12 @@ export type CliRuntime = {
 	masterPlanNaturalDecision?: (
 		text: string,
 	) => ReturnType<typeof handleMasterPlanNaturalDecision>;
+	sourceLibraryStatus: () => SourceLibraryStatus;
+	sourceLibraryAdd: (inputPath: string) => SourceLibraryMutationResult;
+	sourceLibraryRefresh: () => SourceLibraryStatus;
+	formatSourceLibraryStatus: (status: SourceLibraryStatus) => string;
+	formatSourceLibraryAddResult: (result: SourceLibraryMutationResult) => string;
+	formatSourceLibraryRefreshResult: (status: SourceLibraryStatus) => string;
 	formatMasterPlanStatus?: (result: MasterPlanStatusResult) => string;
 	formatMasterPlanReview?: (review: MasterPlanReview) => string;
 	formatMasterPlanOperation?: (result: MasterPlanDraftResult) => string;
@@ -713,6 +729,25 @@ export function createCliRuntime(
 				gitHead: readGitHead(activeProject.path),
 				source: "cli",
 			}),
+		sourceLibraryStatus: () =>
+			getSourceLibraryStatus({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+			}),
+		sourceLibraryAdd: (inputPath) =>
+			addSourceLibraryItem({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				inputPath,
+			}),
+		sourceLibraryRefresh: () =>
+			refreshSourceLibrary({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+			}),
+		formatSourceLibraryStatus,
+		formatSourceLibraryAddResult,
+		formatSourceLibraryRefreshResult,
 		formatMasterPlanStatus,
 		formatMasterPlanReview,
 		formatMasterPlanOperation,
@@ -1123,6 +1158,27 @@ export async function runCliCommand(
 					),
 				);
 			}
+			case "idu-source-status":
+			case "source-status":
+				return ok(
+					activeRuntime.formatSourceLibraryStatus(
+						activeRuntime.sourceLibraryStatus(),
+					),
+				);
+			case "idu-source-add":
+			case "source-add":
+				return ok(
+					activeRuntime.formatSourceLibraryAddResult(
+						activeRuntime.sourceLibraryAdd(requiredText(rest)),
+					),
+				);
+			case "idu-source-refresh":
+			case "source-refresh":
+				return ok(
+					activeRuntime.formatSourceLibraryRefreshResult(
+						activeRuntime.sourceLibraryRefresh(),
+					),
+				);
 			case "idu-preflight":
 			case "preflight":
 				return ok(
@@ -2158,6 +2214,9 @@ export function helpText(): string {
 		"  idu-pi idu-master-plan-approve latest",
 		"  idu-pi idu-master-plan-reject latest [motivo]",
 		"  idu-pi idu-master-plan-redraft latest",
+		"  idu-pi idu-source-status",
+		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
+		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-improvements-review latest",
 		"  idu-pi idu-supervisor-improvements-create latest",

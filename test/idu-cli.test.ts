@@ -935,6 +935,67 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 			["Master Plan Status", String(status.status)].join("\n"),
 		formatMasterPlanReview: (review: { markdown?: string }) =>
 			String(review.markdown),
+		sourceLibraryStatus: () => ({
+			projectId: "pi-telegram-bridge",
+			paths: {
+				root: join(workspaceRoot, "Doc", "pi-telegram-bridge"),
+				indexPath: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"source-index.json",
+				),
+				localSourcesDir: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"sources",
+					"local",
+				),
+				extractedDir: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"sources",
+					"extracted",
+				),
+			},
+			state: "missing",
+			sources: [],
+			missingSources: [],
+			staleSources: [],
+			unindexedLocalFiles: [],
+			errors: [],
+			advisory: "stateRoot only; no contract promotion",
+		}),
+		sourceLibraryAdd: () => ({
+			...runtime.sourceLibraryStatus(),
+			state: "ready",
+			addedSource: {
+				id: "source-demo-manual-abc123",
+				title: "manual.md",
+				kind: "markdown",
+				trustLevel: "manual",
+				freshnessPolicy: "manual",
+				originalPath: "C:/docs/manual.md",
+				storedPath: "sources/local/source-demo-manual-abc123-manual.md",
+				sha256: "abc123",
+				sizeBytes: 12,
+				status: "ready",
+				addedAt: "2026-06-01T00:00:00.000Z",
+				lastCheckedAt: "2026-06-01T00:00:00.000Z",
+				contractPromotionAllowed: false,
+			},
+		}),
+		sourceLibraryRefresh: () => runtime.sourceLibraryStatus(),
+		formatSourceLibraryStatus: (status) =>
+			["Idu-pi Source Library", "", "Estado:", status.state].join("\n"),
+		formatSourceLibraryAddResult: (result) =>
+			["Idu-pi Source Library Add", "", result.addedSource?.id ?? "none"].join(
+				"\n",
+			),
+		formatSourceLibraryRefreshResult: (status) =>
+			["Idu-pi Source Library Refresh", "", status.state].join("\n"),
 		formatMasterPlanOperation: (result: { plan: { status: string } }) =>
 			["Master Plan", String(result.plan.status)].join("\n"),
 		labReviewPlan: () => ({
@@ -1314,6 +1375,23 @@ test("CLI master-plan commands are wired with aliases", async () => {
 		);
 		assert.equal(redraft.exitCode, 0);
 		assert.match(redraft.stdout, /draft/u);
+	});
+});
+
+test("CLI source library commands are wired with aliases", async () => {
+	await withRuntime(async (runtime) => {
+		const status = await runCliCommand(["source-status"], runtime);
+		assert.equal(status.exitCode, 0);
+		assert.match(status.stdout, /Idu-pi Source Library/u);
+		const add = await runCliCommand(
+			["idu-source-add", "C:/docs/manual.md"],
+			runtime,
+		);
+		assert.equal(add.exitCode, 0);
+		assert.match(add.stdout, /source-demo-manual/u);
+		const refresh = await runCliCommand(["source-refresh"], runtime);
+		assert.equal(refresh.exitCode, 0);
+		assert.match(refresh.stdout, /Source Library Refresh/u);
 	});
 });
 

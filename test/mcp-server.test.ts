@@ -35,6 +35,10 @@ import type {
 	AgentLabReviewStatus,
 } from "../src/agentlab-review-runner.js";
 import type { StructuredTask } from "../src/structured-task-queue.js";
+import type {
+	SourceLibraryMutationResult,
+	SourceLibraryStatus,
+} from "../src/source-library.js";
 
 const UNUSED = "unused";
 
@@ -510,6 +514,46 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			throw new Error(UNUSED);
 		},
 		formatSkillDraftReview: () => UNUSED,
+		sourceLibraryStatus: (): SourceLibraryStatus => ({
+			projectId: "sistema_de_mantencion",
+			paths: {
+				root: "C:/idu/state/Doc/sistema_de_mantencion",
+				indexPath: "C:/idu/state/Doc/sistema_de_mantencion/source-index.json",
+				localSourcesDir: "C:/idu/state/Doc/sistema_de_mantencion/sources/local",
+				extractedDir:
+					"C:/idu/state/Doc/sistema_de_mantencion/sources/extracted",
+			},
+			state: "ready",
+			sources: [],
+			missingSources: [],
+			staleSources: [],
+			unindexedLocalFiles: [],
+			errors: [],
+			advisory: "stateRoot only; no contract promotion",
+		}),
+		sourceLibraryAdd: (): SourceLibraryMutationResult => ({
+			...fakeRuntime().sourceLibraryStatus(),
+			addedSource: {
+				id: "source-demo-manual-abc123",
+				title: "manual.md",
+				kind: "markdown",
+				trustLevel: "manual",
+				freshnessPolicy: "manual",
+				originalPath: "C:/docs/manual.md",
+				storedPath: "sources/local/source-demo-manual-abc123-manual.md",
+				sha256: "abc123",
+				sizeBytes: 12,
+				status: "ready",
+				addedAt: "2026-06-01T00:00:00.000Z",
+				lastCheckedAt: "2026-06-01T00:00:00.000Z",
+				contractPromotionAllowed: false,
+			},
+		}),
+		sourceLibraryRefresh: (): SourceLibraryStatus =>
+			fakeRuntime().sourceLibraryStatus(),
+		formatSourceLibraryStatus: () => "source library status",
+		formatSourceLibraryAddResult: () => "source library add",
+		formatSourceLibraryRefreshResult: () => "source library refresh",
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
 			projectId: "sistema_de_mantencion",
@@ -621,7 +665,10 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_plan_snapshot"));
 	assert.ok(tools.some((tool) => tool.name === "idu_next_advisory_action"));
 	assert.ok(tools.some((tool) => tool.name === "idu_task_package_create"));
-	assert.equal(tools.length, 29);
+	assert.ok(tools.some((tool) => tool.name === "idu_source_status"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_add"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
+	assert.equal(tools.length, 32);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1441,6 +1488,38 @@ test("idu_activate remains activate-only and does not bootstrap unregistered pro
 		restoreEnv(previous);
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("source library MCP tools remain advisory and stateRoot-only", async () => {
+	const status = await callIduMcpTool(
+		"idu_source_status",
+		{},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(status.ok, true);
+	assert.match(status.summary, /Source Library/u);
+	assert.ok(
+		status.safeNotes.some((note) => /No promoví contratos/u.test(note)),
+	);
+
+	const add = await callIduMcpTool(
+		"idu_source_add",
+		{ path: "C:/docs/manual.md" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(add.ok, true);
+	assert.ok(!add.data.run);
+	assert.ok(add.safeNotes.some((note) => /stateRoot\/Doc/u.test(note)));
+
+	const refresh = await callIduMcpTool(
+		"idu_source_refresh",
+		{},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(refresh.ok, true);
+	assert.ok(
+		refresh.safeNotes.some((note) => /No cambié contratos/u.test(note)),
+	);
 });
 
 test("postflight request create remains request-only and review-run reports sandbox notes", async () => {

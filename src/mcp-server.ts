@@ -58,6 +58,9 @@ export type IduMcpToolName =
 	| "idu_task"
 	| "idu_queue_detail"
 	| "idu_semantic_audit_status"
+	| "idu_source_status"
+	| "idu_source_add"
+	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
 	| "idu_agentlab_review_status";
@@ -345,10 +348,32 @@ const TOOLS: IduMcpToolDefinition[] = [
 		},
 	),
 	tool(
+		"idu_source_status",
+		"Lee estado de Source Library en stateRoot sin escribir ni promover contratos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_add",
+		"Copia/registra documentación manual local en Source Library stateRoot; no parsea PDFs ni promueve contratos.",
+		{
+			path: requiredString("Ruta local .md, .txt o .pdf a registrar."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_refresh",
+		"Recalcula hashes/estado de Source Library sin tocar contratos ni ejecutar AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
 		"idu_agentlab_request_create",
 		"Crea solicitud formal AgentLab; no ejecuta AgentLabs.",
 		{
-				source: requiredEnum("Fuente de solicitud.", [
+			source: requiredEnum("Fuente de solicitud.", [
 				"postflight",
 				"master-plan",
 				"skill-draft",
@@ -1588,6 +1613,59 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Solo leí estado de auditoría semántica.",
 				],
+			});
+		}
+		case "idu_source_status": {
+			const status = runtime.sourceLibraryStatus();
+			return envelope({
+				ok: status.errors.length === 0,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source Library: ${status.state} (${status.sources.length} sources)`,
+				data: { status },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Solo leí Source Library en stateRoot.",
+					"No promoví contratos ni ejecuté AgentLabs.",
+				],
+				errors: status.errors,
+			});
+		}
+		case "idu_source_add": {
+			const result = runtime.sourceLibraryAdd(requiredText(args, "path"));
+			return envelope({
+				ok: result.errors.length === 0,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source agregada: ${result.addedSource?.id ?? "sin fuente"}`,
+				data: { result, addedSource: result.addedSource },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Copié documentación sólo a stateRoot/Doc/<project>/sources/local.",
+					"PDFs se registran como binarios; no hice OCR ni parsing pesado.",
+					"No promoví contratos ni ejecuté AgentLabs.",
+				],
+				errors: result.errors,
+			});
+		}
+		case "idu_source_refresh": {
+			const status = runtime.sourceLibraryRefresh();
+			return envelope({
+				ok: status.errors.length === 0,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source Library refresh: ${status.state}`,
+				data: { status },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Refresh recalculó estado/hashes en stateRoot únicamente.",
+					"No cambié contratos, Project Core, Constitution, flows ni skills.",
+					"No ejecuté AgentLabs.",
+				],
+				errors: status.errors,
 			});
 		}
 		case "idu_agentlab_request_create": {

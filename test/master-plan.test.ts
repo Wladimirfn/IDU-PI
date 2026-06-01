@@ -30,6 +30,7 @@ import {
 	rejectMasterPlan,
 	reviewMasterPlan,
 } from "../src/master-plan.js";
+import { addSourceLibraryItem } from "../src/source-library.js";
 
 function tempRoot(): string {
 	return mkdtempSync(join(tmpdir(), "idu-master-plan-"));
@@ -610,19 +611,52 @@ test("revisionAntesDeZarpar usa Doc root sanitizado y distingue falta de herrami
 		mkdirSync(join(stateRoot, "Doc", "proyecto_cido_uno"), {
 			recursive: true,
 		});
+		const sourceIndexPath = join(
+			stateRoot,
+			"Doc",
+			"proyecto_cido_uno",
+			"source-index.json",
+		);
+		writeFileSync(sourceIndexPath, "{}\n", "utf8");
+		const invalidSourceReview = reviewMasterPlan({
+			stateRoot,
+			pathOrLatest: "latest",
+		});
+		assert.equal(
+			invalidSourceReview.revisionAntesDeZarpar.status,
+			"needs_tools",
+		);
 		writeFileSync(
-			join(stateRoot, "Doc", "proyecto_cido_uno", "source-index.json"),
-			"{}\n",
+			sourceIndexPath,
+			`${JSON.stringify(
+				{
+					version: 1,
+					projectId: "Proyecto Ácido Uno",
+					updatedAt: "2026-06-01T00:00:00.000Z",
+					contractPromotionAllowed: false,
+					sources: [],
+				},
+				null,
+				2,
+			)}\n`,
 			"utf8",
 		);
+
+		const sourcePath = join(root, "manual.md");
+		writeFileSync(sourcePath, "# Manual\nFuente humana", "utf8");
+		addSourceLibraryItem({
+			stateRoot,
+			projectId: "Proyecto Ácido Uno",
+			inputPath: sourcePath,
+			now: () => new Date("2026-06-01T00:00:00.000Z"),
+		});
 		const readyReview = reviewMasterPlan({ stateRoot, pathOrLatest: "latest" });
 		assert.equal(readyReview.revisionAntesDeZarpar.status, "ready");
-		assert.equal(
-			readyReview.revisionAntesDeZarpar.currentProblems.some((item) =>
-				/source-index/iu.test(item),
-			),
-			false,
-		);
+		const sourceContract =
+			readyReview.revisionAntesDeZarpar.requiredContracts.find(
+				(contract) => contract.category === "information_sources",
+			);
+		assert.equal(sourceContract?.status, "recommended");
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

@@ -23,6 +23,7 @@ import { loadProjectCore } from "./project-core.js";
 import { loadProjectFlows } from "./project-flows.js";
 import type { AgentLabSpecialty } from "./agentlab-supervisor-contract.js";
 import type { AgentLabReviewRunResult } from "./agentlab-review-runner.js";
+import { getSourceLibraryStatus } from "./source-library.js";
 
 export type MasterPlanStatus =
 	| "draft"
@@ -2131,11 +2132,11 @@ function buildRevisionAntesDeZarpar(
 	plan: MasterPlan,
 	stateRoot: string,
 ): MasterPlanRevisionAntesDeZarpar {
-	const sourceIndexPath = join(
-		projectDocRoot(stateRoot, plan.projectId),
-		"source-index.json",
-	);
-	const hasSourceIndex = existsSync(sourceIndexPath);
+	const sourceLibraryStatus = getSourceLibraryStatus({
+		stateRoot,
+		projectId: plan.projectId,
+	});
+	const hasReadySources = sourceLibraryStatus.state === "ready";
 	const hasApprovedContract = plan.canonicalClaims.some(
 		(claim) => claim.source === "user_approved",
 	);
@@ -2149,15 +2150,19 @@ function buildRevisionAntesDeZarpar(
 					"Project Blueprint no confirmado como fuente local; no debe tratarse como ley del proyecto.",
 				]
 			: []),
-		...(!hasSourceIndex
-			? [
-					"No existe biblioteca local indexada de fuentes normativas en Doc/<project>/source-index.json.",
-				]
-			: []),
+		...(hasReadySources
+			? []
+			: [
+					`Biblioteca local de fuentes no lista (${sourceLibraryStatus.state}); Doc/<project>/source-index.json debe tener fuentes válidas y vigentes.`,
+				]),
 		...plan.contractViolations.map((violation) => violation.title),
 		...plan.criticalRisks,
 	]);
-	const requiredContracts = buildReadinessContracts(plan, hasSourceIndex);
+	const requiredContracts = buildReadinessContracts(
+		plan,
+		hasReadySources,
+		sourceLibraryStatus.state,
+	);
 	const missingDefinitions = dedupeStrings([
 		...(plan.status !== "approved"
 			? ["Aprobación humana explícita del Plan Maestro."]
@@ -2173,12 +2178,12 @@ function buildRevisionAntesDeZarpar(
 			? "blocked"
 			: missingDefinitions.length > 0
 				? "needs_user_definition"
-				: !hasSourceIndex
+				: !hasReadySources
 					? "needs_tools"
 					: "ready";
 	return {
 		status,
-		confidence: readinessConfidence(plan, hasSourceIndex, hasApprovedContract),
+		confidence: readinessConfidence(plan, hasReadySources, hasApprovedContract),
 		projectUnderstanding: buildProjectUnderstanding(plan),
 		requiredContracts,
 		missingDefinitions,
@@ -2198,15 +2203,16 @@ function buildRevisionAntesDeZarpar(
 		recommendedMcpTools: buildRecommendedMcpTools(plan),
 		recommendedAgentLabs: buildRecommendedAgentLabs(plan),
 		currentProblems: problems,
-		repairStrategy: buildRepairStrategy(plan, hasSourceIndex),
-		questionsForUser: buildQuestionsForUser(plan, hasSourceIndex),
-		beforeSailingChecklist: buildBeforeSailingChecklist(plan, hasSourceIndex),
+		repairStrategy: buildRepairStrategy(plan, hasReadySources),
+		questionsForUser: buildQuestionsForUser(plan, hasReadySources),
+		beforeSailingChecklist: buildBeforeSailingChecklist(plan, hasReadySources),
 	};
 }
 
 function buildReadinessContracts(
 	plan: MasterPlan,
-	hasSourceIndex: boolean,
+	hasReadySources: boolean,
+	sourceLibraryState: string,
 ): MasterPlanReadinessContract[] {
 	const evidence = (items: string[]): string[] =>
 		items.filter(Boolean).slice(0, 6);
@@ -2287,16 +2293,18 @@ function buildReadinessContracts(
 		{
 			category: "information_sources",
 			title: "Contrato de fuentes de información",
-			status: hasSourceIndex ? "confirmed" : "recommended",
+			status: hasReadySources ? "recommended" : "missing",
 			requirement:
 				"Declarar fuentes válidas: documentación canónica, PDFs/normas/libros locales y MCPs/fuentes externas vivas.",
 			evidence: evidence([
 				...plan.canonicalClaims.flatMap((claim) => claim.evidence),
-				...(hasSourceIndex ? ["Doc/<project>/source-index.json"] : []),
+				...(hasReadySources
+					? [`Doc/<project>/source-index.json (${sourceLibraryState})`]
+					: []),
 			]),
-			nextAction: hasSourceIndex
-				? "Mantener source-index actualizado cuando cambien normas o documentación."
-				: "Crear Doc/<project>/source-index.json y carpeta sources/local antes de derivar contratos normativos.",
+			nextAction: hasReadySources
+				? "Mantener source-index actualizado como evidencia advisory; no promueve contratos automáticamente."
+				: `Crear o refrescar Source Library (estado actual: ${sourceLibraryState}) antes de derivar contratos normativos.`,
 		},
 		{
 			category: "agentlabs",

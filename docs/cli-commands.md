@@ -135,6 +135,14 @@ El contrato de datos debe ser operativo: stores, owner lógico, retención, back
 | `idu-pi master-plan-reject latest [motivo]` | Marca el plan como rejected con motivo opcional. MCP también expone `idu_master_plan_reject`. |
 | `idu-pi master-plan-redraft latest` | Rehace el draft actual actualizando el Plan Maestro canónico. |
 
+Source Library C1 permite agregar documentación manual local al `stateRoot` sin escribir en el repo real ni promover contratos automáticamente:
+
+| Comando | Uso |
+| --- | --- |
+| `idu-pi source-status` | Muestra estado explícito `missing | empty | ready | stale | invalid`, hashes y faltantes. |
+| `idu-pi source-add <path.md|path.txt|path.pdf>` | Copia fuente local a `Doc/<project>/sources/local/`; para `.md/.txt` guarda snapshot de texto simple, para `.pdf` sólo copia/registra binario. |
+| `idu-pi source-refresh` | Recalcula existencia/hash/estado; no toca Project Core, Constitution, flows, skills ni contratos. |
+
 Aliases con prefijo Idu-pi:
 
 ```text
@@ -154,8 +162,9 @@ Artefactos por proyecto:
 <stateRoot>/master-plan.memory.json
 <stateRoot>/master-plan.flows.json
 <stateRoot>/project-index.json
-<stateRoot>/Doc/<project>/source-index.json        # futuro índice recomendado de fuentes locales/normativas
-<stateRoot>/Doc/<project>/sources/local/           # futuro lugar para PDFs, normas, leyes, libros o docs descargadas
+<stateRoot>/Doc/<project>/source-index.json        # índice Source Library de fuentes locales/normativas
+<stateRoot>/Doc/<project>/sources/local/           # PDFs, normas, leyes, libros o docs descargadas
+<stateRoot>/Doc/<project>/sources/extracted/       # snapshot de texto simple para .md/.txt; PDFs no se parsean en C1
 <stateRoot>/agentlabs/
 ```
 

@@ -726,6 +726,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-master-plan-redraft latest",
 	},
 	{
+		label: "Source Library status",
+		command: "corepack pnpm cli -- idu-source-status",
+	},
+	{
+		label: "Source Library refresh",
+		command: "corepack pnpm cli -- idu-source-refresh",
+	},
+	{
 		label: "Idu supervisor tick",
 		command: "corepack pnpm cli -- idu-supervisor-tick",
 	},
