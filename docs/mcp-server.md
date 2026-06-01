@@ -123,7 +123,7 @@ El modo de autoridad MCP por defecto es `IDU_MCP_AUTHORITY_MODE=advisory`: Idu-p
 
 `idu_master_plan_review` agrega `data.revisionAntesDeZarpar`: la revisión previa a navegar. Esta estructura resume entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes de información, fuentes externas vivas recomendadas, MCP/herramientas requeridas, AgentLabs sugeridos, problemas actuales, estrategia de arreglo, preguntas para el usuario y checklist antes de trabajo grande. `idu_master_plan_approve` e `idu_master_plan_reject` cierran ese ciclo de forma explícita: sólo cambian el estado del Plan Maestro y sus artefactos de gobernanza en `stateRoot`; no aplican flows, no ejecutan AgentLabs, no modifican el repo real y no hacen commit/push. Los contratos son acuerdos de readiness/recursos: objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes, AgentLabs, testing y entrega. La biblioteca de fuentes locales todavía no ingiere PDFs; cuando falta `Doc/<project>/source-index.json`, la revisión lo declara como recomendación/falta para una etapa posterior. Las fuentes externas vivas pueden incluir documentación oficial, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad. Esas señales informan riesgos y recomendaciones, pero no pasan a contratos aprobados sin validación humana/orquestador. Para este seguimiento, Idu-pi recomienda un AgentLab bibliotecario audit-only: lee documentación/noticias/advisories/comunidades y mantiene informado al orquestador sin implementar ni modificar el repo.
 
-Después de aprobar el Plan Maestro, el loop preventivo recomendado es:
+Después de aprobar el Plan Maestro, el loop preventivo recomendado para cualquier cambio no trivial es:
 
 ```text
 idu_plan_snapshot
@@ -136,6 +136,8 @@ idu_plan_snapshot
 ```
 
 Las tools advisory nuevas no ejecutan cambios ni AgentLabs. Producen lineamientos, acciones candidatas y paquetes para subagentes normales. El paso `governance-review` ocurre antes de codificar para evitar rework: valida Plan Maestro, flujos, contratos, criterios de aceptación, stop conditions y política AgentLab. AgentLabs siguen siendo audit-only y sólo corren mediante `idu_agentlab_review_run` o llamada explícita equivalente del orquestador.
+
+Para proyectos con persistencia, el Plan Maestro debe expresar gobernanza de datos: stores detectados/canónicos, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de artefactos SQLite/JSON/JSONL. Los flujos de ingesta, reporting y API deben apuntar a stores existentes; Idu-pi no inventa stores sin evidencia.
 
 Herramientas mínimas:
 

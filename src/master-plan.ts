@@ -1463,6 +1463,10 @@ function inferOperationalContracts(
 				"Tablas críticas deben tener owner lógico, validación de tipos y reglas de integridad.",
 				"RLS/permisos son obligatorios si hay datos sensibles o Supabase/Postgres externo.",
 				"Reportes no deben leer estados parciales sin señalizar consistencia o corte temporal.",
+				"Todo store debe declarar retención, backup/restore y verificación de recuperación antes de considerarse operativo.",
+				"Datos sensibles o exportables requieren sanitización/redacción antes de logs, reportes, prompts o artefactos compartidos.",
+				"SQLite/JSON/JSONL deben tener ciclo de vida explícito: owner lógico, ubicación, retención, limpieza, backup y criterios de archivo/eliminación.",
+				"Migración/rollback debe cubrir tanto schema DB como compatibilidad de artefactos JSON/JSONL versionados.",
 			],
 			evidence: [
 				...evidence,
@@ -3177,13 +3181,7 @@ function applyCanonicalDocumentationSignals(
 			)
 			.map((flow) => ({
 				...flow,
-				dataStores: canonical.dataStores.length
-					? flow.dataStores.filter((store) =>
-							canonical.dataStores.some(
-								(canonicalStore) => canonicalStore.type === store,
-							),
-						)
-					: flow.dataStores,
+				dataStores: resolveCanonicalFlowDataStores(flow, canonical.dataStores),
 			})),
 		architecture,
 		securityModel,
@@ -3192,6 +3190,21 @@ function applyCanonicalDocumentationSignals(
 			: signals.hasAuth || securityModel.authDetected,
 		hasDb: canonical.dataStores.length > 0 || signals.hasDb,
 	};
+}
+
+function resolveCanonicalFlowDataStores(
+	flow: MasterPlanFunctionalFlow,
+	canonicalStores: MasterPlanDataStore[],
+): string[] {
+	if (!canonicalStores.length) return flow.dataStores;
+	const canonicalTypes = canonicalStores.map((store) => store.type);
+	const compatibleExisting = flow.dataStores.filter((store) =>
+		canonicalTypes.includes(store as MasterPlanDataStore["type"]),
+	);
+	if (compatibleExisting.length) return compatibleExisting;
+	if (["data_ingest", "reporting", "api"].includes(flow.type))
+		return canonicalTypes;
+	return [];
 }
 
 function findCanonicalProjectDocumentation(

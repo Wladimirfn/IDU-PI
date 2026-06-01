@@ -30,14 +30,50 @@ Nada crítico se aplica sin confirmación humana.
 
 ## Cómo funciona en 30 segundos
 
-1. Iniciás Idu-pi desde la superficie disponible: `idu-pi idu` / Pi slash `/idu` como flujo cómodo de bootstrap/start local, o Telegram `/idu` para activar guardrails remotos sobre un proyecto ya configurado.
-2. Idu-pi revisa Project Core, Constitution, flows, reportes y memoria disponible.
-3. Interpreta la intención humana con señales deterministas.
-4. Bloquea o pide confirmación cuando detecta riesgo alto.
-5. Audita eventos y compacta conocimiento en drafts revisables.
-6. Propone mejoras, reglas, skills o tareas futuras sin aplicarlas sola.
-7. AgentLabs revisan en sandbox/clone y devuelven evidencia.
-8. El humano/orquestador decide qué aplicar, encolar, ignorar o guardar.
+1. Entrás por `idu-pi` para ver el home o por `idu-pi idu` / Pi slash `/idu` para activar el supervisor del proyecto.
+2. Si el proyecto no está registrado, lo enrolás explícitamente y Idu-pi crea estado aislado fuera del repo real.
+3. Idu-pi genera o lee el Plan Maestro: objetivo, contratos, flujos, riesgos y diferencia entre docs declaradas y realidad construida.
+4. Con Plan aprobado, el orquestador pide una acción candidata, crea un paquete de tarea y manda un governance-review antes de codificar.
+5. Los workers normales del orquestador implementan; Idu-pi sólo audita, recomienda y hace postflight con evidencia.
+6. AgentLabs se ejecutan sólo por llamada explícita y siempre son audit-only: no editan repo, no hacen commit/push y no implementan.
+7. El humano/orquestador decide qué aplicar, confirmar, encolar, regenerar o descartar.
+
+## Ruta rápida para usuarios nuevos
+
+```powershell
+# 1) Instalar / verificar sin cambios destructivos
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File scripts/install.ps1
+
+# 2) Abrir el home
+idu-pi
+
+# 3) Configurar MCP para que Pi vea las tools de Idu-pi
+idu-pi setup mcp-init
+
+# 4) Registrar un proyecto real
+idu-pi project enroll "C:\ruta\a\tu-proyecto" mi-proyecto
+
+# 5) Activar supervisor local
+idu-pi idu
+
+# 6) Crear/revisar/aprobar Plan Maestro cuando estés conforme
+idu-pi master-plan-status
+idu-pi master-plan-review latest
+idu-pi master-plan-approve latest
+```
+
+Después de eso, el orquestador puede usar MCP para el loop preventivo:
+
+```text
+idu_plan_snapshot
+→ idu_next_advisory_action
+→ idu_task_package_create
+→ governance-review del orquestador
+→ worker normal
+→ idu_postflight
+→ idu_agentlab_review_run sólo si el orquestador lo decide
+```
 
 ## Arquitectura simple
 
@@ -133,13 +169,21 @@ idu-pi setup mcp-init
 idu-pi project enroll <projectPath> [projectId]
 ```
 
-Desde MCP, el orquestador usa Idu-pi como guía de buenas prácticas, asesor y auditor; no como autoridad ciega:
+Desde MCP, el orquestador usa Idu-pi como guía de buenas prácticas, asesor y auditor; no como autoridad ciega. Las tools principales son:
 
 ```text
+# Proyecto y sesión
 idu_project_status
 idu_project_enroll
+idu_project_reset_state
 idu_bootstrap_project
 idu_start
+idu_status
+idu_activate
+idu_deactivate
+idu_prepare
+
+# Plan Maestro
 idu_master_plan_status
 idu_master_plan_create
 idu_master_plan_review
@@ -148,12 +192,22 @@ idu_master_plan_reject
 idu_plan_snapshot
 idu_next_advisory_action
 idu_task_package_create
+
+# Riesgo, tareas y postflight
 idu_orchestrator_procedure
 idu_task_context
 idu_preflight
+idu_advisory
 idu_postflight
+idu_task
+idu_queue_detail
+idu_semantic_audit_status
+idu_supervisor_tick
+
+# AgentLabs audit-only
 idu_agentlab_request_create
 idu_agentlab_review_run
+idu_agentlab_review_status
 ```
 
 `idu_activate` sólo activa guardrails; no enrola ni crea drafts. `idu_master_plan_create` crea/regenera en `stateRoot` un Plan Maestro normativo que separa documentación declarada, realidad construida, drift, contratos y flujos permanentes (`master-plan.flows.json`). `idu_master_plan_review` devuelve además `revisionAntesDeZarpar`: una revisión honesta para el orquestador con entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. `idu_master_plan_approve` y `idu_master_plan_reject` cierran explícitamente el ciclo normativo desde MCP: cambian sólo artefactos de gobernanza en `stateRoot`, no aplican flows, no ejecutan AgentLabs, no tocan el repo real y no hacen commit/push. Con un Plan aprobado, `idu_plan_snapshot`, `idu_next_advisory_action` e `idu_task_package_create` arman lineamientos preventivos para que el orquestador revise Plan/flows/contratos con un subagente governance-review antes de codificar. `idu_orchestrator_procedure` e `idu_task_context` devuelven severidad, confianza, evidencia, lecturas requeridas, contratos afectados, labs sugeridos y guía para subagentes. El orquestador revalida y decide. `idu_agentlab_request_create` sólo crea solicitud; los labs se ejecutan únicamente con `idu_agentlab_review_run` o llamada explícita del orquestador.
@@ -207,6 +261,8 @@ AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces 
 ### Plan Maestro
 
 Plan Maestro es el documento normativo vivo del proyecto. Responde qué es el repo, qué hace, cómo está construido, qué alcance tiene, qué requisitos debe cumplir, qué contratos gobiernan cambios y qué diferencia existe entre la documentación declarada y la realidad construida. Los flujos permanentes viven aparte en `master-plan.flows.json` para que puedan actualizarse junto al proyecto sin convertir el Plan Maestro en lista de tareas.
+
+El contrato de datos no se limita a “hay DB”: debe declarar stores, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de artefactos SQLite/JSON/JSONL. Los flujos de ingesta, reportes y API deben quedar asociados a stores detectados/canónicos; si no hay evidencia, Idu-pi lo marca como riesgo en vez de inventar persistencia.
 
 La revisión del Plan Maestro incluye `revisionAntesDeZarpar`: contratos entendidos como acuerdos/recursos de preparación, no sólo prohibiciones. Cubre objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes de información, AgentLabs, testing y entrega. Si falta una biblioteca local de fuentes (`Doc/<project>/source-index.json` y `sources/local/` para PDFs, normas, leyes o libros), la revisión la marca como fuente recomendada antes de derivar normas fuertes. Las fuentes externas vivas —docs oficiales, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad— sólo informan riesgos y recomendaciones; no se convierten automáticamente en contratos aprobados. Para esa inteligencia, Idu-pi recomienda un AgentLab bibliotecario audit-only que mantiene al orquestador informado sin implementar ni modificar el repo.
 

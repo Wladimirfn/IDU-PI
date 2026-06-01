@@ -2,7 +2,7 @@
 
 El CLI es la superficie principal para usar el core de Idu-pi. Telegram es una interfaz remota opcional para ejecutar comandos, revisar estado, cambiar de proyecto enrolado y confirmar decisiones sin estar en la terminal. Telegram no tiene otro core: sus botones son atajos al mismo CLI/supervisor.
 
-Usá `idu-pi` como entrada única: activa el supervisor, muestra/reutiliza el Plan Maestro y, cuando corresponde, reutiliza o ejecuta la revisión profunda en sandbox sin tocar el repo real. Los comandos largos quedan para depuración/orquestadores avanzados. Desde el repo, el equivalente es:
+Usá `idu-pi` como entrada única: muestra el home, ayuda a configurar MCP, registra proyectos y guía el Plan Maestro sin tocar el repo real de forma implícita. `idu-pi idu` activa el supervisor del proyecto y muestra/reutiliza el Plan Maestro. Los comandos largos quedan para depuración/orquestadores avanzados. Desde el repo, el equivalente es:
 
 ```text
 corepack pnpm cli
@@ -54,6 +54,28 @@ El bootstrap installer crea un shim local. Si falta en `PATH`, pregunta antes de
 
 Guía: [Instalador y estado por proyecto](installer.md).
 
+## Receta mínima
+
+Para un usuario nuevo, el camino feliz es:
+
+```text
+idu-pi setup status
+idu-pi setup mcp-init
+idu-pi project enroll "C:\ruta\a\tu-proyecto" mi-proyecto
+idu-pi idu
+idu-pi master-plan-review latest
+idu-pi master-plan-approve latest
+```
+
+Para trabajar con Plan aprobado desde el orquestador, usá MCP:
+
+```text
+idu_plan_snapshot → idu_next_advisory_action → idu_task_package_create
+→ governance-review → worker normal → idu_postflight
+```
+
+AgentLabs son opcionales/explícitos y audit-only: `idu_agentlab_request_create` crea solicitud; `idu_agentlab_review_run` ejecuta revisión; ninguno implementa código.
+
 ## Estado y activación
 
 | Comando | Uso |
@@ -101,7 +123,9 @@ idu-pi lab-review-plan postflight
 
 ## Plan Maestro
 
-`idu-pi idu` genera o muestra un Plan Maestro draft/approved/stale en el `stateRoot` del proyecto. Es determinista, no usa IA externa, no aplica flows y no confirma Project Core/Constitution. El Plan Maestro es normativo: describe qué es el proyecto, su alcance, arquitectura, stack, contratos, documentación declarada versus realidad construida y referencia flujos permanentes en un artefacto separado. `master-plan-review` antepone `revisionAntesDeZarpar`, una revisión para el orquestador con contratos de preparación, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. Las fuentes externas vivas recomendadas pueden incluir docs oficiales, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad; informan riesgos, no aprueban contratos solas. Para ese seguimiento, la revisión recomienda un AgentLab bibliotecario audit-only.
+`idu-pi idu` genera o muestra un Plan Maestro draft/approved/stale en el `stateRoot` del proyecto. Es determinista, no usa IA externa, no aplica flows y no confirma Project Core/Constitution. El Plan Maestro es normativo: describe qué es el proyecto, su alcance, arquitectura, stack, contratos, documentación declarada versus realidad construida y referencia flujos permanentes en un artefacto separado.
+
+El contrato de datos debe ser operativo: stores, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de SQLite/JSON/JSONL. Los flujos de ingesta, reporting y API deben referenciar stores detectados/canónicos; si faltan, la revisión lo trata como riesgo a corregir. `master-plan-review` antepone `revisionAntesDeZarpar`, una revisión para el orquestador con contratos de preparación, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. Las fuentes externas vivas recomendadas pueden incluir docs oficiales, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad; informan riesgos, no aprueban contratos solas. Para ese seguimiento, la revisión recomienda un AgentLab bibliotecario audit-only.
 
 | Comando | Uso |
 | --- | --- |

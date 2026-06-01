@@ -402,6 +402,144 @@ test("Plan Maestro renderiza documento normativo y separa flujos permanentes", (
 	}
 });
 
+test("Plan Maestro mapea persistencia canónica en flujos y explicita gobernanza de datos", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "idu-pi");
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		mkdirSync(join(projectPath, "docs"), { recursive: true });
+		mkdirSync(join(projectPath, "src", "services"), { recursive: true });
+		mkdirSync(join(projectPath, "routes"), { recursive: true });
+		writeFileSync(
+			join(projectPath, "docs", "architecture.md"),
+			[
+				"# Arquitectura de Idu-pi",
+				"",
+				"Idu-pi está organizado como core de supervisión más adaptadores.",
+				"CLI adapter, Telegram adapter, MCP adapter y Pi slash commands llaman al Core Idu-pi.",
+				"El core mantiene reports JSON/JSONL, lab.db SQLite local, Project Core, Constitution, Flows, Plan Maestro, Doc y AgentLabs audit-only.",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "src", "services", "upload.ts"),
+			"export const upload = async (file: File) => normalize(file);",
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "src", "services", "report.ts"),
+			"export const reportDashboard = () => exportReportsJsonl();",
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "routes", "api.ts"),
+			"export const route = '/api/reports';",
+			"utf8",
+		);
+
+		const result = generateMasterPlanDraft({
+			projectId: "idu-pi",
+			projectPath,
+			stateRoot,
+			gitHead: "head1",
+		});
+
+		assert.deepEqual(result.plan.dataStores.map((store) => store.type).sort(), [
+			"json",
+			"sqlite",
+		]);
+		const persistenceFlows = result.plan.detectedFlows.filter((flow) =>
+			["data_ingest", "reporting", "api"].includes(flow.type),
+		);
+		assert.ok(persistenceFlows.length >= 2);
+		assert.ok(
+			persistenceFlows.every((flow) => flow.dataStores.length > 0),
+			"ingestion/reporting/API flows should inherit canonical stores instead of dataStores: []",
+		);
+		for (const flow of persistenceFlows) {
+			assert.deepEqual([...flow.dataStores].sort(), ["json", "sqlite"]);
+		}
+
+		const dataContract = result.plan.operationalContracts.find(
+			(contract) => contract.title === "Contrato Datos/DB",
+		);
+		assert.ok(dataContract);
+		const rules = dataContract.rules.join("\n");
+		assert.match(rules, /retenci[oó]n/iu);
+		assert.match(rules, /backup\/restore|backup.*restore|restore.*backup/iu);
+		assert.match(rules, /sanitizaci[oó]n|redacci[oó]n/iu);
+		assert.match(rules, /owner l[oó]gico/iu);
+		assert.match(rules, /migraci[oó]n.*rollback|rollback.*migraci[oó]n/iu);
+		assert.match(rules, /SQLite\/JSON\/JSONL|JSONL/iu);
+
+		const agentContract = result.plan.operationalContracts.find(
+			(contract) => contract.area === "agent",
+		);
+		assert.ok(
+			agentContract?.rules.some((rule) => /aprobaci[oó]n humana/iu.test(rule)),
+		);
+		assert.ok(
+			result.plan.projectFlows.some(
+				(flow) =>
+					flow.name === "Flujo MCP advisory" &&
+					flow.rules.includes("MCP informa y recomienda") &&
+					flow.rules.includes("El orquestador decide"),
+			),
+		);
+		assert.ok(
+			result.plan.projectFlows.some(
+				(flow) =>
+					flow.name === "Flujo AgentLab audit-only" &&
+					flow.rules.includes("Audit-only") &&
+					/no editar repo real/iu.test(flow.rules.join("\n")) &&
+					/sin permitir que AgentLabs implementen/iu.test(flow.purpose),
+			),
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("Plan Maestro mapea persistencia canónica en flujo API aislado", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "idu-pi-api");
+		const stateRoot = join(root, "state", "projects", "idu-pi-api");
+		mkdirSync(join(projectPath, "docs"), { recursive: true });
+		mkdirSync(join(projectPath, "api"), { recursive: true });
+		writeFileSync(
+			join(projectPath, "docs", "architecture.md"),
+			[
+				"# Arquitectura de Idu-pi",
+				"",
+				"Idu-pi está organizado como core de supervisión más adaptadores.",
+				"CLI adapter, Telegram adapter, MCP adapter y Pi slash commands llaman al Core Idu-pi.",
+				"El core mantiene reports JSON/JSONL y lab.db SQLite local.",
+			].join("\n"),
+			"utf8",
+		);
+		writeFileSync(
+			join(projectPath, "api", "health.txt"),
+			"GET /api/health returns JSON health status.",
+			"utf8",
+		);
+
+		const result = generateMasterPlanDraft({
+			projectId: "idu-pi-api",
+			projectPath,
+			stateRoot,
+			gitHead: "head1",
+		});
+		const apiFlow = result.plan.detectedFlows.find(
+			(flow) => flow.type === "api",
+		);
+		assert.ok(apiFlow);
+		assert.deepEqual([...apiFlow.dataStores].sort(), ["json", "sqlite"]);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("revisionAntesDeZarpar usa Doc root sanitizado y distingue falta de herramientas", () => {
 	const root = tempRoot();
 	try {
