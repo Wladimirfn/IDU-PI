@@ -899,6 +899,14 @@ export function createCliRuntime(
 					masterPlanPathOrLatest: pathOrLatest ?? "latest",
 				});
 			}
+			if (source === "external-source-intelligence") {
+				return createAgentLabReviewRequests({
+					source: "external_source_intelligence",
+					reportsPath: reportsPath,
+					projectId: activeProject.id,
+					projectPath: activeProject.path,
+				});
+			}
 			throw new Error(
 				`Fuente no soportada para agentlab-request-create: ${source}`,
 			);

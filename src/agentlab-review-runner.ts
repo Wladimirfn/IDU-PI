@@ -826,6 +826,8 @@ function agentLabRoleForSpecialty(
 		case "code_quality":
 		case "skill_review":
 			return "agentlab-code-quality";
+		case "librarian":
+			return "agentlab-general";
 		case "general":
 		case "database":
 		case "ui_ux":
@@ -853,6 +855,8 @@ function specialtyPatterns(specialty: AgentLabSpecialty): RegExp[] {
 			return [/architecture|project[_ -]?understanding/iu, /general/iu];
 		case "docs":
 			return [/docs?|documentation/iu, /general/iu];
+		case "librarian":
+			return [/librarian|bibliotecario|docs?|advisory|security/iu, /general/iu];
 		case "code_quality":
 			return [/code[_ -]?quality|quality/iu, /general/iu];
 		case "general":

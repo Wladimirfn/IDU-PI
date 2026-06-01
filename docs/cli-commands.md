@@ -256,6 +256,7 @@ Los comandos de skills no modifican skills reales automáticamente.
 | `idu-pi idu-agentlab-request-create postflight` | Crea solicitudes formales desde postflight. |
 | `idu-pi idu-agentlab-request-create master-plan latest` | Comando avanzado para Plan Maestro: crea solicitud audit-only; no ejecuta labs automáticamente. |
 | `idu-pi idu-agentlab-request-create skill-draft latest` | Crea solicitud para revisar draft de skill. |
+| `idu-pi idu-agentlab-request-create external-source-intelligence` | Crea solicitud para AgentLab bibliotecario audit-only: docs oficiales, changelogs, advisories, CVE/NVD, GitHub/npm advisories y señales comunitarias; no promueve contratos automáticamente. |
 | `idu-pi idu-agentlab-request-review latest` | Valida solicitud sin ejecutar AgentLab. |
 | `idu-pi idu-agentlab-review-run latest` | Ejecuta revisión review-only en workspace clone. |
 | `idu-pi idu-agentlab-review-status latest` | Muestra informe AgentLab. |

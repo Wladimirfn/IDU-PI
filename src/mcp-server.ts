@@ -348,10 +348,11 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"idu_agentlab_request_create",
 		"Crea solicitud formal AgentLab; no ejecuta AgentLabs.",
 		{
-			source: requiredEnum("Fuente de solicitud.", [
+				source: requiredEnum("Fuente de solicitud.", [
 				"postflight",
 				"master-plan",
 				"skill-draft",
+				"external-source-intelligence",
 			]),
 			selector: optionalString("Selector; usar latest por defecto."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
@@ -1594,6 +1595,7 @@ async function dispatchTool(
 				"postflight",
 				"master-plan",
 				"skill-draft",
+				"external-source-intelligence",
 			]);
 			const selector = stringArg(args, "selector") ?? "latest";
 			const plan = runtime.agentLabRequestCreate(source, selector);
@@ -1957,7 +1959,9 @@ function contractsFromPostflightImpact(areas: string[]): string[] {
 		...(text.match(/db|storage|datos|schema/u) ? ["data"] : []),
 		...(text.match(/docs/u) ? ["docs"] : []),
 		...(text.match(/tests?/u) ? ["tests"] : []),
-		...(text.match(/ui|frontend|components|pages|html|css/u) ? ["frontend"] : []),
+		...(text.match(/ui|frontend|components|pages|html|css/u)
+			? ["frontend"]
+			: []),
 		...(text.match(/orquestaci|code|flujos|mapa/u) ? ["agent"] : []),
 		...(areas.length ? ["agent"] : []),
 	]);

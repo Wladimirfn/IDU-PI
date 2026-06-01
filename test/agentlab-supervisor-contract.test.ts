@@ -230,6 +230,36 @@ test("skill_review request no permite aplicar skills", () => {
 	assert.equal(validation.ok, false);
 });
 
+test("librarian request modela external source intelligence sin promover contratos", () => {
+	const request = buildAgentLabReviewRequest({
+		...validRequest(),
+		specialty: "librarian",
+		trigger: "external_source_intelligence",
+		externalSourceIntelligence: {
+			status: "requested",
+			allowedSourceKinds: ["official_docs", "changelog", "advisory", "cve_nvd", "github_advisory", "npm_advisory", "community_signal"],
+			freshness: "latest available",
+			queries: ["official docs", "CVE NVD", "npm advisories"],
+			relatedContracts: ["security", "data"],
+			contractPromotionAllowed: false,
+		},
+		allowedActions: ["leer fuentes externas", "commit", "aplicar contrato"],
+	});
+	assert.equal(request.externalSourceIntelligence?.contractPromotionAllowed, false);
+	assert.ok(!request.allowedActions.some((action) => /commit|aplicar contrato/iu.test(action)));
+	assert.equal(validateAgentLabReviewRequest(request).ok, true);
+
+	const invalid = validateAgentLabReviewRequest({
+		...request,
+		externalSourceIntelligence: {
+			...request.externalSourceIntelligence!,
+			contractPromotionAllowed: true,
+		},
+	});
+	assert.equal(invalid.ok, false);
+	assert.match(invalid.errors.join("\n"), /contractPromotionAllowed|auto-promote/u);
+});
+
 test("security/database request exige human approval", () => {
 	assert.equal(
 		buildAgentLabReviewRequest({ ...validRequest(), specialty: "security" })

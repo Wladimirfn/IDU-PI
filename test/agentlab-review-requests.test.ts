@@ -432,6 +432,39 @@ test("no modifica .agents ni .atl", () => {
 	assert.ok(existsSync(join(temp, ".atl")));
 });
 
+test("external source intelligence crea request librarian audit-only", () => {
+	const temp = root();
+	const reportsPath = join(temp, "reports");
+	const plan = createAgentLabReviewRequests({
+		source: "external_source_intelligence",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath: temp,
+		externalSourceQueries: ["Supabase changelog", "CVE NVD sqlite"],
+		externalSourceRelatedContracts: ["security", "data"],
+		now,
+	});
+	assert.equal(plan.source, "external_source_intelligence");
+	assert.equal(plan.requests[0]?.specialty, "librarian");
+	assert.equal(plan.requests[0]?.trigger, "external_source_intelligence");
+	assert.equal(
+		plan.requests[0]?.externalSourceIntelligence?.contractPromotionAllowed,
+		false,
+	);
+	assert.deepEqual(plan.requests[0]?.externalSourceIntelligence?.status, "requested");
+	assert.ok(
+		plan.requests[0]?.forbiddenActions.some((action) =>
+			/no commit/u.test(action),
+		),
+	);
+	assert.match(
+		formatAgentLabReviewRequestForPrompt(plan.requests[0]!),
+		/contractPromotionAllowed: false/u,
+	);
+	const reviewed = reviewAgentLabReviewRequest("latest", reportsPath);
+	assert.equal(reviewed.valid, true);
+});
+
 test("format plan confirma que no ejecuta AgentLabs", () => {
 	const plan = createAgentLabReviewRequests({
 		source: "manual",

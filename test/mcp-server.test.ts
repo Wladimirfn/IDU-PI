@@ -518,7 +518,9 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 					? "skill_draft"
 					: source === "master-plan"
 						? "master_plan"
-						: "postflight",
+						: source === "external-source-intelligence"
+							? "external_source_intelligence"
+							: "postflight",
 			warning: "Solicitud AgentLab. No ejecuta revisión por sí sola.",
 			requests: [],
 			errors: [],
@@ -983,7 +985,11 @@ test("idu_postflight accepts expectedChangeMode and maps normalized contracts", 
 	const runtime = fakeRuntime();
 	runtime.postflight = (): ProjectPostflightReport => ({
 		risk: "low",
-		changedFiles: ["src/lab-db.ts", "src/components/Button.tsx", "test/ui.test.ts"],
+		changedFiles: [
+			"src/lab-db.ts",
+			"src/components/Button.tsx",
+			"test/ui.test.ts",
+		],
 		ignoredFiles: ["subagent-artifacts/review.md"],
 		observedChangeMode: "code",
 		impactedAreas: ["DB/storage", "UI", "orquestación", "tests"],
@@ -1458,6 +1464,19 @@ test("postflight request create remains request-only and review-run reports sand
 	assert.ok(!masterPlan.data.run);
 	assert.ok(
 		masterPlan.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
+	);
+
+	const external = await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{ source: "external-source-intelligence", selector: "latest" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(external.ok, true);
+	const externalPlan = external.data.plan as AgentLabReviewRequestPlan;
+	assert.equal(externalPlan.source, "external_source_intelligence");
+	assert.ok(!external.data.run);
+	assert.ok(
+		external.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
 	);
 
 	const invalid = await callIduMcpTool(

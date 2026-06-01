@@ -9,6 +9,7 @@ export type AgentLabSpecialty =
 	| "project_understanding"
 	| "docs"
 	| "token_cost"
+	| "librarian"
 	| "general";
 
 export type SupervisorControlPillar =
@@ -30,7 +31,26 @@ export type AgentLabReviewTrigger =
 	| "project_core_review"
 	| "constitution_gate"
 	| "recurring_bug"
+	| "external_source_intelligence"
 	| "manual";
+
+export type AgentLabExternalSourceKind =
+	| "official_docs"
+	| "changelog"
+	| "advisory"
+	| "cve_nvd"
+	| "github_advisory"
+	| "npm_advisory"
+	| "community_signal";
+
+export type AgentLabExternalSourceIntelligence = {
+	status: "requested" | "queued" | "running" | "reported" | "reviewed" | "deferred" | "rejected";
+	allowedSourceKinds: AgentLabExternalSourceKind[];
+	freshness: string;
+	queries: string[];
+	relatedContracts: string[];
+	contractPromotionAllowed: false;
+};
 
 export type AgentLabReviewRequest = {
 	id: string;
@@ -48,6 +68,7 @@ export type AgentLabReviewRequest = {
 	projectCoreSummary?: string;
 	constitutionSummary?: string;
 	sourceSkillDraftPath?: string;
+	externalSourceIntelligence?: AgentLabExternalSourceIntelligence;
 	constraints: string[];
 	allowedActions: string[];
 	forbiddenActions: string[];
@@ -156,6 +177,7 @@ export type BuildAgentLabReviewRequestInput = {
 	projectCoreSummary?: string;
 	constitutionSummary?: string;
 	sourceSkillDraftPath?: string;
+	externalSourceIntelligence?: AgentLabExternalSourceIntelligence;
 	constraints?: string[];
 	allowedActions?: string[];
 	forbiddenActions?: string[];
@@ -186,6 +208,7 @@ const SPECIALTIES = new Set<AgentLabSpecialty>([
 	"project_understanding",
 	"docs",
 	"token_cost",
+	"librarian",
 	"general",
 ]);
 const PILLARS = new Set<SupervisorControlPillar>([
@@ -207,6 +230,7 @@ const TRIGGERS = new Set<AgentLabReviewTrigger>([
 	"project_core_review",
 	"constitution_gate",
 	"recurring_bug",
+	"external_source_intelligence",
 	"manual",
 ]);
 const STATUSES = new Set<AgentLabReviewStatus>([
@@ -222,6 +246,25 @@ const SEVERITIES = new Set<AgentLabFindingSeverity>([
 	"critical",
 ]);
 const CONFIDENCES = new Set<AgentLabConfidence>(["low", "medium", "high"]);
+const SOURCE_KINDS = new Set<AgentLabExternalSourceKind>([
+	"official_docs",
+	"changelog",
+	"advisory",
+	"cve_nvd",
+	"github_advisory",
+	"npm_advisory",
+	"community_signal",
+]);
+const SOURCE_STATUSES = new Set<AgentLabExternalSourceIntelligence["status"]>([
+	"requested",
+	"queued",
+	"running",
+	"reported",
+	"reviewed",
+	"deferred",
+	"rejected",
+]);
+
 const BENEFITS = new Set<AgentLabRecommendationBenefit>([
 	"quality",
 	"time",
@@ -276,6 +319,9 @@ export function buildAgentLabReviewRequest(
 			: {}),
 		...(input.sourceSkillDraftPath
 			? { sourceSkillDraftPath: input.sourceSkillDraftPath.trim() }
+			: {}),
+		...(input.externalSourceIntelligence
+			? { externalSourceIntelligence: input.externalSourceIntelligence }
 			: {}),
 		constraints: dedupe([
 			...(input.constraints ?? []),
@@ -365,6 +411,10 @@ export function validateAgentLabReviewRequest(
 		"sourceSkillDraftPath",
 		errors,
 	);
+	const externalSourceIntelligence = optionalExternalSourceIntelligence(
+		request.externalSourceIntelligence,
+		errors,
+	);
 	const constraints = stringArray(request.constraints, "constraints", errors);
 	const allowedActions = stringArray(
 		request.allowedActions,
@@ -400,6 +450,23 @@ export function validateAgentLabReviewRequest(
 	const createdAt = requiredString(request.createdAt, "createdAt", errors);
 
 	if (forbiddenActions) validateForbiddenActions(forbiddenActions, errors);
+	if (specialty === "librarian" || trigger === "external_source_intelligence") {
+		if (!externalSourceIntelligence) {
+			errors.push("librarian requests require externalSourceIntelligence");
+		}
+		if (externalSourceIntelligence?.contractPromotionAllowed !== false) {
+			errors.push("external source intelligence must not auto-promote contracts");
+		}
+		if (
+			allowedActions?.some((action) =>
+				/apply\s+contract|aplicar\s+contrato|edit\s+code|commit|push/iu.test(
+					action,
+				),
+			)
+		) {
+			errors.push("librarian allowedActions must stay audit-only");
+		}
+	}
 	if (specialty === "skill_review") {
 		if (allowedActions?.some((action) => /aplicar\s+skills/iu.test(action))) {
 			errors.push("skill_review allowedActions must not apply skills");
@@ -433,6 +500,10 @@ export function validateAgentLabReviewRequest(
 		!flowsToCheck ||
 		!rulesToCheck ||
 		!constraints ||
+		(externalSourceIntelligence === undefined &&
+			(request.externalSourceIntelligence !== undefined ||
+				specialty === "librarian" ||
+				trigger === "external_source_intelligence")) ||
 		!allowedActions ||
 		!forbiddenActions ||
 		maxCommands === undefined ||
@@ -464,6 +535,7 @@ export function validateAgentLabReviewRequest(
 			...(projectCoreSummary ? { projectCoreSummary } : {}),
 			...(constitutionSummary ? { constitutionSummary } : {}),
 			...(sourceSkillDraftPath ? { sourceSkillDraftPath } : {}),
+			...(externalSourceIntelligence ? { externalSourceIntelligence } : {}),
 			constraints,
 			allowedActions,
 			forbiddenActions,
@@ -758,6 +830,9 @@ export function mapRiskToAgentLabSpecialties(
 		specialties.push("performance");
 	}
 	if (/docs?|readme|documentaci[oó]n/u.test(text)) specialties.push("docs");
+	if (/librarian|bibliotecario|external source|changelog|advisory|cve|nvd|github advisory|npm advisory|fuentes externas/u.test(text)) {
+		specialties.push("librarian");
+	}
 	return dedupe(specialties).length ? dedupe(specialties) : ["general"];
 }
 
@@ -793,6 +868,18 @@ export function formatAgentLabReviewRequestForPrompt(
 		"",
 		...(request.sourceSkillDraftPath
 			? ["Skill draft source:", request.sourceSkillDraftPath, ""]
+			: []),
+		...(request.externalSourceIntelligence
+			? [
+				"External source intelligence:",
+				`- status: ${request.externalSourceIntelligence.status}`,
+				`- allowedSourceKinds: ${request.externalSourceIntelligence.allowedSourceKinds.join(", ")}`,
+				`- freshness: ${request.externalSourceIntelligence.freshness}`,
+				`- queries: ${request.externalSourceIntelligence.queries.join("; ")}`,
+				`- relatedContracts: ${request.externalSourceIntelligence.relatedContracts.join(", ")}`,
+				`- contractPromotionAllowed: ${String(request.externalSourceIntelligence.contractPromotionAllowed)}`,
+				"",
+			]
 			: []),
 		...(request.trigger === "skill_draft"
 			? [
@@ -1083,6 +1170,57 @@ function recommendationsArray(
 	return errors.length > 0 ? undefined : recommendations;
 }
 
+function optionalExternalSourceIntelligence(
+	value: unknown,
+	errors: string[],
+): AgentLabExternalSourceIntelligence | undefined {
+	if (value === undefined) return undefined;
+	const record = asRecord(value);
+	if (!record) {
+		errors.push("externalSourceIntelligence must be an object");
+		return undefined;
+	}
+	const status = enumValue(
+		record.status,
+		"externalSourceIntelligence.status",
+		SOURCE_STATUSES,
+		errors,
+	);
+	const allowedSourceKinds = enumArray(
+		record.allowedSourceKinds,
+		"externalSourceIntelligence.allowedSourceKinds",
+		SOURCE_KINDS,
+		errors,
+	);
+	const freshness = requiredString(
+		record.freshness,
+		"externalSourceIntelligence.freshness",
+		errors,
+	);
+	const queries = stringArray(
+		record.queries,
+		"externalSourceIntelligence.queries",
+		errors,
+	);
+	const relatedContracts = stringArray(
+		record.relatedContracts,
+		"externalSourceIntelligence.relatedContracts",
+		errors,
+	);
+	const contractPromotionAllowed = booleanValue(
+		record.contractPromotionAllowed,
+		"externalSourceIntelligence.contractPromotionAllowed",
+		errors,
+	);
+	if (contractPromotionAllowed !== false) {
+		errors.push("externalSourceIntelligence.contractPromotionAllowed must be false");
+	}
+	if (!status || !allowedSourceKinds || !freshness || !queries || !relatedContracts || contractPromotionAllowed !== false) {
+		return undefined;
+	}
+	return { status, allowedSourceKinds, freshness, queries, relatedContracts, contractPromotionAllowed };
+}
+
 function allFindings(report: AgentLabReviewReport): AgentLabFinding[] {
 	return [
 		...report.qualityFindings,
@@ -1138,6 +1276,14 @@ function defaultAllowedActions(specialty: AgentLabSpecialty): string[] {
 	if (specialty === "skill_review") {
 		return [...base, "revisar skill drafts sin aplicar skills"];
 	}
+	if (specialty === "librarian") {
+		return [
+			...base,
+			"leer fuentes externas permitidas",
+			"reportar señales con URL y confianza",
+			"recomendar revisión humana de contratos sin aplicarlos",
+		];
+	}
 	return base;
 }
 
@@ -1146,6 +1292,14 @@ function sanitizeAllowedActions(
 	specialty: AgentLabSpecialty,
 ): string[] {
 	const cleaned = cleanArray(actions);
+	if (specialty === "librarian") {
+		return cleaned.filter(
+			(action) =>
+				!/apply\s+contract|aplicar\s+contrato|edit\s+code|commit|push/iu.test(
+					action,
+				),
+		);
+	}
 	if (specialty !== "skill_review") return cleaned;
 	return cleaned.filter((action) => !/aplicar\s+skills/iu.test(action));
 }

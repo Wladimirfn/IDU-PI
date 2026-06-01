@@ -33,6 +33,7 @@ export type AgentLabReviewRequestSource =
 	| "semantic_agent_tasks"
 	| "supervisor_improvements"
 	| "project_core_constitution"
+	| "external_source_intelligence"
 	| "manual";
 
 export type AgentLabReviewRequestPlan = {
@@ -65,6 +66,9 @@ export type CreateAgentLabReviewRequestsInput = {
 	semanticAgentTaskPlan?: SemanticAgentTaskPlan;
 	manualObjective?: string;
 	manualContext?: string;
+	externalSourceQueries?: string[];
+	externalSourceRelatedContracts?: string[];
+	externalSourceFreshness?: string;
 	now?: () => Date;
 };
 
@@ -243,6 +247,8 @@ function buildRequests(
 			return requestsFromMasterPlan(input, createdAt);
 		case "semantic_agent_tasks":
 			return requestsFromSemanticTasks(input, createdAt);
+		case "external_source_intelligence":
+			return requestsFromExternalSourceIntelligence(input, createdAt);
 		case "manual":
 			return requestsFromManual(input, createdAt);
 		case "supervisor_improvements":
@@ -462,6 +468,92 @@ function requestsFromSemanticTasks(
 			),
 		}),
 	);
+}
+
+function requestsFromExternalSourceIntelligence(
+	input: CreateAgentLabReviewRequestsInput,
+	createdAt: string,
+): AgentLabReviewRequest[] {
+	const objective =
+		input.manualObjective ??
+		"Auditar fuentes externas vivas sin promover contratos automáticamente";
+	const relatedContracts = input.externalSourceRelatedContracts ?? [
+		"security",
+		"data",
+		"agent",
+	];
+	const queries = input.externalSourceQueries ?? [
+		"official documentation breaking changes",
+		"security advisories CVE NVD",
+		"GitHub npm advisories changelog releases",
+		"community signals ecosystem reports",
+	];
+	return [
+		buildAgentLabReviewRequest({
+			id: requestId(input.projectId, "external-source", "librarian", 1),
+			projectId: input.projectId,
+			projectPath: input.projectPath,
+			specialty: "librarian",
+			trigger: "external_source_intelligence",
+			objective,
+			contextSummary:
+				input.manualContext ??
+				"AgentLab bibliotecario audit-only: recopilar señales externas, clasificarlas por fuente/confianza y recomendar revisión humana sin modificar contratos.",
+			evidence: [
+				"external_source_intelligence request",
+				`queries: ${queries.join("; ")}`,
+				`relatedContracts: ${relatedContracts.join(", ")}`,
+			],
+			filesToInspect: [],
+			flowsToCheck: ["AgentLab audit-only", "Plan Maestro governance"],
+			rulesToCheck: [
+				"external signals are evidence, not approved contracts",
+				"community signals require lower confidence than official advisories",
+				"contract promotion requires explicit orchestrator/user review",
+			],
+			externalSourceIntelligence: {
+				status: "requested",
+				allowedSourceKinds: [
+					"official_docs",
+					"changelog",
+					"advisory",
+					"cve_nvd",
+					"github_advisory",
+					"npm_advisory",
+					"community_signal",
+				],
+				freshness: input.externalSourceFreshness ?? "latest available at review time",
+				queries,
+				relatedContracts,
+				contractPromotionAllowed: false,
+			},
+			constraints: [
+				"Audit-only: no scraping side effects, repo writes, contracts, skills, commits or push.",
+				"URLs and claims must be reported with source kind, confidence and freshness.",
+				"Signals can only recommend human/orchestrator review; they never become contracts automatically.",
+			],
+			allowedActions: [
+				"leer fuentes externas permitidas",
+				"reportar señales con URL, severidad, confianza y frescura",
+				"recomendar revisión humana de contratos sin aplicarlos",
+			],
+			forbiddenActions: [
+				"no aplicar contratos",
+				"no editar código",
+				"no ejecutar cambios del Plan Maestro",
+			],
+			maxCommands: 4,
+			maxMinutes: 12,
+			tokenBudgetHint: "bounded-source-intelligence",
+			expectedOutputs: [
+				"señales externas con URL/evidencia",
+				"clasificación por fuente, severidad, confianza y frescura",
+				"recomendaciones que requieran revisión humana antes de tocar contratos",
+			],
+			createdAt,
+			requiresHumanApproval: true,
+		}),
+	];
 }
 
 function requestsFromManual(
@@ -785,6 +877,7 @@ function isSource(value: unknown): value is AgentLabReviewRequestSource {
 		value === "semantic_agent_tasks" ||
 		value === "supervisor_improvements" ||
 		value === "project_core_constitution" ||
+		value === "external_source_intelligence" ||
 		value === "manual"
 	);
 }
@@ -849,6 +942,12 @@ function formatRequestDetail(request: AgentLabReviewRequest): string[] {
 		`  objective: ${request.objective}`,
 		...(request.sourceSkillDraftPath
 			? [`  sourceSkillDraftPath: ${request.sourceSkillDraftPath}`]
+			: []),
+		...(request.externalSourceIntelligence
+			? [
+				`  externalSourceStatus: ${request.externalSourceIntelligence.status}`,
+				`  contractPromotionAllowed: ${String(request.externalSourceIntelligence.contractPromotionAllowed)}`,
+			]
 			: []),
 		`  forbiddenActions: ${request.forbiddenActions.join("; ")}`,
 		`  maxCommands: ${request.maxCommands}`,
