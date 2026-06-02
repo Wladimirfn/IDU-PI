@@ -2722,6 +2722,8 @@ async function runModelProfilesMenuTui(
 		let message: string;
 		if (choice === "assign") {
 			message = await assignModelRoleTui(status);
+		} else if (choice === "edit") {
+			message = await editAgentProfilesTui(status);
 		} else {
 			const rl = createInterface({
 				input: process.stdin,
@@ -2962,11 +2964,31 @@ async function handleModelProfilesChoice(
 	return "Opción no reconocida. No ejecuté acciones.";
 }
 
+async function editAgentProfilesTui(
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Promise<string> {
+	const choice = await selectMenu("Editar perfiles", [
+		{ label: "Editar PI_AGENT_PROFILES", value: "edit" },
+		{ label: "← Volver", value: "back" },
+		{ label: "Exit", value: "exit" },
+	]);
+	if (choice !== "edit") return "Cancelado sin cambios.";
+	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	try {
+		return await editAgentProfiles((prompt: string) => rl.question(prompt), status);
+	} finally {
+		rl.close();
+	}
+}
+
 async function editAgentProfiles(
 	question: CliQuestion,
 	status: ReturnType<typeof buildCliHomeStatus>,
 ): Promise<string> {
-	const raw = (await question("PI_AGENT_PROFILES: ")).trim();
+	const raw = (
+		await question("PI_AGENT_PROFILES (Enter vacío=volver, exit=salir): ")
+	).trim();
+	if (!raw || /^exit|salir|volver$/iu.test(raw)) return "Cancelado sin cambios.";
 	try {
 		parseAgentProfiles(raw);
 	} catch (error) {
