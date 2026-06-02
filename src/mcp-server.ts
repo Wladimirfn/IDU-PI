@@ -67,6 +67,7 @@ export type IduMcpToolName =
 	| "idu_advisory"
 	| "idu_postflight"
 	| "idu_supervisor_tick"
+	| "idu_supervisor_cron_plan"
 	| "idu_task"
 	| "idu_queue_detail"
 	| "idu_semantic_audit_status"
@@ -345,6 +346,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 			allowAgentTaskPlan: optionalBoolean(
 				"Permite plan de tareas; default false.",
 			),
+		},
+	),
+	tool(
+		"idu_supervisor_cron_plan",
+		"Propone un tick cron advisory-only del supervisor; no escribe, no crea drafts, no ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
 	tool(
@@ -1732,6 +1740,40 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Supervisor tick no ejecuta AgentLabs.",
 					"No aplica reglas ni modifica Project Core/Constitution.",
+				],
+			});
+		}
+		case "idu_supervisor_cron_plan": {
+			const plan = runtime.supervisorCronPlan();
+			const alignmentAdvisory = buildSupervisorLoopOrchestratorAdvisory(
+				plan.loop,
+			);
+			const decisionEnvelope = decisionEnvelopeFromAdvisory(
+				name,
+				alignmentAdvisory,
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Cron plan: ${plan.classification}`,
+				data: {
+					alignmentAdvisory,
+					decisionEnvelope,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+					classification: plan.classification,
+					proposedActions: plan.proposedActions,
+					advisoryOnly: plan.advisoryOnly,
+					writesAllowed: plan.writesAllowed,
+					agentLabsAllowed: plan.agentLabsAllowed,
+					plan,
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Cron plan es advisory-only: no escribe auditorías, drafts ni tareas.",
+					"No ejecuta AgentLabs ni aprueba acciones automáticamente.",
 				],
 			});
 		}

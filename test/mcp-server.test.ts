@@ -29,6 +29,7 @@ import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { DecisionEnvelope } from "../src/decision-envelope.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
+import type { IduSupervisorCronPlanResult } from "../src/idu-supervisor-cron.js";
 import type { SemanticAuditStatusReport } from "../src/semantic-audit-command.js";
 import type { AgentLabReviewRequestPlan } from "../src/agentlab-review-requests.js";
 import type {
@@ -437,6 +438,62 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 							projectCoreModified: false,
 						},
 					},
+		supervisorCronPlan: (): IduSupervisorCronPlanResult => {
+			const loop: IduSupervisorLoopResult = active
+				? {
+						status: "completed" as const,
+						trigger: "cron_planning" as const,
+						projectId: "sistema_de_mantencion",
+						steps: [
+							{
+								name: "session_check" as const,
+								status: "active" as const,
+								summary: "Idu-pi activo.",
+							},
+						],
+						createdTasks: 0,
+						summary: "Cron plan seguro.",
+						recommendedNext: ["idu_semantic_audit_status"],
+						safety: {
+							agentLabsExecuted: false,
+							rulesApplied: false,
+							memoryDeleted: false,
+							projectCoreModified: false,
+						},
+					}
+				: {
+						status: "skipped" as const,
+						reason: "idu_inactive" as const,
+						trigger: "cron_planning" as const,
+						projectId: "sistema_de_mantencion",
+						steps: [
+							{
+								name: "session_check" as const,
+								status: "inactive" as const,
+								summary: "Idu-pi inactivo.",
+							},
+						],
+						createdTasks: 0,
+						summary: "Cron plan idle.",
+						recommendedNext: ["Activar /idu"],
+						safety: {
+							agentLabsExecuted: false,
+							rulesApplied: false,
+							memoryDeleted: false,
+							projectCoreModified: false,
+						},
+					};
+			return {
+				status: active ? "planned" : "skipped",
+				projectId: "sistema_de_mantencion",
+				classification: active ? "watch" : "idle",
+				proposedActions: loop.recommendedNext,
+				advisoryOnly: true,
+				writesAllowed: false,
+				agentLabsAllowed: false,
+				loop,
+			};
+		},
 		formatSupervisorTick: () => "tick",
 		supervisorOnIduActivation: () => {
 			active = true;
@@ -802,7 +859,8 @@ test("mcp server lists Idu-pi tools", async () => {
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_source_required_actions"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
-	assert.equal(tools.length, 42);
+	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
+	assert.equal(tools.length, 43);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1355,6 +1413,31 @@ test("idu_supervisor_tick skips when inactive", async () => {
 	assert.equal(
 		(result.data.alignmentAdvisory as { severity: string }).severity,
 		"warning",
+	);
+});
+
+test("idu_supervisor_cron_plan is advisory-only and does not execute", async () => {
+	const runtime = fakeRuntime();
+	runtime.supervisorOnIduActivation();
+	const result = await callIduMcpTool(
+		"idu_supervisor_cron_plan",
+		{},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+
+	assert.equal(result.ok, true);
+	assert.equal(result.data.classification, "watch");
+	assert.equal(result.data.advisoryOnly, true);
+	assert.equal(result.data.writesAllowed, false);
+	assert.equal(result.data.agentLabsAllowed, false);
+	assert.match(result.safeNotes.join("\n"), /advisory-only/u);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.plan as IduSupervisorCronPlanResult).loop.trigger,
+		"cron_planning",
 	);
 });
 

@@ -37,6 +37,7 @@ import type {
 	SemanticAgentTaskPlan,
 } from "../src/semantic-agent-tasks.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
+import type { IduSupervisorCronPlanResult } from "../src/idu-supervisor-cron.js";
 import type {
 	SupervisorImprovementCreationResult,
 	SupervisorImprovementPlan,
@@ -1200,6 +1201,16 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				review.summary.suggestedAgentTasks.join("\n"),
 			].join("\n"),
 		supervisorTick: fakeSupervisorResult,
+		supervisorCronPlan: (): IduSupervisorCronPlanResult => ({
+			status: "planned",
+			projectId: "test-project",
+			classification: "watch",
+			proposedActions: ["idu_semantic_audit_status"],
+			advisoryOnly: true,
+			writesAllowed: false,
+			agentLabsAllowed: false,
+			loop: fakeSupervisorResult(),
+		}),
 		formatSupervisorTick: (result) =>
 			[
 				"Idu-pi Supervisor Tick",

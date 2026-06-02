@@ -21,7 +21,8 @@ export type IduSupervisorTrigger =
 	| "on_idu_activation"
 	| "after_task_registered"
 	| "after_postflight"
-	| "after_semantic_threshold";
+	| "after_semantic_threshold"
+	| "cron_planning";
 
 export type IduSupervisorStepStatus =
 	| "active"
@@ -73,6 +74,7 @@ export type IduSupervisorLoopInput = {
 		allowSemanticDraft: boolean;
 		allowAgentTaskPlan: boolean;
 		dryRun: boolean;
+		mode?: "execute" | "plan";
 		maxCreatedTasks?: number;
 	};
 	repository: Pick<
@@ -104,6 +106,8 @@ export function runIduSupervisorLoop(
 	input: IduSupervisorLoopInput,
 ): IduSupervisorLoopResult {
 	const steps: IduSupervisorStepResult[] = [];
+	const planMode = input.options.mode === "plan";
+	const writeDisabled = input.options.dryRun || planMode;
 	const isActive = (input.isIduActive ?? shouldUseAutomaticGuardrails)(
 		input.projectId,
 	);
@@ -139,7 +143,7 @@ export function runIduSupervisorLoop(
 	});
 
 	let auditRunId: string | undefined;
-	if (auditStatus.decision.shouldRun && !input.options.dryRun) {
+	if (auditStatus.decision.shouldRun && !writeDisabled) {
 		const now = input.now?.() ?? new Date();
 		auditRunId = (input.idFactory ?? defaultRunId)(input.projectId, now);
 		input.repository.createSemanticAuditRun({
@@ -167,7 +171,9 @@ export function runIduSupervisorLoop(
 			name: "semantic_audit_run",
 			status: "skipped",
 			summary: auditStatus.decision.shouldRun
-				? "dryRun activo."
+				? planMode
+					? "plan mode advisory-only: no se registra auditoría ni checkpoint."
+					: "dryRun activo."
 				: "No se alcanzó umbral.",
 		});
 	}
@@ -179,7 +185,7 @@ export function runIduSupervisorLoop(
 			auditStatus.decision.triggerReason,
 		) &&
 		input.options.allowSemanticDraft;
-	if (canDraft && !input.options.dryRun) {
+	if (canDraft && !writeDisabled) {
 		const draft = (
 			input.saveSemanticCompactionDraft ?? saveSemanticCompactionDraft
 		)({
@@ -199,14 +205,16 @@ export function runIduSupervisorLoop(
 			name: "semantic_compaction_draft",
 			status: "skipped",
 			summary: input.options.allowSemanticDraft
-				? "No corresponde crear draft para este umbral."
+				? planMode
+					? "plan mode advisory-only: no se crea draft."
+					: "No corresponde crear draft para este umbral."
 				: "allowSemanticDraft=false.",
 		});
 	}
 
 	let plan: SemanticAgentTaskPlan | undefined;
 	let createdTasks = 0;
-	if (input.options.allowAgentTaskPlan && !input.options.dryRun && draftPath) {
+	if (input.options.allowAgentTaskPlan && !writeDisabled && draftPath) {
 		const pathOrLatest = draftPath;
 		plan = (input.buildSemanticAgentTaskPlan ?? buildSemanticAgentTaskPlan)(
 			pathOrLatest,
@@ -240,9 +248,11 @@ export function runIduSupervisorLoop(
 			name: "semantic_agent_tasks",
 			status: "skipped",
 			summary: input.options.allowAgentTaskPlan
-				? draftPath
-					? "dryRun activo."
-					: "Sin draft fresco de este tick."
+				? planMode
+					? "plan mode advisory-only: no se crean tareas."
+					: draftPath
+						? "dryRun activo."
+						: "Sin draft fresco de este tick."
 				: "allowAgentTaskPlan=false.",
 		});
 	}
@@ -260,7 +270,9 @@ export function runIduSupervisorLoop(
 		...(plan ? { agentTaskPlan: plan } : {}),
 		createdTasks,
 		summary: auditStatus.decision.shouldRun
-			? `Supervisor completado. Tareas creadas: ${createdTasks}.`
+			? planMode
+				? "Supervisor cron planning completado en modo advisory-only. No se escribieron auditorías, drafts ni tareas."
+				: `Supervisor completado. Tareas creadas: ${createdTasks}.`
 			: "No se alcanzó umbral. No se ejecutaron tareas.",
 		recommendedNext,
 		safety: SAFE_FLAGS,

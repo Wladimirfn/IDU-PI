@@ -124,10 +124,11 @@ function runWithDeps(
 		allowAgentTaskPlan?: boolean;
 		maxCreatedTasks?: number;
 		planCount?: number;
+		mode?: "execute" | "plan";
 	} = {},
 ): { result: IduSupervisorLoopResult; calls: Record<string, number> } {
 	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-"));
-	const calls = { auditRun: 0, draft: 0, plan: 0, createTasks: 0 };
+	const calls = { auditRun: 0, checkpoint: 0, draft: 0, plan: 0, createTasks: 0 };
 	try {
 		const repository = {
 			getSemanticAuditStats: () => options.stats ?? stats(),
@@ -135,7 +136,9 @@ function runWithDeps(
 			createSemanticAuditRun: () => {
 				calls.auditRun += 1;
 			},
-			updateSemanticAuditCheckpoint: () => undefined,
+			updateSemanticAuditCheckpoint: () => {
+				calls.checkpoint += 1;
+			},
 		};
 		const queue = new StructuredTaskQueue({
 			filePath: join(root, "reports", "tasks.jsonl"),
@@ -149,6 +152,7 @@ function runWithDeps(
 				allowSemanticDraft: options.allowSemanticDraft ?? false,
 				allowAgentTaskPlan: options.allowAgentTaskPlan ?? false,
 				dryRun: false,
+				mode: options.mode,
 				maxCreatedTasks: options.maxCreatedTasks,
 			},
 			repository,
@@ -309,6 +313,29 @@ test("loop respeta maxCreatedTasks", () => {
 	});
 
 	assert.equal(result.createdTasks, 1);
+});
+
+test("loop plan mode observa y propone sin escribir aunque flags estén activos", () => {
+	const { result, calls } = runWithDeps({
+		stats: stats({ criticalFindingCount: 1 }),
+		allowSemanticDraft: true,
+		allowAgentTaskPlan: true,
+		mode: "plan",
+	});
+
+	assert.equal(result.trigger, "manual");
+	assert.equal(calls.auditRun, 0);
+	assert.equal(calls.checkpoint, 0);
+	assert.equal(calls.draft, 0);
+	assert.equal(calls.plan, 0);
+	assert.equal(calls.createTasks, 0);
+	assert.equal(result.createdTasks, 0);
+	assert.match(result.summary, /advisory-only/u);
+	assert.match(
+		result.steps.find((step) => step.name === "semantic_audit_run")?.summary ??
+			"",
+		/plan mode/u,
+	);
 });
 
 test("loop nunca ejecuta AgentLabs ni borra datos", () => {

@@ -211,6 +211,10 @@ import {
 	type IduSupervisorLoopResult,
 } from "./idu-supervisor-loop.js";
 import {
+	planIduSupervisorCron,
+	type IduSupervisorCronPlanResult,
+} from "./idu-supervisor-cron.js";
+import {
 	maybeRunSupervisorAfterPostflight,
 	maybeRunSupervisorAfterSemanticTrigger,
 	maybeRunSupervisorAfterTask,
@@ -440,6 +444,7 @@ export type CliRuntime = {
 		allowSemanticDraft?: boolean;
 		allowAgentTaskPlan?: boolean;
 	}) => IduSupervisorLoopResult;
+	supervisorCronPlan: () => IduSupervisorCronPlanResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
 	supervisorOnIduActivation: () => void;
 	supervisorImprovementPlan: (
@@ -937,6 +942,21 @@ export function createCliRuntime(
 					allowSemanticDraft: options.allowSemanticDraft ?? false,
 					allowAgentTaskPlan: options.allowAgentTaskPlan ?? false,
 					dryRun: false,
+				},
+				repository: labDbRepository,
+				queue: structuredTaskQueue,
+			}),
+		supervisorCronPlan: () =>
+			planIduSupervisorCron({
+				projectId: activeProject.id,
+				projectPath: activeProject.path,
+				workspaceRoot: runtimeWorkspaceRoot,
+				trigger: "cron_planning",
+				options: {
+					allowSemanticDraft: false,
+					allowAgentTaskPlan: false,
+					dryRun: true,
+					mode: "plan",
 				},
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
