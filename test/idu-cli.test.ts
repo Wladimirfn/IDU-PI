@@ -1006,6 +1006,42 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				contractPromotionAllowed: false,
 			},
 		}),
+		sourceLibraryRead: () => ({
+			projectId: "pi-telegram-bridge",
+			paths: runtime.sourceLibraryStatus().paths,
+			source: runtime.sourceLibraryAdd("C:/docs/manual.md").addedSource!,
+			readStatus: "ready",
+			content: "manual robusto",
+			maxChars: 20_000,
+			truncated: false,
+			citationPath: "sources/extracted/source-demo-manual-abc123.txt",
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
+		sourceLibraryExtract: () => ({
+			...runtime.sourceLibraryRead("source-demo-manual-abc123"),
+			extractionStatus: "extracted",
+			extractedTextPath: "sources/extracted/source-demo-manual-abc123.txt",
+		}),
+		sourceLibraryReport: () => ({
+			projectId: "pi-telegram-bridge",
+			paths: runtime.sourceLibraryStatus().paths,
+			source: runtime.sourceLibraryAdd("C:/docs/manual.md").addedSource!,
+			extractedAvailable: true,
+			extractionStatus: "extracted",
+			citationPath: "sources/extracted/source-demo-manual-abc123.txt",
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
+		sourceLibraryResearch: () => ({
+			projectId: "pi-telegram-bridge",
+			query: "robusto",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			searchedSourceIds: ["source-demo-manual-abc123"],
+			signals: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
 		sourceLibraryRefresh: () => runtime.sourceLibraryStatus(),
 		formatSourceLibraryStatus: (status) =>
 			["Idu-pi Source Library", "", "Estado:", status.state].join("\n"),
@@ -1019,6 +1055,10 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"",
 				result.removedSource?.id ?? "none",
 			].join("\n"),
+		formatSourceLibraryReadResult: () => "Idu-pi Source Library Read",
+		formatSourceLibraryExtractResult: () => "Idu-pi Source Library Extract",
+		formatSourceLibraryItemReport: () => "Idu-pi Source Library Report",
+		formatSourceResearchReport: () => "Idu-pi Source Research Report",
 		formatSourceLibraryRefreshResult: (status) =>
 			["Idu-pi Source Library Refresh", "", status.state].join("\n"),
 		formatMasterPlanOperation: (result: { plan: { status: string } }) =>
@@ -1420,6 +1460,30 @@ test("CLI source library commands are wired with aliases", async () => {
 		);
 		assert.equal(remove.exitCode, 0);
 		assert.match(remove.stdout, /Source Library Remove/u);
+		const read = await runCliCommand(
+			["source-read", "source-demo-manual-abc123"],
+			runtime,
+		);
+		assert.equal(read.exitCode, 0);
+		assert.match(read.stdout, /Source Library Read/u);
+		const extract = await runCliCommand(
+			["source-extract", "source-demo-manual-abc123"],
+			runtime,
+		);
+		assert.equal(extract.exitCode, 0);
+		assert.match(extract.stdout, /Source Library Extract/u);
+		const report = await runCliCommand(
+			["source-report", "source-demo-manual-abc123"],
+			runtime,
+		);
+		assert.equal(report.exitCode, 0);
+		assert.match(report.stdout, /Source Library Report/u);
+		const research = await runCliCommand(
+			["source-research", "robusto"],
+			runtime,
+		);
+		assert.equal(research.exitCode, 0);
+		assert.match(research.stdout, /Source Research Report/u);
 		const refresh = await runCliCommand(["source-refresh"], runtime);
 		assert.equal(refresh.exitCode, 0);
 		assert.match(refresh.stdout, /Source Library Refresh/u);

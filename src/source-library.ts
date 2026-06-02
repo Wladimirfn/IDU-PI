@@ -101,6 +101,46 @@ export type SourceLibraryMutationResult = SourceLibraryStatus & {
 	addedSource?: SourceLibraryItem;
 };
 
+export type SourceLibraryReadStatus =
+	| "ready"
+	| "metadata_only"
+	| "missing"
+	| "unsupported";
+export type SourceLibraryExtractionStatus =
+	| "extracted"
+	| "metadata_only"
+	| "missing"
+	| "unsupported";
+
+export type SourceLibraryReadResult = {
+	projectId: string;
+	paths: SourceLibraryPaths;
+	source: SourceLibraryItem;
+	readStatus: SourceLibraryReadStatus;
+	content: string;
+	maxChars: number;
+	truncated: boolean;
+	citationPath: string;
+	limitations: string[];
+	contractPromotionAllowed: false;
+};
+
+export type SourceLibraryExtractResult = SourceLibraryReadResult & {
+	extractionStatus: SourceLibraryExtractionStatus;
+	extractedTextPath?: string;
+};
+
+export type SourceLibraryItemReport = {
+	projectId: string;
+	paths: SourceLibraryPaths;
+	source: SourceLibraryItem;
+	extractedAvailable: boolean;
+	extractionStatus: SourceLibraryExtractionStatus;
+	citationPath: string;
+	limitations: string[];
+	contractPromotionAllowed: false;
+};
+
 export type RemoveSourceLibraryItemResult = SourceLibraryStatus & {
 	removedSource?: SourceLibraryItem;
 	removedFiles: string[];
@@ -287,6 +327,182 @@ export function removeSourceLibraryItem(input: {
 	};
 }
 
+export function readSourceLibraryItem(input: {
+	stateRoot: string;
+	projectId: string;
+	sourceId: string;
+	maxChars?: number;
+}): SourceLibraryReadResult {
+	const paths = sourceLibraryPaths(input.stateRoot, input.projectId);
+	const source = findSource(paths, input.sourceId);
+	const maxChars = boundedMaxChars(input.maxChars);
+	const limitations: string[] = [];
+	const stored = assertInside(paths.root, join(paths.root, source.storedPath));
+	if (!existsSync(stored)) {
+		return sourceReadResult({
+			projectId: input.projectId,
+			paths,
+			source,
+			readStatus: "missing",
+			content: "",
+			maxChars,
+			truncated: false,
+			citationPath: source.storedPath,
+			limitations: ["Fuente registrada no encontrada en Source Library."],
+		});
+	}
+	if (source.extractedTextPath) {
+		const extracted = assertInside(
+			paths.root,
+			join(paths.root, source.extractedTextPath),
+		);
+		if (existsSync(extracted)) {
+			const read = readBoundedUtf8(extracted, maxChars);
+			return sourceReadResult({
+				projectId: input.projectId,
+				paths,
+				source,
+				readStatus: "ready",
+				content: read.content,
+				maxChars,
+				truncated: read.truncated,
+				citationPath: source.extractedTextPath,
+				limitations: read.truncated
+					? ["Contenido truncado por límite de lectura."]
+					: [],
+			});
+		}
+		limitations.push(
+			"Snapshot extraído registrado no existe en Source Library.",
+		);
+	}
+	if (isTextReadableKind(source.kind)) {
+		const read = readBoundedUtf8(stored, maxChars);
+		return sourceReadResult({
+			projectId: input.projectId,
+			paths,
+			source,
+			readStatus: "ready",
+			content: read.content,
+			maxChars,
+			truncated: read.truncated,
+			citationPath: source.storedPath,
+			limitations: read.truncated
+				? [...limitations, "Contenido truncado por límite de lectura."]
+				: limitations,
+		});
+	}
+	return sourceReadResult({
+		projectId: input.projectId,
+		paths,
+		source,
+		readStatus: "metadata_only",
+		content: "",
+		maxChars,
+		truncated: false,
+		citationPath: source.storedPath,
+		limitations: [
+			...limitations,
+			"PDF registrado como binario; extracción de texto/OCR no soportada en este MVP.",
+		],
+	});
+}
+
+export function extractSourceLibraryItem(input: {
+	stateRoot: string;
+	projectId: string;
+	sourceId: string;
+	maxChars?: number;
+	now?: () => Date;
+}): SourceLibraryExtractResult {
+	const paths = sourceLibraryPaths(input.stateRoot, input.projectId);
+	const source = findSource(paths, input.sourceId);
+	if (source.kind === "pdf") {
+		return {
+			...readSourceLibraryItem(input),
+			extractionStatus: "metadata_only",
+		};
+	}
+	if (!isTextReadableKind(source.kind)) {
+		return {
+			...readSourceLibraryItem(input),
+			extractionStatus: "unsupported",
+		};
+	}
+	const stored = assertInside(paths.root, join(paths.root, source.storedPath));
+	if (!existsSync(stored)) {
+		return {
+			...readSourceLibraryItem(input),
+			extractionStatus: "missing",
+		};
+	}
+	mkdirSync(paths.extractedDir, { recursive: true });
+	const maxChars = boundedMaxChars(input.maxChars);
+	const read = readBoundedUtf8(stored, maxChars);
+	const target = assertInside(
+		paths.extractedDir,
+		join(paths.extractedDir, `${source.id}.txt`),
+	);
+	writeFileSync(target, read.content, "utf8");
+	const extractedTextPath = relative(paths.root, target).replace(/\\/gu, "/");
+	const now = (input.now?.() ?? new Date()).toISOString();
+	const parsed = readIndex(paths.indexPath);
+	if (!parsed.ok)
+		throw new Error(`source-index inválido: ${parsed.errors.join("; ")}`);
+	writeIndex(paths, {
+		...parsed.index,
+		updatedAt: now,
+		contractPromotionAllowed: false,
+		sources: parsed.index.sources.map((item) =>
+			item.id === source.id
+				? { ...item, extractedTextPath, lastCheckedAt: now }
+				: item,
+		),
+	});
+	const result = readSourceLibraryItem({ ...input, maxChars });
+	return {
+		...result,
+		extractionStatus: "extracted",
+		extractedTextPath,
+		limitations: read.truncated
+			? ["Extracción truncada por límite de lectura."]
+			: result.limitations,
+	};
+}
+
+export function reportSourceLibraryItem(input: {
+	stateRoot: string;
+	projectId: string;
+	sourceId: string;
+}): SourceLibraryItemReport {
+	const paths = sourceLibraryPaths(input.stateRoot, input.projectId);
+	const source = findSource(paths, input.sourceId);
+	const extractedAvailable = Boolean(
+		source.extractedTextPath &&
+			existsSync(
+				assertInside(paths.root, join(paths.root, source.extractedTextPath)),
+			),
+	);
+	const read = readSourceLibraryItem({ ...input, maxChars: 1_000 });
+	return {
+		projectId: input.projectId,
+		paths,
+		source,
+		extractedAvailable,
+		extractionStatus:
+			source.kind === "pdf"
+				? "metadata_only"
+				: extractedAvailable
+					? "extracted"
+					: read.readStatus === "missing"
+						? "missing"
+						: "unsupported",
+		citationPath: read.citationPath,
+		limitations: read.limitations,
+		contractPromotionAllowed: false,
+	};
+}
+
 export function refreshSourceLibrary(input: {
 	stateRoot: string;
 	projectId: string;
@@ -373,6 +589,75 @@ export function formatSourceLibraryRemoveResult(
 	].join("\n");
 }
 
+export function formatSourceLibraryReadResult(
+	result: SourceLibraryReadResult,
+): string {
+	return [
+		"Idu-pi Source Library Read",
+		"",
+		"Fuente:",
+		`${result.source.id} (${result.source.title})`,
+		"",
+		"Estado:",
+		result.readStatus,
+		"",
+		"Citation:",
+		result.citationPath,
+		"",
+		"Limitaciones:",
+		...formatList(result.limitations),
+		"",
+		"Contenido:",
+		result.content || "- sin contenido legible en este MVP",
+	].join("\n");
+}
+
+export function formatSourceLibraryExtractResult(
+	result: SourceLibraryExtractResult,
+): string {
+	return [
+		"Idu-pi Source Library Extract",
+		"",
+		"Fuente:",
+		`${result.source.id} (${result.source.title})`,
+		"",
+		"Estado extracción:",
+		result.extractionStatus,
+		"",
+		"Extracted path:",
+		result.extractedTextPath ?? "- ninguno",
+		"",
+		"Limitaciones:",
+		...formatList(result.limitations),
+	].join("\n");
+}
+
+export function formatSourceLibraryItemReport(
+	result: SourceLibraryItemReport,
+): string {
+	return [
+		"Idu-pi Source Library Report",
+		"",
+		"Fuente:",
+		`${result.source.id} (${result.source.title})`,
+		"",
+		"Kind:",
+		result.source.kind,
+		"",
+		"Status:",
+		result.source.status,
+		"",
+		"SHA-256:",
+		result.source.sha256,
+		"",
+		"Extracción:",
+		result.extractionStatus,
+		"",
+		"Limitaciones:",
+		...formatList(result.limitations),
+	].join("\n");
+}
+
 export function formatSourceLibraryRefreshResult(
 	result: SourceLibraryStatus,
 ): string {
@@ -406,6 +691,50 @@ function statusResult(
 		errors,
 		advisory:
 			"Biblioteca de fuentes advisory: escribe sólo en stateRoot/Doc, no promueve contratos, no ejecuta AgentLabs ni toca el repo real.",
+	};
+}
+
+function findSource(
+	paths: SourceLibraryPaths,
+	sourceId: string,
+): SourceLibraryItem {
+	const parsed = readIndex(paths.indexPath);
+	if (!parsed.ok)
+		throw new Error(`source-index inválido: ${parsed.errors.join("; ")}`);
+	const cleanId = sourceId.trim();
+	if (!cleanId) throw new Error("sourceId requerido.");
+	const source = parsed.index.sources.find((item) => item.id === cleanId);
+	if (!source) throw new Error(`Fuente no encontrada en índice: ${cleanId}`);
+	return source;
+}
+
+function sourceReadResult(input: {
+	projectId: string;
+	paths: SourceLibraryPaths;
+	source: SourceLibraryItem;
+	readStatus: SourceLibraryReadStatus;
+	content: string;
+	maxChars: number;
+	truncated: boolean;
+	citationPath: string;
+	limitations: string[];
+}): SourceLibraryReadResult {
+	return { ...input, contractPromotionAllowed: false };
+}
+
+function boundedMaxChars(value: number | undefined): number {
+	if (value === undefined || !Number.isFinite(value)) return 12_000;
+	return Math.max(1, Math.min(Math.floor(value), 50_000));
+}
+
+function readBoundedUtf8(
+	path: string,
+	maxChars: number,
+): { content: string; truncated: boolean } {
+	const content = readFileSync(path, "utf8");
+	return {
+		content: content.slice(0, maxChars),
+		truncated: content.length > maxChars,
 	};
 }
 
@@ -593,7 +922,7 @@ function maybeWriteTextSnapshot(input: {
 	sourcePath: string;
 	kind: SourceLibraryKind;
 }): string | undefined {
-	if (input.kind !== "markdown" && input.kind !== "text") return undefined;
+	if (!isTextReadableKind(input.kind)) return undefined;
 	const text = readFileSync(input.sourcePath, "utf8");
 	const target = assertInside(
 		input.paths.extractedDir,
@@ -601,6 +930,10 @@ function maybeWriteTextSnapshot(input: {
 	);
 	writeFileSync(target, text, "utf8");
 	return relative(input.paths.root, target).replace(/\\/gu, "/");
+}
+
+function isTextReadableKind(kind: SourceLibraryKind): boolean {
+	return kind === "markdown" || kind === "text" || kind === "manual_doc";
 }
 
 function inferKind(path: string): SourceLibraryKind | undefined {

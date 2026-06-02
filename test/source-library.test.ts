@@ -12,9 +12,12 @@ import { mkdtempSync } from "node:fs";
 import test from "node:test";
 import {
 	addSourceLibraryItem,
+	extractSourceLibraryItem,
 	getSourceLibraryStatus,
+	readSourceLibraryItem,
 	refreshSourceLibrary,
 	removeSourceLibraryItem,
+	reportSourceLibraryItem,
 	sourceLibraryPaths,
 } from "../src/source-library.js";
 
@@ -179,10 +182,117 @@ test("remove deletes indexed source files and keeps contracts advisory", () => {
 		assert.deepEqual(removed.sources, []);
 		assert.equal(existsSync(stored), false);
 		assert.equal(existsSync(extracted), false);
-		assert.deepEqual(removed.removedFiles.sort(), [
-			added.addedSource!.extractedTextPath!,
-			added.addedSource!.storedPath,
-		].sort());
+		assert.deepEqual(
+			removed.removedFiles.sort(),
+			[
+				added.addedSource!.extractedTextPath!,
+				added.addedSource!.storedPath,
+			].sort(),
+		);
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test("read extract and report source text with bounds", () => {
+	const temp = root();
+	try {
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const text = join(temp, "notes.txt");
+		writeFileSync(text, "proyecto robusto con contratos y evidencia", "utf8");
+		const added = addSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			inputPath: text,
+			now,
+		});
+		const read = readSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+			maxChars: 16,
+		});
+		assert.equal(read.readStatus, "ready");
+		assert.equal(read.truncated, true);
+		assert.match(read.content, /proyecto robust/u);
+		assert.equal(read.contractPromotionAllowed, false);
+
+		const extracted = extractSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+			now,
+		});
+		assert.equal(extracted.extractionStatus, "extracted");
+		assert.ok(extracted.extractedTextPath);
+		assert.ok(
+			existsSync(join(extracted.paths.root, extracted.extractedTextPath!)),
+		);
+
+		const report = reportSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+		});
+		assert.equal(report.extractedAvailable, true);
+		assert.equal(report.contractPromotionAllowed, false);
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test("manual_doc kind remains readable text", () => {
+	const temp = root();
+	try {
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const text = join(temp, "manual.txt");
+		writeFileSync(text, "manual doc legacy", "utf8");
+		const added = addSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			inputPath: text,
+			kind: "manual_doc",
+			now,
+		});
+		const read = readSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+		});
+		assert.equal(read.readStatus, "ready");
+		assert.equal(read.content, "manual doc legacy");
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test("pdf read and extract stay metadata-only without parsing", () => {
+	const temp = root();
+	try {
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const pdf = join(temp, "manual.pdf");
+		writeFileSync(pdf, "%PDF fake content", "utf8");
+		const added = addSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			inputPath: pdf,
+			now,
+		});
+		const read = readSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+		});
+		assert.equal(read.readStatus, "metadata_only");
+		assert.equal(read.content, "");
+		assert.match(read.limitations.join("\n"), /PDF registrado como binario/u);
+		const extracted = extractSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+		});
+		assert.equal(extracted.extractionStatus, "metadata_only");
+		assert.equal(extracted.extractedTextPath, undefined);
 	} finally {
 		rmSync(temp, { recursive: true, force: true });
 	}

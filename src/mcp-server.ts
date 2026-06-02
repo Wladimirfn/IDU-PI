@@ -61,6 +61,10 @@ export type IduMcpToolName =
 	| "idu_source_status"
 	| "idu_source_add"
 	| "idu_source_remove"
+	| "idu_source_read"
+	| "idu_source_extract"
+	| "idu_source_report"
+	| "idu_source_research_report"
 	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
@@ -368,6 +372,38 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Remueve una fuente registrada de Source Library y sus copias en stateRoot; no toca contratos.",
 		{
 			sourceId: requiredString("ID de fuente a remover."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_read",
+		"Lee contenido acotado de una fuente registrada; PDFs quedan metadata-only.",
+		{
+			sourceId: requiredString("ID de fuente a leer."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_extract",
+		"Extrae texto acotado para markdown/text; PDFs quedan metadata-only sin OCR.",
+		{
+			sourceId: requiredString("ID de fuente a extraer."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_report",
+		"Reporta metadata, estado y limitaciones de una fuente registrada.",
+		{
+			sourceId: requiredString("ID de fuente a reportar."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_research_report",
+		"Crea reporte advisory de investigación sobre fuentes registradas y texto extraído; sin web ni contratos automáticos.",
+		{
+			query: requiredString("Consulta a buscar en fuentes registradas."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -1675,6 +1711,73 @@ async function dispatchTool(
 					"No ejecuté AgentLabs.",
 				],
 				errors: result.errors,
+			});
+		}
+		case "idu_source_read": {
+			const result = runtime.sourceLibraryRead(requiredText(args, "sourceId"));
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source read: ${result.source.id} status=${result.readStatus}`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Leí sólo fuentes registradas en Source Library stateRoot.",
+					"No cambié contratos ni ejecuté AgentLabs.",
+					"No consulté web/live sources.",
+				],
+			});
+		}
+		case "idu_source_extract": {
+			const result = runtime.sourceLibraryExtract(requiredText(args, "sourceId"));
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source extract: ${result.source.id} status=${result.extractionStatus}`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Extracción escribe sólo bajo stateRoot/Doc/<project>/sources/extracted.",
+					"PDFs quedan metadata-only; no hice OCR ni parsing pesado.",
+					"No cambié contratos ni ejecuté AgentLabs.",
+				],
+			});
+		}
+		case "idu_source_report": {
+			const result = runtime.sourceLibraryReport(requiredText(args, "sourceId"));
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source report: ${result.source.id} extraction=${result.extractionStatus}`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Reporté metadata de fuente registrada solamente.",
+					"No cambié contratos ni ejecuté AgentLabs.",
+				],
+			});
+		}
+		case "idu_source_research_report": {
+			const result = runtime.sourceLibraryResearch(requiredText(args, "query"));
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source research: ${result.signals.length} señales`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Investigué sólo fuentes registradas y texto extraído/legible.",
+					"No consulté web/live sources.",
+					"No promoví contratos ni ejecuté AgentLabs.",
+				],
 			});
 		}
 		case "idu_source_refresh": {

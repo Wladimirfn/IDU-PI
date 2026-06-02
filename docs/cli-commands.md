@@ -135,12 +135,16 @@ El contrato de datos debe ser operativo: stores, owner lógico, retención, back
 | `idu-pi master-plan-reject latest [motivo]` | Marca el plan como rejected con motivo opcional. MCP también expone `idu_master_plan_reject`. |
 | `idu-pi master-plan-redraft latest` | Rehace el draft actual actualizando el Plan Maestro canónico. |
 
-Source Library C1 permite agregar documentación manual local al `stateRoot` sin escribir en el repo real ni promover contratos automáticamente:
+Source Library permite agregar, leer e investigar documentación manual local en `stateRoot` sin escribir en el repo real ni promover contratos automáticamente:
 
 | Comando | Uso |
 | --- | --- |
 | `idu-pi source-status` | Muestra estado explícito `missing | empty | ready | stale | invalid`, hashes y faltantes. |
 | `idu-pi source-add <path.md|path.txt|path.pdf>` | Copia fuente local a `Doc/<project>/sources/local/`; para `.md/.txt` guarda snapshot de texto simple, para `.pdf` sólo copia/registra binario. |
+| `idu-pi source-read <source-id>` | Lee contenido acotado de fuentes `.md/.txt` o snapshots existentes; PDFs quedan metadata-only. |
+| `idu-pi source-extract <source-id>` | Actualiza snapshot acotado para `.md/.txt`; PDFs quedan metadata-only sin OCR/parsing pesado. |
+| `idu-pi source-report <source-id>` | Reporta metadata, hash, estado de extracción y limitaciones de una fuente. |
+| `idu-pi source-research <consulta>` | Busca coincidencias en fuentes registradas/legibles y devuelve señales con evidencia/citas; no consulta web ni promueve contratos. |
 | `idu-pi source-remove <source-id>` | Remueve una fuente registrada y sus copias/snapshot dentro de Source Library; no toca contratos ni repo real. |
 | `idu-pi source-refresh` | Recalcula existencia/hash/estado; no toca Project Core, Constitution, flows, skills ni contratos. |
 
@@ -165,7 +169,7 @@ Artefactos por proyecto:
 <stateRoot>/project-index.json
 <stateRoot>/Doc/<project>/source-index.json        # índice Source Library de fuentes locales/normativas
 <stateRoot>/Doc/<project>/sources/local/           # PDFs, normas, leyes, libros o docs descargadas
-<stateRoot>/Doc/<project>/sources/extracted/       # snapshot de texto simple para .md/.txt; PDFs no se parsean en C1
+<stateRoot>/Doc/<project>/sources/extracted/       # snapshot de texto simple para .md/.txt; PDFs quedan metadata-only
 <stateRoot>/agentlabs/
 ```
 

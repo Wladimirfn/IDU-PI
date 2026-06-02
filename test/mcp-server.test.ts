@@ -569,11 +569,51 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 				contractPromotionAllowed: false,
 			},
 		}),
+		sourceLibraryRead: () => ({
+			projectId: "sistema_de_mantencion",
+			paths: fakeRuntime().sourceLibraryStatus().paths,
+			source: fakeRuntime().sourceLibraryAdd("C:/docs/manual.md").addedSource!,
+			readStatus: "ready",
+			content: "manual robusto",
+			maxChars: 20_000,
+			truncated: false,
+			citationPath: "sources/extracted/source-demo-manual-abc123.txt",
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
+		sourceLibraryExtract: () => ({
+			...fakeRuntime().sourceLibraryRead("source-demo-manual-abc123"),
+			extractionStatus: "extracted",
+			extractedTextPath: "sources/extracted/source-demo-manual-abc123.txt",
+		}),
+		sourceLibraryReport: () => ({
+			projectId: "sistema_de_mantencion",
+			paths: fakeRuntime().sourceLibraryStatus().paths,
+			source: fakeRuntime().sourceLibraryAdd("C:/docs/manual.md").addedSource!,
+			extractedAvailable: true,
+			extractionStatus: "extracted",
+			citationPath: "sources/extracted/source-demo-manual-abc123.txt",
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
+		sourceLibraryResearch: () => ({
+			projectId: "sistema_de_mantencion",
+			query: "robusto",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			searchedSourceIds: ["source-demo-manual-abc123"],
+			signals: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
 		sourceLibraryRefresh: (): SourceLibraryStatus =>
 			fakeRuntime().sourceLibraryStatus(),
 		formatSourceLibraryStatus: () => "source library status",
 		formatSourceLibraryAddResult: () => "source library add",
 		formatSourceLibraryRemoveResult: () => "source library remove",
+		formatSourceLibraryReadResult: () => "source library read",
+		formatSourceLibraryExtractResult: () => "source library extract",
+		formatSourceLibraryItemReport: () => "source library report",
+		formatSourceResearchReport: () => "source research report",
 		formatSourceLibraryRefreshResult: () => "source library refresh",
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
@@ -689,8 +729,12 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_source_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_add"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_remove"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_read"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_extract"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_report"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_research_report"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
-	assert.equal(tools.length, 33);
+	assert.equal(tools.length, 37);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1539,9 +1583,41 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(remove.ok, true);
-	assert.ok(
-		remove.safeNotes.some((note) => /No cambié contratos/u.test(note)),
+	assert.ok(remove.safeNotes.some((note) => /No cambié contratos/u.test(note)));
+
+	const read = await callIduMcpTool(
+		"idu_source_read",
+		{ sourceId: "source-demo-manual-abc123" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
+	assert.equal(read.ok, true);
+	assert.ok(read.safeNotes.some((note) => /No consulté web/u.test(note)));
+
+	const extract = await callIduMcpTool(
+		"idu_source_extract",
+		{ sourceId: "source-demo-manual-abc123" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(extract.ok, true);
+	assert.ok(
+		extract.safeNotes.some((note) => /PDFs quedan metadata-only/u.test(note)),
+	);
+
+	const report = await callIduMcpTool(
+		"idu_source_report",
+		{ sourceId: "source-demo-manual-abc123" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(report.ok, true);
+	assert.ok(report.safeNotes.some((note) => /metadata de fuente/u.test(note)));
+
+	const research = await callIduMcpTool(
+		"idu_source_research_report",
+		{ query: "robusto" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(research.ok, true);
+	assert.ok(research.safeNotes.some((note) => /No consulté web/u.test(note)));
 
 	const refresh = await callIduMcpTool(
 		"idu_source_refresh",

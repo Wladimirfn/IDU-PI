@@ -227,6 +227,10 @@ idu_supervisor_tick
 idu_source_status
 idu_source_add
 idu_source_remove
+idu_source_read
+idu_source_extract
+idu_source_report
+idu_source_research_report
 idu_source_refresh
 
 # AgentLabs audit-only
@@ -235,7 +239,7 @@ idu_agentlab_review_run
 idu_agentlab_review_status
 ```
 
-`idu_activate` sólo activa guardrails; no enrola ni crea drafts. `idu_source_add/status/remove/refresh` mantienen una Source Library en `stateRoot/Doc/<project>` para documentación manual `.md`, `.txt` y `.pdf`; los PDFs se copian/registran sin OCR ni parsing pesado, y ninguna fuente promueve contratos automáticamente. `idu_master_plan_create` crea/regenera en `stateRoot` un Plan Maestro normativo que separa documentación declarada, realidad construida, drift, contratos y flujos permanentes (`master-plan.flows.json`). `idu_master_plan_review` devuelve además `revisionAntesDeZarpar`: una revisión honesta para el orquestador con entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. `idu_master_plan_approve` y `idu_master_plan_reject` cierran explícitamente el ciclo normativo desde MCP: cambian sólo artefactos de gobernanza en `stateRoot`, no aplican flows, no ejecutan AgentLabs, no tocan el repo real y no hacen commit/push. Con un Plan aprobado, `idu_plan_snapshot`, `idu_next_advisory_action` e `idu_task_package_create` arman lineamientos preventivos para que el orquestador revise Plan/flows/contratos con un subagente governance-review antes de codificar. `idu_orchestrator_procedure` e `idu_task_context` devuelven severidad, confianza, evidencia, lecturas requeridas, contratos afectados, labs sugeridos y guía para subagentes. El orquestador revalida y decide. `idu_agentlab_request_create` sólo crea solicitud; los labs se ejecutan únicamente con `idu_agentlab_review_run` o llamada explícita del orquestador.
+`idu_activate` sólo activa guardrails; no enrola ni crea drafts. `idu_source_add/status/remove/read/extract/report/research/refresh` mantienen una Source Library en `stateRoot/Doc/<project>` para documentación manual `.md`, `.txt` y `.pdf`; los PDFs se copian/registran sin OCR ni parsing pesado, y ninguna fuente promueve contratos automáticamente. `idu_master_plan_create` crea/regenera en `stateRoot` un Plan Maestro normativo que separa documentación declarada, realidad construida, drift, contratos y flujos permanentes (`master-plan.flows.json`). `idu_master_plan_review` devuelve además `revisionAntesDeZarpar`: una revisión honesta para el orquestador con entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. `idu_master_plan_approve` y `idu_master_plan_reject` cierran explícitamente el ciclo normativo desde MCP: cambian sólo artefactos de gobernanza en `stateRoot`, no aplican flows, no ejecutan AgentLabs, no tocan el repo real y no hacen commit/push. Con un Plan aprobado, `idu_plan_snapshot`, `idu_next_advisory_action` e `idu_task_package_create` arman lineamientos preventivos para que el orquestador revise Plan/flows/contratos con un subagente governance-review antes de codificar. `idu_orchestrator_procedure` e `idu_task_context` devuelven severidad, confianza, evidencia, lecturas requeridas, contratos afectados, labs sugeridos y guía para subagentes. El orquestador revalida y decide. `idu_agentlab_request_create` sólo crea solicitud; los labs se ejecutan únicamente con `idu_agentlab_review_run` o llamada explícita del orquestador.
 
 Guía: [Instalador, home CLI y estado por proyecto](docs/installer.md).
 

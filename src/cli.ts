@@ -40,17 +40,31 @@ import {
 } from "./project-state.js";
 import {
 	addSourceLibraryItem,
+	extractSourceLibraryItem,
 	formatSourceLibraryAddResult,
+	formatSourceLibraryExtractResult,
+	formatSourceLibraryItemReport,
+	formatSourceLibraryReadResult,
 	formatSourceLibraryRefreshResult,
 	formatSourceLibraryRemoveResult,
 	formatSourceLibraryStatus,
 	getSourceLibraryStatus,
+	readSourceLibraryItem,
 	refreshSourceLibrary,
 	removeSourceLibraryItem,
+	reportSourceLibraryItem,
 	type RemoveSourceLibraryItemResult,
+	type SourceLibraryExtractResult,
+	type SourceLibraryItemReport,
 	type SourceLibraryMutationResult,
+	type SourceLibraryReadResult,
 	type SourceLibraryStatus,
 } from "./source-library.js";
+import {
+	createSourceResearchReport,
+	formatSourceResearchReport,
+	type SourceResearchReport,
+} from "./source-research.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -347,12 +361,20 @@ export type CliRuntime = {
 	sourceLibraryStatus: () => SourceLibraryStatus;
 	sourceLibraryAdd: (inputPath: string) => SourceLibraryMutationResult;
 	sourceLibraryRemove: (sourceId: string) => RemoveSourceLibraryItemResult;
+	sourceLibraryRead: (sourceId: string) => SourceLibraryReadResult;
+	sourceLibraryExtract: (sourceId: string) => SourceLibraryExtractResult;
+	sourceLibraryReport: (sourceId: string) => SourceLibraryItemReport;
+	sourceLibraryResearch: (query: string) => SourceResearchReport;
 	sourceLibraryRefresh: () => SourceLibraryStatus;
 	formatSourceLibraryStatus: (status: SourceLibraryStatus) => string;
 	formatSourceLibraryAddResult: (result: SourceLibraryMutationResult) => string;
 	formatSourceLibraryRemoveResult: (
 		result: RemoveSourceLibraryItemResult,
 	) => string;
+	formatSourceLibraryReadResult: (result: SourceLibraryReadResult) => string;
+	formatSourceLibraryExtractResult: (result: SourceLibraryExtractResult) => string;
+	formatSourceLibraryItemReport: (result: SourceLibraryItemReport) => string;
+	formatSourceResearchReport: (result: SourceResearchReport) => string;
 	formatSourceLibraryRefreshResult: (status: SourceLibraryStatus) => string;
 	formatMasterPlanStatus?: (result: MasterPlanStatusResult) => string;
 	formatMasterPlanReview?: (review: MasterPlanReview) => string;
@@ -753,6 +775,30 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				sourceId,
 			}),
+		sourceLibraryRead: (sourceId) =>
+			readSourceLibraryItem({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				sourceId,
+			}),
+		sourceLibraryExtract: (sourceId) =>
+			extractSourceLibraryItem({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				sourceId,
+			}),
+		sourceLibraryReport: (sourceId) =>
+			reportSourceLibraryItem({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				sourceId,
+			}),
+		sourceLibraryResearch: (query) =>
+			createSourceResearchReport({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				query,
+			}),
 		sourceLibraryRefresh: () =>
 			refreshSourceLibrary({
 				stateRoot: masterPlanStateRoot,
@@ -761,6 +807,10 @@ export function createCliRuntime(
 		formatSourceLibraryStatus,
 		formatSourceLibraryAddResult,
 		formatSourceLibraryRemoveResult,
+		formatSourceLibraryReadResult,
+		formatSourceLibraryExtractResult,
+		formatSourceLibraryItemReport,
+		formatSourceResearchReport,
 		formatSourceLibraryRefreshResult,
 		formatMasterPlanStatus,
 		formatMasterPlanReview,
@@ -1191,6 +1241,34 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSourceLibraryRemoveResult(
 						activeRuntime.sourceLibraryRemove(requiredText(rest)),
+					),
+				);
+			case "idu-source-read":
+			case "source-read":
+				return ok(
+					activeRuntime.formatSourceLibraryReadResult(
+						activeRuntime.sourceLibraryRead(requiredText(rest)),
+					),
+				);
+			case "idu-source-extract":
+			case "source-extract":
+				return ok(
+					activeRuntime.formatSourceLibraryExtractResult(
+						activeRuntime.sourceLibraryExtract(requiredText(rest)),
+					),
+				);
+			case "idu-source-report":
+			case "source-report":
+				return ok(
+					activeRuntime.formatSourceLibraryItemReport(
+						activeRuntime.sourceLibraryReport(requiredText(rest)),
+					),
+				);
+			case "idu-source-research":
+			case "source-research":
+				return ok(
+					activeRuntime.formatSourceResearchReport(
+						activeRuntime.sourceLibraryResearch(requiredText(rest)),
 					),
 				);
 			case "idu-source-refresh":
@@ -2237,6 +2315,10 @@ export function helpText(): string {
 		"  idu-pi idu-master-plan-redraft latest",
 		"  idu-pi idu-source-status",
 		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
+		"  idu-pi idu-source-read <source-id>",
+		"  idu-pi idu-source-extract <source-id>",
+		"  idu-pi idu-source-report <source-id>",
+		'  idu-pi idu-source-research "consulta"',
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-improvements-review latest",
