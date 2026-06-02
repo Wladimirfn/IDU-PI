@@ -2975,7 +2975,10 @@ async function editAgentProfilesTui(
 	if (choice !== "edit") return "Cancelado sin cambios.";
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
 	try {
-		return await editAgentProfiles((prompt: string) => rl.question(prompt), status);
+		return await editAgentProfiles(
+			(prompt: string) => rl.question(prompt),
+			status,
+		);
 	} finally {
 		rl.close();
 	}
@@ -2988,7 +2991,8 @@ async function editAgentProfiles(
 	const raw = (
 		await question("PI_AGENT_PROFILES (Enter vacío=volver, exit=salir): ")
 	).trim();
-	if (!raw || /^exit|salir|volver$/iu.test(raw)) return "Cancelado sin cambios.";
+	if (!raw || /^exit|salir|volver$/iu.test(raw))
+		return "Cancelado sin cambios.";
 	try {
 		parseAgentProfiles(raw);
 	} catch (error) {
