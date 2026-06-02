@@ -2795,7 +2795,11 @@ async function selectSearchableMenu(
 			: [];
 		const searchRows = settings.search
 			? [
-					panelLine(`buscar: ${query || "(escribí para filtrar)"}`, width, ANSI_DIM),
+					panelLine(
+						`buscar: ${query || "(escribí para filtrar)"}`,
+						width,
+						ANSI_DIM,
+					),
 				]
 			: [];
 		const header = [
@@ -2834,7 +2838,8 @@ async function selectSearchableMenu(
 			const onKeypress = (chunk: string, key: { name?: string }) => {
 				const visible = filteredOptions();
 				if (key.name === "up") {
-					if (visible.length) selected = (selected - 1 + visible.length) % visible.length;
+					if (visible.length)
+						selected = (selected - 1 + visible.length) % visible.length;
 					render();
 					return;
 				}
@@ -2850,12 +2855,17 @@ async function selectSearchableMenu(
 					return;
 				}
 				if (key.name === "return") {
-					if (visible.length) resolve(visible[selected]?.value ?? visible[0].value);
+					if (visible.length)
+						resolve(visible[selected]?.value ?? visible[0].value);
 					return;
 				}
 				if (key.name === "escape" || (!settings.search && key.name === "q"))
 					resolve("exit");
-				if (settings.search && chunk.length === 1 && chunk.charCodeAt(0) >= 32) {
+				if (
+					settings.search &&
+					chunk.length === 1 &&
+					chunk.charCodeAt(0) >= 32
+				) {
 					query += chunk;
 					selected = 0;
 					render();
@@ -3047,37 +3057,58 @@ async function assignModelRoleTui(
 	const stateRoot = status.project.stateRoot;
 	if (!stateRoot)
 		return "No hay stateRoot. Enrolá o bootstrappeá el proyecto antes de asignar modelos por rol.";
-	const roleId = await selectSearchableMenu(
-		"Elegir rol",
-		IDU_MODEL_ROLES.map((role) => ({
-			label: `${role.label} (${role.id})`,
-			value: role.id,
-		})),
-		{ search: true },
-	);
-	if (roleId === "exit") return "Cancelado sin cambios.";
-	const assignmentOptions = modelAssignmentOptions(status);
-	const profileId = await selectSearchableMenu(
-		"Elegir modelo/perfil",
-		assignmentOptions.map((option) => ({
-			label: option.label,
-			value: option.value,
-		})),
-		{
-			search: true,
-			content: [
-				`Rol: ${roleId}`,
-				"Elegí un perfil existente o un modelo directo conocido por Gentle AI.",
-				"Custom sólo si el modelo no aparece en la lista.",
-			].join("\n"),
-		},
-	);
-	if (profileId === "exit") return "Cancelado sin cambios.";
+	let roleId: string;
+	let profileId: string;
+	while (true) {
+		roleId = await selectSearchableMenu(
+			"Elegir rol",
+			[
+				...IDU_MODEL_ROLES.map((role) => ({
+					label: `${role.label} (${role.id})`,
+					value: role.id,
+				})),
+				{ label: "← Volver", value: "__back" },
+				{ label: "Exit", value: "__exit" },
+			],
+			{ search: true },
+		);
+		if (roleId === "exit" || roleId === "__back" || roleId === "__exit")
+			return "Cancelado sin cambios.";
+		const assignmentOptions = modelAssignmentOptions(status);
+		profileId = await selectSearchableMenu(
+			"Elegir modelo/perfil",
+			[
+				...assignmentOptions.map((option) => ({
+					label: option.label,
+					value: option.value,
+				})),
+				{ label: "← Volver a roles", value: "__back" },
+				{ label: "Exit", value: "__exit" },
+			],
+			{
+				search: true,
+				content: [
+					`Rol: ${roleId}`,
+					"Elegí un perfil existente o un modelo directo conocido por Gentle AI.",
+					"Custom sólo si el modelo no aparece en la lista.",
+				].join("\n"),
+			},
+		);
+		if (profileId === "__back") continue;
+		if (profileId === "exit" || profileId === "__exit")
+			return "Cancelado sin cambios.";
+		break;
+	}
 	let finalProfileId = profileId;
 	if (finalProfileId === "__custom_model__") {
-		const rl = createInterface({ input: process.stdin, output: process.stdout });
+		const rl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		});
 		try {
-			finalProfileId = (await rl.question("Custom model id (provider/model): ")).trim();
+			finalProfileId = (
+				await rl.question("Custom model id (provider/model): ")
+			).trim();
 		} finally {
 			rl.close();
 		}
