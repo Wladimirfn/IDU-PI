@@ -145,7 +145,7 @@ Source Library permite agregar, leer e investigar documentación manual local en
 | `idu-pi source-extract <source-id>` | Actualiza snapshot acotado para `.md/.txt`; PDFs usan sólo conversión embebida existente, sin OCR/parsing pesado. |
 | `idu-pi source-report <source-id>` | Reporta metadata, hash, estado de extracción/conversión y limitaciones de una fuente. |
 | `idu-pi source-research <consulta>` | Busca coincidencias en fuentes registradas/legibles y devuelve señales con evidencia/citas; no consulta web ni promueve contratos. |
-| `idu-pi source-digest <source-id>` | Divide texto legible en chunks/tomos, genera `sources/digests/<sourceId>.json` y actualiza `source-library-index.json`; advisory-only. |
+| `idu-pi source-digest <source-id>` | Divide texto legible en chunks/tomos, genera `sources/digests/<sourceId>.json` y actualiza `source-library-index.json`; si no hay texto real, marca acción requerida para lector bibliotecario especializado. Advisory-only. |
 | `idu-pi source-digest-status` | Muestra digests disponibles y estado del índice bibliotecario. |
 | `idu-pi source-chunk-read <source-id> <chunk-id>` | Lee un chunk/tomo específico para que el orquestador pueda mandar subagentes a contrastar evidencia. |
 | `idu-pi source-recommend <tarea>` | Recomienda fuentes/chunks relevantes para una tarea; no implementa ni aprueba contratos. |

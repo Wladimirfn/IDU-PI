@@ -46,6 +46,7 @@ export type SourceLibraryDigestStatus =
 	| "pending"
 	| "ready"
 	| "stale"
+	| "blocked_unread"
 	| "not_applicable";
 
 export type SourceLibraryItem = {
@@ -317,7 +318,9 @@ export function addSourceLibraryItem(
 		digestStatus:
 			conversion.extractedTextPath || conversion.convertedTextPath
 				? "pending"
-				: "not_applicable",
+				: kind === "pdf"
+					? "blocked_unread"
+					: "not_applicable",
 		...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
 	};
 	const existing = loadOrCreateIndex(paths, input.projectId, now);

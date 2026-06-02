@@ -152,7 +152,7 @@ test("recommendation uses local digest index and returns orchestrator read instr
 	}
 });
 
-test("metadata-only PDF digest records limitations without chunks", () => {
+test("unreadable PDF digest requires librarian reader without semantic claims", () => {
 	const temp = root();
 	try {
 		const stateRoot = join(temp, "state", "projects", "demo");
@@ -170,12 +170,15 @@ test("metadata-only PDF digest records limitations without chunks", () => {
 			sourceId: added.addedSource!.id,
 			now,
 		});
-		assert.equal(digest.processingMode, "metadata_only");
+		assert.equal(digest.processingMode, "requires_specialized_reader");
 		assert.deepEqual(digest.chunks, []);
 		assert.deepEqual(digest.topics, []);
 		assert.deepEqual(digest.useWhen, []);
 		assert.deepEqual(digest.recommendedReads, []);
 		assert.match(digest.summary, /Documento no leído/u);
+		assert.equal(digest.requiredAction?.owner, "orchestrator");
+		assert.equal(digest.requiredAction?.recommendedAgent, "librarian");
+		assert.match(digest.requiredAction?.instructions ?? "", /subagente bibliotecario/u);
 		assert.match(
 			digest.limitations.join("\n"),
 			/sin texto legible|metadata_only/u,

@@ -26,6 +26,16 @@ export type SourceDigestChunk = {
 	contractPromotionAllowed: false;
 };
 
+export type SourceDigestRequiredAction = {
+	owner: "orchestrator";
+	action: "dispatch_librarian_reader";
+	reason: string;
+	recommendedAgent: "librarian";
+	recommendedReaderType: "document-reader";
+	instructions: string;
+	contractPromotionAllowed: false;
+};
+
 export type SourceDigest = {
 	version: 1;
 	projectId: string;
@@ -33,13 +43,14 @@ export type SourceDigest = {
 	title: string;
 	kind: SourceLibraryItem["kind"];
 	generatedAt: string;
-	processingMode: "direct" | "chunked" | "metadata_only";
+	processingMode: "direct" | "chunked" | "requires_specialized_reader";
 	summary: string;
 	topics: string[];
 	useWhen: string[];
 	chunks: SourceDigestChunk[];
 	recommendedReads: string[];
 	limitations: string[];
+	requiredAction?: SourceDigestRequiredAction;
 	contractPromotionAllowed: false;
 };
 
@@ -147,7 +158,8 @@ export function createSourceDigest(input: {
 	mkdirSync(paths.digestsDir, { recursive: true });
 
 	let chunks: SourceDigestChunk[] = [];
-	let processingMode: SourceDigest["processingMode"] = "metadata_only";
+	let processingMode: SourceDigest["processingMode"] =
+		"requires_specialized_reader";
 	if (content) {
 		const rawChunks = chunkText(content, chunkChars, overlapChars);
 		processingMode = rawChunks.length > 1 ? "chunked" : "direct";
@@ -171,7 +183,7 @@ export function createSourceDigest(input: {
 		});
 	} else {
 		limitations.push(
-			"Fuente sin texto legible para digest; registrar .md/.txt asociado o convertir manualmente.",
+			"Fuente sin texto legible para digest; requiere lector bibliotecario especializado antes de catalogación semántica.",
 		);
 	}
 	const topics = content
@@ -190,12 +202,13 @@ export function createSourceDigest(input: {
 		processingMode,
 		summary: content
 			? summarizeText(content)
-			: "Documento no leído: metadata-only; requiere conversión a texto/Markdown antes de generar resumen semántico.",
+			: "Documento no leído: requiere lector bibliotecario especializado antes de generar resumen semántico.",
 		topics,
 		useWhen: content ? useWhenForTopics(topics, source.title) : [],
 		chunks,
 		recommendedReads: chunks.slice(0, 5).map((chunk) => chunk.chunkId),
 		limitations: unique(limitations),
+		...(content ? {} : { requiredAction: requiredLibrarianAction(source) }),
 		contractPromotionAllowed: false,
 	};
 	writeDigest(paths, digest);
@@ -326,6 +339,11 @@ export function formatSourceDigest(digest: SourceDigest): string {
 		"Limitaciones:",
 		...formatList(digest.limitations),
 		"",
+		"Acción requerida:",
+		digest.requiredAction
+			? `${digest.requiredAction.owner}: ${digest.requiredAction.action} — ${digest.requiredAction.reason}`
+			: "- ninguna",
+		"",
 		"Nota segura:",
 		"Digest advisory: no promueve contratos, no ejecuta AgentLabs y no consulta web/live.",
 	].join("\n");
@@ -404,7 +422,7 @@ function updateLibraryIndex(
 		(item) => item.sourceId !== digest.sourceId,
 	);
 	const nextEntries =
-		digest.processingMode === "metadata_only"
+		digest.processingMode === "requires_specialized_reader"
 			? readableEntries
 			: [
 					...readableEntries,
@@ -518,6 +536,21 @@ function summarizeText(content: string): string {
 	const normalized = content.replace(/\s+/gu, " ").trim();
 	if (!normalized) return "Sin contenido legible.";
 	return normalized.slice(0, 360) + (normalized.length > 360 ? "..." : "");
+}
+
+function requiredLibrarianAction(
+	source: SourceLibraryItem,
+): SourceDigestRequiredAction {
+	return {
+		owner: "orchestrator",
+		action: "dispatch_librarian_reader",
+		reason:
+			"El bibliotecario local no obtuvo texto real del documento; no puede catalogarlo semánticamente sin lector especializado.",
+		recommendedAgent: "librarian",
+		recommendedReaderType: "document-reader",
+		instructions: `Enviar un subagente bibliotecario/document-reader a leer ${source.id} (${source.title}), convertirlo a Markdown/texto si corresponde, dividirlo en tomos/chunks y devolver resumen, temas, secciones importantes y limitaciones. No implementar código ni promover contratos.`,
+		contractPromotionAllowed: false,
+	};
 }
 
 function extractTopics(content: string): string[] {

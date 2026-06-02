@@ -80,6 +80,7 @@ test("pdf is copied and registered without text snapshot", () => {
 			now,
 		});
 		assert.equal(result.addedSource?.kind, "pdf");
+		assert.equal(result.addedSource?.digestStatus, "blocked_unread");
 		assert.equal(result.addedSource?.extractedTextPath, undefined);
 		assert.ok(
 			existsSync(join(result.paths.root, result.addedSource!.storedPath)),
