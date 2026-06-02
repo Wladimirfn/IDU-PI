@@ -65,6 +65,10 @@ export type IduMcpToolName =
 	| "idu_source_extract"
 	| "idu_source_report"
 	| "idu_source_research_report"
+	| "idu_source_digest"
+	| "idu_source_digest_status"
+	| "idu_source_chunk_read"
+	| "idu_source_recommend_for_task"
 	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
@@ -361,7 +365,7 @@ const TOOLS: IduMcpToolDefinition[] = [
 	),
 	tool(
 		"idu_source_add",
-		"Copia/registra documentación manual local en Source Library stateRoot; no parsea PDFs ni promueve contratos.",
+		"Copia/registra documentación manual local en Source Library stateRoot; PDFs intentan conversión best-effort desde texto embebido, sin OCR ni contratos automáticos.",
 		{
 			path: requiredString("Ruta local .md, .txt o .pdf a registrar."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
@@ -377,7 +381,7 @@ const TOOLS: IduMcpToolDefinition[] = [
 	),
 	tool(
 		"idu_source_read",
-		"Lee contenido acotado de una fuente registrada; PDFs quedan metadata-only.",
+		"Lee contenido acotado de una fuente registrada; PDFs convertidos pueden ser legibles y los no convertidos quedan metadata-only.",
 		{
 			sourceId: requiredString("ID de fuente a leer."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
@@ -385,7 +389,7 @@ const TOOLS: IduMcpToolDefinition[] = [
 	),
 	tool(
 		"idu_source_extract",
-		"Extrae texto acotado para markdown/text; PDFs quedan metadata-only sin OCR.",
+		"Extrae texto acotado para markdown/text y lee PDFs convertidos; PDFs sin texto embebido quedan metadata-only sin OCR.",
 		{
 			sourceId: requiredString("ID de fuente a extraer."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
@@ -404,6 +408,40 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Crea reporte advisory de investigación sobre fuentes registradas y texto extraído; sin web ni contratos automáticos.",
 		{
 			query: requiredString("Consulta a buscar en fuentes registradas."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_digest",
+		"Genera digest/chunks advisory para una fuente registrada; stateRoot only, sin web ni contratos automáticos.",
+		{
+			sourceId: requiredString("ID de fuente a digerir."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_digest_status",
+		"Lee estado de digests e índice bibliotecario sin escribir.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_chunk_read",
+		"Lee un chunk/tomo generado por Source Digest de forma acotada.",
+		{
+			sourceId: requiredString("ID de fuente."),
+			chunkId: requiredString("ID del chunk a leer."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_recommend_for_task",
+		"Recomienda fuentes/chunks relevantes para una tarea del orquestador desde el índice local; no implementa.",
+		{
+			request: requiredString(
+				"Tarea o solicitud a contrastar con la biblioteca.",
+			),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -1688,15 +1726,17 @@ async function dispatchTool(
 				data: { result, addedSource: result.addedSource },
 				safeNotes: [
 					...resolution.safeNotes,
-					"Copié documentación sólo a stateRoot/Doc/<project>/sources/local.",
-					"PDFs se registran como binarios; no hice OCR ni parsing pesado.",
+					"Copié documentación bajo stateRoot/Doc/<project>/Source Library; texto legible puede generar snapshots/Markdown seguros.",
+					"PDFs intentan conversión best-effort desde texto embebido; no hice OCR ni parsing pesado.",
 					"No promoví contratos ni ejecuté AgentLabs.",
 				],
 				errors: result.errors,
 			});
 		}
 		case "idu_source_remove": {
-			const result = runtime.sourceLibraryRemove(requiredText(args, "sourceId"));
+			const result = runtime.sourceLibraryRemove(
+				requiredText(args, "sourceId"),
+			);
 			return envelope({
 				ok: result.errors.length === 0,
 				tool: name,
@@ -1731,7 +1771,9 @@ async function dispatchTool(
 			});
 		}
 		case "idu_source_extract": {
-			const result = runtime.sourceLibraryExtract(requiredText(args, "sourceId"));
+			const result = runtime.sourceLibraryExtract(
+				requiredText(args, "sourceId"),
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1741,14 +1783,16 @@ async function dispatchTool(
 				data: { result },
 				safeNotes: [
 					...resolution.safeNotes,
-					"Extracción escribe sólo bajo stateRoot/Doc/<project>/sources/extracted.",
-					"PDFs quedan metadata-only; no hice OCR ni parsing pesado.",
+					"Extracción de texto escribe sólo bajo Source Library stateRoot cuando corresponde.",
+					"PDFs convertidos se leen desde Markdown seguro; PDFs sin texto embebido quedan metadata-only. No hice OCR ni parsing pesado.",
 					"No cambié contratos ni ejecuté AgentLabs.",
 				],
 			});
 		}
 		case "idu_source_report": {
-			const result = runtime.sourceLibraryReport(requiredText(args, "sourceId"));
+			const result = runtime.sourceLibraryReport(
+				requiredText(args, "sourceId"),
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1777,6 +1821,75 @@ async function dispatchTool(
 					"Investigué sólo fuentes registradas y texto extraído/legible.",
 					"No consulté web/live sources.",
 					"No promoví contratos ni ejecuté AgentLabs.",
+				],
+			});
+		}
+		case "idu_source_digest": {
+			const result = runtime.sourceDigest(requiredText(args, "sourceId"));
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source digest: ${result.sourceId} mode=${result.processingMode}`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Digest/chunks escritos bajo stateRoot/Doc/<project>/sources/{chunks,digests} y source-library-index.json.",
+					"No consulté web/live sources ni ejecuté AgentLabs.",
+					"No promoví contratos.",
+				],
+			});
+		}
+		case "idu_source_digest_status": {
+			const result = runtime.sourceDigestStatus();
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source digest status: ${result.digests.length} fuentes`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Leí sólo estado de digests en Source Library stateRoot.",
+					"No promoví contratos ni ejecuté AgentLabs.",
+				],
+			});
+		}
+		case "idu_source_chunk_read": {
+			const result = runtime.sourceChunkRead(
+				requiredText(args, "sourceId"),
+				requiredText(args, "chunkId"),
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source chunk read: ${result.chunkId}`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Leí sólo chunks registrados bajo Source Library stateRoot.",
+					"No consulté web/live sources ni ejecuté AgentLabs.",
+				],
+			});
+		}
+		case "idu_source_recommend_for_task": {
+			const result = runtime.sourceRecommend(requiredText(args, "request"));
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source recommendations: ${result.matches.length} matches`,
+				data: { result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Recomendé fuentes/chunks desde índice local; el orquestador decide y manda subagentes.",
+					"No implementé, no consulté web/live sources y no ejecuté AgentLabs.",
+					"No promoví contratos.",
 				],
 			});
 		}

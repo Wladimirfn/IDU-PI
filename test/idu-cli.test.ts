@@ -945,6 +945,12 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 					"pi-telegram-bridge",
 					"source-index.json",
 				),
+				libraryIndexPath: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"source-library-index.json",
+				),
 				localSourcesDir: join(
 					workspaceRoot,
 					"Doc",
@@ -958,6 +964,27 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 					"pi-telegram-bridge",
 					"sources",
 					"extracted",
+				),
+				convertedDir: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"sources",
+					"converted",
+				),
+				chunksDir: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"sources",
+					"chunks",
+				),
+				digestsDir: join(
+					workspaceRoot,
+					"Doc",
+					"pi-telegram-bridge",
+					"sources",
+					"digests",
 				),
 			},
 			state: "missing",
@@ -1042,6 +1069,48 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 			limitations: [],
 			contractPromotionAllowed: false,
 		}),
+		sourceDigest: () => ({
+			version: 1,
+			projectId: "pi-telegram-bridge",
+			sourceId: "source-demo-manual-abc123",
+			title: "manual.md",
+			kind: "markdown",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			processingMode: "direct",
+			summary: "manual robusto",
+			topics: ["robusto"],
+			useWhen: ["cuando la tarea menciona robusto"],
+			chunks: [],
+			recommendedReads: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
+		sourceDigestStatus: () => ({
+			projectId: "pi-telegram-bridge",
+			paths: runtime.sourceLibraryStatus().paths,
+			digests: [],
+			libraryIndexExists: true,
+			contractPromotionAllowed: false,
+		}),
+		sourceChunkRead: () => ({
+			projectId: "pi-telegram-bridge",
+			sourceId: "source-demo-manual-abc123",
+			chunkId: "source-demo-manual-abc123-chunk-001",
+			path: "sources/chunks/source-demo-manual-abc123/source-demo-manual-abc123-chunk-001.md",
+			content: "manual robusto",
+			maxChars: 12_000,
+			truncated: false,
+			contractPromotionAllowed: false,
+		}),
+		sourceRecommend: () => ({
+			projectId: "pi-telegram-bridge",
+			request: "robusto",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			matches: [],
+			missingKnowledge: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
 		sourceLibraryRefresh: () => runtime.sourceLibraryStatus(),
 		formatSourceLibraryStatus: (status) =>
 			["Idu-pi Source Library", "", "Estado:", status.state].join("\n"),
@@ -1059,6 +1128,10 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		formatSourceLibraryExtractResult: () => "Idu-pi Source Library Extract",
 		formatSourceLibraryItemReport: () => "Idu-pi Source Library Report",
 		formatSourceResearchReport: () => "Idu-pi Source Research Report",
+		formatSourceDigest: () => "Idu-pi Source Digest",
+		formatSourceDigestStatus: () => "Idu-pi Source Digest Status",
+		formatSourceChunkRead: () => "Idu-pi Source Chunk Read",
+		formatSourceRecommendationReport: () => "Idu-pi Source Recommend For Task",
 		formatSourceLibraryRefreshResult: (status) =>
 			["Idu-pi Source Library Refresh", "", status.state].join("\n"),
 		formatMasterPlanOperation: (result: { plan: { status: string } }) =>
@@ -1484,6 +1557,31 @@ test("CLI source library commands are wired with aliases", async () => {
 		);
 		assert.equal(research.exitCode, 0);
 		assert.match(research.stdout, /Source Research Report/u);
+		const digest = await runCliCommand(
+			["source-digest", "source-demo-manual-abc123"],
+			runtime,
+		);
+		assert.equal(digest.exitCode, 0);
+		assert.match(digest.stdout, /Source Digest/u);
+		const digestStatus = await runCliCommand(["source-digest-status"], runtime);
+		assert.equal(digestStatus.exitCode, 0);
+		assert.match(digestStatus.stdout, /Source Digest Status/u);
+		const chunk = await runCliCommand(
+			[
+				"source-chunk-read",
+				"source-demo-manual-abc123",
+				"source-demo-manual-abc123-chunk-001",
+			],
+			runtime,
+		);
+		assert.equal(chunk.exitCode, 0);
+		assert.match(chunk.stdout, /Source Chunk Read/u);
+		const recommend = await runCliCommand(
+			["source-recommend", "robusto"],
+			runtime,
+		);
+		assert.equal(recommend.exitCode, 0);
+		assert.match(recommend.stdout, /Source Recommend/u);
 		const refresh = await runCliCommand(["source-refresh"], runtime);
 		assert.equal(refresh.exitCode, 0);
 		assert.match(refresh.stdout, /Source Library Refresh/u);

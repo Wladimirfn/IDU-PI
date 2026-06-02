@@ -746,6 +746,23 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: 'corepack pnpm cli -- idu-source-research "consulta"',
 	},
 	{
+		label: "Source Digest",
+		command: "corepack pnpm cli -- idu-source-digest <source-id>",
+	},
+	{
+		label: "Source Digest status",
+		command: "corepack pnpm cli -- idu-source-digest-status",
+	},
+	{
+		label: "Source Chunk read",
+		command:
+			"corepack pnpm cli -- idu-source-chunk-read <source-id> <chunk-id>",
+	},
+	{
+		label: "Source Recommend",
+		command: 'corepack pnpm cli -- idu-source-recommend "tarea"',
+	},
+	{
 		label: "Source Library remove",
 		command: "corepack pnpm cli -- idu-source-remove <source-id>",
 	},

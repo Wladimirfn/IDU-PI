@@ -140,11 +140,15 @@ Source Library permite agregar, leer e investigar documentación manual local en
 | Comando | Uso |
 | --- | --- |
 | `idu-pi source-status` | Muestra estado explícito `missing | empty | ready | stale | invalid`, hashes y faltantes. |
-| `idu-pi source-add <path.md|path.txt|path.pdf>` | Copia fuente local a `Doc/<project>/sources/local/`; para `.md/.txt` guarda snapshot de texto simple, para `.pdf` sólo copia/registra binario. |
-| `idu-pi source-read <source-id>` | Lee contenido acotado de fuentes `.md/.txt` o snapshots existentes; PDFs quedan metadata-only. |
-| `idu-pi source-extract <source-id>` | Actualiza snapshot acotado para `.md/.txt`; PDFs quedan metadata-only sin OCR/parsing pesado. |
-| `idu-pi source-report <source-id>` | Reporta metadata, hash, estado de extracción y limitaciones de una fuente. |
+| `idu-pi source-add <path.md|path.txt|path.pdf>` | Copia fuente local a `Doc/<project>/sources/local/`; para `.md/.txt` guarda snapshot de texto simple, para `.pdf` intenta conversión best-effort desde texto embebido a Markdown sin OCR/dependencias nuevas. |
+| `idu-pi source-read <source-id>` | Lee contenido acotado de fuentes `.md/.txt`, snapshots o PDFs convertidos; PDFs sin texto quedan metadata-only. |
+| `idu-pi source-extract <source-id>` | Actualiza snapshot acotado para `.md/.txt`; PDFs usan sólo conversión embebida existente, sin OCR/parsing pesado. |
+| `idu-pi source-report <source-id>` | Reporta metadata, hash, estado de extracción/conversión y limitaciones de una fuente. |
 | `idu-pi source-research <consulta>` | Busca coincidencias en fuentes registradas/legibles y devuelve señales con evidencia/citas; no consulta web ni promueve contratos. |
+| `idu-pi source-digest <source-id>` | Divide texto legible en chunks/tomos, genera `sources/digests/<sourceId>.json` y actualiza `source-library-index.json`; advisory-only. |
+| `idu-pi source-digest-status` | Muestra digests disponibles y estado del índice bibliotecario. |
+| `idu-pi source-chunk-read <source-id> <chunk-id>` | Lee un chunk/tomo específico para que el orquestador pueda mandar subagentes a contrastar evidencia. |
+| `idu-pi source-recommend <tarea>` | Recomienda fuentes/chunks relevantes para una tarea; no implementa ni aprueba contratos. |
 | `idu-pi source-remove <source-id>` | Remueve una fuente registrada y sus copias/snapshot dentro de Source Library; no toca contratos ni repo real. |
 | `idu-pi source-refresh` | Recalcula existencia/hash/estado; no toca Project Core, Constitution, flows, skills ni contratos. |
 
@@ -169,7 +173,11 @@ Artefactos por proyecto:
 <stateRoot>/project-index.json
 <stateRoot>/Doc/<project>/source-index.json        # índice Source Library de fuentes locales/normativas
 <stateRoot>/Doc/<project>/sources/local/           # PDFs, normas, leyes, libros o docs descargadas
-<stateRoot>/Doc/<project>/sources/extracted/       # snapshot de texto simple para .md/.txt; PDFs quedan metadata-only
+<stateRoot>/Doc/<project>/sources/extracted/       # snapshot de texto simple para .md/.txt
+<stateRoot>/Doc/<project>/sources/converted/       # Markdown best-effort desde PDFs con texto embebido; sin OCR
+<stateRoot>/Doc/<project>/sources/chunks/          # chunks/tomos generados por digest
+<stateRoot>/Doc/<project>/sources/digests/         # digest JSON por fuente
+<stateRoot>/Doc/<project>/source-library-index.json # índice bibliotecario global advisory
 <stateRoot>/agentlabs/
 ```
 

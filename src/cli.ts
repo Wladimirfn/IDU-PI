@@ -65,6 +65,20 @@ import {
 	formatSourceResearchReport,
 	type SourceResearchReport,
 } from "./source-research.js";
+import {
+	createSourceDigest,
+	formatSourceChunkRead,
+	formatSourceDigest,
+	formatSourceDigestStatus,
+	formatSourceRecommendationReport,
+	getSourceDigestStatus,
+	readSourceChunk,
+	recommendSourcesForTask,
+	type SourceChunkReadResult,
+	type SourceDigest,
+	type SourceDigestStatus,
+	type SourceRecommendationReport,
+} from "./source-digest.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -365,6 +379,10 @@ export type CliRuntime = {
 	sourceLibraryExtract: (sourceId: string) => SourceLibraryExtractResult;
 	sourceLibraryReport: (sourceId: string) => SourceLibraryItemReport;
 	sourceLibraryResearch: (query: string) => SourceResearchReport;
+	sourceDigest: (sourceId: string) => SourceDigest;
+	sourceDigestStatus: () => SourceDigestStatus;
+	sourceChunkRead: (sourceId: string, chunkId: string) => SourceChunkReadResult;
+	sourceRecommend: (request: string) => SourceRecommendationReport;
 	sourceLibraryRefresh: () => SourceLibraryStatus;
 	formatSourceLibraryStatus: (status: SourceLibraryStatus) => string;
 	formatSourceLibraryAddResult: (result: SourceLibraryMutationResult) => string;
@@ -372,9 +390,17 @@ export type CliRuntime = {
 		result: RemoveSourceLibraryItemResult,
 	) => string;
 	formatSourceLibraryReadResult: (result: SourceLibraryReadResult) => string;
-	formatSourceLibraryExtractResult: (result: SourceLibraryExtractResult) => string;
+	formatSourceLibraryExtractResult: (
+		result: SourceLibraryExtractResult,
+	) => string;
 	formatSourceLibraryItemReport: (result: SourceLibraryItemReport) => string;
 	formatSourceResearchReport: (result: SourceResearchReport) => string;
+	formatSourceDigest: (result: SourceDigest) => string;
+	formatSourceDigestStatus: (result: SourceDigestStatus) => string;
+	formatSourceChunkRead: (result: SourceChunkReadResult) => string;
+	formatSourceRecommendationReport: (
+		result: SourceRecommendationReport,
+	) => string;
 	formatSourceLibraryRefreshResult: (status: SourceLibraryStatus) => string;
 	formatMasterPlanStatus?: (result: MasterPlanStatusResult) => string;
 	formatMasterPlanReview?: (review: MasterPlanReview) => string;
@@ -799,6 +825,30 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				query,
 			}),
+		sourceDigest: (sourceId) =>
+			createSourceDigest({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				sourceId,
+			}),
+		sourceDigestStatus: () =>
+			getSourceDigestStatus({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+			}),
+		sourceChunkRead: (sourceId, chunkId) =>
+			readSourceChunk({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				sourceId,
+				chunkId,
+			}),
+		sourceRecommend: (request) =>
+			recommendSourcesForTask({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				request,
+			}),
 		sourceLibraryRefresh: () =>
 			refreshSourceLibrary({
 				stateRoot: masterPlanStateRoot,
@@ -811,6 +861,10 @@ export function createCliRuntime(
 		formatSourceLibraryExtractResult,
 		formatSourceLibraryItemReport,
 		formatSourceResearchReport,
+		formatSourceDigest,
+		formatSourceDigestStatus,
+		formatSourceChunkRead,
+		formatSourceRecommendationReport,
 		formatSourceLibraryRefreshResult,
 		formatMasterPlanStatus,
 		formatMasterPlanReview,
@@ -1269,6 +1323,37 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSourceResearchReport(
 						activeRuntime.sourceLibraryResearch(requiredText(rest)),
+					),
+				);
+			case "idu-source-digest":
+			case "source-digest":
+				return ok(
+					activeRuntime.formatSourceDigest(
+						activeRuntime.sourceDigest(requiredText(rest)),
+					),
+				);
+			case "idu-source-digest-status":
+			case "source-digest-status":
+				return ok(
+					activeRuntime.formatSourceDigestStatus(
+						activeRuntime.sourceDigestStatus(),
+					),
+				);
+			case "idu-source-chunk-read":
+			case "source-chunk-read":
+				return ok(
+					activeRuntime.formatSourceChunkRead(
+						activeRuntime.sourceChunkRead(
+							requiredArg(rest, 0, "sourceId"),
+							requiredArg(rest, 1, "chunkId"),
+						),
+					),
+				);
+			case "idu-source-recommend":
+			case "source-recommend":
+				return ok(
+					activeRuntime.formatSourceRecommendationReport(
+						activeRuntime.sourceRecommend(requiredText(rest)),
 					),
 				);
 			case "idu-source-refresh":
@@ -2205,6 +2290,12 @@ function requiredText(parts: string[]): string {
 	return text;
 }
 
+function requiredArg(parts: string[], index: number, name: string): string {
+	const value = parts[index]?.trim();
+	if (!value) throw new Error(`Falta ${name}.`);
+	return value;
+}
+
 function requiredDecisionParts(parts: string[]): {
 	pathOrLatest: string;
 	proposalIdOrAll: string;
@@ -2319,6 +2410,10 @@ export function helpText(): string {
 		"  idu-pi idu-source-extract <source-id>",
 		"  idu-pi idu-source-report <source-id>",
 		'  idu-pi idu-source-research "consulta"',
+		"  idu-pi idu-source-digest <source-id>",
+		"  idu-pi idu-source-digest-status",
+		"  idu-pi idu-source-chunk-read <source-id> <chunk-id>",
+		'  idu-pi idu-source-recommend "tarea"',
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-improvements-review latest",

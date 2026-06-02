@@ -266,6 +266,48 @@ test("manual_doc kind remains readable text", () => {
 	}
 });
 
+test("pdf with embedded text is converted to readable markdown without OCR", () => {
+	const temp = root();
+	try {
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const pdf = join(temp, "manual.pdf");
+		writeFileSync(
+			pdf,
+			"%PDF-1.4\nBT (Python database pooling y contratos robustos) Tj ET",
+			"latin1",
+		);
+		const added = addSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			inputPath: pdf,
+			now,
+		});
+		assert.equal(added.addedSource?.kind, "pdf");
+		assert.equal(added.addedSource?.conversionStatus, "converted");
+		assert.ok(added.addedSource?.convertedTextPath);
+		assert.equal(added.addedSource?.extractedTextPath, undefined);
+		assert.equal(added.addedSource?.digestStatus, "pending");
+		assert.ok(
+			existsSync(join(added.paths.root, added.addedSource!.convertedTextPath!)),
+		);
+		const read = readSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+		});
+		assert.equal(read.readStatus, "ready");
+		assert.match(read.content, /Python database pooling/u);
+		const extracted = extractSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+		});
+		assert.equal(extracted.extractionStatus, "extracted");
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
 test("pdf read and extract stay metadata-only without parsing", () => {
 	const temp = root();
 	try {
@@ -285,7 +327,10 @@ test("pdf read and extract stay metadata-only without parsing", () => {
 		});
 		assert.equal(read.readStatus, "metadata_only");
 		assert.equal(read.content, "");
-		assert.match(read.limitations.join("\n"), /PDF registrado como binario/u);
+		assert.match(
+			read.limitations.join("\n"),
+			/metadata_only|sin texto embebido/u,
+		);
 		const extracted = extractSourceLibraryItem({
 			stateRoot,
 			projectId: "Demo",

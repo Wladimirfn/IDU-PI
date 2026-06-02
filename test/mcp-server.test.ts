@@ -520,9 +520,15 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			paths: {
 				root: "C:/idu/state/Doc/sistema_de_mantencion",
 				indexPath: "C:/idu/state/Doc/sistema_de_mantencion/source-index.json",
+				libraryIndexPath:
+					"C:/idu/state/Doc/sistema_de_mantencion/source-library-index.json",
 				localSourcesDir: "C:/idu/state/Doc/sistema_de_mantencion/sources/local",
 				extractedDir:
 					"C:/idu/state/Doc/sistema_de_mantencion/sources/extracted",
+				convertedDir:
+					"C:/idu/state/Doc/sistema_de_mantencion/sources/converted",
+				chunksDir: "C:/idu/state/Doc/sistema_de_mantencion/sources/chunks",
+				digestsDir: "C:/idu/state/Doc/sistema_de_mantencion/sources/digests",
 			},
 			state: "ready",
 			sources: [],
@@ -605,6 +611,48 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			limitations: [],
 			contractPromotionAllowed: false,
 		}),
+		sourceDigest: () => ({
+			version: 1,
+			projectId: "sistema_de_mantencion",
+			sourceId: "source-demo-manual-abc123",
+			title: "manual.md",
+			kind: "markdown",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			processingMode: "direct",
+			summary: "manual robusto",
+			topics: ["robusto"],
+			useWhen: ["cuando la tarea menciona robusto"],
+			chunks: [],
+			recommendedReads: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
+		sourceDigestStatus: () => ({
+			projectId: "sistema_de_mantencion",
+			paths: fakeRuntime().sourceLibraryStatus().paths,
+			digests: [],
+			libraryIndexExists: true,
+			contractPromotionAllowed: false,
+		}),
+		sourceChunkRead: () => ({
+			projectId: "sistema_de_mantencion",
+			sourceId: "source-demo-manual-abc123",
+			chunkId: "source-demo-manual-abc123-chunk-001",
+			path: "sources/chunks/source-demo-manual-abc123/source-demo-manual-abc123-chunk-001.md",
+			content: "manual robusto",
+			maxChars: 12_000,
+			truncated: false,
+			contractPromotionAllowed: false,
+		}),
+		sourceRecommend: () => ({
+			projectId: "sistema_de_mantencion",
+			request: "robusto",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			matches: [],
+			missingKnowledge: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
 		sourceLibraryRefresh: (): SourceLibraryStatus =>
 			fakeRuntime().sourceLibraryStatus(),
 		formatSourceLibraryStatus: () => "source library status",
@@ -614,6 +662,10 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		formatSourceLibraryExtractResult: () => "source library extract",
 		formatSourceLibraryItemReport: () => "source library report",
 		formatSourceResearchReport: () => "source research report",
+		formatSourceDigest: () => "source digest",
+		formatSourceDigestStatus: () => "source digest status",
+		formatSourceChunkRead: () => "source chunk read",
+		formatSourceRecommendationReport: () => "source recommend",
 		formatSourceLibraryRefreshResult: () => "source library refresh",
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
@@ -733,8 +785,14 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_source_extract"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_report"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_research_report"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_digest"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_digest_status"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_chunk_read"));
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_source_recommend_for_task"),
+	);
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
-	assert.equal(tools.length, 37);
+	assert.equal(tools.length, 41);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1600,7 +1658,7 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	);
 	assert.equal(extract.ok, true);
 	assert.ok(
-		extract.safeNotes.some((note) => /PDFs quedan metadata-only/u.test(note)),
+		extract.safeNotes.some((note) => /PDFs convertidos|metadata-only/u.test(note)),
 	);
 
 	const report = await callIduMcpTool(
@@ -1618,6 +1676,45 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	);
 	assert.equal(research.ok, true);
 	assert.ok(research.safeNotes.some((note) => /No consulté web/u.test(note)));
+
+	const digest = await callIduMcpTool(
+		"idu_source_digest",
+		{ sourceId: "source-demo-manual-abc123" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(digest.ok, true);
+	assert.ok(digest.safeNotes.some((note) => /chunks/u.test(note)));
+
+	const digestStatus = await callIduMcpTool(
+		"idu_source_digest_status",
+		{},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(digestStatus.ok, true);
+	assert.ok(
+		digestStatus.safeNotes.some((note) => /No promoví contratos/u.test(note)),
+	);
+
+	const chunk = await callIduMcpTool(
+		"idu_source_chunk_read",
+		{
+			sourceId: "source-demo-manual-abc123",
+			chunkId: "source-demo-manual-abc123-chunk-001",
+		},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(chunk.ok, true);
+	assert.ok(chunk.safeNotes.some((note) => /No consulté web/u.test(note)));
+
+	const recommend = await callIduMcpTool(
+		"idu_source_recommend_for_task",
+		{ request: "robusto" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(recommend.ok, true);
+	assert.ok(
+		recommend.safeNotes.some((note) => /orquestador decide/u.test(note)),
+	);
 
 	const refresh = await callIduMcpTool(
 		"idu_source_refresh",

@@ -38,6 +38,16 @@ export type SourceLibraryIndexState =
 	| "stale"
 	| "invalid";
 
+export type SourceLibraryConversionStatus =
+	| "converted"
+	| "metadata_only"
+	| "not_applicable";
+export type SourceLibraryDigestStatus =
+	| "pending"
+	| "ready"
+	| "stale"
+	| "not_applicable";
+
 export type SourceLibraryItem = {
 	id: string;
 	title: string;
@@ -53,6 +63,10 @@ export type SourceLibraryItem = {
 	lastCheckedAt: string;
 	contractPromotionAllowed: false;
 	extractedTextPath?: string;
+	convertedTextPath?: string;
+	conversionStatus?: SourceLibraryConversionStatus;
+	conversionLimitations?: string[];
+	digestStatus?: SourceLibraryDigestStatus;
 	notes?: string;
 };
 
@@ -68,8 +82,12 @@ export type SourceLibraryIndex = {
 export type SourceLibraryPaths = {
 	root: string;
 	indexPath: string;
+	libraryIndexPath: string;
 	localSourcesDir: string;
 	extractedDir: string;
+	convertedDir: string;
+	chunksDir: string;
+	digestsDir: string;
 };
 
 export type SourceLibraryStatus = {
@@ -164,8 +182,12 @@ export function sourceLibraryPaths(
 	return {
 		root,
 		indexPath: join(root, "source-index.json"),
+		libraryIndexPath: join(root, "source-library-index.json"),
 		localSourcesDir: join(root, "sources", "local"),
 		extractedDir: join(root, "sources", "extracted"),
+		convertedDir: join(root, "sources", "converted"),
+		chunksDir: join(root, "sources", "chunks"),
+		digestsDir: join(root, "sources", "digests"),
 	};
 }
 
@@ -254,17 +276,21 @@ export function addSourceLibraryItem(
 	const destinationName = `${id}-${sanitizeFileName(basename(sourcePath))}`;
 	mkdirSync(paths.localSourcesDir, { recursive: true });
 	mkdirSync(paths.extractedDir, { recursive: true });
+	mkdirSync(paths.convertedDir, { recursive: true });
+	mkdirSync(paths.chunksDir, { recursive: true });
+	mkdirSync(paths.digestsDir, { recursive: true });
 	const destination = assertInside(
 		paths.localSourcesDir,
 		join(paths.localSourcesDir, destinationName),
 	);
 	copyFileSync(sourcePath, destination);
 	const storedPath = relative(paths.root, destination).replace(/\\/gu, "/");
-	const extractedTextPath = maybeWriteTextSnapshot({
+	const conversion = maybeConvertSourceToReadableText({
 		paths,
 		id,
 		sourcePath,
 		kind,
+		title: input.title?.trim() || basename(sourcePath),
 	});
 	const item: SourceLibraryItem = {
 		id,
@@ -280,7 +306,18 @@ export function addSourceLibraryItem(
 		addedAt: now,
 		lastCheckedAt: now,
 		contractPromotionAllowed: false,
-		...(extractedTextPath ? { extractedTextPath } : {}),
+		...(conversion.extractedTextPath
+			? { extractedTextPath: conversion.extractedTextPath }
+			: {}),
+		...(conversion.convertedTextPath
+			? { convertedTextPath: conversion.convertedTextPath }
+			: {}),
+		conversionStatus: conversion.conversionStatus,
+		conversionLimitations: conversion.conversionLimitations,
+		digestStatus:
+			conversion.extractedTextPath || conversion.convertedTextPath
+				? "pending"
+				: "not_applicable",
 		...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
 	};
 	const existing = loadOrCreateIndex(paths, input.projectId, now);
@@ -376,6 +413,29 @@ export function readSourceLibraryItem(input: {
 			"Snapshot extraído registrado no existe en Source Library.",
 		);
 	}
+	if (source.convertedTextPath) {
+		const converted = assertInside(
+			paths.root,
+			join(paths.root, source.convertedTextPath),
+		);
+		if (existsSync(converted)) {
+			const read = readBoundedUtf8(converted, maxChars);
+			return sourceReadResult({
+				projectId: input.projectId,
+				paths,
+				source,
+				readStatus: "ready",
+				content: read.content,
+				maxChars,
+				truncated: read.truncated,
+				citationPath: source.convertedTextPath,
+				limitations: read.truncated
+					? [...limitations, "Contenido convertido truncado por límite de lectura."]
+					: limitations,
+			});
+		}
+		limitations.push("Markdown convertido registrado no existe en Source Library.");
+	}
 	if (isTextReadableKind(source.kind)) {
 		const read = readBoundedUtf8(stored, maxChars);
 		return sourceReadResult({
@@ -403,7 +463,11 @@ export function readSourceLibraryItem(input: {
 		citationPath: source.storedPath,
 		limitations: [
 			...limitations,
-			"PDF registrado como binario; extracción de texto/OCR no soportada en este MVP.",
+			...(source.conversionLimitations?.length
+				? source.conversionLimitations
+				: [
+						"PDF registrado como binario; sin texto embebido legible. No se ejecutó OCR ni parser pesado.",
+					]),
 		],
 	});
 }
@@ -418,9 +482,12 @@ export function extractSourceLibraryItem(input: {
 	const paths = sourceLibraryPaths(input.stateRoot, input.projectId);
 	const source = findSource(paths, input.sourceId);
 	if (source.kind === "pdf") {
+		const read = readSourceLibraryItem(input);
 		return {
-			...readSourceLibraryItem(input),
-			extractionStatus: "metadata_only",
+			...read,
+			extractionStatus:
+				read.readStatus === "ready" ? "extracted" : "metadata_only",
+			extractedTextPath: source.extractedTextPath,
 		};
 	}
 	if (!isTextReadableKind(source.kind)) {
@@ -478,10 +545,14 @@ export function reportSourceLibraryItem(input: {
 	const paths = sourceLibraryPaths(input.stateRoot, input.projectId);
 	const source = findSource(paths, input.sourceId);
 	const extractedAvailable = Boolean(
-		source.extractedTextPath &&
+		(source.extractedTextPath &&
 			existsSync(
 				assertInside(paths.root, join(paths.root, source.extractedTextPath)),
-			),
+			)) ||
+			(source.convertedTextPath &&
+				existsSync(
+					assertInside(paths.root, join(paths.root, source.convertedTextPath)),
+				)),
 	);
 	const read = readSourceLibraryItem({ ...input, maxChars: 1_000 });
 	return {
@@ -491,7 +562,9 @@ export function reportSourceLibraryItem(input: {
 		extractedAvailable,
 		extractionStatus:
 			source.kind === "pdf"
-				? "metadata_only"
+				? extractedAvailable
+					? "extracted"
+					: "metadata_only"
 				: extractedAvailable
 					? "extracted"
 					: read.readStatus === "missing"
@@ -906,7 +979,11 @@ function removeSourceFiles(
 	source: SourceLibraryItem,
 ): string[] {
 	const removed: string[] = [];
-	for (const relativePath of [source.storedPath, source.extractedTextPath]) {
+	for (const relativePath of [
+		source.storedPath,
+		source.extractedTextPath,
+		source.convertedTextPath,
+	]) {
 		if (!relativePath) continue;
 		const target = assertInside(paths.root, join(paths.root, relativePath));
 		if (!existsSync(target)) continue;
@@ -916,20 +993,119 @@ function removeSourceFiles(
 	return removed;
 }
 
-function maybeWriteTextSnapshot(input: {
+function maybeConvertSourceToReadableText(input: {
 	paths: SourceLibraryPaths;
 	id: string;
 	sourcePath: string;
 	kind: SourceLibraryKind;
-}): string | undefined {
-	if (!isTextReadableKind(input.kind)) return undefined;
-	const text = readFileSync(input.sourcePath, "utf8");
-	const target = assertInside(
-		input.paths.extractedDir,
-		join(input.paths.extractedDir, `${input.id}.txt`),
+	title: string;
+}): {
+	extractedTextPath?: string;
+	convertedTextPath?: string;
+	conversionStatus: SourceLibraryConversionStatus;
+	conversionLimitations: string[];
+} {
+	if (isTextReadableKind(input.kind)) {
+		const text = readFileSync(input.sourcePath, "utf8");
+		const target = assertInside(
+			input.paths.extractedDir,
+			join(input.paths.extractedDir, `${input.id}.txt`),
+		);
+		writeFileSync(target, text, "utf8");
+		return {
+			extractedTextPath: relative(input.paths.root, target).replace(
+				/\\/gu,
+				"/",
+			),
+			conversionStatus: "not_applicable",
+			conversionLimitations: [],
+		};
+	}
+	if (input.kind !== "pdf") {
+		return {
+			conversionStatus: "metadata_only",
+			conversionLimitations: ["Tipo de fuente no legible en este MVP."],
+		};
+	}
+	const extracted = extractEmbeddedPdfText(input.sourcePath);
+	if (!extracted.trim()) {
+		return {
+			conversionStatus: "metadata_only",
+			conversionLimitations: [
+				"PDF sin texto embebido legible; queda metadata_only/pending_conversion. No se ejecutó OCR ni parser pesado.",
+			],
+		};
+	}
+	const markdown = [`# ${input.title}`, "", extracted.trim(), ""].join("\n");
+	const convertedTarget = assertInside(
+		input.paths.convertedDir,
+		join(input.paths.convertedDir, `${input.id}.md`),
 	);
-	writeFileSync(target, text, "utf8");
-	return relative(input.paths.root, target).replace(/\\/gu, "/");
+	writeFileSync(convertedTarget, markdown, "utf8");
+	return {
+		convertedTextPath: relative(input.paths.root, convertedTarget).replace(
+			/\\/gu,
+			"/",
+		),
+		conversionStatus: "converted",
+		conversionLimitations: [
+			"Conversión PDF best-effort desde texto embebido; sin OCR ni dependencias nuevas.",
+		],
+	};
+}
+
+function extractEmbeddedPdfText(path: string): string {
+	const latin = readFileSync(path).toString("latin1");
+	const snippets: string[] = [];
+	for (const objectMatch of latin.matchAll(/\bBT\b[\s\S]{0,20000}?\bET\b/gu)) {
+		const object = objectMatch[0];
+		for (const match of object.matchAll(/\((?:\\.|[^\\)]){3,}\)/gu)) {
+			const text = decodePdfLiteral(match[0].slice(1, -1));
+			if (isReadableSnippet(text)) snippets.push(text);
+		}
+		for (const match of object.matchAll(/<([0-9A-Fa-f]{8,})>/gu)) {
+			const text = decodePdfHex(match[1]);
+			if (isReadableSnippet(text)) snippets.push(text);
+		}
+	}
+	return [...new Set(snippets)]
+		.join("\n")
+		.replace(/[ \t]+/gu, " ")
+		.replace(/\n{3,}/gu, "\n\n")
+		.trim();
+}
+
+function decodePdfLiteral(value: string): string {
+	return value
+		.replace(/\\n/gu, "\n")
+		.replace(/\\r/gu, "\n")
+		.replace(/\\t/gu, "\t")
+		.replace(/\\([()\\])/gu, "$1")
+		.replace(/\\[0-7]{1,3}/gu, (match) =>
+			String.fromCharCode(Number.parseInt(match.slice(1), 8)),
+		);
+}
+
+function decodePdfHex(value: string): string {
+	const bytes = value.match(/../gu) ?? [];
+	return Buffer.from(bytes.map((byte) => Number.parseInt(byte, 16))).toString(
+		"utf8",
+	);
+}
+
+function isReadableSnippet(value: string): boolean {
+	const text = value.replace(/\s+/gu, " ").trim();
+	if (text.length < 3) return false;
+	const chars = [...text];
+	const controls = chars.filter((char) =>
+		/[\u0000-\u001f\u007f-\u009f]/u.test(char),
+	).length;
+	if (controls > 0) return false;
+	const safePrintable = chars.filter((char) =>
+		/[\p{L}\p{N}\s.,;:!?¿¡()[\]{}'"/@#%&+_\-=–—áéíóúÁÉÍÓÚñÑüÜ]/u.test(char),
+	).length;
+	const letters = chars.filter((char) => /[\p{L}\p{N}]/u.test(char)).length;
+	return safePrintable / chars.length >= 0.9 && letters / chars.length >= 0.35;
 }
 
 function isTextReadableKind(kind: SourceLibraryKind): boolean {
