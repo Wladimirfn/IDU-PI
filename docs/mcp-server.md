@@ -174,6 +174,7 @@ Herramientas mínimas:
 | `idu_semantic_audit_status` | Lee stats/checkpoint/decisión de auditoría semántica. |
 | `idu_source_status` | Lee Source Library en `stateRoot` y reporta `missing | empty | ready | stale | invalid`; no escribe ni promueve contratos. |
 | `idu_source_add` | Copia/registra `.md`, `.txt` o `.pdf` local en `Doc/<project>/sources/local`; para PDFs no hace OCR/parsing pesado. |
+| `idu_source_remove` | Remueve una fuente registrada y sus copias/snapshot en Source Library stateRoot; no cambia contratos ni repo real. |
 | `idu_source_refresh` | Recalcula hashes/estado de fuentes; no cambia contratos, Project Core, Constitution, flows, skills ni AgentLabs. |
 | `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft` y `external-source-intelligence`. |
 | `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard. |

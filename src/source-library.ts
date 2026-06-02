@@ -5,6 +5,7 @@ import {
 	mkdirSync,
 	readFileSync,
 	readdirSync,
+	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
@@ -98,6 +99,11 @@ export type AddSourceLibraryItemInput = {
 
 export type SourceLibraryMutationResult = SourceLibraryStatus & {
 	addedSource?: SourceLibraryItem;
+};
+
+export type RemoveSourceLibraryItemResult = SourceLibraryStatus & {
+	removedSource?: SourceLibraryItem;
+	removedFiles: string[];
 };
 
 export function safeDocProjectName(projectId: string): string {
@@ -248,6 +254,39 @@ export function addSourceLibraryItem(
 	return { ...getSourceLibraryStatus(input), addedSource: item };
 }
 
+export function removeSourceLibraryItem(input: {
+	stateRoot: string;
+	projectId: string;
+	sourceId: string;
+	now?: () => Date;
+}): RemoveSourceLibraryItemResult {
+	const paths = sourceLibraryPaths(input.stateRoot, input.projectId);
+	if (!existsSync(paths.indexPath)) {
+		throw new Error("Source Library no existe; no hay fuentes para remover.");
+	}
+	const parsed = readIndex(paths.indexPath);
+	if (!parsed.ok) {
+		throw new Error(`source-index inválido: ${parsed.errors.join("; ")}`);
+	}
+	const sourceId = input.sourceId.trim();
+	if (!sourceId) throw new Error("sourceId requerido para remover fuente.");
+	const source = parsed.index.sources.find((item) => item.id === sourceId);
+	if (!source) throw new Error(`Fuente no encontrada en índice: ${sourceId}`);
+	const removedFiles = removeSourceFiles(paths, source);
+	const now = (input.now?.() ?? new Date()).toISOString();
+	writeIndex(paths, {
+		...parsed.index,
+		updatedAt: now,
+		contractPromotionAllowed: false,
+		sources: parsed.index.sources.filter((item) => item.id !== sourceId),
+	});
+	return {
+		...getSourceLibraryStatus(input),
+		removedSource: source,
+		removedFiles,
+	};
+}
+
 export function refreshSourceLibrary(input: {
 	stateRoot: string;
 	projectId: string;
@@ -311,6 +350,24 @@ export function formatSourceLibraryAddResult(
 		result.addedSource
 			? `${result.addedSource.id} -> ${result.addedSource.storedPath}`
 			: "- ninguna",
+		"",
+		formatSourceLibraryStatus(result),
+	].join("\n");
+}
+
+export function formatSourceLibraryRemoveResult(
+	result: RemoveSourceLibraryItemResult,
+): string {
+	return [
+		"Idu-pi Source Library Remove",
+		"",
+		"Removida:",
+		result.removedSource
+			? `${result.removedSource.id} -> ${result.removedSource.storedPath}`
+			: "- ninguna",
+		"",
+		"Archivos removidos:",
+		...formatList(result.removedFiles),
 		"",
 		formatSourceLibraryStatus(result),
 	].join("\n");
@@ -513,6 +570,21 @@ function reconcileItem(
 		lastCheckedAt: updateCheckedAt ? now : item.lastCheckedAt,
 		contractPromotionAllowed: false,
 	};
+}
+
+function removeSourceFiles(
+	paths: SourceLibraryPaths,
+	source: SourceLibraryItem,
+): string[] {
+	const removed: string[] = [];
+	for (const relativePath of [source.storedPath, source.extractedTextPath]) {
+		if (!relativePath) continue;
+		const target = assertInside(paths.root, join(paths.root, relativePath));
+		if (!existsSync(target)) continue;
+		rmSync(target, { force: true });
+		removed.push(relative(paths.root, target).replace(/\\/gu, "/"));
+	}
+	return removed;
 }
 
 function maybeWriteTextSnapshot(input: {

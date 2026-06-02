@@ -14,6 +14,7 @@ import {
 	addSourceLibraryItem,
 	getSourceLibraryStatus,
 	refreshSourceLibrary,
+	removeSourceLibraryItem,
 	sourceLibraryPaths,
 } from "../src/source-library.js";
 
@@ -142,6 +143,46 @@ test("status detects stale and refresh persists recalculated status", () => {
 		});
 		assert.equal(refreshed.state, "stale");
 		assert.equal(refreshed.sources[0]?.status, "stale");
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
+test("remove deletes indexed source files and keeps contracts advisory", () => {
+	const temp = root();
+	try {
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const text = join(temp, "notes.txt");
+		writeFileSync(text, "remove me", "utf8");
+		const added = addSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			inputPath: text,
+			now,
+		});
+		const stored = join(added.paths.root, added.addedSource!.storedPath);
+		const extracted = join(
+			added.paths.root,
+			added.addedSource!.extractedTextPath!,
+		);
+		assert.ok(existsSync(stored));
+		assert.ok(existsSync(extracted));
+
+		const removed = removeSourceLibraryItem({
+			stateRoot,
+			projectId: "Demo",
+			sourceId: added.addedSource!.id,
+			now,
+		});
+		assert.equal(removed.state, "empty");
+		assert.equal(removed.removedSource?.contractPromotionAllowed, false);
+		assert.deepEqual(removed.sources, []);
+		assert.equal(existsSync(stored), false);
+		assert.equal(existsSync(extracted), false);
+		assert.deepEqual(removed.removedFiles.sort(), [
+			added.addedSource!.extractedTextPath!,
+			added.addedSource!.storedPath,
+		].sort());
 	} finally {
 		rmSync(temp, { recursive: true, force: true });
 	}

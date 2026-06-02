@@ -60,6 +60,7 @@ export type IduMcpToolName =
 	| "idu_semantic_audit_status"
 	| "idu_source_status"
 	| "idu_source_add"
+	| "idu_source_remove"
 	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
@@ -359,6 +360,14 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Copia/registra documentación manual local en Source Library stateRoot; no parsea PDFs ni promueve contratos.",
 		{
 			path: requiredString("Ruta local .md, .txt o .pdf a registrar."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_remove",
+		"Remueve una fuente registrada de Source Library y sus copias en stateRoot; no toca contratos.",
+		{
+			sourceId: requiredString("ID de fuente a remover."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -1646,6 +1655,24 @@ async function dispatchTool(
 					"Copié documentación sólo a stateRoot/Doc/<project>/sources/local.",
 					"PDFs se registran como binarios; no hice OCR ni parsing pesado.",
 					"No promoví contratos ni ejecuté AgentLabs.",
+				],
+				errors: result.errors,
+			});
+		}
+		case "idu_source_remove": {
+			const result = runtime.sourceLibraryRemove(requiredText(args, "sourceId"));
+			return envelope({
+				ok: result.errors.length === 0,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source removida: ${result.removedSource?.id ?? "sin fuente"}`,
+				data: { result, removedSource: result.removedSource },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Removí sólo archivos registrados dentro de Source Library stateRoot.",
+					"No cambié contratos, Project Core, Constitution, flows ni skills.",
+					"No ejecuté AgentLabs.",
 				],
 				errors: result.errors,
 			});

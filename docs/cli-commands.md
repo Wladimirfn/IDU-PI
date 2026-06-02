@@ -141,6 +141,7 @@ Source Library C1 permite agregar documentación manual local al `stateRoot` sin
 | --- | --- |
 | `idu-pi source-status` | Muestra estado explícito `missing | empty | ready | stale | invalid`, hashes y faltantes. |
 | `idu-pi source-add <path.md|path.txt|path.pdf>` | Copia fuente local a `Doc/<project>/sources/local/`; para `.md/.txt` guarda snapshot de texto simple, para `.pdf` sólo copia/registra binario. |
+| `idu-pi source-remove <source-id>` | Remueve una fuente registrada y sus copias/snapshot dentro de Source Library; no toca contratos ni repo real. |
 | `idu-pi source-refresh` | Recalcula existencia/hash/estado; no toca Project Core, Constitution, flows, skills ni contratos. |
 
 Aliases con prefijo Idu-pi:

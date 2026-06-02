@@ -987,6 +987,25 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				contractPromotionAllowed: false,
 			},
 		}),
+		sourceLibraryRemove: () => ({
+			...runtime.sourceLibraryStatus(),
+			removedFiles: ["sources/local/source-demo-manual-abc123-manual.md"],
+			removedSource: {
+				id: "source-demo-manual-abc123",
+				title: "manual.md",
+				kind: "markdown",
+				trustLevel: "manual",
+				freshnessPolicy: "manual",
+				originalPath: "C:/docs/manual.md",
+				storedPath: "sources/local/source-demo-manual-abc123-manual.md",
+				sha256: "abc123",
+				sizeBytes: 12,
+				status: "ready",
+				addedAt: "2026-06-01T00:00:00.000Z",
+				lastCheckedAt: "2026-06-01T00:00:00.000Z",
+				contractPromotionAllowed: false,
+			},
+		}),
 		sourceLibraryRefresh: () => runtime.sourceLibraryStatus(),
 		formatSourceLibraryStatus: (status) =>
 			["Idu-pi Source Library", "", "Estado:", status.state].join("\n"),
@@ -994,6 +1013,12 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 			["Idu-pi Source Library Add", "", result.addedSource?.id ?? "none"].join(
 				"\n",
 			),
+		formatSourceLibraryRemoveResult: (result) =>
+			[
+				"Idu-pi Source Library Remove",
+				"",
+				result.removedSource?.id ?? "none",
+			].join("\n"),
 		formatSourceLibraryRefreshResult: (status) =>
 			["Idu-pi Source Library Refresh", "", status.state].join("\n"),
 		formatMasterPlanOperation: (result: { plan: { status: string } }) =>
@@ -1389,6 +1414,12 @@ test("CLI source library commands are wired with aliases", async () => {
 		);
 		assert.equal(add.exitCode, 0);
 		assert.match(add.stdout, /source-demo-manual/u);
+		const remove = await runCliCommand(
+			["source-remove", "source-demo-manual-abc123"],
+			runtime,
+		);
+		assert.equal(remove.exitCode, 0);
+		assert.match(remove.stdout, /Source Library Remove/u);
 		const refresh = await runCliCommand(["source-refresh"], runtime);
 		assert.equal(refresh.exitCode, 0);
 		assert.match(refresh.stdout, /Source Library Refresh/u);

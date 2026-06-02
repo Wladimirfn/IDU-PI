@@ -36,6 +36,7 @@ import type {
 } from "../src/agentlab-review-runner.js";
 import type { StructuredTask } from "../src/structured-task-queue.js";
 import type {
+	RemoveSourceLibraryItemResult,
 	SourceLibraryMutationResult,
 	SourceLibraryStatus,
 } from "../src/source-library.js";
@@ -549,10 +550,30 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 				contractPromotionAllowed: false,
 			},
 		}),
+		sourceLibraryRemove: (): RemoveSourceLibraryItemResult => ({
+			...fakeRuntime().sourceLibraryStatus(),
+			removedFiles: ["sources/local/source-demo-manual-abc123-manual.md"],
+			removedSource: {
+				id: "source-demo-manual-abc123",
+				title: "manual.md",
+				kind: "markdown",
+				trustLevel: "manual",
+				freshnessPolicy: "manual",
+				originalPath: "C:/docs/manual.md",
+				storedPath: "sources/local/source-demo-manual-abc123-manual.md",
+				sha256: "abc123",
+				sizeBytes: 12,
+				status: "ready",
+				addedAt: "2026-06-01T00:00:00.000Z",
+				lastCheckedAt: "2026-06-01T00:00:00.000Z",
+				contractPromotionAllowed: false,
+			},
+		}),
 		sourceLibraryRefresh: (): SourceLibraryStatus =>
 			fakeRuntime().sourceLibraryStatus(),
 		formatSourceLibraryStatus: () => "source library status",
 		formatSourceLibraryAddResult: () => "source library add",
+		formatSourceLibraryRemoveResult: () => "source library remove",
 		formatSourceLibraryRefreshResult: () => "source library refresh",
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
@@ -667,8 +688,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_task_package_create"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_add"));
+	assert.ok(tools.some((tool) => tool.name === "idu_source_remove"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
-	assert.equal(tools.length, 32);
+	assert.equal(tools.length, 33);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1510,6 +1532,16 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	assert.equal(add.ok, true);
 	assert.ok(!add.data.run);
 	assert.ok(add.safeNotes.some((note) => /stateRoot\/Doc/u.test(note)));
+
+	const remove = await callIduMcpTool(
+		"idu_source_remove",
+		{ sourceId: "source-demo-manual-abc123" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(remove.ok, true);
+	assert.ok(
+		remove.safeNotes.some((note) => /No cambié contratos/u.test(note)),
+	);
 
 	const refresh = await callIduMcpTool(
 		"idu_source_refresh",

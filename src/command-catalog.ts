@@ -730,6 +730,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-source-status",
 	},
 	{
+		label: "Source Library remove",
+		command: "corepack pnpm cli -- idu-source-remove <source-id>",
+	},
+	{
 		label: "Source Library refresh",
 		command: "corepack pnpm cli -- idu-source-refresh",
 	},

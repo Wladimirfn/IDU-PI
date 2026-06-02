@@ -42,9 +42,12 @@ import {
 	addSourceLibraryItem,
 	formatSourceLibraryAddResult,
 	formatSourceLibraryRefreshResult,
+	formatSourceLibraryRemoveResult,
 	formatSourceLibraryStatus,
 	getSourceLibraryStatus,
 	refreshSourceLibrary,
+	removeSourceLibraryItem,
+	type RemoveSourceLibraryItemResult,
 	type SourceLibraryMutationResult,
 	type SourceLibraryStatus,
 } from "./source-library.js";
@@ -343,9 +346,13 @@ export type CliRuntime = {
 	) => ReturnType<typeof handleMasterPlanNaturalDecision>;
 	sourceLibraryStatus: () => SourceLibraryStatus;
 	sourceLibraryAdd: (inputPath: string) => SourceLibraryMutationResult;
+	sourceLibraryRemove: (sourceId: string) => RemoveSourceLibraryItemResult;
 	sourceLibraryRefresh: () => SourceLibraryStatus;
 	formatSourceLibraryStatus: (status: SourceLibraryStatus) => string;
 	formatSourceLibraryAddResult: (result: SourceLibraryMutationResult) => string;
+	formatSourceLibraryRemoveResult: (
+		result: RemoveSourceLibraryItemResult,
+	) => string;
 	formatSourceLibraryRefreshResult: (status: SourceLibraryStatus) => string;
 	formatMasterPlanStatus?: (result: MasterPlanStatusResult) => string;
 	formatMasterPlanReview?: (review: MasterPlanReview) => string;
@@ -740,6 +747,12 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				inputPath,
 			}),
+		sourceLibraryRemove: (sourceId) =>
+			removeSourceLibraryItem({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+				sourceId,
+			}),
 		sourceLibraryRefresh: () =>
 			refreshSourceLibrary({
 				stateRoot: masterPlanStateRoot,
@@ -747,6 +760,7 @@ export function createCliRuntime(
 			}),
 		formatSourceLibraryStatus,
 		formatSourceLibraryAddResult,
+		formatSourceLibraryRemoveResult,
 		formatSourceLibraryRefreshResult,
 		formatMasterPlanStatus,
 		formatMasterPlanReview,
@@ -1170,6 +1184,13 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSourceLibraryAddResult(
 						activeRuntime.sourceLibraryAdd(requiredText(rest)),
+					),
+				);
+			case "idu-source-remove":
+			case "source-remove":
+				return ok(
+					activeRuntime.formatSourceLibraryRemoveResult(
+						activeRuntime.sourceLibraryRemove(requiredText(rest)),
 					),
 				);
 			case "idu-source-refresh":
