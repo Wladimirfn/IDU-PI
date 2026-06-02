@@ -763,6 +763,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: 'corepack pnpm cli -- idu-source-recommend "tarea"',
 	},
 	{
+		label: "Source required actions",
+		command: "corepack pnpm cli -- idu-source-required-actions",
+	},
+	{
 		label: "Source Library remove",
 		command: "corepack pnpm cli -- idu-source-remove <source-id>",
 	},

@@ -69,6 +69,7 @@ export type IduMcpToolName =
 	| "idu_source_digest_status"
 	| "idu_source_chunk_read"
 	| "idu_source_recommend_for_task"
+	| "idu_source_required_actions"
 	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
@@ -442,6 +443,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 			request: requiredString(
 				"Tarea o solicitud a contrastar con la biblioteca.",
 			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_required_actions",
+		"Lista fuentes sin lectura real que requieren que el orquestador despache un lector bibliotecario/document-reader.",
+		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -1889,6 +1897,23 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Recomendé fuentes/chunks desde índice local; el orquestador decide y manda subagentes.",
 					"No implementé, no consulté web/live sources y no ejecuté AgentLabs.",
+					"No promoví contratos.",
+				],
+			});
+		}
+		case "idu_source_required_actions": {
+			const result = runtime.sourceRequiredActions();
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source required actions: ${result.actions.length}`,
+				data: { result, actions: result.actions },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Listé fuentes que requieren lector bibliotecario; el orquestador debe despachar el subagente.",
+					"No implementé, no ejecuté AgentLabs y no consulté web/live sources.",
 					"No promoví contratos.",
 				],
 			});

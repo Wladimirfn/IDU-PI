@@ -71,13 +71,16 @@ import {
 	formatSourceDigest,
 	formatSourceDigestStatus,
 	formatSourceRecommendationReport,
+	formatSourceRequiredActionsReport,
 	getSourceDigestStatus,
+	getSourceRequiredActions,
 	readSourceChunk,
 	recommendSourcesForTask,
 	type SourceChunkReadResult,
 	type SourceDigest,
 	type SourceDigestStatus,
 	type SourceRecommendationReport,
+	type SourceRequiredActionsReport,
 } from "./source-digest.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
@@ -383,6 +386,7 @@ export type CliRuntime = {
 	sourceDigestStatus: () => SourceDigestStatus;
 	sourceChunkRead: (sourceId: string, chunkId: string) => SourceChunkReadResult;
 	sourceRecommend: (request: string) => SourceRecommendationReport;
+	sourceRequiredActions: () => SourceRequiredActionsReport;
 	sourceLibraryRefresh: () => SourceLibraryStatus;
 	formatSourceLibraryStatus: (status: SourceLibraryStatus) => string;
 	formatSourceLibraryAddResult: (result: SourceLibraryMutationResult) => string;
@@ -400,6 +404,9 @@ export type CliRuntime = {
 	formatSourceChunkRead: (result: SourceChunkReadResult) => string;
 	formatSourceRecommendationReport: (
 		result: SourceRecommendationReport,
+	) => string;
+	formatSourceRequiredActionsReport: (
+		result: SourceRequiredActionsReport,
 	) => string;
 	formatSourceLibraryRefreshResult: (status: SourceLibraryStatus) => string;
 	formatMasterPlanStatus?: (result: MasterPlanStatusResult) => string;
@@ -849,6 +856,11 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				request,
 			}),
+		sourceRequiredActions: () =>
+			getSourceRequiredActions({
+				stateRoot: masterPlanStateRoot,
+				projectId: activeProject.id,
+			}),
 		sourceLibraryRefresh: () =>
 			refreshSourceLibrary({
 				stateRoot: masterPlanStateRoot,
@@ -865,6 +877,7 @@ export function createCliRuntime(
 		formatSourceDigestStatus,
 		formatSourceChunkRead,
 		formatSourceRecommendationReport,
+		formatSourceRequiredActionsReport,
 		formatSourceLibraryRefreshResult,
 		formatMasterPlanStatus,
 		formatMasterPlanReview,
@@ -1354,6 +1367,13 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSourceRecommendationReport(
 						activeRuntime.sourceRecommend(requiredText(rest)),
+					),
+				);
+			case "idu-source-required-actions":
+			case "source-required-actions":
+				return ok(
+					activeRuntime.formatSourceRequiredActionsReport(
+						activeRuntime.sourceRequiredActions(),
 					),
 				);
 			case "idu-source-refresh":
@@ -2414,6 +2434,7 @@ export function helpText(): string {
 		"  idu-pi idu-source-digest-status",
 		"  idu-pi idu-source-chunk-read <source-id> <chunk-id>",
 		'  idu-pi idu-source-recommend "tarea"',
+		"  idu-pi idu-source-required-actions",
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-improvements-review latest",

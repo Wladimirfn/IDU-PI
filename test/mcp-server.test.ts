@@ -653,6 +653,13 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			limitations: [],
 			contractPromotionAllowed: false,
 		}),
+		sourceRequiredActions: () => ({
+			projectId: "sistema_de_mantencion",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			actions: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
 		sourceLibraryRefresh: (): SourceLibraryStatus =>
 			fakeRuntime().sourceLibraryStatus(),
 		formatSourceLibraryStatus: () => "source library status",
@@ -666,6 +673,7 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		formatSourceDigestStatus: () => "source digest status",
 		formatSourceChunkRead: () => "source chunk read",
 		formatSourceRecommendationReport: () => "source recommend",
+		formatSourceRequiredActionsReport: () => "source required actions",
 		formatSourceLibraryRefreshResult: () => "source library refresh",
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
@@ -791,8 +799,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_source_recommend_for_task"),
 	);
+	assert.ok(tools.some((tool) => tool.name === "idu_source_required_actions"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
-	assert.equal(tools.length, 41);
+	assert.equal(tools.length, 42);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1716,6 +1725,18 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	assert.equal(recommend.ok, true);
 	assert.ok(
 		recommend.safeNotes.some((note) => /orquestador decide/u.test(note)),
+	);
+
+	const requiredActions = await callIduMcpTool(
+		"idu_source_required_actions",
+		{},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(requiredActions.ok, true);
+	assert.ok(
+		requiredActions.safeNotes.some((note) =>
+			/lector bibliotecario/u.test(note),
+		),
 	);
 
 	const refresh = await callIduMcpTool(

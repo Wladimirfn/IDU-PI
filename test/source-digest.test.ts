@@ -13,6 +13,7 @@ import { addSourceLibraryItem } from "../src/source-library.js";
 import {
 	createSourceDigest,
 	getSourceDigestStatus,
+	getSourceRequiredActions,
 	readSourceChunk,
 	recommendSourcesForTask,
 } from "../src/source-digest.js";
@@ -178,12 +179,26 @@ test("unreadable PDF digest requires librarian reader without semantic claims", 
 		assert.match(digest.summary, /Documento no leído/u);
 		assert.equal(digest.requiredAction?.owner, "orchestrator");
 		assert.equal(digest.requiredAction?.recommendedAgent, "librarian");
-		assert.match(digest.requiredAction?.instructions ?? "", /subagente bibliotecario/u);
+		assert.match(
+			digest.requiredAction?.instructions ?? "",
+			/subagente bibliotecario/u,
+		);
 		assert.match(
 			digest.limitations.join("\n"),
 			/sin texto legible|metadata_only/u,
 		);
 		assert.equal(digest.contractPromotionAllowed, false);
+		const actions = getSourceRequiredActions({
+			stateRoot,
+			projectId: "Demo",
+			now,
+		});
+		assert.equal(actions.actions.length, 1);
+		assert.equal(actions.actions[0]!.sourceId, added.addedSource!.id);
+		assert.equal(
+			actions.actions[0]!.requiredAction.action,
+			"dispatch_librarian_reader",
+		);
 		const report = recommendSourcesForTask({
 			stateRoot,
 			projectId: "Demo",

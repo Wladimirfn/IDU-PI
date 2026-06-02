@@ -149,6 +149,7 @@ Source Library permite agregar, leer e investigar documentación manual local en
 | `idu-pi source-digest-status` | Muestra digests disponibles y estado del índice bibliotecario. |
 | `idu-pi source-chunk-read <source-id> <chunk-id>` | Lee un chunk/tomo específico para que el orquestador pueda mandar subagentes a contrastar evidencia. |
 | `idu-pi source-recommend <tarea>` | Recomienda fuentes/chunks relevantes para una tarea; no implementa ni aprueba contratos. |
+| `idu-pi source-required-actions` | Lista fuentes no leídas que obligan al orquestador a despachar un lector bibliotecario/document-reader. |
 | `idu-pi source-remove <source-id>` | Remueve una fuente registrada y sus copias/snapshot dentro de Source Library; no toca contratos ni repo real. |
 | `idu-pi source-refresh` | Recalcula existencia/hash/estado; no toca Project Core, Constitution, flows, skills ni contratos. |
 

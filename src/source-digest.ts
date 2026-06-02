@@ -119,6 +119,22 @@ export type SourceRecommendationReport = {
 	contractPromotionAllowed: false;
 };
 
+export type SourceRequiredActionsReport = {
+	projectId: string;
+	generatedAt: string;
+	actions: Array<{
+		sourceId: string;
+		title: string;
+		kind: SourceLibraryItem["kind"];
+		digestStatus: SourceLibraryItem["digestStatus"];
+		conversionStatus: SourceLibraryItem["conversionStatus"];
+		requiredAction: SourceDigestRequiredAction;
+		contractPromotionAllowed: false;
+	}>;
+	limitations: string[];
+	contractPromotionAllowed: false;
+};
+
 export function createSourceDigest(input: {
 	stateRoot: string;
 	projectId: string;
@@ -275,6 +291,39 @@ export function readSourceChunk(input: {
 	};
 }
 
+export function getSourceRequiredActions(input: {
+	stateRoot: string;
+	projectId: string;
+	now?: () => Date;
+}): SourceRequiredActionsReport {
+	const status = getSourceLibraryStatus({
+		stateRoot: input.stateRoot,
+		projectId: input.projectId,
+	});
+	const actions = status.sources
+		.filter((source) => requiresSpecializedReader(source))
+		.map((source) => ({
+			sourceId: source.id,
+			title: source.title,
+			kind: source.kind,
+			digestStatus: source.digestStatus,
+			conversionStatus: source.conversionStatus,
+			requiredAction: requiredLibrarianAction(source),
+			contractPromotionAllowed: false as const,
+		}));
+	return {
+		projectId: input.projectId,
+		generatedAt: (input.now?.() ?? new Date()).toISOString(),
+		actions,
+		limitations: actions.length
+			? [
+					"Hay fuentes registradas sin lectura real; el orquestador debe despachar lector bibliotecario antes de usarlas como conocimiento.",
+				]
+			: [],
+		contractPromotionAllowed: false,
+	};
+}
+
 export function recommendSourcesForTask(input: {
 	stateRoot: string;
 	projectId: string;
@@ -375,6 +424,25 @@ export function formatSourceChunkRead(result: SourceChunkReadResult): string {
 		"",
 		"Contenido:",
 		result.content || "- sin contenido",
+	].join("\n");
+}
+
+export function formatSourceRequiredActionsReport(
+	report: SourceRequiredActionsReport,
+): string {
+	return [
+		"Idu-pi Source Required Actions",
+		"",
+		"Acciones:",
+		...(report.actions.length
+			? report.actions.map(
+					(action) =>
+						`- ${action.sourceId}: ${action.requiredAction.action} (${action.requiredAction.recommendedReaderType})`,
+				)
+			: ["- ninguna"]),
+		"",
+		"Limitaciones:",
+		...formatList(report.limitations),
 	].join("\n");
 }
 
@@ -530,6 +598,15 @@ function chunkText(
 		start = Math.max(end - overlapChars, start + 1);
 	}
 	return chunks;
+}
+
+function requiresSpecializedReader(source: SourceLibraryItem): boolean {
+	return (
+		source.digestStatus === "blocked_unread" ||
+		(source.kind === "pdf" &&
+			!source.extractedTextPath &&
+			!source.convertedTextPath)
+	);
 }
 
 function summarizeText(content: string): string {

@@ -1111,6 +1111,13 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 			limitations: [],
 			contractPromotionAllowed: false,
 		}),
+		sourceRequiredActions: () => ({
+			projectId: "pi-telegram-bridge",
+			generatedAt: "2026-06-01T00:00:00.000Z",
+			actions: [],
+			limitations: [],
+			contractPromotionAllowed: false,
+		}),
 		sourceLibraryRefresh: () => runtime.sourceLibraryStatus(),
 		formatSourceLibraryStatus: (status) =>
 			["Idu-pi Source Library", "", "Estado:", status.state].join("\n"),
@@ -1132,6 +1139,7 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		formatSourceDigestStatus: () => "Idu-pi Source Digest Status",
 		formatSourceChunkRead: () => "Idu-pi Source Chunk Read",
 		formatSourceRecommendationReport: () => "Idu-pi Source Recommend For Task",
+		formatSourceRequiredActionsReport: () => "Idu-pi Source Required Actions",
 		formatSourceLibraryRefreshResult: (status) =>
 			["Idu-pi Source Library Refresh", "", status.state].join("\n"),
 		formatMasterPlanOperation: (result: { plan: { status: string } }) =>
@@ -1582,6 +1590,12 @@ test("CLI source library commands are wired with aliases", async () => {
 		);
 		assert.equal(recommend.exitCode, 0);
 		assert.match(recommend.stdout, /Source Recommend/u);
+		const requiredActions = await runCliCommand(
+			["source-required-actions"],
+			runtime,
+		);
+		assert.equal(requiredActions.exitCode, 0);
+		assert.match(requiredActions.stdout, /Source Required Actions/u);
 		const refresh = await runCliCommand(["source-refresh"], runtime);
 		assert.equal(refresh.exitCode, 0);
 		assert.match(refresh.stdout, /Source Library Refresh/u);
