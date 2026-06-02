@@ -172,11 +172,23 @@ test("metadata-only PDF digest records limitations without chunks", () => {
 		});
 		assert.equal(digest.processingMode, "metadata_only");
 		assert.deepEqual(digest.chunks, []);
+		assert.deepEqual(digest.topics, []);
+		assert.deepEqual(digest.useWhen, []);
+		assert.deepEqual(digest.recommendedReads, []);
+		assert.match(digest.summary, /Documento no leído/u);
 		assert.match(
 			digest.limitations.join("\n"),
 			/sin texto legible|metadata_only/u,
 		);
 		assert.equal(digest.contractPromotionAllowed, false);
+		const report = recommendSourcesForTask({
+			stateRoot,
+			projectId: "Demo",
+			request: "scan pdf",
+			now,
+		});
+		assert.equal(report.matches.length, 0);
+		assert.match(report.missingKnowledge.join("\n"), /No hay digest/u);
 	} finally {
 		rmSync(temp, { recursive: true, force: true });
 	}

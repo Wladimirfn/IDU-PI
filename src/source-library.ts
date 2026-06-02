@@ -430,11 +430,16 @@ export function readSourceLibraryItem(input: {
 				truncated: read.truncated,
 				citationPath: source.convertedTextPath,
 				limitations: read.truncated
-					? [...limitations, "Contenido convertido truncado por límite de lectura."]
+					? [
+							...limitations,
+							"Contenido convertido truncado por límite de lectura.",
+						]
 					: limitations,
 			});
 		}
-		limitations.push("Markdown convertido registrado no existe en Source Library.");
+		limitations.push(
+			"Markdown convertido registrado no existe en Source Library.",
+		);
 	}
 	if (isTextReadableKind(source.kind)) {
 		const read = readBoundedUtf8(stored, maxChars);

@@ -174,10 +174,12 @@ export function createSourceDigest(input: {
 			"Fuente sin texto legible para digest; registrar .md/.txt asociado o convertir manualmente.",
 		);
 	}
-	const topics = unique([
-		...extractTopics(`${source.title} ${content}`),
-		...chunks.flatMap((chunk) => chunk.topics),
-	]).slice(0, 12);
+	const topics = content
+		? unique([
+				...extractTopics(content),
+				...chunks.flatMap((chunk) => chunk.topics),
+			]).slice(0, 12)
+		: [];
 	const digest: SourceDigest = {
 		version: 1,
 		projectId: input.projectId,
@@ -188,9 +190,9 @@ export function createSourceDigest(input: {
 		processingMode,
 		summary: content
 			? summarizeText(content)
-			: `${source.title}: metadata-only; sin contenido textual legible.`,
+			: "Documento no leído: metadata-only; requiere conversión a texto/Markdown antes de generar resumen semántico.",
 		topics,
-		useWhen: useWhenForTopics(topics, source.title),
+		useWhen: content ? useWhenForTopics(topics, source.title) : [],
 		chunks,
 		recommendedReads: chunks.slice(0, 5).map((chunk) => chunk.chunkId),
 		limitations: unique(limitations),
@@ -398,25 +400,31 @@ function updateLibraryIndex(
 	updatedAt: string,
 ): void {
 	const current = readLibraryIndex(paths, projectId);
-	const entry: SourceLibraryIndexEntry = {
-		sourceId: digest.sourceId,
-		title: digest.title,
-		kind: digest.kind,
-		summary: digest.summary,
-		topics: digest.topics,
-		useWhen: digest.useWhen,
-		recommendedReads: digest.recommendedReads,
-		generatedAt: digest.generatedAt,
-		contractPromotionAllowed: false,
-	};
+	const readableEntries = current.entries.filter(
+		(item) => item.sourceId !== digest.sourceId,
+	);
+	const nextEntries =
+		digest.processingMode === "metadata_only"
+			? readableEntries
+			: [
+					...readableEntries,
+					{
+						sourceId: digest.sourceId,
+						title: digest.title,
+						kind: digest.kind,
+						summary: digest.summary,
+						topics: digest.topics,
+						useWhen: digest.useWhen,
+						recommendedReads: digest.recommendedReads,
+						generatedAt: digest.generatedAt,
+						contractPromotionAllowed: false,
+					} satisfies SourceLibraryIndexEntry,
+				];
 	const next: SourceLibraryKnowledgeIndex = {
 		version: 1,
 		projectId,
 		updatedAt,
-		entries: [
-			...current.entries.filter((item) => item.sourceId !== digest.sourceId),
-			entry,
-		].sort((a, b) => a.sourceId.localeCompare(b.sourceId)),
+		entries: nextEntries.sort((a, b) => a.sourceId.localeCompare(b.sourceId)),
 		contractPromotionAllowed: false,
 	};
 	writeFileSync(

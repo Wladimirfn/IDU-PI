@@ -1658,7 +1658,9 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	);
 	assert.equal(extract.ok, true);
 	assert.ok(
-		extract.safeNotes.some((note) => /PDFs convertidos|metadata-only/u.test(note)),
+		extract.safeNotes.some((note) =>
+			/PDFs convertidos|metadata-only/u.test(note),
+		),
 	);
 
 	const report = await callIduMcpTool(
