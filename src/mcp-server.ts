@@ -15,6 +15,12 @@ import {
 	buildProjectAdvisoryForOrchestrator,
 	buildSupervisorLoopOrchestratorAdvisory,
 } from "./orchestrator-advisory.js";
+import {
+	buildPostflightEvidenceGateways,
+	buildPreflightEvidenceGateways,
+	buildSourceRequiredActionsEvidenceGateways,
+	buildTaskPackageEvidenceGateways,
+} from "./evidence-gateways.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -1440,6 +1446,8 @@ async function dispatchTool(
 				stringArg(args, "actionId"),
 				booleanArg(args, "includePlanSnapshot", false),
 			);
+			taskPackage.evidenceGateways =
+				buildTaskPackageEvidenceGateways(taskPackage);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1509,6 +1517,7 @@ async function dispatchTool(
 			const request = requiredText(args, "request");
 			const report = runtime.preflight(request);
 			const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
+			const evidenceGateways = buildPreflightEvidenceGateways(report);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1519,6 +1528,7 @@ async function dispatchTool(
 					alignmentAdvisory,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
+					evidenceGateways,
 					risk: report.risk,
 					detectedImpact: report.affectedAreas,
 					rulesAffected: report.constitutionGate?.affectedRules ?? [],
@@ -1564,6 +1574,18 @@ async function dispatchTool(
 			const expectedContracts = stringListArg(args, "expectedContracts");
 			const expectedFiles = stringListArg(args, "expectedFiles");
 			const expectedChangeMode = stringArg(args, "expectedChangeMode");
+			const taskTrace = buildPostflightTaskTrace({
+				actionId,
+				taskPackageId,
+				expectedContracts,
+				expectedFiles,
+				expectedChangeMode,
+				report,
+			});
+			const evidenceGateways = buildPostflightEvidenceGateways({
+				report,
+				taskTrace,
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1578,16 +1600,10 @@ async function dispatchTool(
 					observedChangeMode: report.observedChangeMode ?? "code",
 					risk: report.risk,
 					gates: report.constitutionGate ?? null,
+					evidenceGateways,
 					suggestedAgentLabs: report.suggestedAgentLabs,
 					requiresHumanConfirmation: report.requiresHumanConfirmation,
-					taskTrace: buildPostflightTaskTrace({
-						actionId,
-						taskPackageId,
-						expectedContracts,
-						expectedFiles,
-						expectedChangeMode,
-						report,
-					}),
+					taskTrace,
 					report,
 				},
 				safeNotes: [
@@ -1903,13 +1919,15 @@ async function dispatchTool(
 		}
 		case "idu_source_required_actions": {
 			const result = runtime.sourceRequiredActions();
+			const evidenceGateways =
+				buildSourceRequiredActionsEvidenceGateways(result);
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: `Source required actions: ${result.actions.length}`,
-				data: { result, actions: result.actions },
+				data: { result, actions: result.actions, evidenceGateways },
 				safeNotes: [
 					...resolution.safeNotes,
 					"Listé fuentes que requieren lector bibliotecario; el orquestador debe despachar el subagente.",

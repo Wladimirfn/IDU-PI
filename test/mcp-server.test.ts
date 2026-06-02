@@ -967,6 +967,11 @@ test("idu_preflight detects high auth/login risk", async () => {
 	assert.equal(result.data.risk, "high");
 	assert.equal(result.data.requiresHumanConfirmation, true);
 	assert.deepEqual(result.data.detectedImpact, ["auth/seguridad", "login"]);
+	assert.ok(Array.isArray(result.data.evidenceGateways));
+	assert.equal(
+		(result.data.evidenceGateways as Array<{ source: string }>)[0]?.source,
+		"preflight",
+	);
 	assert.deepEqual(
 		(result.data.alignmentAdvisory as { audience: string; severity: string })
 			.audience,
@@ -1076,6 +1081,11 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.equal(taskPackage.data.implementationOwner, "normal_subagents");
 	assert.equal(taskPackage.data.iduRole, "advisor_auditor");
 	assert.equal(taskPackage.data.agentLabsRole, "audit_only");
+	assert.ok(Array.isArray(taskPackage.data.evidenceGateways));
+	assert.equal(
+		(taskPackage.data.evidenceGateways as Array<{ source: string }>)[0]?.source,
+		"task_package",
+	);
 	assert.deepEqual(taskPackage.data.preconditions, {
 		planApproved: true,
 		blocked: false,
@@ -1138,6 +1148,11 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(result.ok, true);
+	assert.ok(Array.isArray(result.data.evidenceGateways));
+	assert.equal(
+		(result.data.evidenceGateways as Array<{ source: string }>)[0]?.source,
+		"postflight",
+	);
 	const trace = result.data.taskTrace as {
 		actionId: string;
 		taskPackageId: string;
@@ -1733,6 +1748,12 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(requiredActions.ok, true);
+	assert.ok(Array.isArray(requiredActions.data.evidenceGateways));
+	assert.equal(
+		(requiredActions.data.evidenceGateways as Array<{ source: string }>)[0]
+			?.source,
+		"source_required_actions",
+	);
 	assert.ok(
 		requiredActions.safeNotes.some((note) =>
 			/lector bibliotecario/u.test(note),
