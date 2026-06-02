@@ -27,6 +27,7 @@ import {
 	decisionEnvelopeFromEvidence,
 } from "./decision-envelope.js";
 import { buildPostflightTaskTrace } from "./postflight-core.js";
+import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -68,6 +69,7 @@ export type IduMcpToolName =
 	| "idu_postflight"
 	| "idu_supervisor_tick"
 	| "idu_supervisor_cron_plan"
+	| "idu_architectural_pruning_plan"
 	| "idu_task"
 	| "idu_queue_detail"
 	| "idu_semantic_audit_status"
@@ -351,6 +353,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool(
 		"idu_supervisor_cron_plan",
 		"Propone un tick cron advisory-only del supervisor; no escribe, no crea drafts, no ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_architectural_pruning_plan",
+		"Devuelve plan advisory-only de poda arquitectónica; no borra, no aprueba y no refactoriza.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
@@ -1774,6 +1783,52 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Cron plan es advisory-only: no escribe auditorías, drafts ni tareas.",
 					"No ejecuta AgentLabs ni aprueba acciones automáticamente.",
+				],
+			});
+		}
+		case "idu_architectural_pruning_plan": {
+			const plan = buildArchitecturalPruningPlan({
+				projectId: runtime.projectId,
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: "warn",
+				severity: "warning",
+				confidence: 0.78,
+				summary: "Architectural pruning plan requires review before changes.",
+				requiresHuman: true,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: plan.candidates.map((candidate) => candidate.id),
+				nextActions: plan.recommendedNext,
+				requiredActions: [
+					{
+						id: "architectural-pruning-human-review",
+						owner: "human",
+						action: "review_pruning_plan_before_changes",
+						reason:
+							"Architectural pruning must not be applied without human/orchestrator approval.",
+						blocking: true,
+					},
+				],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Architectural pruning candidates: ${plan.candidates.length}`,
+				data: {
+					decisionEnvelope,
+					plan,
+					candidates: plan.candidates,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Plan de poda advisory-only: no borré archivos ni apliqué refactors.",
+					"No aprobé recomendaciones, no ejecuté AgentLabs y no escribí reportes runtime.",
 				],
 			});
 		}

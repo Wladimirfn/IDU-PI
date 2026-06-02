@@ -860,7 +860,8 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_source_required_actions"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
-	assert.equal(tools.length, 43);
+	assert.ok(tools.some((tool) => tool.name === "idu_architectural_pruning_plan"));
+	assert.equal(tools.length, 44);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -1439,6 +1440,33 @@ test("idu_supervisor_cron_plan is advisory-only and does not execute", async () 
 		(result.data.plan as IduSupervisorCronPlanResult).loop.trigger,
 		"cron_planning",
 	);
+});
+
+test("idu_architectural_pruning_plan is advisory-only", async () => {
+	const result = await callIduMcpTool(
+		"idu_architectural_pruning_plan",
+		{},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+
+	assert.equal(result.ok, true);
+	assert.ok(Array.isArray(result.data.candidates));
+	assert.equal((result.data.plan as { noDeletion: boolean }).noDeletion, true);
+	assert.equal((result.data.plan as { noAutoApprove: boolean }).noAutoApprove, true);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		false,
+	);
+	assert.ok(
+		(result.data.decisionEnvelope as DecisionEnvelope).requiredActions.some(
+			(action) => action.action === "review_pruning_plan_before_changes",
+		),
+	);
+	assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
 });
 
 test("idu_queue_detail returns complete ids and guard status", async () => {
