@@ -2719,19 +2719,23 @@ async function runModelProfilesMenuTui(
 			if (result === "exit") return "Salida sin cambios.";
 			continue;
 		}
-		const rl = createInterface({
-			input: process.stdin,
-			output: process.stdout,
-		});
 		let message: string;
-		try {
-			message = await handleModelProfilesChoice(
-				choice,
-				(prompt: string) => rl.question(prompt),
-				status,
-			);
-		} finally {
-			rl.close();
+		if (choice === "assign") {
+			message = await assignModelRoleTui(status);
+		} else {
+			const rl = createInterface({
+				input: process.stdin,
+				output: process.stdout,
+			});
+			try {
+				message = await handleModelProfilesChoice(
+					choice,
+					(prompt: string) => rl.question(prompt),
+					status,
+				);
+			} finally {
+				rl.close();
+			}
 		}
 		const result = await showTextView("Modelos y perfiles", message);
 		if (result === "exit") return "Salida sin cambios.";
@@ -2744,61 +2748,118 @@ async function selectMenu(
 	status?: ReturnType<typeof buildCliHomeStatus>,
 	content?: string,
 ): Promise<string> {
+	return selectSearchableMenu(title, options, {
+		status,
+		content,
+		search: false,
+	});
+}
+
+async function selectSearchableMenu(
+	title: string,
+	options: MenuOption[],
+	settings: {
+		status?: ReturnType<typeof buildCliHomeStatus>;
+		content?: string;
+		search?: boolean;
+		help?: string;
+	} = {},
+): Promise<string> {
 	let selected = 0;
+	let query = "";
 	emitKeypressEvents(process.stdin);
 	const rawMode = process.stdin.isTTY;
 	if (rawMode) process.stdin.setRawMode(true);
 	process.stdin.resume();
 	process.stdout.write(`${ANSI_ALT_SCREEN_ON}${ANSI_HIDE_CURSOR}`);
+	const filteredOptions = () => {
+		if (!settings.search || !query.trim()) return options;
+		const normalized = query.trim().toLowerCase();
+		return options.filter((option) =>
+			`${option.label}\n${option.value}`.toLowerCase().includes(normalized),
+		);
+	};
 	const render = () => {
 		process.stdout.write(ANSI_CLEAR);
 		const width = ANSI_PANEL_WIDTH;
+		const visible = filteredOptions();
+		selected = Math.min(selected, Math.max(0, visible.length - 1));
 		const pageTitle = title || "Menú principal";
-		const contentRows = content
+		const contentRows = settings.content
 			? [
 					midBorder(width),
-					...contentLines(content, width).map((line) => panelLine(line, width)),
+					...contentLines(settings.content, width).map((line) =>
+						panelLine(line, width),
+					),
+				]
+			: [];
+		const searchRows = settings.search
+			? [
+					panelLine(`buscar: ${query || "(escribí para filtrar)"}`, width, ANSI_DIM),
 				]
 			: [];
 		const header = [
-			...(status
-				? [formatIduLogo(), "", `version: ${status.version}`, ""]
+			...(settings.status
+				? [formatIduLogo(), "", `version: ${settings.status.version}`, ""]
 				: []),
 			topBorder(pageTitle, width),
-			panelLine("↑/↓ navegar · Enter elegir · Esc/q salir", width, ANSI_DIM),
+			panelLine(
+				settings.help ??
+					(settings.search
+						? "↑/↓ navegar · escribir filtra · Enter elegir · Esc volver/salir"
+						: "↑/↓ navegar · Enter elegir · Esc/q salir"),
+				width,
+				ANSI_DIM,
+			),
+			...searchRows,
 			...contentRows,
 			midBorder(width),
 		].join("\n");
-		const rows = options
-			.map((option, index) => {
-				const label = option.label.padEnd(width - 4, " ");
-				return index === selected
-					? `${ANSI_DARK_PURPLE}│${ANSI_RESET} ${ANSI_WHITE_BG}${ANSI_DARK_PURPLE}❯ ${label}${ANSI_RESET} ${ANSI_DARK_PURPLE}│${ANSI_RESET}`
-					: `${ANSI_DARK_PURPLE}│${ANSI_RESET}   ${label} ${ANSI_DARK_PURPLE}│${ANSI_RESET}`;
-			})
-			.join("\n");
+		const rows = visible.length
+			? visible
+					.map((option, index) => {
+						const label = option.label.padEnd(width - 4, " ");
+						return index === selected
+							? `${ANSI_DARK_PURPLE}│${ANSI_RESET} ${ANSI_WHITE_BG}${ANSI_DARK_PURPLE}❯ ${label}${ANSI_RESET} ${ANSI_DARK_PURPLE}│${ANSI_RESET}`
+							: `${ANSI_DARK_PURPLE}│${ANSI_RESET}   ${label} ${ANSI_DARK_PURPLE}│${ANSI_RESET}`;
+					})
+					.join("\n")
+			: panelLine("Sin resultados", width, ANSI_DIM);
 		const footer = bottomBorder(width);
 		process.stdout.write(`${header}\n${rows}\n${footer}`);
 	};
 	try {
 		render();
 		return await new Promise<string>((resolve) => {
-			const onKeypress = (_chunk: string, key: { name?: string }) => {
+			const onKeypress = (chunk: string, key: { name?: string }) => {
+				const visible = filteredOptions();
 				if (key.name === "up") {
-					selected = (selected - 1 + options.length) % options.length;
+					if (visible.length) selected = (selected - 1 + visible.length) % visible.length;
 					render();
 					return;
 				}
 				if (key.name === "down") {
-					selected = (selected + 1) % options.length;
+					if (visible.length) selected = (selected + 1) % visible.length;
+					render();
+					return;
+				}
+				if (settings.search && key.name === "backspace") {
+					query = query.slice(0, -1);
+					selected = 0;
 					render();
 					return;
 				}
 				if (key.name === "return") {
-					resolve(options[selected]?.value ?? options[0].value);
+					if (visible.length) resolve(visible[selected]?.value ?? visible[0].value);
 					return;
 				}
-				if (key.name === "escape" || key.name === "q") resolve("exit");
+				if (key.name === "escape" || (!settings.search && key.name === "q"))
+					resolve("exit");
+				if (settings.search && chunk.length === 1 && chunk.charCodeAt(0) >= 32) {
+					query += chunk;
+					selected = 0;
+					render();
+				}
 			};
 			process.stdin.on("keypress", onKeypress);
 		}).finally(() => process.stdin.removeAllListeners("keypress"));
@@ -2980,6 +3041,69 @@ async function proposeAgentLabModelAssignments(
 	}
 }
 
+async function assignModelRoleTui(
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Promise<string> {
+	const stateRoot = status.project.stateRoot;
+	if (!stateRoot)
+		return "No hay stateRoot. Enrolá o bootstrappeá el proyecto antes de asignar modelos por rol.";
+	const roleId = await selectSearchableMenu(
+		"Elegir rol",
+		IDU_MODEL_ROLES.map((role) => ({
+			label: `${role.label} (${role.id})`,
+			value: role.id,
+		})),
+		{ search: true },
+	);
+	if (roleId === "exit") return "Cancelado sin cambios.";
+	const assignmentOptions = modelAssignmentOptions(status);
+	const profileId = await selectSearchableMenu(
+		"Elegir modelo/perfil",
+		assignmentOptions.map((option) => ({
+			label: option.label,
+			value: option.value,
+		})),
+		{
+			search: true,
+			content: [
+				`Rol: ${roleId}`,
+				"Elegí un perfil existente o un modelo directo conocido por Gentle AI.",
+				"Custom sólo si el modelo no aparece en la lista.",
+			].join("\n"),
+		},
+	);
+	if (profileId === "exit") return "Cancelado sin cambios.";
+	let finalProfileId = profileId;
+	if (finalProfileId === "__custom_model__") {
+		const rl = createInterface({ input: process.stdin, output: process.stdout });
+		try {
+			finalProfileId = (await rl.question("Custom model id (provider/model): ")).trim();
+		} finally {
+			rl.close();
+		}
+	}
+	const confirmation = await selectMenu("Confirmar asignación", [
+		{ label: `Guardar ${roleId} -> ${finalProfileId}`, value: "yes" },
+		{ label: "Cancelar", value: "no" },
+	]);
+	if (confirmation !== "yes") return "Cancelado sin cambios.";
+	try {
+		const saved = saveModelAssignment(
+			stateRoot,
+			roleId,
+			finalProfileId,
+			status.agentProfiles,
+		);
+		return [
+			"Asignación guardada.",
+			formatModelAssignments(saved, status.agentProfiles),
+			...(saved.backupPath ? [`Backup: ${saved.backupPath}`] : []),
+		].join("\n");
+	} catch (error) {
+		return `No pude guardar asignación.\n${error instanceof Error ? error.message : String(error)}`;
+	}
+}
+
 async function assignModelRole(
 	question: CliQuestion,
 	status: ReturnType<typeof buildCliHomeStatus>,
@@ -2995,24 +3119,7 @@ async function assignModelRole(
 	).trim();
 	const roleId = resolveRoleSelection(roleAnswer);
 	if (!roleId) return "Rol no reconocido. No escribí model-assignments.json.";
-	const knownModelIds = readGentleModelRouting(status.cwd);
-	const assignmentOptions = [
-		...status.agentProfiles.map((profile) => ({
-			kind: "profile" as const,
-			value: profile.id,
-			label: `${profile.label} (${profile.id}) — ${profileModelLabel(profile)}`,
-		})),
-		...knownModelIds.map((modelId) => ({
-			kind: "model" as const,
-			value: modelId,
-			label: `${modelId} — modelo directo Gentle AI`,
-		})),
-		{
-			kind: "custom" as const,
-			value: "__custom_model__",
-			label: "Custom model id (provider/model)",
-		},
-	];
+	const assignmentOptions = modelAssignmentOptions(status);
 	const assignmentOptionsText = assignmentOptions
 		.map((option, index) => `${index + 1}. ${option.label}`)
 		.join("\n");
@@ -3053,6 +3160,26 @@ async function assignModelRole(
 	} catch (error) {
 		return `No pude guardar asignación.\n${error instanceof Error ? error.message : String(error)}`;
 	}
+}
+
+function modelAssignmentOptions(
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Array<{ value: string; label: string }> {
+	const knownModelIds = readGentleModelRouting(status.cwd);
+	return [
+		...status.agentProfiles.map((profile) => ({
+			value: profile.id,
+			label: `${profile.label} (${profile.id}) — ${profileModelLabel(profile)}`,
+		})),
+		...knownModelIds.map((modelId) => ({
+			value: modelId,
+			label: `${modelId} — modelo directo Gentle AI`,
+		})),
+		{
+			value: "__custom_model__",
+			label: "Custom model id (provider/model)",
+		},
+	];
 }
 
 function resolveRoleSelection(input: string): string | undefined {
