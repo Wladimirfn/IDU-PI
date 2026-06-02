@@ -333,9 +333,12 @@ import {
 import {
 	IDU_MODEL_ROLES,
 	applySupervisorModelAssignment,
+	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
+	recommendAgentLabModelAssignments,
 	saveModelAssignment,
+	saveModelAssignments,
 } from "./model-assignments.js";
 
 export type CliResult = {
@@ -2687,6 +2690,7 @@ function modelProfilesMenuOptions(): MenuOption[] {
 	return [
 		{ label: "Ver perfiles actuales", value: "status" },
 		{ label: "Editar perfiles", value: "edit" },
+		{ label: "Propuesta automática por AgentLab", value: "proposal" },
 		{ label: "Asignar modelos por rol", value: "assign" },
 		{ label: "Validar configuración", value: "validate" },
 		{ label: "← Volver", value: "back" },
@@ -2879,6 +2883,8 @@ async function handleModelProfilesChoice(
 ): Promise<string> {
 	if (choice === "status") return formatModelProfilesStatus(status);
 	if (choice === "edit") return editAgentProfiles(question, status);
+	if (choice === "proposal")
+		return proposeAgentLabModelAssignments(question, status);
 	if (choice === "assign") return assignModelRole(question, status);
 	if (choice === "validate") return validateAgentProfiles(status);
 	return "Opción no reconocida. No ejecuté acciones.";
@@ -2910,6 +2916,59 @@ async function editAgentProfiles(
 		"Perfiles guardados en .env.",
 		...(result.backupPath ? [`Backup: ${result.backupPath}`] : []),
 	].join("\n");
+}
+
+async function proposeAgentLabModelAssignments(
+	question: CliQuestion,
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Promise<string> {
+	const stateRoot = status.project.stateRoot;
+	if (!stateRoot)
+		return "No hay stateRoot. Enrolá o bootstrappeá el proyecto antes de proponer modelos por AgentLab.";
+	const current = loadModelAssignments(stateRoot);
+	const recommendations = recommendAgentLabModelAssignments(
+		status.agentProfiles,
+		current,
+	);
+	if (!recommendations.length)
+		return "No encontré perfiles AgentLab configurados. Agregá perfiles antes de generar propuesta.";
+	const proposal = formatAgentLabModelAssignmentProposal(
+		recommendations,
+		status.agentProfiles,
+	);
+	if (
+		!(await confirmAction(
+			question,
+			`${proposal}\n\n¿Guardar esta propuesta en model-assignments.json?`,
+		))
+	) {
+		return [
+			proposal,
+			"",
+			"Cancelado sin cambios. Podés ajustar manualmente con 'Asignar modelos por rol'.",
+		].join("\n");
+	}
+	try {
+		const nextAssignments = { ...current.assignments };
+		for (const recommendation of recommendations) {
+			nextAssignments[recommendation.roleId] =
+				recommendation.recommendedProfileId;
+		}
+		const saved = saveModelAssignments(
+			stateRoot,
+			nextAssignments,
+			status.agentProfiles,
+		);
+		return [
+			"Propuesta AgentLab aprobada y guardada por el usuario.",
+			"Idu-pi no rotó modelos automáticamente; esta escritura ocurrió sólo tras confirmación.",
+			"",
+			formatModelAssignments(saved, status.agentProfiles),
+			...(saved.backupPath ? [`Backup: ${saved.backupPath}`] : []),
+		].join("\n");
+	} catch (error) {
+		return `No pude guardar propuesta.\n${error instanceof Error ? error.message : String(error)}`;
+	}
 }
 
 async function assignModelRole(
@@ -3078,16 +3137,18 @@ async function runModelProfilesMenu(
 	status: ReturnType<typeof buildCliHomeStatus>,
 ): Promise<string> {
 	print(formatModelProfilesMenu());
-	const choice = (await question("\nElegí una opción [1-6]: ")).trim();
-	if (choice === "5" || /^volver$/iu.test(choice)) return "Volver sin cambios.";
-	if (choice === "6" || /^exit|salir$/iu.test(choice))
+	const choice = (await question("\nElegí una opción [1-7]: ")).trim();
+	if (choice === "6" || /^volver$/iu.test(choice)) return "Volver sin cambios.";
+	if (choice === "7" || /^exit|salir$/iu.test(choice))
 		return "Salida sin cambios.";
 	if (choice === "1") return formatModelProfilesStatus(status);
 	if (choice === "2" || choice === "edit")
 		return editAgentProfiles(question, status);
-	if (choice === "3" || choice === "assign")
+	if (choice === "3" || choice === "proposal")
+		return proposeAgentLabModelAssignments(question, status);
+	if (choice === "4" || choice === "assign")
 		return assignModelRole(question, status);
-	if (choice === "4" || choice === "validate")
+	if (choice === "5" || choice === "validate")
 		return validateAgentProfiles(status);
 	return "Opción no reconocida. No ejecuté acciones.";
 }

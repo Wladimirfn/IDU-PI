@@ -817,21 +817,25 @@ function agentLabRoleForSpecialty(
 	switch (specialty) {
 		case "security":
 			return "agentlab-security";
-		case "architecture":
 		case "project_understanding":
+			return "agentlab-project-understanding";
+		case "architecture":
 			return "agentlab-architecture";
+		case "database":
+			return "agentlab-database";
+		case "ui_ux":
+			return "agentlab-ui-ux";
 		case "performance":
 		case "token_cost":
 			return "agentlab-performance";
 		case "code_quality":
 		case "skill_review":
 			return "agentlab-code-quality";
-		case "librarian":
-			return "agentlab-general";
-		case "general":
-		case "database":
-		case "ui_ux":
 		case "docs":
+			return "agentlab-docs";
+		case "librarian":
+			return "agentlab-librarian";
+		case "general":
 			return "agentlab-general";
 	}
 }

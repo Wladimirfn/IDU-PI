@@ -8,9 +8,11 @@ import type { AgentProfile } from "../src/config.js";
 import {
 	IDU_MODEL_ROLES,
 	applySupervisorModelAssignment,
+	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
 	profileForModelRole,
+	recommendAgentLabModelAssignments,
 	saveModelAssignment,
 } from "../src/model-assignments.js";
 
@@ -34,6 +36,24 @@ function testProfiles(): AgentProfile[] {
 			label: "Review",
 			provider: "pi",
 			piArgs: ["--model", "openai-codex/review"],
+		},
+		{
+			id: "database",
+			label: "Database Lab",
+			provider: "pi",
+			piArgs: ["--model", "openai-codex/db"],
+		},
+		{
+			id: "frontend",
+			label: "UI UX Lab",
+			provider: "pi",
+			piArgs: ["--model", "openai-codex/ui"],
+		},
+		{
+			id: "docs",
+			label: "Docs Librarian",
+			provider: "pi",
+			piArgs: ["--model", "openai-codex/docs"],
 		},
 	];
 }
@@ -75,6 +95,55 @@ test("model assignments save selected role and reject invalid profile", () => {
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("all real AgentLab roles accept explicit profile assignment", () => {
+	const root = tempDir();
+	try {
+		const agentLabRoles = IDU_MODEL_ROLES.filter(
+			(role) => role.group === "agentlab",
+		);
+		for (const role of agentLabRoles) {
+			const saved = saveModelAssignment(root, role.id, "codex", profiles);
+			assert.equal(saved.assignments[role.id], "codex");
+		}
+		assert.ok(
+			agentLabRoles.some(
+				(role) => role.id === "agentlab-project-understanding",
+			),
+		);
+		assert.ok(agentLabRoles.some((role) => role.id === "agentlab-database"));
+		assert.ok(agentLabRoles.some((role) => role.id === "agentlab-ui-ux"));
+		assert.ok(agentLabRoles.some((role) => role.id === "agentlab-docs"));
+		assert.ok(agentLabRoles.some((role) => role.id === "agentlab-librarian"));
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("AgentLab model proposal prefers specialty profiles", () => {
+	const recommendations = recommendAgentLabModelAssignments(profiles, {
+		version: 1,
+		assignments: { "agentlab-database": "codex" },
+	});
+	const database = recommendations.find(
+		(recommendation) => recommendation.roleId === "agentlab-database",
+	);
+	const uiUx = recommendations.find(
+		(recommendation) => recommendation.roleId === "agentlab-ui-ux",
+	);
+	const docs = recommendations.find(
+		(recommendation) => recommendation.roleId === "agentlab-docs",
+	);
+
+	assert.equal(database?.recommendedProfileId, "database");
+	assert.equal(database?.currentProfileId, "codex");
+	assert.equal(uiUx?.recommendedProfileId, "frontend");
+	assert.equal(docs?.recommendedProfileId, "docs");
+	assert.match(
+		formatAgentLabModelAssignmentProposal(recommendations, profiles),
+		/Guardar esta propuesta requiere aprobación explícita/u,
+	);
 });
 
 test("supervisor-main assignment selects router active profile when valid", () => {

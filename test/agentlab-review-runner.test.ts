@@ -83,6 +83,7 @@ function profiles(): AgentProfile[] {
 		{ id: "default", label: "Default", provider: "pi", piArgs: [] },
 		{ id: "security", label: "Security Lab", provider: "pi", piArgs: [] },
 		{ id: "database", label: "Database Lab", provider: "pi", piArgs: [] },
+		{ id: "ui", label: "UI UX Lab", provider: "pi", piArgs: [] },
 		{ id: "general", label: "General Lab", provider: "pi", piArgs: [] },
 	];
 }
@@ -270,6 +271,21 @@ test("selectAgentLabProfile uses assigned role profile before specialty fallback
 	});
 
 	assert.equal(selected?.id, "general");
+});
+
+test("selectAgentLabProfile uses explicit database and ui_ux role assignments", () => {
+	const { router } = routerWith(validReport());
+	const database = selectAgentLabProfile(router, "database", {
+		version: 1,
+		assignments: { "agentlab-database": "general" },
+	});
+	const uiUx = selectAgentLabProfile(router, "ui_ux", {
+		version: 1,
+		assignments: { "agentlab-ui-ux": "database" },
+	});
+
+	assert.equal(database?.id, "general");
+	assert.equal(uiUx?.id, "database");
 });
 
 test("selectAgentLabProfile ignores missing assignment and keeps specialty fallback", () => {

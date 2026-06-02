@@ -392,11 +392,12 @@ test("model profiles submenu exposes navigable actions", () => {
 	const menu = formatModelProfilesMenu();
 	assert.match(menu, /1\. Ver perfiles actuales/u);
 	assert.match(menu, /2\. Editar perfiles/u);
-	assert.match(menu, /3\. Asignar modelos por rol/u);
-	assert.match(menu, /4\. Validar configuración/u);
+	assert.match(menu, /3\. Propuesta automática por AgentLab/u);
+	assert.match(menu, /4\. Asignar modelos por rol/u);
+	assert.match(menu, /5\. Validar configuración/u);
 	assert.doesNotMatch(menu, /Save/u);
-	assert.match(menu, /5\. ← Volver/u);
-	assert.match(menu, /6\. Exit/u);
+	assert.match(menu, /6\. ← Volver/u);
+	assert.match(menu, /7\. Exit/u);
 });
 
 test("interactive home model option is non-mutating", async () => {
@@ -542,7 +543,7 @@ test("interactive model role assignment writes project state", async () => {
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
 		process.env.PI_AGENT_PROFILES =
 			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt";
-		const answers = ["4", "3", "agentlab-security", "codex"];
+		const answers = ["4", "4", "agentlab-security", "codex"];
 		const output = await runInteractiveHomeWithQuestion(
 			async () => answers.shift() ?? "",
 		);

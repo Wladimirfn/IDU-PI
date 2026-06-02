@@ -10,6 +10,11 @@ import {
 } from "./config.js";
 import { profileModelLabel } from "./agent-router.js";
 import {
+	formatModelAssignments,
+	loadModelAssignments,
+	recommendAgentLabModelAssignments,
+} from "./model-assignments.js";
+import {
 	detectGlobalIduInstall,
 	detectTools,
 	formatPnpmPathHelp,
@@ -268,10 +273,11 @@ export function formatModelProfilesMenu(): string {
 		"",
 		"1. Ver perfiles actuales",
 		"2. Editar perfiles",
-		"3. Asignar modelos por rol",
-		"4. Validar configuración",
-		"5. ← Volver",
-		"6. Exit",
+		"3. Propuesta automática por AgentLab",
+		"4. Asignar modelos por rol",
+		"5. Validar configuración",
+		"6. ← Volver",
+		"7. Exit",
 	].join("\n");
 }
 
@@ -280,16 +286,13 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 		? status.agentProfiles
 		: parseAgentProfiles();
 	const defaultProfile = profiles[0];
-	const labProfiles = profiles.slice(1);
-	const generalLab = labProfiles[0];
-	const securityLab =
-		findProfile(labProfiles, /seguridad|security|sec/iu) ?? generalLab;
-	const architectureLab =
-		findProfile(labProfiles, /arquitectura|architecture|arch/iu) ?? generalLab;
-	const performanceLab =
-		findProfile(labProfiles, /performance|perf|rendimiento/iu) ?? generalLab;
-	const codeQualityLab =
-		findProfile(labProfiles, /quality|calidad|code|general/iu) ?? generalLab;
+	const assignments = status.project.stateRoot
+		? loadModelAssignments(status.project.stateRoot)
+		: { version: 1 as const, assignments: {} };
+	const recommendations = recommendAgentLabModelAssignments(
+		profiles,
+		assignments,
+	);
 	return [
 		"Modelos y perfiles",
 		"",
@@ -308,15 +311,20 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 		`  ▸ Supervisor principal       ${profileLabel(defaultProfile)}`,
 		`    Supervisor semántico       ${profileLabel(defaultProfile)}`,
 		`    Supervisor compactación    ${profileLabel(defaultProfile)}`,
-		`    AgentLab general           ${profileLabel(generalLab)}`,
-		`    AgentLab seguridad         ${profileLabel(securityLab)}`,
-		`    AgentLab arquitectura      ${profileLabel(architectureLab)}`,
-		`    AgentLab performance       ${profileLabel(performanceLab)}`,
-		`    AgentLab calidad código    ${profileLabel(codeQualityLab)}`,
+		...(status.project.stateRoot
+			? formatModelAssignments(assignments, profiles).split("\n").slice(2)
+			: ["    AgentLabs                sin stateRoot"]),
+		"",
+		"Recommended AgentLab proposal:",
+		...recommendations.map(
+			(recommendation) =>
+				`  ${recommendation.label}: ${recommendation.recommendedProfile.label} (${recommendation.recommendedProfileId})`,
+		),
 		"",
 		"Acciones disponibles en el menú:",
 		"- Ver perfiles actuales",
 		"- Editar perfiles",
+		"- Propuesta automática por AgentLab",
 		"- Asignar modelos por rol",
 		"- Validar configuración",
 		"",
