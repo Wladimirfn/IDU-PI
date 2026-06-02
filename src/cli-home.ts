@@ -10,8 +10,10 @@ import {
 } from "./config.js";
 import { profileModelLabel } from "./agent-router.js";
 import {
+	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
+	profileModelInventory,
 	recommendAgentLabModelAssignments,
 } from "./model-assignments.js";
 import {
@@ -150,15 +152,6 @@ function safeParseAgentProfiles(raw?: string): AgentProfile[] {
 	}
 }
 
-function findProfile(
-	profiles: AgentProfile[],
-	pattern: RegExp,
-): AgentProfile | undefined {
-	return profiles.find((profile) =>
-		pattern.test(`${profile.id}\n${profile.label}`),
-	);
-}
-
 function profileLabel(profile: AgentProfile | undefined): string {
 	if (!profile) return "(not set)";
 	return `${profile.label} / ${profileModelLabel(profile)}`;
@@ -289,10 +282,10 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 	const assignments = status.project.stateRoot
 		? loadModelAssignments(status.project.stateRoot)
 		: { version: 1 as const, assignments: {} };
-	const recommendations = recommendAgentLabModelAssignments(
-		profiles,
-		assignments,
-	);
+	const proposal = recommendAgentLabModelAssignments(profiles, assignments, {
+		cwd: status.cwd,
+	});
+	const inventory = profileModelInventory(profiles.slice(1));
 	return [
 		"Modelos y perfiles",
 		"",
@@ -306,6 +299,20 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 				`  ${index === 0 ? "▸" : " "} ${profile.label} (${profile.id})  ${profileModelLabel(profile)}`,
 		),
 		"",
+		"Unique AgentLab profile models:",
+		...(inventory.uniqueModelIds.length
+			? inventory.uniqueModelIds.map((modelId) => `  - ${modelId}`)
+			: ["  - ninguno explícito"]),
+		...(inventory.duplicateModelGroups.length
+			? [
+					"",
+					"Duplicate model warnings:",
+					...inventory.duplicateModelGroups.map(
+						(group) => `  - ${group.modelId}: ${group.profileIds.join(", ")}`,
+					),
+				]
+			: []),
+		"",
 		"Current assignments:",
 		"",
 		`  ▸ Supervisor principal       ${profileLabel(defaultProfile)}`,
@@ -316,10 +323,10 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 			: ["    AgentLabs                sin stateRoot"]),
 		"",
 		"Recommended AgentLab proposal:",
-		...recommendations.map(
-			(recommendation) =>
-				`  ${recommendation.label}: ${recommendation.recommendedProfile.label} (${recommendation.recommendedProfileId})`,
-		),
+		...formatAgentLabModelAssignmentProposal(proposal, profiles)
+			.split("\n")
+			.slice(4)
+			.map((line) => (line ? `  ${line}` : "")),
 		"",
 		"Acciones disponibles en el menú:",
 		"- Ver perfiles actuales",

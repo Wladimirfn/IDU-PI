@@ -288,6 +288,18 @@ test("selectAgentLabProfile uses explicit database and ui_ux role assignments", 
 	assert.equal(uiUx?.id, "database");
 });
 
+test("selectAgentLabProfile creates virtual profile for direct model assignment", () => {
+	const { router } = routerWith(validReport());
+	const selected = selectAgentLabProfile(router, "security", {
+		version: 1,
+		assignments: { "agentlab-security": "anthropic/claude-sonnet-4" },
+	});
+
+	assert.match(selected?.id ?? "", /^agentlab-security__anthropic_claude/iu);
+	assert.equal(selected?.piArgs[0], "--model");
+	assert.equal(selected?.piArgs[1], "anthropic/claude-sonnet-4");
+});
+
 test("selectAgentLabProfile ignores missing assignment and keeps specialty fallback", () => {
 	const { router } = routerWith(validReport());
 	const selected = selectAgentLabProfile(router, "security", {
@@ -306,6 +318,22 @@ test("selectAgentLabProfile does not allow default direct profile for AgentLabs"
 	});
 
 	assert.equal(selected?.id, "security");
+});
+
+test("run uses virtual profile for direct model assignment", async () => {
+	const { router, projectPath } = routerWith(validReport());
+	const result = await runAgentLabReviewRequest({
+		request: request("security"),
+		projectPath,
+		router,
+		modelAssignments: {
+			version: 1,
+			assignments: { "agentlab-security": "anthropic/claude-sonnet-4" },
+		},
+	});
+
+	assert.equal(result.status, "completed");
+	assert.match(result.agentId ?? "", /^agentlab-security__anthropic_claude/iu);
 });
 
 test("run latest lee request válido", async () => {

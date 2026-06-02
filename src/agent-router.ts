@@ -213,6 +213,10 @@ export class AgentRouter {
 		return this.runtimeFor(this.projectId, this.cwd, profile);
 	}
 
+	runtimeForAdHocProfile(profile: AgentProfile): AgentRuntime {
+		return this.runtimeFor(this.projectId, this.cwd, profile);
+	}
+
 	cancelProfiles(profileIds: string[]): number {
 		let cancelled = 0;
 		for (const profileId of profileIds) {

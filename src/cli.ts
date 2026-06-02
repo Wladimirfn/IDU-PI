@@ -10,7 +10,7 @@ import {
 	parseAgentProfiles,
 	type BridgeConfig,
 } from "./config.js";
-import { AgentRouter } from "./agent-router.js";
+import { AgentRouter, profileModelLabel } from "./agent-router.js";
 import {
 	applyPackageEnvDefaults,
 	buildCliHomeStatus,
@@ -336,6 +336,7 @@ import {
 	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
+	readGentleModelRouting,
 	recommendAgentLabModelAssignments,
 	saveModelAssignment,
 	saveModelAssignments,
@@ -2926,31 +2927,39 @@ async function proposeAgentLabModelAssignments(
 	if (!stateRoot)
 		return "No hay stateRoot. Enrolá o bootstrappeá el proyecto antes de proponer modelos por AgentLab.";
 	const current = loadModelAssignments(stateRoot);
-	const recommendations = recommendAgentLabModelAssignments(
+	const proposal = recommendAgentLabModelAssignments(
 		status.agentProfiles,
 		current,
+		{
+			cwd: status.cwd,
+		},
 	);
-	if (!recommendations.length)
-		return "No encontré perfiles AgentLab configurados. Agregá perfiles antes de generar propuesta.";
-	const proposal = formatAgentLabModelAssignmentProposal(
-		recommendations,
+	const proposalText = formatAgentLabModelAssignmentProposal(
+		proposal,
 		status.agentProfiles,
 	);
+	if (proposal.status === "blocked") {
+		return [
+			proposalText,
+			"",
+			"No guardé cambios: la propuesta no tiene diversidad suficiente. Usá 'Asignar modelos por rol' o editá perfiles/modelos primero.",
+		].join("\n");
+	}
 	if (
 		!(await confirmAction(
 			question,
-			`${proposal}\n\n¿Guardar esta propuesta en model-assignments.json?`,
+			`${proposalText}\n\n¿Guardar esta propuesta en model-assignments.json?`,
 		))
 	) {
 		return [
-			proposal,
+			proposalText,
 			"",
 			"Cancelado sin cambios. Podés ajustar manualmente con 'Asignar modelos por rol'.",
 		].join("\n");
 	}
 	try {
 		const nextAssignments = { ...current.assignments };
-		for (const recommendation of recommendations) {
+		for (const recommendation of proposal.recommendations) {
 			nextAssignments[recommendation.roleId] =
 				recommendation.recommendedProfileId;
 		}
@@ -2978,17 +2987,58 @@ async function assignModelRole(
 	const stateRoot = status.project.stateRoot;
 	if (!stateRoot)
 		return "No hay stateRoot. Enrolá o bootstrappeá el proyecto antes de asignar modelos por rol.";
-	const roleId = (
+	const roleOptions = IDU_MODEL_ROLES.map(
+		(role, index) => `${index + 1}. ${role.label} (${role.id})`,
+	).join("\n");
+	const roleAnswer = (
+		await question(`Elegí rol por número o id:\n${roleOptions}\nrol: `)
+	).trim();
+	const roleId = resolveRoleSelection(roleAnswer);
+	if (!roleId) return "Rol no reconocido. No escribí model-assignments.json.";
+	const knownModelIds = readGentleModelRouting(status.cwd);
+	const assignmentOptions = [
+		...status.agentProfiles.map((profile) => ({
+			kind: "profile" as const,
+			value: profile.id,
+			label: `${profile.label} (${profile.id}) — ${profileModelLabel(profile)}`,
+		})),
+		...knownModelIds.map((modelId) => ({
+			kind: "model" as const,
+			value: modelId,
+			label: `${modelId} — modelo directo Gentle AI`,
+		})),
+		{
+			kind: "custom" as const,
+			value: "__custom_model__",
+			label: "Custom model id (provider/model)",
+		},
+	];
+	const assignmentOptionsText = assignmentOptions
+		.map((option, index) => `${index + 1}. ${option.label}`)
+		.join("\n");
+	const assignmentAnswer = (
 		await question(
-			`role id (${IDU_MODEL_ROLES.map((role) => role.id).join(", ")}): `,
+			`Elegí perfil/modelo por número o id:\n${assignmentOptionsText}\nperfil/modelo: `,
 		)
 	).trim();
-	const profileId = (
-		await question(
-			`profile id (${status.agentProfiles.map((profile) => profile.id).join(", ")}): `,
-		)
-	).trim();
+	let profileId = resolveAssignmentSelection(
+		assignmentAnswer,
+		assignmentOptions,
+	);
+	if (profileId === "__custom_model__") {
+		profileId = (await question("Custom model id (provider/model): ")).trim();
+	}
+	if (!profileId)
+		return "Perfil/modelo no reconocido. No escribí model-assignments.json.";
 	try {
+		if (
+			!(await confirmAction(
+				question,
+				`Guardar asignación ${roleId} -> ${profileId} en model-assignments.json?`,
+			))
+		) {
+			return "Cancelado sin cambios.";
+		}
 		const saved = saveModelAssignment(
 			stateRoot,
 			roleId,
@@ -3003,6 +3053,29 @@ async function assignModelRole(
 	} catch (error) {
 		return `No pude guardar asignación.\n${error instanceof Error ? error.message : String(error)}`;
 	}
+}
+
+function resolveRoleSelection(input: string): string | undefined {
+	const index = Number(input);
+	if (
+		Number.isInteger(index) &&
+		index >= 1 &&
+		index <= IDU_MODEL_ROLES.length
+	) {
+		return IDU_MODEL_ROLES[index - 1]?.id;
+	}
+	return IDU_MODEL_ROLES.find((role) => role.id === input)?.id;
+}
+
+function resolveAssignmentSelection(
+	input: string,
+	options: Array<{ value: string }>,
+): string | undefined {
+	const index = Number(input);
+	if (Number.isInteger(index) && index >= 1 && index <= options.length) {
+		return options[index - 1]?.value;
+	}
+	return options.find((option) => option.value === input)?.value;
 }
 
 function validateAgentProfiles(

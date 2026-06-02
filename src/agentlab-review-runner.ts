@@ -206,7 +206,11 @@ export async function runAgentLabReviewRequest(
 			[],
 		);
 	}
-	const runtime = input.router.runtimeForProfile(profile.id);
+	const runtime = input.router.profiles.some(
+		(candidate) => candidate.id === profile.id,
+	)
+		? input.router.runtimeForProfile(profile.id)
+		: input.router.runtimeForAdHocProfile(profile);
 	if (runtime.workspaceKind !== "clone") {
 		return skippedRun(
 			input.request,
@@ -795,6 +799,7 @@ export function selectAgentLabProfile(
 				router.profiles,
 			)
 		: undefined;
+	if (assigned?.source === "direct-model") return assigned.profile;
 	if (
 		assigned?.source === "assigned" &&
 		profiles.some((profile) => profile.id === assigned.profile.id)

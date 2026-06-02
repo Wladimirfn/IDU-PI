@@ -383,9 +383,30 @@ test("model profile panel renders current profiles and planned Idu-pi roles", ()
 	assert.match(panel, /Barato \(barato\).*nvidia\/deepseek-v3/u);
 	assert.match(panel, /Current assignments:/u);
 	assert.match(panel, /Supervisor principal.*Pi default/u);
-	assert.match(panel, /AgentLab general.*Barato/u);
-	assert.match(panel, /AgentLab seguridad.*Seguridad/u);
+	assert.match(panel, /Unique AgentLab profile models:/u);
+	assert.match(panel, /nvidia\/deepseek-v3/u);
+	assert.match(panel, /AgentLab general/u);
+	assert.match(panel, /recomendado: Barato/u);
+	assert.match(panel, /AgentLab seguridad/u);
+	assert.match(panel, /recomendado: Seguridad/u);
 	assert.match(panel, /guarda PI_AGENT_PROFILES en \.env con backup/u);
+});
+
+test("model profile panel warns when AgentLab profiles duplicate the same model", () => {
+	const status = buildCliHomeStatus({
+		env: {
+			PATH: "",
+			PI_AGENT_PROFILES:
+				"default|Pi default;codex|GPT Codex|--model openai-codex/gpt-5.3-codex-spark;spark|Spark|--model openai-codex/gpt-5.3-codex-spark",
+		},
+		runner: () => undefined,
+		stdinInteractive: false,
+	});
+	const panel = formatModelProfilesStatus(status);
+	assert.match(panel, /Duplicate model warnings:/u);
+	assert.match(panel, /codex, spark/u);
+	assert.match(panel, /estado: blocked/u);
+	assert.match(panel, /Diversidad insuficiente/u);
 });
 
 test("model profiles submenu exposes navigable actions", () => {
@@ -543,7 +564,7 @@ test("interactive model role assignment writes project state", async () => {
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
 		process.env.PI_AGENT_PROFILES =
 			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt";
-		const answers = ["4", "4", "agentlab-security", "codex"];
+		const answers = ["4", "4", "agentlab-security", "codex", "s"];
 		const output = await runInteractiveHomeWithQuestion(
 			async () => answers.shift() ?? "",
 		);

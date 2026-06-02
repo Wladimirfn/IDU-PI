@@ -5,6 +5,7 @@ import {
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentRouter, profileModelLabel } from "./agent-router.js";
 import type { AgentProfile } from "./config.js";
@@ -30,13 +31,41 @@ export type IduModelRole = {
 	group: "supervisor" | "agentlab";
 };
 
+export type AgentLabModelCapability =
+	| "general"
+	| "project_understanding"
+	| "architecture"
+	| "database"
+	| "security"
+	| "ui_ux"
+	| "performance"
+	| "code_quality"
+	| "docs"
+	| "librarian";
+
 export type AgentLabModelAssignmentRecommendation = {
 	roleId: IduModelRoleId;
 	label: string;
+	capability: AgentLabModelCapability;
+	capabilityLabel: string;
 	recommendedProfileId: string;
 	recommendedProfile: AgentProfile;
 	currentProfileId?: string;
 	reason: string;
+};
+
+export type ProfileModelInventory = {
+	uniqueModelIds: string[];
+	duplicateModelGroups: Array<{ modelId: string; profileIds: string[] }>;
+	profileModels: Array<{ profileId: string; label: string; modelId: string }>;
+};
+
+export type AgentLabModelAssignmentProposal = {
+	status: "ready" | "blocked";
+	recommendations: AgentLabModelAssignmentRecommendation[];
+	limitations: string[];
+	inventory: ProfileModelInventory;
+	knownModelIds: string[];
 };
 
 export const IDU_MODEL_ROLES: IduModelRole[] = [
@@ -96,6 +125,7 @@ export type ModelAssignments = {
 
 export type ModelAssignmentResolution =
 	| { source: "assigned"; profile: AgentProfile; profileId: string }
+	| { source: "direct-model"; profile: AgentProfile; modelId: string }
 	| { source: "missing"; profileId: string }
 	| { source: "inherit" };
 
@@ -141,8 +171,15 @@ export function profileForModelRole(
 	const profileId = assignments.assignments[roleId];
 	if (!profileId) return undefined;
 	const profile = profiles.find((candidate) => candidate.id === profileId);
-	if (!profile) return { source: "missing", profileId };
-	return { source: "assigned", profile, profileId };
+	if (profile) return { source: "assigned", profile, profileId };
+	if (isValidDirectModelId(profileId)) {
+		return {
+			source: "direct-model",
+			modelId: profileId,
+			profile: virtualAgentProfile(roleId, profileId),
+		};
+	}
+	return { source: "missing", profileId };
 }
 
 export function applySupervisorModelAssignment(
@@ -171,8 +208,7 @@ export function saveModelAssignment(
 ): ModelAssignments {
 	const role = IDU_MODEL_ROLES.find((candidate) => candidate.id === roleId);
 	if (!role) throw new Error(`Rol desconocido: ${roleId}`);
-	if (!profiles.some((profile) => profile.id === profileId))
-		throw new Error(`Perfil desconocido: ${profileId}`);
+	validateAssignmentTarget(profileId, profiles);
 	const current = loadModelAssignments(stateRoot);
 	return saveModelAssignments(
 		stateRoot,
@@ -192,8 +228,7 @@ export function saveModelAssignments(
 	>) {
 		const role = IDU_MODEL_ROLES.find((candidate) => candidate.id === roleId);
 		if (!role) throw new Error(`Rol desconocido: ${roleId}`);
-		if (!profiles.some((profile) => profile.id === profileId))
-			throw new Error(`Perfil desconocido: ${profileId}`);
+		validateAssignmentTarget(profileId, profiles);
 		validated[role.id] = profileId;
 	}
 	mkdirSync(stateRoot, { recursive: true });
@@ -219,52 +254,118 @@ export function saveModelAssignments(
 export function recommendAgentLabModelAssignments(
 	profiles: AgentProfile[],
 	current: ModelAssignments = { version: 1, assignments: {} },
-): AgentLabModelAssignmentRecommendation[] {
+	options: { cwd?: string; knownModelIds?: string[] } = {},
+): AgentLabModelAssignmentProposal {
 	const labProfiles = profiles.slice(1);
+	const inventory = profileModelInventory(labProfiles);
+	const knownModelIds = uniqueStrings([
+		...(options.knownModelIds ?? []),
+		...readGentleModelRouting(options.cwd),
+	]);
+	const limitations: string[] = [];
+	if (!labProfiles.length) {
+		limitations.push(
+			"No hay perfiles AgentLab configurados; agregá perfiles antes de generar propuesta.",
+		);
+	}
+	if (inventory.uniqueModelIds.length < 2) {
+		limitations.push(
+			`Diversidad insuficiente: detecté ${inventory.uniqueModelIds.length} modelo(s) real(es) en perfiles AgentLab. No voy a recomendar el mismo modelo para todos los labs.`,
+		);
+		if (inventory.uniqueModelIds.length === 1) {
+			limitations.push(
+				`Modelo único detectado: ${inventory.uniqueModelIds[0]}. Creá perfiles con modelos distintos o usá selección manual.`,
+			);
+		}
+	}
 	const fallback =
 		findRecommendedProfile(labProfiles, [/general/iu]) ?? labProfiles[0];
-	if (!fallback) return [];
-	return IDU_MODEL_ROLES.filter((role) => role.group === "agentlab").map(
-		(role) => {
-			const patterns = recommendationPatternsForRole(role.id);
-			const recommendedProfile =
-				findRecommendedProfile(labProfiles, patterns) ?? fallback;
-			return {
-				roleId: role.id,
-				label: role.label,
-				recommendedProfileId: recommendedProfile.id,
-				recommendedProfile,
-				...(current.assignments[role.id]
-					? { currentProfileId: current.assignments[role.id] }
-					: {}),
-				reason: recommendationReasonForRole(role.id, recommendedProfile),
-			};
-		},
-	);
+	if (!fallback || limitations.length) {
+		return {
+			status: "blocked",
+			recommendations: [],
+			limitations,
+			inventory,
+			knownModelIds,
+		};
+	}
+	const recommendations = IDU_MODEL_ROLES.filter(
+		(role) => role.group === "agentlab",
+	).map((role) => {
+		const patterns = recommendationPatternsForRole(role.id);
+		const recommendedProfile =
+			findRecommendedProfile(labProfiles, patterns) ?? fallback;
+		return {
+			roleId: role.id,
+			label: role.label,
+			capability: capabilityForRole(role.id),
+			capabilityLabel: capabilityLabelForRole(role.id),
+			recommendedProfileId: recommendedProfile.id,
+			recommendedProfile,
+			...(current.assignments[role.id]
+				? { currentProfileId: current.assignments[role.id] }
+				: {}),
+			reason: recommendationReasonForRole(role.id, recommendedProfile),
+		};
+	});
+	return {
+		status: "ready",
+		recommendations,
+		limitations,
+		inventory,
+		knownModelIds,
+	};
 }
 
 export function formatAgentLabModelAssignmentProposal(
-	recommendations: AgentLabModelAssignmentRecommendation[],
+	proposal: AgentLabModelAssignmentProposal,
 	profiles: AgentProfile[],
 ): string {
+	const duplicateLines = proposal.inventory.duplicateModelGroups.map(
+		(group) =>
+			`- ${group.modelId}: perfiles duplicados ${group.profileIds.join(", ")}`,
+	);
+	const knownLines = proposal.knownModelIds.map((modelId) => `- ${modelId}`);
 	return [
 		"Propuesta automática por AgentLab",
 		"",
 		"Idu-pi no rota modelos automáticamente. Guardar esta propuesta requiere aprobación explícita del usuario.",
 		"",
-		...recommendations.map((recommendation) => {
-			const current = recommendation.currentProfileId
-				? (profiles.find(
-						(profile) => profile.id === recommendation.currentProfileId,
-					)?.label ?? `missing profile ${recommendation.currentProfileId}`)
-				: "sin asignación explícita";
-			return [
-				`${recommendation.label}`,
-				`  actual: ${current}`,
-				`  recomendado: ${recommendation.recommendedProfile.label} / ${profileModelLabel(recommendation.recommendedProfile)}`,
-				`  motivo: ${recommendation.reason}`,
-			].join("\n");
-		}),
+		`estado: ${proposal.status}`,
+		...(proposal.limitations.length
+			? [
+					"",
+					"Limitaciones:",
+					...proposal.limitations.map((item) => `- ${item}`),
+				]
+			: []),
+		...(duplicateLines.length
+			? ["", "Duplicados detectados:", ...duplicateLines]
+			: []),
+		...(knownLines.length
+			? ["", "Modelos conocidos por Gentle AI (sólo lectura):", ...knownLines]
+			: []),
+		...(proposal.recommendations.length
+			? [
+					"",
+					"Recomendaciones:",
+					...proposal.recommendations.map((recommendation) => {
+						const current = recommendation.currentProfileId
+							? (profiles.find(
+									(profile) => profile.id === recommendation.currentProfileId,
+								)?.label ??
+								`missing profile ${recommendation.currentProfileId}`)
+							: "sin asignación explícita";
+						return [
+							`${recommendation.label}`,
+							`  capacidad: ${recommendation.capabilityLabel}`,
+							`  actual: ${current}`,
+							`  recomendado: ${recommendation.recommendedProfile.label} / ${profileModelLabel(recommendation.recommendedProfile)}`,
+							`  motivo: ${recommendation.reason}`,
+						].join("\n");
+					}),
+				]
+			: []),
 	].join("\n");
 }
 
@@ -281,6 +382,157 @@ export function formatModelAssignments(
 			return `  ${index === 0 ? "▸" : " "} ${role.label.padEnd(28, " ")} ${value}`;
 		}),
 	].join("\n");
+}
+
+export function profileModelInventory(
+	profiles: AgentProfile[],
+): ProfileModelInventory {
+	const profileModels = profiles.map((profile) => ({
+		profileId: profile.id,
+		label: profile.label,
+		modelId: normalizeModelId(profileModelLabel(profile)),
+	}));
+	const groups = new Map<string, string[]>();
+	for (const profile of profileModels) {
+		if (!isRealModelId(profile.modelId)) continue;
+		groups.set(profile.modelId, [
+			...(groups.get(profile.modelId) ?? []),
+			profile.profileId,
+		]);
+	}
+	return {
+		profileModels,
+		uniqueModelIds: Array.from(groups.keys()).sort((left, right) =>
+			left.localeCompare(right),
+		),
+		duplicateModelGroups: Array.from(groups.entries())
+			.filter(([, profileIds]) => profileIds.length > 1)
+			.map(([modelId, profileIds]) => ({ modelId, profileIds })),
+	};
+}
+
+export function readGentleModelRouting(cwd?: string): string[] {
+	const paths = [
+		join(homedir(), ".pi", "gentle-ai", "models.json"),
+		...(cwd ? [join(cwd, ".pi", "gentle-ai", "models.json")] : []),
+	];
+	const modelIds: string[] = [];
+	for (const path of paths) {
+		if (!existsSync(path)) continue;
+		try {
+			const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+			if (!isRecord(parsed)) continue;
+			for (const value of Object.values(parsed)) {
+				if (typeof value === "string") {
+					const model = normalizeModelId(value);
+					if (isRealModelId(model)) modelIds.push(model);
+				} else if (isRecord(value) && typeof value.model === "string") {
+					const model = normalizeModelId(value.model);
+					if (isRealModelId(model)) modelIds.push(model);
+				}
+			}
+		} catch {}
+	}
+	return uniqueStrings(modelIds);
+}
+
+function capabilityForRole(roleId: IduModelRoleId): AgentLabModelCapability {
+	switch (roleId) {
+		case "agentlab-project-understanding":
+			return "project_understanding";
+		case "agentlab-architecture":
+			return "architecture";
+		case "agentlab-database":
+			return "database";
+		case "agentlab-security":
+			return "security";
+		case "agentlab-ui-ux":
+			return "ui_ux";
+		case "agentlab-performance":
+			return "performance";
+		case "agentlab-code-quality":
+			return "code_quality";
+		case "agentlab-docs":
+			return "docs";
+		case "agentlab-librarian":
+			return "librarian";
+		case "agentlab-general":
+		case "supervisor-main":
+		case "supervisor-semantic":
+		case "supervisor-compaction":
+			return "general";
+	}
+}
+
+function capabilityLabelForRole(roleId: IduModelRoleId): string {
+	switch (capabilityForRole(roleId)) {
+		case "project_understanding":
+			return "entendimiento de proyecto y contexto amplio";
+		case "architecture":
+			return "razonamiento sistémico/arquitectura";
+		case "database":
+			return "SQL, persistencia, schema y datos";
+		case "security":
+			return "auditoría adversarial y seguridad";
+		case "ui_ux":
+			return "producto, frontend y experiencia de usuario";
+		case "performance":
+			return "performance, costo y eficiencia";
+		case "code_quality":
+			return "lectura de código, testing y calidad";
+		case "docs":
+			return "documentación técnica y trazabilidad";
+		case "librarian":
+			return "lectura larga, síntesis y catalogación";
+		case "general":
+			return "auditoría general";
+	}
+}
+
+function normalizeModelId(value: string): string {
+	return value.trim();
+}
+
+function isValidDirectModelId(modelId: string): boolean {
+	return /^[A-Za-z0-9._~:@%+-]+\/[A-Za-z0-9._~:@%+-]+$/u.test(modelId.trim());
+}
+
+function validateAssignmentTarget(
+	value: string,
+	profiles: AgentProfile[],
+): void {
+	if (profiles.some((profile) => profile.id === value)) return;
+	if (isValidDirectModelId(value)) return;
+	throw new Error(`Perfil o modelo desconocido: ${value}`);
+}
+
+function virtualAgentProfile(
+	roleId: IduModelRoleId,
+	modelId: string,
+): AgentProfile {
+	return {
+		id: `${roleId}__${slugModelId(modelId)}`,
+		label: `${roleId} direct model`,
+		provider: "pi",
+		piArgs: ["--model", modelId],
+	};
+}
+
+function slugModelId(value: string): string {
+	return value
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/giu, "_")
+		.replace(/^_+|_+$/gu, "");
+}
+
+function isRealModelId(modelId: string): boolean {
+	return modelId.length > 0 && !/^pi default$/iu.test(modelId);
+}
+
+function uniqueStrings(values: string[]): string[] {
+	return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort(
+		(left, right) => left.localeCompare(right),
+	);
 }
 
 function recommendationPatternsForRole(roleId: IduModelRoleId): RegExp[] {
@@ -347,6 +599,8 @@ function formatAssignmentResolution(
 		return "inherit (fallback)";
 	if (resolution.source === "missing")
 		return `missing profile ${resolution.profileId} (fallback)`;
+	if (resolution.source === "direct-model")
+		return `${resolution.modelId} (direct model)`;
 	return `${resolution.profile.label} / ${profileModelLabel(resolution.profile)} (assigned)`;
 }
 
