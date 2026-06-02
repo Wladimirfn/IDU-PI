@@ -342,7 +342,7 @@ function isConfigFile(file: string): boolean {
 }
 
 function isSecurityFile(file: string): boolean {
-	return /(permissions?|auth|login|token|secret|\.env\.example|env)/u.test(
+	return /(^|[/._-])(permissions?|auth|login|token|secret|env)([/._-]|$)|\.env\.example/u.test(
 		file,
 	);
 }

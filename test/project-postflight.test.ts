@@ -104,6 +104,14 @@ test("auth login and env example changes are high risk", () => {
 	assert.ok(report.impactedAreas.includes("seguridad"));
 });
 
+test("decision envelope files are not security files by substring", () => {
+	const report = reportFor(["src/decision-envelope.ts"]);
+
+	assert.equal(report.risk, "medium");
+	assert.ok(report.impactedAreas.includes("code"));
+	assert.equal(report.impactedAreas.includes("seguridad"), false);
+});
+
 test("permission patch JavaScript is security code", () => {
 	const report = reportFor(["patch_permissions_server.js"]);
 

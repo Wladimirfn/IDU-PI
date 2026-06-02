@@ -21,6 +21,11 @@ import {
 	buildSourceRequiredActionsEvidenceGateways,
 	buildTaskPackageEvidenceGateways,
 } from "./evidence-gateways.js";
+import {
+	buildDecisionEnvelope,
+	decisionEnvelopeFromAdvisory,
+	decisionEnvelopeFromEvidence,
+} from "./decision-envelope.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -1403,6 +1408,20 @@ async function dispatchTool(
 				stringArg(args, "mode") ?? "from_plan",
 				stringArg(args, "maxScope") ?? "small",
 			);
+			advisoryAction.decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: String(advisoryAction.recommendation),
+				severity: "info",
+				confidence: 0.72,
+				summary: String((advisoryAction.candidateAction as JsonObject).title),
+				requiresHuman: false,
+				orchestratorDecisionRequired: Boolean(
+					advisoryAction.orchestratorDecisionRequired,
+				),
+				allowedToProceed: true,
+				evidenceRefs: ["plan:snapshot", "candidate_action"],
+				nextActions: [String(advisoryAction.recommendation)],
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1446,8 +1465,24 @@ async function dispatchTool(
 				stringArg(args, "actionId"),
 				booleanArg(args, "includePlanSnapshot", false),
 			);
-			taskPackage.evidenceGateways =
+			const taskPackageEvidenceGateways =
 				buildTaskPackageEvidenceGateways(taskPackage);
+			taskPackage.evidenceGateways = taskPackageEvidenceGateways;
+			taskPackage.decisionEnvelope = decisionEnvelopeFromEvidence(
+				name,
+				String(taskPackage.recommendation),
+				taskPackageEvidenceGateways,
+				{
+					recommendation: String(taskPackage.recommendation),
+					severity: taskPackage.humanApprovalRequired ? "needs_approval" : "warning",
+					confidence: 0.74,
+					requiresHuman: Boolean(taskPackage.humanApprovalRequired),
+					orchestratorDecisionRequired: Boolean(
+						taskPackage.orchestratorDecisionRequired,
+					),
+					nextActions: [String(taskPackage.recommendation)],
+				},
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1476,6 +1511,18 @@ async function dispatchTool(
 				runtime,
 				resolution,
 			);
+			procedure.decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: "warn",
+				severity: "info",
+				confidence: 0.7,
+				summary: String(procedure.summary),
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: true,
+				evidenceRefs: ["project:resolution", "procedure:must_consult"],
+				nextActions: [String(procedure.recommendedNext)],
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1494,6 +1541,10 @@ async function dispatchTool(
 			const request = requiredText(args, "request");
 			const report = runtime.preflight(request);
 			const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
+			const decisionEnvelope = decisionEnvelopeFromAdvisory(
+				name,
+				alignmentAdvisory,
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1502,6 +1553,7 @@ async function dispatchTool(
 				summary: `Contexto asesor: ${alignmentAdvisory.recommendation}`,
 				data: {
 					alignmentAdvisory,
+					decisionEnvelope,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					report,
@@ -1518,6 +1570,11 @@ async function dispatchTool(
 			const report = runtime.preflight(request);
 			const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
 			const evidenceGateways = buildPreflightEvidenceGateways(report);
+			const decisionEnvelope = decisionEnvelopeFromAdvisory(
+				name,
+				alignmentAdvisory,
+				evidenceGateways,
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1526,6 +1583,7 @@ async function dispatchTool(
 				summary: alignmentAdvisory.summary,
 				data: {
 					alignmentAdvisory,
+					decisionEnvelope,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					evidenceGateways,
@@ -1547,6 +1605,10 @@ async function dispatchTool(
 			const request = requiredText(args, "request");
 			const advisory = runtime.advisory(request);
 			const alignmentAdvisory = buildProjectAdvisoryForOrchestrator(advisory);
+			const decisionEnvelope = decisionEnvelopeFromAdvisory(
+				name,
+				alignmentAdvisory,
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1555,6 +1617,7 @@ async function dispatchTool(
 				summary: alignmentAdvisory.summary,
 				data: {
 					alignmentAdvisory,
+					decisionEnvelope,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					risk: advisory.level,
@@ -1586,6 +1649,20 @@ async function dispatchTool(
 				report,
 				taskTrace,
 			});
+			const decisionEnvelope = decisionEnvelopeFromEvidence(
+				name,
+				report.recommendedNext,
+				evidenceGateways,
+				{
+					recommendation: taskTrace.matchesIntent ? "warn" : "needs_evidence",
+					severity: report.requiresHumanConfirmation ? "needs_approval" : "warning",
+					confidence: 0.76,
+					requiresHuman: report.requiresHumanConfirmation,
+					orchestratorDecisionRequired: true,
+					suggestedAgentLabs: report.suggestedAgentLabs,
+					nextActions: [report.recommendedNext, String(taskTrace.nextAdvisory)],
+				},
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1593,6 +1670,7 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 				summary: report.recommendedNext,
 				data: {
+					decisionEnvelope,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					changedFiles: report.changedFiles,
@@ -1621,6 +1699,10 @@ async function dispatchTool(
 				allowAgentTaskPlan,
 			});
 			const alignmentAdvisory = buildSupervisorLoopOrchestratorAdvisory(result);
+			const decisionEnvelope = decisionEnvelopeFromAdvisory(
+				name,
+				alignmentAdvisory,
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1629,6 +1711,7 @@ async function dispatchTool(
 				summary: alignmentAdvisory.summary,
 				data: {
 					alignmentAdvisory,
+					decisionEnvelope,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					stepsExecuted: result.steps.filter(
@@ -1902,13 +1985,27 @@ async function dispatchTool(
 		}
 		case "idu_source_recommend_for_task": {
 			const result = runtime.sourceRecommend(requiredText(args, "request"));
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: result.matches.length > 0 ? "warn" : "allow",
+				severity: result.matches.length > 0 ? "warning" : "info",
+				confidence: 0.68,
+				summary: `Source recommendations: ${result.matches.length} matches`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: result.matches.length > 0,
+				allowedToProceed: true,
+				evidenceRefs: result.matches.map((match) => `source:${match.sourceId}`),
+				nextActions: result.matches.map(
+					(match) => match.orchestratorInstruction,
+				),
+			});
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: `Source recommendations: ${result.matches.length} matches`,
-				data: { result },
+				data: { result, decisionEnvelope },
 				safeNotes: [
 					...resolution.safeNotes,
 					"Recomendé fuentes/chunks desde índice local; el orquestador decide y manda subagentes.",
@@ -1921,13 +2018,29 @@ async function dispatchTool(
 			const result = runtime.sourceRequiredActions();
 			const evidenceGateways =
 				buildSourceRequiredActionsEvidenceGateways(result);
+			const decisionEnvelope = decisionEnvelopeFromEvidence(
+				name,
+				`Source required actions: ${result.actions.length}`,
+				evidenceGateways,
+				{
+					recommendation:
+						result.actions.length > 0 ? "needs_evidence" : "allow",
+					severity: result.actions.length > 0 ? "needs_approval" : "info",
+					confidence: 0.86,
+					requiresHuman: false,
+					orchestratorDecisionRequired: result.actions.length > 0,
+					nextActions: result.actions.map(
+						(action) => action.requiredAction.instructions,
+					),
+				},
+			);
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: `Source required actions: ${result.actions.length}`,
-				data: { result, actions: result.actions, evidenceGateways },
+				data: { result, actions: result.actions, evidenceGateways, decisionEnvelope },
 				safeNotes: [
 					...resolution.safeNotes,
 					"Listé fuentes que requieren lector bibliotecario; el orquestador debe despachar el subagente.",
@@ -1963,6 +2076,23 @@ async function dispatchTool(
 			]);
 			const selector = stringArg(args, "selector") ?? "latest";
 			const plan = runtime.agentLabRequestCreate(source, selector);
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: plan.errors.length > 0 ? "block" : "warn",
+				severity: plan.errors.length > 0 ? "needs_approval" : "warning",
+				confidence: 0.72,
+				summary: `Solicitud AgentLab creada: ${plan.path ?? "sin ruta"}`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: plan.errors.length === 0,
+				evidenceRefs: plan.requests.map(
+					(request) => `agentlab-request:${request.specialty}`,
+				),
+				suggestedAgentLabs: [
+					...new Set(plan.requests.map((request) => request.specialty)),
+				],
+				nextActions: ["Run idu_agentlab_review_run only by explicit orchestrator decision."],
+			});
 			return envelope({
 				ok: plan.errors.length === 0,
 				tool: name,
@@ -1970,6 +2100,7 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 				summary: `Solicitud AgentLab creada: ${plan.path ?? "sin ruta"}`,
 				data: {
+					decisionEnvelope,
 					requestFilePath: plan.path,
 					specialties: [
 						...new Set(plan.requests.map((request) => request.specialty)),
@@ -2012,6 +2143,59 @@ async function dispatchTool(
 		case "idu_agentlab_review_status": {
 			const selector = stringArg(args, "selector") ?? "latest";
 			const status = runtime.agentLabReviewStatus(selector);
+			const runs = status.result?.runs ?? [];
+			const recommendations = runs.flatMap((run) => run.recommendations);
+			const agentLabRequiresHuman =
+				!status.valid ||
+				status.result?.requiresHumanApproval === true ||
+				runs.some((run) => run.requiresHumanApproval) ||
+				recommendations.some(
+					(recommendation) => recommendation.requiresHumanApproval,
+				);
+			const agentLabHumanActions = agentLabRequiresHuman
+				? [
+						{
+							id: "agentlab-review-human-approval",
+							owner: "human" as const,
+							action: "review_agentlab_before_proceeding",
+							reason:
+								"AgentLab status or recommendation requires human/orchestrator approval.",
+							blocking: true,
+							data: {
+								recommendedNext: status.result?.recommendedNext,
+								recommendations: recommendations
+									.filter(
+										(recommendation) => recommendation.requiresHumanApproval,
+									)
+									.map((recommendation) => recommendation.title),
+							},
+						},
+					]
+				: [];
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: status.valid
+					? agentLabRequiresHuman
+						? "ask_human"
+						: "warn"
+					: "block",
+				severity: agentLabRequiresHuman ? "needs_approval" : "warning",
+				confidence: 0.74,
+				summary: status.valid
+					? `Estado AgentLab: ${status.name}`
+					: "Estado AgentLab inválido.",
+				requiresHuman: agentLabRequiresHuman,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: status.valid && !agentLabRequiresHuman,
+				evidenceRefs: (status.result?.consolidatedFindings ?? []).map(
+					(finding, index) => `agentlab-finding:${index + 1}:${finding.title}`,
+				),
+				requiredActions: agentLabHumanActions,
+				suggestedAgentLabs: runs.map((run) => run.specialty),
+				nextActions: recommendations.map(
+					(recommendation) => recommendation.suggestedNextStep,
+				),
+			});
 			return envelope({
 				ok: status.valid,
 				tool: name,
@@ -2021,19 +2205,13 @@ async function dispatchTool(
 					? `Estado AgentLab: ${status.name}`
 					: "Estado AgentLab inválido.",
 				data: {
+					decisionEnvelope,
 					statusBySpecialty: Object.fromEntries(
-						(status.result?.runs ?? []).map((run) => [
-							run.specialty,
-							run.status,
-						]),
+						runs.map((run) => [run.specialty, run.status]),
 					),
 					findings: status.result?.consolidatedFindings ?? [],
-					recommendations: (status.result?.runs ?? []).flatMap(
-						(run) => run.recommendations,
-					),
-					testsSuggested: (status.result?.runs ?? []).flatMap(
-						(run) => run.testsSuggested,
-					),
+					recommendations,
+					testsSuggested: runs.flatMap((run) => run.testsSuggested),
 					status,
 				},
 				safeNotes: [

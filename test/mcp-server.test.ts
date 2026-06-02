@@ -26,6 +26,7 @@ import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
+import type { DecisionEnvelope } from "../src/decision-envelope.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
 import type { SemanticAuditStatusReport } from "../src/semantic-audit-command.js";
@@ -964,6 +965,19 @@ test("idu_preflight detects high auth/login risk", async () => {
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(result.ok, true);
+	const decisionEnvelope = result.data.decisionEnvelope as DecisionEnvelope;
+	assert.equal(decisionEnvelope.version, 1);
+	assert.equal(decisionEnvelope.authority, "advisory");
+	assert.equal(decisionEnvelope.advisoryOnly, true);
+	assert.equal(decisionEnvelope.tool, "idu_preflight");
+	assert.equal(decisionEnvelope.recommendation, "ask_human");
+	assert.equal(decisionEnvelope.requiresHuman, true);
+	assert.equal(decisionEnvelope.allowedToProceed, false);
+	assert.ok(
+		decisionEnvelope.requiredActions.some(
+			(action) => action.action === "approve_or_adjust_before_implementation",
+		),
+	);
 	assert.equal(result.data.risk, "high");
 	assert.equal(result.data.requiresHumanConfirmation, true);
 	assert.deepEqual(result.data.detectedImpact, ["auth/seguridad", "login"]);
@@ -1006,6 +1020,15 @@ test("idu_orchestrator_procedure and task_context guide without implementing", a
 	);
 	assert.equal(procedure.ok, true);
 	assert.match(procedure.summary, /Procedimiento asesor/u);
+	assert.equal(
+		(procedure.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(procedure.data.decisionEnvelope as DecisionEnvelope)
+			.orchestratorDecisionRequired,
+		true,
+	);
 	assert.ok(
 		(procedure.data.procedure as string[]).some((step) =>
 			/revalidar/i.test(step),
@@ -1024,6 +1047,10 @@ test("idu_orchestrator_procedure and task_context guide without implementing", a
 	);
 	assert.equal(context.ok, true);
 	assert.match(context.summary, /Contexto asesor/u);
+	assert.equal(
+		(context.data.decisionEnvelope as DecisionEnvelope).recommendation,
+		"ask_human",
+	);
 	assert.equal(
 		(context.data.alignmentAdvisory as { recommendation: string })
 			.recommendation,
@@ -1055,6 +1082,15 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	);
 	assert.equal(next.ok, true);
 	assert.equal(next.data.authority, "advisory");
+	assert.equal(
+		(next.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(next.data.decisionEnvelope as DecisionEnvelope)
+			.orchestratorDecisionRequired,
+		true,
+	);
 	assert.equal(next.data.implementationOwner, "orchestrator");
 	assert.equal(next.data.agentLabsRole, "audit_only");
 	const candidate = next.data.candidateAction as {
@@ -1082,6 +1118,20 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.equal(taskPackage.data.iduRole, "advisor_auditor");
 	assert.equal(taskPackage.data.agentLabsRole, "audit_only");
 	assert.ok(Array.isArray(taskPackage.data.evidenceGateways));
+	assert.equal(
+		(taskPackage.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(taskPackage.data.decisionEnvelope as DecisionEnvelope)
+			.orchestratorDecisionRequired,
+		true,
+	);
+	assert.ok(
+		(taskPackage.data.decisionEnvelope as DecisionEnvelope).requiredActions.some(
+			(action) => action.action === "run_governance_review_before_worker",
+		),
+	);
 	assert.equal(
 		(taskPackage.data.evidenceGateways as Array<{ source: string }>)[0]?.source,
 		"task_package",
@@ -1148,6 +1198,14 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(result.ok, true);
+	const decisionEnvelope = result.data.decisionEnvelope as DecisionEnvelope;
+	assert.equal(decisionEnvelope.authority, "advisory");
+	assert.equal(decisionEnvelope.allowedToProceed, false);
+	assert.ok(
+		decisionEnvelope.requiredActions.some(
+			(action) => action.action === "resolve_task_trace_delta",
+		),
+	);
 	assert.ok(Array.isArray(result.data.evidenceGateways));
 	assert.equal(
 		(result.data.evidenceGateways as Array<{ source: string }>)[0]?.source,
@@ -1748,6 +1806,10 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(requiredActions.ok, true);
+	assert.equal(
+		(requiredActions.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
 	assert.ok(Array.isArray(requiredActions.data.evidenceGateways));
 	assert.equal(
 		(requiredActions.data.evidenceGateways as Array<{ source: string }>)[0]
@@ -1778,6 +1840,10 @@ test("postflight request create remains request-only and review-run reports sand
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.match(request.summary, /solicitud/i);
+	assert.equal(
+		(request.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
 	assert.ok(
 		request.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
 	);
@@ -1805,6 +1871,63 @@ test("postflight request create remains request-only and review-run reports sand
 	assert.ok(!external.data.run);
 	assert.ok(
 		external.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
+	);
+
+	const approvalRuntime = fakeRuntime();
+	approvalRuntime.agentLabReviewStatus = (): AgentLabReviewStatus => ({
+		path: "run.json",
+		name: "run.json",
+		valid: true,
+		errors: [],
+		result: {
+			generatedAt: "2026-05-25T00:00:00.000Z",
+			sourceRequestFile: "request.json",
+			warning: "Revisión AgentLab. No aplica cambios.",
+			projectId: "sistema_de_mantencion",
+			runs: [
+				{
+					requestId: "req-1",
+					specialty: "architecture",
+					status: "completed",
+					commandsExecuted: [],
+					rawSummary: "Requires approval.",
+					contractValidation: { valid: true, errors: [] },
+					findings: [],
+					recommendations: [
+						{
+							title: "Review architecture change",
+							description: "Human review required.",
+							rationale: "Risky architecture change.",
+							expectedBenefit: "safety",
+							risk: "high",
+							requiresHumanApproval: true,
+							suggestedNextStep: "Ask human before proceeding.",
+						},
+					],
+					testsSuggested: [],
+					requiresHumanApproval: true,
+				},
+			],
+			consolidatedSummary: "Approval needed.",
+			consolidatedFindings: [],
+			recommendedNext: "Ask human before proceeding.",
+			requiresHumanApproval: true,
+			safeNotes: [],
+		},
+	});
+	const approvalStatus = await callIduMcpTool(
+		"idu_agentlab_review_status",
+		{ selector: "latest" },
+		{ runtimeFactory: () => approvalRuntime, projectResolver: () => registered() },
+	);
+	const approvalDecision = approvalStatus.data
+		.decisionEnvelope as DecisionEnvelope;
+	assert.equal(approvalDecision.requiresHuman, true);
+	assert.equal(approvalDecision.allowedToProceed, false);
+	assert.ok(
+		approvalDecision.requiredActions.some(
+			(action) => action.action === "review_agentlab_before_proceeding",
+		),
 	);
 
 	const invalid = await callIduMcpTool(
