@@ -354,6 +354,13 @@ import {
 	readPiModelCatalogSnapshot,
 	resolvePiModelCatalogSnapshotPath,
 } from "./model-catalog.js";
+import {
+	flushIduUsageEvents,
+	formatIduUsageSummary,
+	readIduUsageEvents,
+	recordIduUsageEventDeferred,
+	summarizeIduUsageEvents,
+} from "./usage-events.js";
 
 export type CliResult = {
 	exitCode: number;
@@ -1160,6 +1167,27 @@ export function normalizeCliArgs(args: string[]): string[] {
 	return args[0] === "--" ? args.slice(1) : args;
 }
 
+function recordCliUsage(
+	runtime: CliRuntime,
+	action: string,
+	fields: {
+		risk?: string;
+		recommendation?: string;
+		allowedToProceed?: boolean;
+		requiresHuman?: boolean;
+		durationMs?: number;
+		ok?: boolean;
+	} = {},
+): void {
+	recordIduUsageEventDeferred(runtime.workspaceRoot, {
+		projectId: runtime.projectId,
+		surface: "cli",
+		action,
+		active: getIduSessionStatus(runtime.projectId).active,
+		...fields,
+	});
+}
+
 export async function runCliCommand(
 	args: string[],
 	runtime?: CliRuntime,
@@ -1229,6 +1257,7 @@ export async function runCliCommand(
 			case "idu": {
 				activateIduSession(activeRuntime.projectId);
 				activeRuntime.supervisorOnIduActivation();
+				recordCliUsage(activeRuntime, command, { ok: true });
 				return ok(
 					[
 						"Guardrails automáticos activados para el proyecto activo.",
@@ -1237,17 +1266,22 @@ export async function runCliCommand(
 					].join("\n"),
 				);
 			}
-			case "idu-off":
-				return ok(
-					formatIduSessionStatus(deactivateIduSession(activeRuntime.projectId)),
-				);
-			case "idu-status":
-				return ok(
-					formatIduSessionStatus(getIduSessionStatus(activeRuntime.projectId)),
-				);
+			case "idu-off": {
+				const status = deactivateIduSession(activeRuntime.projectId);
+				recordCliUsage(activeRuntime, command, { ok: true });
+				return ok(formatIduSessionStatus(status));
+			}
+			case "idu-status": {
+				const status = getIduSessionStatus(activeRuntime.projectId);
+				recordCliUsage(activeRuntime, command, { ok: true });
+				return ok(formatIduSessionStatus(status));
+			}
 			case "idu-prepare":
-			case "prepare":
-				return ok(activeRuntime.formatPrepare(activeRuntime.prepare()));
+			case "prepare": {
+				const result = activeRuntime.prepare();
+				recordCliUsage(activeRuntime, command, { ok: true });
+				return ok(activeRuntime.formatPrepare(result));
+			}
 			case "idu-project-reset-state":
 			case "project-reset-state":
 				return ok(
@@ -1417,22 +1451,49 @@ export async function runCliCommand(
 					),
 				);
 			case "idu-preflight":
-			case "preflight":
-				return ok(
-					activeRuntime.formatPreflight(
-						activeRuntime.preflight(requiredText(rest)),
-					),
-				);
+			case "preflight": {
+				const report = activeRuntime.preflight(requiredText(rest));
+				recordCliUsage(activeRuntime, command, {
+					risk: report.risk,
+					recommendation: report.recommendedNext,
+					allowedToProceed: report.okToProceed,
+					requiresHuman: report.requiresHumanConfirmation,
+					ok: report.okToProceed,
+				});
+				return ok(activeRuntime.formatPreflight(report));
+			}
 			case "idu-advisory":
-			case "advisory":
+			case "advisory": {
+				const advisory = activeRuntime.advisory(requiredText(rest));
+				recordCliUsage(activeRuntime, command, {
+					recommendation: advisory.recommendation,
+					requiresHuman: advisory.requiresHumanConfirmation,
+					allowedToProceed: advisory.okToProceed,
+					ok: advisory.okToProceed,
+				});
+				return ok(activeRuntime.formatAdvisory(advisory));
+			}
+			case "idu-postflight":
+			case "postflight": {
+				const report = activeRuntime.postflight();
+				recordCliUsage(activeRuntime, command, {
+					risk: report.risk,
+					recommendation: report.recommendedNext,
+					requiresHuman: report.requiresHumanConfirmation,
+					ok: !report.requiresHumanConfirmation,
+				});
+				return ok(activeRuntime.formatPostflight(report));
+			}
+			case "idu-usage-status":
+			case "usage-status":
+				await flushIduUsageEvents();
 				return ok(
-					activeRuntime.formatAdvisory(
-						activeRuntime.advisory(requiredText(rest)),
+					formatIduUsageSummary(
+						summarizeIduUsageEvents(
+							readIduUsageEvents(activeRuntime.workspaceRoot),
+						),
 					),
 				);
-			case "idu-postflight":
-			case "postflight":
-				return ok(activeRuntime.formatPostflight(activeRuntime.postflight()));
 			case "idu-lab-review-plan":
 			case "lab-review-plan": {
 				const mode = rest[0] ?? "postflight";
@@ -1888,6 +1949,16 @@ async function runBootstrapIduCommand(): Promise<string> {
 		message: finalBlocked
 			? "Repo real protegido; faltan conexiones externas para cerrar el plan"
 			: "Repo real protegido; reporte final listo",
+	});
+	recordIduUsageEventDeferred(bootstrap.statePaths.stateRoot, {
+		projectId: bootstrap.project.id,
+		surface: "cli",
+		action: "idu",
+		active: getIduSessionStatus(bootstrap.project.id).active,
+		recommendation: finalBlocked ? "blocked" : "ready",
+		allowedToProceed: !finalBlocked,
+		requiresHuman: finalBlocked,
+		ok: !finalBlocked,
 	});
 	return finalReport;
 }
@@ -2500,6 +2571,7 @@ export function helpText(): string {
 		'  idu-pi idu-preflight "solicitud"',
 		'  idu-pi idu-advisory "solicitud"',
 		"  idu-pi idu-postflight",
+		"  idu-pi idu-usage-status",
 		"  idu-pi idu-lab-review-plan postflight",
 		"  idu-pi revisar",
 		"  idu-pi idu-agentlab-request-create postflight",
@@ -2869,7 +2941,9 @@ async function selectSearchableMenu(
 					.join("\n")
 			: panelLine("Sin resultados", width, ANSI_DIM);
 		const footer = bottomBorder(width);
-		process.stdout.write(`${ANSI_HOME}${header}\n${rows}\n${footer}${ANSI_CLEAR_TO_END}`);
+		process.stdout.write(
+			`${ANSI_HOME}${header}\n${rows}\n${footer}${ANSI_CLEAR_TO_END}`,
+		);
 	};
 	try {
 		render();

@@ -1,0 +1,119 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import {
+	formatIduUsageSummary,
+	readIduUsageEvents,
+	recordIduUsageEvent,
+	summarizeIduUsageEvents,
+	usageEventsPath,
+} from "../src/usage-events.js";
+
+function tempStateRoot(): string {
+	return mkdtempSync(join(tmpdir(), "idu-usage-events-"));
+}
+
+test("usage events append safe JSONL under stateRoot reports", async () => {
+	const root = tempStateRoot();
+	try {
+		const result = await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "idu-preflight dangerous text should sanitize",
+			active: true,
+			risk: "high",
+			recommendation: "ask_human",
+			allowedToProceed: false,
+			requiresHuman: true,
+			durationMs: 12.4,
+			ok: false,
+		});
+		assert.equal(result.ok, true);
+		assert.equal(result.path, usageEventsPath(root));
+		const events = readIduUsageEvents(root);
+		assert.equal(events.length, 1);
+		assert.equal(events[0]?.projectId, "idu-pi");
+		assert.equal(events[0]?.surface, "cli");
+		assert.equal(
+			events[0]?.action,
+			"idu-preflight_dangerous_text_should_sanitize",
+		);
+		assert.equal(events[0]?.allowedToProceed, false);
+		assert.equal(events[0]?.requiresHuman, true);
+		assert.equal(events[0]?.durationMs, 12);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("usage event reader ignores malformed and bounds by limit", async () => {
+	const root = tempStateRoot();
+	try {
+		const path = usageEventsPath(root);
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "status",
+		});
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_status",
+		});
+		writeFileSync(
+			path,
+			`${readIduUsageEvents(root)
+				.map((event) => JSON.stringify(event))
+				.join("\n")}\nnot-json\n`,
+			"utf8",
+		);
+		const events = readIduUsageEvents(root, 1);
+		assert.equal(events.length, 0, "bounded malformed tail should be ignored");
+		const all = readIduUsageEvents(root, 10);
+		assert.equal(all.length, 2);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("usage summary counts surfaces actions recommendations and tri-state fields", async () => {
+	const root = tempStateRoot();
+	try {
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "idu-preflight",
+			active: true,
+			recommendation: "ask_human",
+			allowedToProceed: false,
+			requiresHuman: true,
+			ok: false,
+		});
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_postflight",
+			active: false,
+			recommendation: "warn",
+			allowedToProceed: true,
+			requiresHuman: false,
+			ok: true,
+		});
+		const summary = summarizeIduUsageEvents(readIduUsageEvents(root));
+		assert.equal(summary.totalEvents, 2);
+		assert.equal(summary.bySurface.cli, 1);
+		assert.equal(summary.bySurface.mcp, 1);
+		assert.equal(summary.byAction["idu-preflight"], 1);
+		assert.equal(summary.byRecommendation.ask_human, 1);
+		assert.equal(summary.active.true, 1);
+		assert.equal(summary.active.false, 1);
+		assert.equal(summary.allowedToProceed.false, 1);
+		assert.equal(summary.requiresHuman.true, 1);
+		assert.match(formatIduUsageSummary(summary), /Uso Idu-pi/u);
+		assert.match(formatIduUsageSummary(summary), /idu_postflight/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});

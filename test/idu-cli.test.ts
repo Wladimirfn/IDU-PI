@@ -18,6 +18,7 @@ import {
 	normalizeCliArgs,
 	type CliRuntime,
 } from "../src/cli.js";
+import { flushIduUsageEvents } from "../src/usage-events.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
@@ -1649,6 +1650,7 @@ test("cli natural approval only acts with pending Master Plan action", async () 
 test("cli idu activa sesión persistente", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
 		const result = await runCliCommand(["idu"], runtime);
+		await flushIduUsageEvents();
 
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Guardrails automáticos activados/u);
@@ -1656,6 +1658,23 @@ test("cli idu activa sesión persistente", async () => {
 			existsSync(join(workspaceRoot, "reports", "idu-session-state.json")),
 			true,
 		);
+		assert.equal(
+			existsSync(join(workspaceRoot, "reports", "idu-usage-events.jsonl")),
+			true,
+		);
+	});
+});
+
+test("cli usage-status muestra resumen de eventos locales", async () => {
+	await withRuntime(async (runtime) => {
+		await runCliCommand(["idu"], runtime);
+		const result = await runCliCommand(["idu-usage-status"], runtime);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Uso Idu-pi/u);
+		assert.match(result.stdout, /eventos: 1/u);
+		assert.match(result.stdout, /cli/u);
+		assert.match(result.stdout, /idu/u);
 	});
 });
 
@@ -1789,19 +1808,23 @@ test("cli advisory cambia login devuelve advisory", async () => {
 	});
 });
 
-test("cli postflight funciona sin escribir archivos", async () => {
+test("cli postflight registra sólo evento de uso local", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
 		const before = existsSync(join(workspaceRoot, "reports"))
 			? readdirSync(join(workspaceRoot, "reports"))
 			: [];
 		const result = await runCliCommand(["idu-postflight"], runtime);
+		await flushIduUsageEvents();
 
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Postflight Idu-pi/u);
 		const after = existsSync(join(workspaceRoot, "reports"))
 			? readdirSync(join(workspaceRoot, "reports"))
 			: [];
-		assert.deepEqual(after, before);
+		assert.deepEqual(
+			after.filter((entry) => !before.includes(entry)),
+			["idu-usage-events.jsonl"],
+		);
 	});
 });
 

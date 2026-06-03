@@ -27,6 +27,7 @@ import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { DecisionEnvelope } from "../src/decision-envelope.js";
+import { flushIduUsageEvents } from "../src/usage-events.js";
 import type { ContextBudgetUsage } from "../src/context-budget.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
@@ -871,7 +872,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_source_required_actions"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
-	assert.ok(tools.some((tool) => tool.name === "idu_architectural_pruning_plan"));
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
+	);
 	assert.equal(tools.length, 44);
 });
 
@@ -975,6 +978,52 @@ test("idu_status works with mocked active project", async () => {
 	);
 	assert.equal(result.ok, true);
 	assert.equal(result.projectPath, "C:/projects/active");
+});
+
+test("MCP usage recording does not write outside stateRoot", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-mcp-usage-"));
+	try {
+		const runtime = fakeRuntime("C:/projects/sistema");
+		runtime.workspaceRoot = join(root, "workspace");
+		await callIduMcpTool(
+			"idu_status",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => registered("C:/projects/sistema"),
+			},
+		);
+		assert.equal(
+			existsSync(
+				join(runtime.workspaceRoot, "reports", "idu-usage-events.jsonl"),
+			),
+			false,
+		);
+
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		await callIduMcpTool(
+			"idu_status",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered("C:/projects/sistema"),
+					stateRoot,
+				}),
+			},
+		);
+		await flushIduUsageEvents();
+		const usagePath = join(stateRoot, "reports", "idu-usage-events.jsonl");
+		assert.equal(existsSync(usagePath), true);
+		const event = JSON.parse(readFileSync(usagePath, "utf8").trim()) as {
+			surface?: string;
+			action?: string;
+		};
+		assert.equal(event.surface, "mcp");
+		assert.equal(event.action, "idu_status");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("idu_activate and idu_deactivate change session state", async () => {
@@ -1202,7 +1251,9 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		true,
 	);
 	assert.ok(
-		(taskPackage.data.decisionEnvelope as DecisionEnvelope).requiredActions.some(
+		(
+			taskPackage.data.decisionEnvelope as DecisionEnvelope
+		).requiredActions.some(
 			(action) => action.action === "run_governance_review_before_worker",
 		),
 	);
@@ -1281,8 +1332,9 @@ test("MCP context budgets report plan and source truncation explicitly", async (
 		{ sourceId: "source-demo-manual-abc123" },
 		options,
 	);
-	const readBudget = (read.data.result as { contextBudgetUsage: ContextBudgetUsage })
-		.contextBudgetUsage;
+	const readBudget = (
+		read.data.result as { contextBudgetUsage: ContextBudgetUsage }
+	).contextBudgetUsage;
 	assert.equal(readBudget.profile, "source_chunk_read");
 	assert.equal(readBudget.truncated, true);
 	assert.ok(
@@ -1385,7 +1437,10 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 	assert.deepEqual(trace.contractDelta, [
 		{ contract: "data", status: "expected_not_observed" },
 	]);
-	assert.match(result.safeNotes.join("\n"), /no ejecutó build\/test automáticamente/u);
+	assert.match(
+		result.safeNotes.join("\n"),
+		/no ejecutó build\/test automáticamente/u,
+	);
 	assert.match(result.safeNotes.join("\n"), /no cierra ni aplica/u);
 });
 
@@ -1548,7 +1603,10 @@ test("idu_architectural_pruning_plan is advisory-only", async () => {
 	assert.equal(result.ok, true);
 	assert.ok(Array.isArray(result.data.candidates));
 	assert.equal((result.data.plan as { noDeletion: boolean }).noDeletion, true);
-	assert.equal((result.data.plan as { noAutoApprove: boolean }).noAutoApprove, true);
+	assert.equal(
+		(result.data.plan as { noAutoApprove: boolean }).noAutoApprove,
+		true,
+	);
 	assert.equal(
 		(result.data.decisionEnvelope as DecisionEnvelope).authority,
 		"advisory",
@@ -1939,17 +1997,13 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	);
 	assert.equal(read.ok, true);
 	assert.equal(
-		(
-			(read.data.result as { contextBudgetUsage: ContextBudgetUsage })
-				.contextBudgetUsage
-		).profile,
+		(read.data.result as { contextBudgetUsage: ContextBudgetUsage })
+			.contextBudgetUsage.profile,
 		"source_chunk_read",
 	);
 	assert.equal(
-		(
-			(read.data.result as { contextBudgetUsage: ContextBudgetUsage })
-				.contextBudgetUsage
-		).advisoryOnly,
+		(read.data.result as { contextBudgetUsage: ContextBudgetUsage })
+			.contextBudgetUsage.advisoryOnly,
 		true,
 	);
 	assert.ok(read.safeNotes.some((note) => /No consulté web/u.test(note)));
@@ -1981,10 +2035,8 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	);
 	assert.equal(research.ok, true);
 	assert.equal(
-		(
-			(research.data.result as { contextBudgetUsage: ContextBudgetUsage })
-				.contextBudgetUsage
-		).profile,
+		(research.data.result as { contextBudgetUsage: ContextBudgetUsage })
+			.contextBudgetUsage.profile,
 		"source_research",
 	);
 	assert.ok(research.safeNotes.some((note) => /No consulté web/u.test(note)));
@@ -2017,10 +2069,8 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	);
 	assert.equal(chunk.ok, true);
 	assert.equal(
-		(
-			(chunk.data.result as { contextBudgetUsage: ContextBudgetUsage })
-				.contextBudgetUsage
-		).profile,
+		(chunk.data.result as { contextBudgetUsage: ContextBudgetUsage })
+			.contextBudgetUsage.profile,
 		"source_chunk_read",
 	);
 	assert.ok(chunk.safeNotes.some((note) => /No consulté web/u.test(note)));
@@ -2153,7 +2203,10 @@ test("postflight request create remains request-only and review-run reports sand
 	const approvalStatus = await callIduMcpTool(
 		"idu_agentlab_review_status",
 		{ selector: "latest" },
-		{ runtimeFactory: () => approvalRuntime, projectResolver: () => registered() },
+		{
+			runtimeFactory: () => approvalRuntime,
+			projectResolver: () => registered(),
+		},
 	);
 	const approvalDecision = approvalStatus.data
 		.decisionEnvelope as DecisionEnvelope;

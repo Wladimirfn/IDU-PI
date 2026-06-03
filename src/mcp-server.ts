@@ -51,6 +51,7 @@ import {
 	slugifyProjectId,
 } from "./projects.js";
 import type { StructuredTask } from "./structured-task-queue.js";
+import { recordIduUsageEventDeferred } from "./usage-events.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -110,6 +111,7 @@ export type IduMcpProjectResolution = {
 	status: IduMcpProjectResolutionStatus;
 	projectId: string;
 	projectPath: string;
+	stateRoot?: string;
 	recommendedNext?: string;
 	safeNotes: string[];
 	errors: string[];
@@ -572,6 +574,7 @@ export function resolveMcpProjectContext(
 				status: "registered_project",
 				projectId: registered.id,
 				projectPath: registered.path,
+				...(registered.stateRoot ? { stateRoot: registered.stateRoot } : {}),
 				safeNotes: [],
 				errors: [],
 			};
@@ -582,6 +585,9 @@ export function resolveMcpProjectContext(
 				status: "active_project",
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
+				...(activeProject.stateRoot
+					? { stateRoot: activeProject.stateRoot }
+					: {}),
 				safeNotes: [],
 				errors: [],
 			};
@@ -602,6 +608,40 @@ export function resolveMcpProjectContext(
 		const projectPath = inputProjectPath?.trim() || process.cwd();
 		return invalidProject(projectPath, [redactSecrets(errorMessage(error))]);
 	}
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+	return typeof value === "boolean" ? value : undefined;
+}
+
+function recordMcpUsage(
+	runtime: CliRuntime,
+	result: IduMcpToolResult,
+	durationMs: number,
+	stateRoot?: string,
+): void {
+	if (!stateRoot) return;
+	const decisionEnvelope = isRecord(result.data.decisionEnvelope)
+		? result.data.decisionEnvelope
+		: undefined;
+	recordIduUsageEventDeferred(stateRoot, {
+		projectId: runtime.projectId,
+		surface: "mcp",
+		action: result.tool,
+		active: getIduSessionStatus(runtime.projectId).active,
+		risk: stringValue(result.data.risk),
+		recommendation: stringValue(decisionEnvelope?.recommendation),
+		allowedToProceed: booleanValue(decisionEnvelope?.allowedToProceed),
+		requiresHuman:
+			booleanValue(decisionEnvelope?.requiresHuman) ??
+			booleanValue(result.data.requiresHumanConfirmation),
+		durationMs,
+		ok: result.ok,
+	});
 }
 
 export async function callIduMcpTool(
@@ -652,7 +692,15 @@ export async function callIduMcpTool(
 		const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
 			resolution.projectPath,
 		);
-		return await dispatchTool(name, args, runtime, resolution);
+		const startedAt = Date.now();
+		const result = await dispatchTool(name, args, runtime, resolution);
+		recordMcpUsage(
+			runtime,
+			result,
+			Date.now() - startedAt,
+			resolution.stateRoot,
+		);
+		return result;
 	} catch (error) {
 		return envelope({
 			ok: false,
@@ -1502,7 +1550,9 @@ async function dispatchTool(
 				taskPackageEvidenceGateways,
 				{
 					recommendation: String(taskPackage.recommendation),
-					severity: taskPackage.humanApprovalRequired ? "needs_approval" : "warning",
+					severity: taskPackage.humanApprovalRequired
+						? "needs_approval"
+						: "warning",
 					confidence: 0.74,
 					requiresHuman: Boolean(taskPackage.humanApprovalRequired),
 					orchestratorDecisionRequired: Boolean(
@@ -1689,7 +1739,9 @@ async function dispatchTool(
 				evidenceGateways,
 				{
 					recommendation: taskTrace.matchesIntent ? "warn" : "needs_evidence",
-					severity: report.requiresHumanConfirmation ? "needs_approval" : "warning",
+					severity: report.requiresHumanConfirmation
+						? "needs_approval"
+						: "warning",
 					confidence: 0.76,
 					requiresHuman: report.requiresHumanConfirmation,
 					orchestratorDecisionRequired: true,
@@ -2167,7 +2219,12 @@ async function dispatchTool(
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: `Source required actions: ${result.actions.length}`,
-				data: { result, actions: result.actions, evidenceGateways, decisionEnvelope },
+				data: {
+					result,
+					actions: result.actions,
+					evidenceGateways,
+					decisionEnvelope,
+				},
 				safeNotes: [
 					...resolution.safeNotes,
 					"Listé fuentes que requieren lector bibliotecario; el orquestador debe despachar el subagente.",
@@ -2218,7 +2275,9 @@ async function dispatchTool(
 				suggestedAgentLabs: [
 					...new Set(plan.requests.map((request) => request.specialty)),
 				],
-				nextActions: ["Run idu_agentlab_review_run only by explicit orchestrator decision."],
+				nextActions: [
+					"Run idu_agentlab_review_run only by explicit orchestrator decision.",
+				],
 			});
 			return envelope({
 				ok: plan.errors.length === 0,
@@ -2541,7 +2600,9 @@ function budgetJsonArray(
 	};
 }
 
-function withSourceContentBudget<T extends { content: string; truncated?: boolean }>(
+function withSourceContentBudget<
+	T extends { content: string; truncated?: boolean },
+>(
 	result: T,
 	profile: ContextBudgetProfile,
 	path: string,
