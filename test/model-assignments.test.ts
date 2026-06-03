@@ -11,9 +11,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { AgentRouter } from "../src/agent-router.js";
 import type { AgentProfile } from "../src/config.js";
+import { buildUnifiedModelCatalog } from "../src/model-catalog.js";
 import {
 	IDU_MODEL_ROLES,
 	applySupervisorModelAssignment,
+	assignmentOptionsFromModelCatalog,
 	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
@@ -185,6 +187,31 @@ test("AgentLab model proposal blocks duplicate single-model profiles", () => {
 	assert.match(
 		formatAgentLabModelAssignmentProposal(proposal, duplicateProfiles),
 		/Diversidad insuficiente/u,
+	);
+});
+
+test("assignment options include profiles unified catalog models and custom fallback", () => {
+	const catalog = buildUnifiedModelCatalog({
+		piModels: [
+			{ provider: "minimax", id: "MiniMax-M2.7", name: "MiniMax M2.7" },
+		],
+		gentleModelIds: ["minimax/MiniMax-M2.7", "openai-codex/gpt"],
+	});
+	const options = assignmentOptionsFromModelCatalog(profiles, catalog.entries);
+
+	assert.ok(options.some((option) => option.value === "default"));
+	assert.equal(
+		options.filter((option) => option.value === "minimax/MiniMax-M2.7").length,
+		1,
+	);
+	assert.ok(options.some((option) => option.value === "__custom_model__"));
+	assert.equal(
+		options.find((option) => option.value === "minimax/MiniMax-M2.7")?.source,
+		"model",
+	);
+	assert.equal(
+		options.filter((option) => option.value === "openai-codex/gpt").length,
+		0,
 	);
 });
 

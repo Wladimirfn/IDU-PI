@@ -9,6 +9,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type AgentRouter, profileModelLabel } from "./agent-router.js";
 import type { AgentProfile } from "./config.js";
+import {
+	normalizeModelCatalogId,
+	type UnifiedModelCatalogEntry,
+} from "./model-catalog.js";
 
 export type IduModelRoleId =
 	| "supervisor-main"
@@ -382,6 +386,49 @@ export function formatModelAssignments(
 			return `  ${index === 0 ? "▸" : " "} ${role.label.padEnd(28, " ")} ${value}`;
 		}),
 	].join("\n");
+}
+
+export function assignmentOptionsFromModelCatalog(
+	profiles: AgentProfile[],
+	catalogEntries: UnifiedModelCatalogEntry[],
+): Array<{
+	value: string;
+	label: string;
+	source: "profile" | "model" | "custom";
+}> {
+	const options = new Map<
+		string,
+		{ value: string; label: string; source: "profile" | "model" | "custom" }
+	>();
+	const profileModelIds = new Set<string>();
+	for (const profile of profiles) {
+		const modelId = normalizeModelCatalogId(profileModelLabel(profile));
+		if (modelId) profileModelIds.add(modelId);
+		options.set(profile.id, {
+			value: profile.id,
+			label: `${profile.label} (${profile.id}) — ${profileModelLabel(profile)}`,
+			source: "profile",
+		});
+	}
+	for (const entry of catalogEntries) {
+		if (
+			options.has(entry.canonicalId) ||
+			profileModelIds.has(entry.canonicalId)
+		) {
+			continue;
+		}
+		options.set(entry.canonicalId, {
+			value: entry.canonicalId,
+			label: `${entry.label} (${entry.canonicalId})`,
+			source: "model",
+		});
+	}
+	options.set("__custom_model__", {
+		value: "__custom_model__",
+		label: "Custom model id (provider/model)",
+		source: "custom",
+	});
+	return [...options.values()];
 }
 
 export function profileModelInventory(
