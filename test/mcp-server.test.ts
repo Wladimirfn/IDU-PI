@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -896,6 +897,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_plan_snapshot"));
 	assert.ok(tools.some((tool) => tool.name === "idu_next_advisory_action"));
 	assert.ok(tools.some((tool) => tool.name === "idu_task_package_create"));
+	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_context_pack"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_add"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_remove"));
@@ -921,7 +923,97 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
 	);
-	assert.equal(tools.length, 46);
+	assert.equal(tools.length, 47);
+});
+
+test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-project-"));
+	writeFileSync(
+		join(projectPath, "README.md"),
+		[
+			"# Idu-pi",
+			"",
+			"Idu-pi es un cerebelo supervisor de proyecto para el orquestador.",
+			"",
+			"## Qué problema resuelve",
+			"Evita que el proyecto avance sin objetivo claro o evidencia.",
+			"",
+			"## Qué NO es",
+			"No reemplaza al humano ni al orquestador.",
+		].join("\n"),
+		"utf8",
+	);
+	const result = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{
+			request:
+				"Implement Goal Injection / Supervisor Context Pack for orchestrator AgentLabs completion decisions",
+			includePlanSnapshot: true,
+		},
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => registered(projectPath),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	assert.equal(result.data.authority, "advisory");
+	assert.equal(result.data.audience, "orchestrator_subagents");
+	assert.match(JSON.stringify(result.data.goals), /cerebelo supervisor/u);
+	assert.match(
+		JSON.stringify(result.data.goals),
+		/Mantener gobernanza preventiva/u,
+	);
+	assert.ok((result.data.contracts as string[]).includes("agent"));
+	assert.match(JSON.stringify(result.data.autonomyGates), /postflight/u);
+	assert.match(
+		JSON.stringify(result.data.skipNoiseGuidance),
+		/No leas docs completas/u,
+	);
+	assert.ok(result.data.taskPackage);
+	assert.ok(result.data.taskContext);
+	assert.ok(result.data.planSnapshot);
+	const budget = result.data.contextBudget as ContextBudgetUsage;
+	assert.equal(budget.profile, "supervisor_context_pack");
+	assert.equal(budget.contractPromotionAllowed, false);
+});
+
+test("idu_supervisor_context_pack limita README y request gigantes sin redistribuir prompt crudo", async () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-large-"));
+	writeFileSync(
+		join(projectPath, "README.md"),
+		`# Idu-pi\n\n${"texto enorme ".repeat(3000)}`,
+		"utf8",
+	);
+	const hugeRequest = `audit frontend data agent context quality ${"PROMPT_GIGANTE_NO_REDISTRIBUIR ".repeat(1000)}`;
+	const result = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{
+			request: hugeRequest,
+			includePlanSnapshot: false,
+		},
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => registered(projectPath),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	assert.equal(result.data.planSnapshot, undefined);
+	const serialized = JSON.stringify(result.data);
+	assert.equal(serialized.includes("originalText"), false);
+	assert.ok(serialized.length < hugeRequest.length / 2);
+	assert.ok(
+		(serialized.match(/PROMPT_GIGANTE_NO_REDISTRIBUIR/gu) ?? []).length <= 30,
+	);
+	assert.match(String(result.data.request), /context truncated/u);
+	assert.match(
+		String((result.data.taskPackage as Record<string, unknown>).request),
+		/context truncated/u,
+	);
+	const budget = result.data.contextBudget as ContextBudgetUsage;
+	assert.equal(budget.profile, "supervisor_context_pack");
+	assert.equal(budget.truncated, true);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {

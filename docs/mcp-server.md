@@ -127,6 +127,7 @@ Después de aprobar el Plan Maestro, el loop preventivo recomendado para cualqui
 
 ```text
 idu_plan_snapshot
+→ idu_supervisor_context_pack
 → idu_next_advisory_action
 → idu_task_package_create
 → subagente governance-review del orquestador
@@ -135,7 +136,7 @@ idu_plan_snapshot
 → AgentLab audit-only si el orquestador decide ejecutarlo explícitamente
 ```
 
-Las tools advisory nuevas no ejecutan cambios ni AgentLabs. Producen lineamientos, acciones candidatas y paquetes para subagentes normales. El paso `governance-review` ocurre antes de codificar para evitar rework: valida Plan Maestro, flujos, contratos, criterios de aceptación, stop conditions y política AgentLab. AgentLabs siguen siendo audit-only y sólo corren mediante `idu_agentlab_review_run` o llamada explícita equivalente del orquestador.
+Las tools advisory nuevas no ejecutan cambios ni AgentLabs. Producen lineamientos, acciones candidatas y paquetes para subagentes normales. `idu_supervisor_context_pack` es el punto de inyección natural para el orquestador: combina visión humana del README, objetivo del Plan Maestro, contratos, riesgos, lecturas requeridas, guía para omitir ruido y gates de autonomía sin volcar documentos largos. El paso `governance-review` ocurre antes de codificar para evitar rework: valida Plan Maestro, flujos, contratos, criterios de aceptación, stop conditions y política AgentLab. AgentLabs siguen siendo audit-only y sólo corren mediante `idu_agentlab_review_run` o llamada explícita equivalente del orquestador.
 
 Para proyectos con persistencia, el Plan Maestro debe expresar gobernanza de datos: stores detectados/canónicos, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de artefactos SQLite/JSON/JSONL. Los flujos de ingesta, reporting y API deben apuntar a stores existentes; Idu-pi no inventa stores sin evidencia.
 
@@ -163,6 +164,7 @@ Herramientas mínimas:
 | `idu_plan_snapshot` | Devuelve vista compacta del Plan aprobado: objetivo, contratos, flujos, riesgos, drift, blockers y AgentLabs recomendados. |
 | `idu_next_advisory_action` | Propone una próxima acción candidata desde Plan/request; no ordena, no implementa y no ejecuta AgentLabs. |
 | `idu_task_package_create` | Crea paquete para subagentes normales con brief obligatorio de governance-review previo al worker. |
+| `idu_supervisor_context_pack` | Inyecta contexto supervisor compacto para orquestador/subagentes: visión humana, Plan Maestro, contratos, riesgos, lecturas, ruido a omitir y gates de autonomía. |
 | `idu_orchestrator_procedure` | Devuelve procedimiento asesor para crear/actualizar plan, implementar o revisar postflight sin reemplazar al orquestador. |
 | `idu_task_context` | Devuelve contratos afectados, lecturas requeridas, labs sugeridos audit-only y guía para subagentes del orquestador. |
 | `idu_preflight` | Evalúa riesgo/impacto de una solicitud humana y devuelve advisory compacto para el orquestador. |

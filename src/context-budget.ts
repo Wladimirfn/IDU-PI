@@ -4,6 +4,7 @@ export type ContextBudgetProfile =
 	| "orchestrator_advisory"
 	| "plan_snapshot"
 	| "task_package"
+	| "supervisor_context_pack"
 	| "source_recommendation"
 	| "source_chunk_read"
 	| "source_research";
@@ -106,6 +107,17 @@ export const CONTEXT_BUDGETS: Record<ContextBudgetProfile, ContextBudget> = {
 		maxTextFieldChars: 1_000,
 		maxArrayItems: 12,
 		maxArrayItemChars: 400,
+		maxSourceChars: 0,
+		allowRawSourceText: false,
+		allowRawMemoryText: false,
+		allowRawReportText: false,
+	},
+	supervisor_context_pack: {
+		profile: "supervisor_context_pack",
+		maxTotalChars: 10_000,
+		maxTextFieldChars: 1_200,
+		maxArrayItems: 10,
+		maxArrayItemChars: 450,
 		maxSourceChars: 0,
 		allowRawSourceText: false,
 		allowRawMemoryText: false,

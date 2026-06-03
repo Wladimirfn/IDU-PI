@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
@@ -73,6 +75,7 @@ export type IduMcpToolName =
 	| "idu_plan_snapshot"
 	| "idu_next_advisory_action"
 	| "idu_task_package_create"
+	| "idu_supervisor_context_pack"
 	| "idu_orchestrator_procedure"
 	| "idu_task_context"
 	| "idu_preflight"
@@ -296,6 +299,19 @@ const TOOLS: IduMcpToolDefinition[] = [
 			actionId: optionalString("ID opcional de acción candidata."),
 			includePlanSnapshot: optionalBoolean(
 				"Incluye snapshot compacto del plan.",
+			),
+		},
+	),
+	tool(
+		"idu_supervisor_context_pack",
+		"Compone un paquete compacto de objetivo, Plan Maestro, contratos, riesgos y gates para el orquestador/subagentes sin volcar docs largas.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: requiredString(
+				"Solicitud o decisión que necesita contexto supervisor.",
+			),
+			includePlanSnapshot: optionalBoolean(
+				"Incluye snapshot compacto del Plan Maestro.",
 			),
 		},
 	),
@@ -1593,6 +1609,51 @@ async function dispatchTool(
 				],
 			});
 		}
+		case "idu_supervisor_context_pack": {
+			if (!runtime.masterPlanReview) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const request = requiredText(args, "request");
+			const pack = buildSupervisorContextPack(
+				runtime,
+				request,
+				booleanArg(args, "includePlanSnapshot", false),
+			);
+			pack.decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: "warn",
+				severity: pack.humanApprovalRequired ? "needs_approval" : "warning",
+				confidence: 0.78,
+				summary: String(pack.summary),
+				requiresHuman: Boolean(pack.humanApprovalRequired),
+				orchestratorDecisionRequired: true,
+				allowedToProceed: true,
+				evidenceRefs: ["readme:vision", "plan:snapshot", "task:context"],
+				nextActions: arrayField(pack, "autonomyGates").map(String),
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: String(pack.summary),
+				data: pack,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Context pack advisory: no implementé, no escribí archivos y no ejecuté AgentLabs.",
+					"Inyecta metas y gates; el orquestador decide y ejecuta.",
+				],
+			});
+		}
 		case "idu_orchestrator_procedure": {
 			const purpose = requiredOneOf(args, "purpose", [
 				"create_plan",
@@ -2503,6 +2564,163 @@ type PlanSnapshot = JsonObject & {
 
 function defaultRuntimeFactory(projectPath?: string): CliRuntime {
 	return createCliRuntime({ projectPath, requireTelegramConfig: false });
+}
+
+function buildSupervisorContextPack(
+	runtime: CliRuntime,
+	request: string,
+	includePlanSnapshot: boolean,
+): JsonObject {
+	if (!runtime.masterPlanReview) {
+		throw new Error("Master Plan no disponible en este runtime.");
+	}
+	const review = runtime.masterPlanReview("latest");
+	const snapshot = buildPlanSnapshot(review, runtime);
+	const humanVision = budgetTextField(
+		extractHumanVision(runtime.projectPath),
+		"supervisor_context_pack",
+		"goals.humanVision",
+	);
+	const taskGoalResult = sliceTextToBudget({
+		text: request,
+		profile: "supervisor_context_pack",
+		path: "goals.taskGoal",
+		maxChars: 320,
+	});
+	const taskGoal = { value: taskGoalResult.text, usage: taskGoalResult.usage };
+	const compactRequest = taskGoal.value;
+	const advisoryAction = buildNextAdvisoryAction(
+		snapshot,
+		compactRequest,
+		"from_request",
+		"small",
+	);
+	const taskPackage = buildTaskPackage(
+		snapshot,
+		advisoryAction,
+		compactRequest,
+		undefined,
+		false,
+	);
+	const report = runtime.preflight(request);
+	const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
+	const contracts = dedupe([
+		...arrayField(taskPackage, "contracts").map(String),
+		...arrayField(
+			alignmentAdvisory as unknown as JsonObject,
+			"contractsAffected",
+		).map(String),
+	]);
+	const requiredReads = dedupe([
+		...arrayField(taskPackage, "filesToRead").map(String),
+		...arrayField(
+			alignmentAdvisory as unknown as JsonObject,
+			"requiredReads",
+		).map(String),
+	]);
+	const risks = dedupe([
+		...arrayField(snapshot, "risks").map(String),
+		...arrayField(report as unknown as JsonObject, "warnings").map(String),
+	]);
+	const safeRisks = budgetStringArray(
+		risks,
+		"supervisor_context_pack",
+		"risks",
+	);
+	const safeReads = budgetStringArray(
+		requiredReads,
+		"supervisor_context_pack",
+		"requiredReads",
+	);
+	const autonomyGates = [
+		"Consultar Plan Maestro antes de definir objetivo o declarar cierre.",
+		"Ejecutar governance-review del orquestador antes del worker.",
+		"Corregir bugs dentro del objetivo aprobado con tests y evidencia.",
+		"Ejecutar idu_postflight antes de cerrar o commitear.",
+		"No commit/push/publicación sin instrucción explícita del humano u orquestador autorizado.",
+		"AgentLabs son audit-only y sólo por llamada explícita; nunca implementan.",
+		"Si falta evidencia o cobertura, reportar parcial/omisiones en vez de asumir aprobado.",
+	];
+	const skipNoiseGuidance = [
+		"No leas docs completas si el pack ya trae objetivo, contratos y gates suficientes.",
+		"No cargues Source Library completa; pedí chunks concretos cuando la tarea lo requiera.",
+		"Ignorá subagent-artifacts, dist, node_modules, logs y stateRoot salvo que la tarea los nombre.",
+		"No trates safeNotes o memoria como contrato aprobado; el Plan Maestro gobierna.",
+		"No infieras tokens/costo/contexto si no hay evidencia estructurada.",
+	];
+	return {
+		packVersion: 1,
+		authority: "advisory",
+		audience: "orchestrator_subagents",
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		request: compactRequest,
+		summary: "Supervisor context pack listo para el orquestador.",
+		goals: {
+			humanVision: humanVision.value,
+			planObjective: snapshot.objective,
+			taskGoal: taskGoal.value,
+		},
+		contracts,
+		risks: safeRisks.items,
+		requiredReads: safeReads.items,
+		skipNoiseGuidance,
+		autonomyGates,
+		humanApprovalRequired:
+			Boolean(alignmentAdvisory.requiresHuman) ||
+			Boolean(
+				(taskPackage.agentLabPolicy as JsonObject | undefined)
+					?.requiresHumanApproval,
+			),
+		taskPackage,
+		taskContext: {
+			recommendation: alignmentAdvisory.recommendation,
+			severity: alignmentAdvisory.severity,
+			confidence: alignmentAdvisory.confidence,
+			summary: alignmentAdvisory.summary,
+			contractsAffected: alignmentAdvisory.contractsAffected,
+			requiredReads: alignmentAdvisory.requiredReads,
+			suggestedAgentLabs: alignmentAdvisory.suggestedAgentLabs,
+			requiresHuman: alignmentAdvisory.requiresHuman,
+			evidenceRefs: alignmentAdvisory.evidenceRefs,
+		},
+		...(includePlanSnapshot ? { planSnapshot: snapshot } : {}),
+		contextBudget: mergeContextBudgetUsage("supervisor_context_pack", [
+			humanVision.usage,
+			taskGoal.usage,
+			safeRisks.usage,
+			safeReads.usage,
+			...(includePlanSnapshot ? [snapshot.contextBudget] : []),
+		]),
+		governanceConfig: governanceConfigData(),
+		workerBoundary: workerBoundaryData(),
+	};
+}
+
+function extractHumanVision(projectPath: string): string {
+	const readme = ["README.md", "readme.md"]
+		.map((name) => join(projectPath, name))
+		.find((path) => existsSync(path));
+	if (!readme) return "README no disponible; usar Plan Maestro vigente.";
+	const content = readFileSync(readme, "utf8");
+	const lines = content
+		.split(/\r?\n/u)
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith("```"));
+	const selected: string[] = [];
+	for (const line of lines) {
+		const normalized = line.replace(/^#+\s*/u, "");
+		if (
+			selected.length < 2 ||
+			/qué problema|que problema|qué no es|que no es|cómo funciona|como funciona|arquitectura simple|orquestador|supervisor|agentlab/iu.test(
+				normalized,
+			)
+		) {
+			selected.push(normalized);
+		}
+		if (selected.join("\n").length > 3_000) break;
+	}
+	return selected.join("\n");
 }
 
 function buildPlanSnapshot(
