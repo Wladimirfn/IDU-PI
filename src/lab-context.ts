@@ -8,6 +8,11 @@ import {
 	type ProjectFlows,
 } from "./project-flows.js";
 import {
+	mergeContextBudgetUsage,
+	sliceTextToBudget,
+	type ContextBudgetUsage,
+} from "./context-budget.js";
+import {
 	scanProjectMap,
 	type ProjectMapScanFinding,
 	type ProjectMapScanResult,
@@ -15,6 +20,7 @@ import {
 
 export type LabProjectContext = {
 	text: string;
+	contextBudget: ContextBudgetUsage;
 };
 
 const MAX_CONTEXT_CHARS = 1800;
@@ -39,18 +45,26 @@ export function formatLabProjectContext(
 	flowsText: string,
 	scanText?: string,
 ): LabProjectContext {
+	const sectionBudget = Math.floor(
+		(MAX_CONTEXT_CHARS - 240) / (scanText ? 3 : 2),
+	);
+	const blueprint = budgetedSection("Blueprint", blueprintText, sectionBudget);
+	const flows = budgetedSection("Project flows", flowsText, sectionBudget);
+	const scan = scanText
+		? budgetedSection("Scan project map", scanText, sectionBudget)
+		: undefined;
 	const sections = [
 		"Contexto resumido del proyecto real para orientar la revisión:",
-		truncateSection("Blueprint", blueprintText),
-		truncateSection("Project flows", flowsText),
+		blueprint.text,
+		flows.text,
+		...(scan ? [scan.text] : []),
 	];
-	if (scanText) sections.push(truncateSection("Scan project map", scanText));
-	const text = sections.join("\n");
 	return {
-		text:
-			text.length <= MAX_CONTEXT_CHARS
-				? text
-				: `${text.slice(0, MAX_CONTEXT_CHARS - 20).trimEnd()}\n[contexto truncado]`,
+		text: sections.join("\n"),
+		contextBudget: mergeContextBudgetUsage(
+			"agentlab_project_context",
+			[blueprint.usage, flows.usage, ...(scan ? [scan.usage] : [])],
+		),
 	};
 }
 
@@ -130,10 +144,21 @@ function shortFinding(message: string): string {
 		.slice(0, 120);
 }
 
-function truncateSection(title: string, value: string): string {
-	return `${title}:\n${redact(value)
-		.slice(0, Math.floor(MAX_CONTEXT_CHARS / 3))
-		.trimEnd()}`;
+function budgetedSection(
+	title: string,
+	value: string,
+	maxChars: number,
+): { text: string; usage: ContextBudgetUsage } {
+	const budgeted = sliceTextToBudget({
+		text: redact(value),
+		profile: "agentlab_project_context",
+		path: title,
+		maxChars,
+	});
+	return {
+		text: `${title}:\n${budgeted.text}`,
+		usage: budgeted.usage,
+	};
 }
 
 function redact(value: string): string {

@@ -600,6 +600,9 @@ test("run usa review-only y forbiddenActions", async () => {
 		prompt,
 		/No modifiques labPrompt ni infraestructura de ejecución AgentLab/u,
 	);
+	assert.match(prompt, /Project context budget JSON/u);
+	assert.match(prompt, /Context budget JSON/u);
+	assert.match(prompt, /"profile": "agentlab_request"/u);
 	assert.match(prompt, /Acciones prohibidas/u);
 	assert.match(prompt, /SALIDA OBLIGATORIA/u);
 	assert.match(prompt, /qualityFindings/u);

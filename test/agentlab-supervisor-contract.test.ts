@@ -211,14 +211,42 @@ test("mapRiskToAgentLabSpecialties asigna señales a especialistas", () => {
 	);
 });
 
-test("formatAgentLabReviewRequestForPrompt incluye objetivo contexto reglas acciones prohibidas y outputs", () => {
+test("formatAgentLabReviewRequestForPrompt incluye objetivo contexto reglas acciones prohibidas outputs y budget", () => {
 	const text = formatAgentLabReviewRequestForPrompt(validRequest());
 	assert.match(text, /Objetivo/u);
 	assert.match(text, /Revisar seguridad/u);
+	assert.match(text, /Context budget JSON/u);
+	assert.match(text, /"profile": "agentlab_request"/u);
 	assert.match(text, /Contexto/u);
 	assert.match(text, /Reglas/u);
 	assert.match(text, /Acciones prohibidas/u);
 	assert.match(text, /Outputs esperados/u);
+});
+
+test("buildAgentLabReviewRequest aplica context budget determinístico", () => {
+	const request = buildAgentLabReviewRequest({
+		...validRequest(),
+		contextSummary: "x".repeat(2_000),
+		evidence: Array.from({ length: 25 }, (_, index) =>
+			`evidence-${index}-${"y".repeat(400)}`,
+		),
+	});
+
+	const budget = request.contextBudget!;
+	assert.equal(request.contextSummary.includes("[context truncated]"), true);
+	assert.equal(request.evidence.length, 20);
+	assert.equal(budget.profile, "agentlab_request");
+	assert.equal(budget.truncated, true);
+	assert.equal(budget.advisoryOnly, true);
+	assert.equal(budget.contractPromotionAllowed, false);
+	assert.equal(
+		budget.omitted.some((item) => item.path === "contextSummary"),
+		true,
+	);
+	assert.equal(
+		budget.omitted.some((item) => item.reason === "max_items"),
+		true,
+	);
 });
 
 test("summarizeAgentLabReports agrupa findings por control pillar", () => {

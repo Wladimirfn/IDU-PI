@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { createContextBudgetUsage } from "../src/context-budget.js";
 import {
 	formatDurationChoices,
 	labPrompt,
@@ -71,9 +72,11 @@ test("labPrompt includes project context when provided", () => {
 		{ id: "spark", label: "Spark", provider: "pi", piArgs: [] },
 		{
 			text: "Proyecto: Demo\nObjetivo: Gestionar máquinas\nMódulos: machines\nPantallas: /machines\nDatos: operations-db\nFlujos: button -> function -> db",
+			contextBudget: createContextBudgetUsage("agentlab_project_context"),
 		},
 	);
 
+	assert.match(prompt, /Project context budget JSON/u);
 	assert.match(prompt, /Contexto del proyecto real/u);
 	assert.match(prompt, /Gestionar máquinas/u);
 	assert.match(prompt, /operations-db/u);
@@ -93,6 +96,7 @@ test("labPrompt works without project context", () => {
 		{ id: "spark", label: "Spark", provider: "pi", piArgs: [] },
 	);
 
+	assert.doesNotMatch(prompt, /Project context budget JSON/u);
 	assert.doesNotMatch(prompt, /Contexto del proyecto real/u);
 	assert.match(prompt, /No hagas commit/u);
 	assert.match(prompt, /AgentLabReport/u);
@@ -119,6 +123,7 @@ test("loadLabProjectContext includes scan summary when scanner works", () => {
 	const context = loadLabProjectContext(projectPath);
 
 	assert.ok(context);
+	assert.equal(context.contextBudget.profile, "agentlab_project_context");
 	assert.match(context.text, /Scan project map/u);
 	assert.match(context.text, /Pantallas reales no mapeadas/u);
 	assert.match(context.text, /UI elements no mapeados/u);
@@ -147,6 +152,8 @@ test("formatLabProjectContext stays short and redacts secret-looking values", ()
 	);
 
 	assert.ok(context.text.length <= 1800);
+	assert.equal(context.contextBudget.profile, "agentlab_project_context");
+	assert.equal(context.contextBudget.truncated, true);
 	assert.doesNotMatch(context.text, /abc123/u);
 	assert.match(context.text, /apiKey: \[redacted\]/u);
 });

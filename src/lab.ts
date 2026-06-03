@@ -68,7 +68,7 @@ export function labPrompt(
 	projectContext?: LabProjectContext,
 ): string {
 	const contextBlock = projectContext
-		? `\n\nContexto del proyecto real:\n${projectContext.text}`
+		? `\n\nProject context budget JSON:\n${JSON.stringify(projectContext.contextBudget, null, 2)}\n\nContexto del proyecto real:\n${projectContext.text}`
 		: "";
 	return `Modo laboratorio de tests para ${agent.label}. Profundidad: ${duration.label} (${duration.description}). Límite de seguridad: ${Math.round(duration.ms / 60_000)} minutos.${contextBlock}
 

@@ -1,3 +1,11 @@
+import {
+	createContextBudgetUsage,
+	mergeContextBudgetUsage,
+	sliceListToBudget,
+	sliceTextToBudget,
+	type ContextBudgetUsage,
+} from "./context-budget.js";
+
 export type AgentLabSpecialty =
 	| "security"
 	| "database"
@@ -65,6 +73,7 @@ export type AgentLabReviewRequest = {
 	filesToInspect: string[];
 	flowsToCheck: string[];
 	rulesToCheck: string[];
+	contextBudget?: ContextBudgetUsage;
 	projectCoreSummary?: string;
 	constitutionSummary?: string;
 	sourceSkillDraftPath?: string;
@@ -186,6 +195,7 @@ export type BuildAgentLabReviewRequestInput = {
 	tokenBudgetHint?: string;
 	expectedOutputs?: string[];
 	requiresHumanApproval?: boolean;
+	contextBudget?: ContextBudgetUsage;
 	createdAt?: string;
 };
 
@@ -308,6 +318,49 @@ export function buildAgentLabReviewRequest(
 		input.allowedActions ?? defaultAllowedActions(input.specialty),
 		input.specialty,
 	);
+	const contextSummary = sliceTextToBudget({
+		text: input.contextSummary,
+		profile: "agentlab_request",
+		path: "contextSummary",
+	});
+	const evidence = sliceListToBudget({
+		items: cleanArray(input.evidence ?? []),
+		profile: "agentlab_request",
+		path: "evidence",
+	});
+	const filesToInspect = sliceListToBudget({
+		items: cleanArray(input.filesToInspect ?? []),
+		profile: "agentlab_request",
+		path: "filesToInspect",
+	});
+	const flowsToCheck = sliceListToBudget({
+		items: cleanArray(input.flowsToCheck ?? []),
+		profile: "agentlab_request",
+		path: "flowsToCheck",
+	});
+	const rulesToCheck = sliceListToBudget({
+		items: cleanArray(input.rulesToCheck ?? []),
+		profile: "agentlab_request",
+		path: "rulesToCheck",
+	});
+	const expectedOutputs = sliceListToBudget({
+		items: dedupe([
+			...(input.expectedOutputs ?? []),
+			"evidence-backed findings",
+			"tests suggested/executed",
+			"recommendations with human approval flag",
+		]),
+		profile: "agentlab_request",
+		path: "expectedOutputs",
+	});
+	const contextBudget = mergeContextBudgetUsage("agentlab_request", [
+		contextSummary.usage,
+		evidence.usage,
+		filesToInspect.usage,
+		flowsToCheck.usage,
+		rulesToCheck.usage,
+		expectedOutputs.usage,
+	]);
 	return {
 		id: input.id ?? `agentlab-review-${compactTimestamp(new Date())}`,
 		projectId: input.projectId,
@@ -316,11 +369,12 @@ export function buildAgentLabReviewRequest(
 		specialty: input.specialty,
 		trigger: input.trigger,
 		objective: input.objective,
-		contextSummary: input.contextSummary,
-		evidence: cleanArray(input.evidence ?? []),
-		filesToInspect: cleanArray(input.filesToInspect ?? []),
-		flowsToCheck: cleanArray(input.flowsToCheck ?? []),
-		rulesToCheck: cleanArray(input.rulesToCheck ?? []),
+		contextSummary: contextSummary.text,
+		evidence: evidence.items,
+		filesToInspect: filesToInspect.items,
+		flowsToCheck: flowsToCheck.items,
+		rulesToCheck: rulesToCheck.items,
+		contextBudget,
 		...(input.projectCoreSummary
 			? { projectCoreSummary: input.projectCoreSummary.trim() }
 			: {}),
@@ -342,12 +396,7 @@ export function buildAgentLabReviewRequest(
 		maxCommands: input.maxCommands ?? 5,
 		maxMinutes: input.maxMinutes ?? 15,
 		tokenBudgetHint: input.tokenBudgetHint ?? "bounded",
-		expectedOutputs: dedupe([
-			...(input.expectedOutputs ?? []),
-			"evidence-backed findings",
-			"tests suggested/executed",
-			"recommendations with human approval flag",
-		]),
+		expectedOutputs: expectedOutputs.items,
 		requiresHumanApproval: true,
 		createdAt: input.createdAt ?? new Date().toISOString(),
 	};
@@ -455,6 +504,11 @@ export function validateAgentLabReviewRequest(
 		"requiresHumanApproval",
 		errors,
 	);
+	const contextBudget = contextBudgetUsage(
+		request.contextBudget,
+		"contextBudget",
+		errors,
+	);
 	const createdAt = requiredString(request.createdAt, "createdAt", errors);
 
 	if (forbiddenActions) validateForbiddenActions(forbiddenActions, errors);
@@ -507,6 +561,7 @@ export function validateAgentLabReviewRequest(
 		!filesToInspect ||
 		!flowsToCheck ||
 		!rulesToCheck ||
+		!contextBudget ||
 		!constraints ||
 		(externalSourceIntelligence === undefined &&
 			(request.externalSourceIntelligence !== undefined ||
@@ -540,6 +595,7 @@ export function validateAgentLabReviewRequest(
 			filesToInspect,
 			flowsToCheck,
 			rulesToCheck,
+			contextBudget,
 			...(projectCoreSummary ? { projectCoreSummary } : {}),
 			...(constitutionSummary ? { constitutionSummary } : {}),
 			...(sourceSkillDraftPath ? { sourceSkillDraftPath } : {}),
@@ -901,6 +957,13 @@ export function formatAgentLabReviewRequestForPrompt(
 		"Trigger:",
 		request.trigger,
 		"",
+		"Context budget JSON:",
+		JSON.stringify(
+			request.contextBudget ?? createContextBudgetUsage("agentlab_request"),
+			null,
+			2,
+		),
+		"",
 		"Contexto:",
 		request.contextSummary,
 		"",
@@ -1223,6 +1286,70 @@ function recommendationsArray(
 		}
 	});
 	return errors.length > 0 ? undefined : recommendations;
+}
+
+function contextBudgetUsage(
+	value: unknown,
+	path: string,
+	errors: string[],
+): ContextBudgetUsage | undefined {
+	if (value === undefined) {
+		return mergeContextBudgetUsage("agentlab_request", []);
+	}
+	const record = asRecord(value);
+	if (!record) {
+		errors.push(`${path} must be an object`);
+		return undefined;
+	}
+	if (record.profile !== "agentlab_request") {
+		errors.push(`${path}.profile must be agentlab_request`);
+	}
+	if (record.advisoryOnly !== true) {
+		errors.push(`${path}.advisoryOnly must be true`);
+	}
+	if (record.contractPromotionAllowed !== false) {
+		errors.push(`${path}.contractPromotionAllowed must be false`);
+	}
+	const maxTotalChars = positiveNumber(
+		record.maxTotalChars,
+		`${path}.maxTotalChars`,
+		errors,
+	);
+	const usedChars = positiveNumber(record.usedChars, `${path}.usedChars`, errors);
+	const truncated = booleanValue(record.truncated, `${path}.truncated`, errors);
+	const omitted = Array.isArray(record.omitted)
+		? (record.omitted as ContextBudgetUsage["omitted"])
+		: [];
+	if (!Array.isArray(record.omitted)) {
+		errors.push(`${path}.omitted must be an array`);
+	}
+	const generatedAt = requiredString(
+		record.generatedAt,
+		`${path}.generatedAt`,
+		errors,
+	);
+	if (
+		record.profile !== "agentlab_request" ||
+		record.advisoryOnly !== true ||
+		record.contractPromotionAllowed !== false ||
+		maxTotalChars === undefined ||
+		usedChars === undefined ||
+		truncated === undefined ||
+		!generatedAt ||
+		!Array.isArray(record.omitted)
+	) {
+		return undefined;
+	}
+	return {
+		profile: "agentlab_request",
+		maxTotalChars,
+		usedChars,
+		truncated,
+		omitted,
+		generatedAt,
+		advisoryOnly: true,
+		contractPromotionAllowed: false,
+	};
 }
 
 function optionalExternalSourceIntelligence(

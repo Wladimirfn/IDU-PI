@@ -747,7 +747,16 @@ function buildReviewPrompt(
 		"- Si no hay evidencia, devolvé findings vacíos.",
 		"- Devolvé JSON AgentLabReviewReport válido; si no podés, texto legacy será guardado como partial sin findings.",
 		"",
-		...(context ? ["Contexto del proyecto real:", context.text, ""] : []),
+		...(context
+			? [
+					"Project context budget JSON:",
+					JSON.stringify(context.contextBudget, null, 2),
+					"",
+					"Contexto del proyecto real:",
+					context.text,
+					"",
+				]
+			: []),
 		formatAgentLabReviewRequestForPrompt(request),
 		"",
 		"SALIDA OBLIGATORIA: devolvé sólo un JSON AgentLabReviewReport válido, sin markdown, sin comentarios y sin texto antes/después.",
