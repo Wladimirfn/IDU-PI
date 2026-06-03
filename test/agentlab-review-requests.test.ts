@@ -130,6 +130,26 @@ test("postflight high crea request security/database según impacto", () => {
 
 	assert.equal(security.requests[0]?.specialty, "security");
 	assert.equal(database.requests[0]?.specialty, "database");
+	assert.equal(security.workloadEnvelope?.status, "requested");
+	assert.equal(security.workloadEnvelope?.authority, "advisory");
+	assert.equal(security.workloadEnvelope?.autoRunAllowed, false);
+	assert.equal(security.workloadEnvelope?.repoWriteAllowed, false);
+	assert.equal(security.workloadEnvelope?.contractPromotionAllowed, false);
+	assert.equal(
+		security.workloadEnvelope?.totalRequests,
+		security.requests.length,
+	);
+	assert.equal(
+		security.workloadEnvelope?.maxCommands,
+		security.requests.reduce(
+			(total, request) => total + request.maxCommands,
+			0,
+		),
+	);
+	assert.equal(
+		security.workloadEnvelope?.maxMinutes,
+		security.requests.reduce((total, request) => total + request.maxMinutes, 0),
+	);
 	assert.match(
 		security.path ?? "",
 		/agentlabs[\\/]requests[\\/]current\.json$/u,
@@ -451,7 +471,10 @@ test("external source intelligence crea request librarian audit-only", () => {
 		plan.requests[0]?.externalSourceIntelligence?.contractPromotionAllowed,
 		false,
 	);
-	assert.deepEqual(plan.requests[0]?.externalSourceIntelligence?.status, "requested");
+	assert.deepEqual(
+		plan.requests[0]?.externalSourceIntelligence?.status,
+		"requested",
+	);
 	assert.ok(
 		plan.requests[0]?.forbiddenActions.some((action) =>
 			/no commit/u.test(action),

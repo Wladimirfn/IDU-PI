@@ -52,12 +52,83 @@ export type AgentLabExternalSourceKind =
 	| "community_signal";
 
 export type AgentLabExternalSourceIntelligence = {
-	status: "requested" | "queued" | "running" | "reported" | "reviewed" | "deferred" | "rejected";
+	status:
+		| "requested"
+		| "queued"
+		| "running"
+		| "reported"
+		| "reviewed"
+		| "deferred"
+		| "rejected";
 	allowedSourceKinds: AgentLabExternalSourceKind[];
 	freshness: string;
 	queries: string[];
 	relatedContracts: string[];
 	contractPromotionAllowed: false;
+};
+
+export type AgentLabWorkloadEnvelopeStatus =
+	| "requested"
+	| "queued"
+	| "running"
+	| "completed"
+	| "partial"
+	| "timed_out"
+	| "skipped"
+	| "failed"
+	| "stale"
+	| "security_violation"
+	| "unknown_timeout";
+
+export type AgentLabWorkloadEnvelopeSource =
+	| "request"
+	| "run"
+	| "status"
+	| "consolidation"
+	| "mcp";
+
+export type AgentLabWorkloadEnvelope = {
+	version: 1;
+	authority: "advisory";
+	advisoryOnly: true;
+	autoRunAllowed: false;
+	repoWriteAllowed: false;
+	contractPromotionAllowed: false;
+	status: AgentLabWorkloadEnvelopeStatus;
+	statusReason: string;
+	generatedAt: string;
+	source: AgentLabWorkloadEnvelopeSource;
+	requestIds: string[];
+	totalRequests: number;
+	requestedRequests: number;
+	completedRequests: number;
+	partialRequests: number;
+	timedOutRequests: number;
+	unknownTimeoutRequests: number;
+	skippedRequests: number;
+	failedRequests: number;
+	staleRequests: number;
+	securityViolations: number;
+	maxCommands: number;
+	maxMinutes: number;
+	tokenBudgetHint: string;
+	contextBudget?: ContextBudgetUsage;
+	requiresHumanApproval: boolean;
+};
+
+export type BuildAgentLabWorkloadEnvelopeInput = {
+	status: AgentLabWorkloadEnvelopeStatus;
+	statusReason: string;
+	generatedAt: string;
+	source: AgentLabWorkloadEnvelopeSource;
+	requests?: AgentLabReviewRequest[];
+	runs?: Array<{
+		requestId: string;
+		status: AgentLabWorkloadEnvelopeStatus | string;
+		requiresHumanApproval?: boolean;
+	}>;
+	requestIds?: string[];
+	contextBudget?: ContextBudgetUsage;
 };
 
 export type AgentLabReviewRequest = {
@@ -307,6 +378,67 @@ const MANDATORY_FORBIDDEN_ACTIONS = [
 const UNSAFE_AGENTLAB_ACTION_PATTERN =
 	/\b(?:commit|push|merge|rebase)\b|git\s+(?:commit|push|merge|rebase)|\bforce\s+push\b|\b(?:apply|edit|delete|promote|approve)\b|(?:write|modify)\s+(?:to\s+)?(?:the\s+)?real\s+repo|create\s+workers?\s+in\s+stateroot|create\s+workspaces?\s+in\s+stateroot|aplicar\s+(?:cambios|contratos?|skills?|reglas)|aprobar|auto[-\s]?aprobar|promover|editar\s+c[oó]digo|modificar\s+repo\s+real|escribir\s+en\s+repo\s+real|crear\s+workers?\s+en\s+stateroot|crear\s+workspaces?\s+en\s+stateroot|borrar|eliminar/iu;
 
+export function buildAgentLabWorkloadEnvelope(
+	input: BuildAgentLabWorkloadEnvelopeInput,
+): AgentLabWorkloadEnvelope {
+	const requests = input.requests ?? [];
+	const runs = input.runs ?? [];
+	const requestIds = dedupe([
+		...requests.map((request) => request.id),
+		...runs.map((run) => run.requestId),
+		...(input.requestIds ?? []),
+	]);
+	const count = (status: AgentLabWorkloadEnvelopeStatus): number => {
+		const runCount = runs.filter((run) => run.status === status).length;
+		if (runCount > 0) return runCount;
+		if (input.status === status)
+			return Math.max(requestIds.length, requests.length, runs.length);
+		return 0;
+	};
+	const maxCommands = requests.reduce(
+		(total, request) => total + Math.max(0, request.maxCommands),
+		0,
+	);
+	const maxMinutes = requests.reduce(
+		(total, request) => total + Math.max(0, request.maxMinutes),
+		0,
+	);
+	const tokenBudgetHint = dedupe(
+		requests.map((request) => request.tokenBudgetHint).filter(Boolean),
+	).join(", ");
+	return {
+		version: 1,
+		authority: "advisory",
+		advisoryOnly: true,
+		autoRunAllowed: false,
+		repoWriteAllowed: false,
+		contractPromotionAllowed: false,
+		status: input.status,
+		statusReason: input.statusReason,
+		generatedAt: input.generatedAt,
+		source: input.source,
+		requestIds,
+		totalRequests: Math.max(requestIds.length, requests.length, runs.length),
+		requestedRequests: count("requested"),
+		completedRequests: count("completed"),
+		partialRequests: count("partial"),
+		timedOutRequests: count("timed_out"),
+		unknownTimeoutRequests: count("unknown_timeout"),
+		skippedRequests: count("skipped"),
+		failedRequests: count("failed"),
+		staleRequests: count("stale"),
+		securityViolations: count("security_violation"),
+		maxCommands,
+		maxMinutes,
+		tokenBudgetHint: tokenBudgetHint || "unspecified",
+		...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
+		requiresHumanApproval:
+			requests.some((request) => request.requiresHumanApproval) ||
+			runs.some((run) => run.requiresHumanApproval === true) ||
+			!["requested", "completed"].includes(input.status),
+	};
+}
+
 export function buildAgentLabReviewRequest(
 	input: BuildAgentLabReviewRequestInput,
 ): AgentLabReviewRequest {
@@ -520,7 +652,9 @@ export function validateAgentLabReviewRequest(
 			errors.push("librarian requests require externalSourceIntelligence");
 		}
 		if (externalSourceIntelligence?.contractPromotionAllowed !== false) {
-			errors.push("external source intelligence must not auto-promote contracts");
+			errors.push(
+				"external source intelligence must not auto-promote contracts",
+			);
 		}
 		if (
 			allowedActions?.some((action) =>
@@ -933,7 +1067,11 @@ export function mapRiskToAgentLabSpecialties(
 		specialties.push("performance");
 	}
 	if (/docs?|readme|documentaci[oó]n/u.test(text)) specialties.push("docs");
-	if (/librarian|bibliotecario|external source|changelog|advisory|cve|nvd|github advisory|npm advisory|fuentes externas/u.test(text)) {
+	if (
+		/librarian|bibliotecario|external source|changelog|advisory|cve|nvd|github advisory|npm advisory|fuentes externas/u.test(
+			text,
+		)
+	) {
 		specialties.push("librarian");
 	}
 	return dedupe(specialties).length ? dedupe(specialties) : ["general"];
@@ -981,15 +1119,15 @@ export function formatAgentLabReviewRequestForPrompt(
 			: []),
 		...(request.externalSourceIntelligence
 			? [
-				"External source intelligence:",
-				`- status: ${request.externalSourceIntelligence.status}`,
-				`- allowedSourceKinds: ${request.externalSourceIntelligence.allowedSourceKinds.join(", ")}`,
-				`- freshness: ${request.externalSourceIntelligence.freshness}`,
-				`- queries: ${request.externalSourceIntelligence.queries.join("; ")}`,
-				`- relatedContracts: ${request.externalSourceIntelligence.relatedContracts.join(", ")}`,
-				`- contractPromotionAllowed: ${String(request.externalSourceIntelligence.contractPromotionAllowed)}`,
-				"",
-			]
+					"External source intelligence:",
+					`- status: ${request.externalSourceIntelligence.status}`,
+					`- allowedSourceKinds: ${request.externalSourceIntelligence.allowedSourceKinds.join(", ")}`,
+					`- freshness: ${request.externalSourceIntelligence.freshness}`,
+					`- queries: ${request.externalSourceIntelligence.queries.join("; ")}`,
+					`- relatedContracts: ${request.externalSourceIntelligence.relatedContracts.join(", ")}`,
+					`- contractPromotionAllowed: ${String(request.externalSourceIntelligence.contractPromotionAllowed)}`,
+					"",
+				]
 			: []),
 		...(request.trigger === "skill_draft"
 			? [
@@ -1315,7 +1453,11 @@ function contextBudgetUsage(
 		`${path}.maxTotalChars`,
 		errors,
 	);
-	const usedChars = positiveNumber(record.usedChars, `${path}.usedChars`, errors);
+	const usedChars = positiveNumber(
+		record.usedChars,
+		`${path}.usedChars`,
+		errors,
+	);
 	const truncated = booleanValue(record.truncated, `${path}.truncated`, errors);
 	const omitted = Array.isArray(record.omitted)
 		? (record.omitted as ContextBudgetUsage["omitted"])
@@ -1395,12 +1537,28 @@ function optionalExternalSourceIntelligence(
 		errors,
 	);
 	if (contractPromotionAllowed !== false) {
-		errors.push("externalSourceIntelligence.contractPromotionAllowed must be false");
+		errors.push(
+			"externalSourceIntelligence.contractPromotionAllowed must be false",
+		);
 	}
-	if (!status || !allowedSourceKinds || !freshness || !queries || !relatedContracts || contractPromotionAllowed !== false) {
+	if (
+		!status ||
+		!allowedSourceKinds ||
+		!freshness ||
+		!queries ||
+		!relatedContracts ||
+		contractPromotionAllowed !== false
+	) {
 		return undefined;
 	}
-	return { status, allowedSourceKinds, freshness, queries, relatedContracts, contractPromotionAllowed };
+	return {
+		status,
+		allowedSourceKinds,
+		freshness,
+		queries,
+		relatedContracts,
+		contractPromotionAllowed,
+	};
 }
 
 function allFindings(report: AgentLabReviewReport): AgentLabFinding[] {
@@ -1496,7 +1654,9 @@ function sanitizeAllowedActions(
 	actions: string[],
 	_specialty: AgentLabSpecialty,
 ): string[] {
-	return cleanArray(actions).filter((action) => !isUnsafeAgentLabAction(action));
+	return cleanArray(actions).filter(
+		(action) => !isUnsafeAgentLabAction(action),
+	);
 }
 
 function isUnsafeAgentLabAction(value: string): boolean {

@@ -291,7 +291,7 @@ Los gates son validadores deterministas. Revisan intención, archivos cambiados 
 
 ### AgentLabs
 
-AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces aislados, producen reportes con evidencia y no aplican cambios al repo real, no crean workspaces permanentes en `stateRoot`, no hacen commit/push y no implementan features. Idu-pi consolida esos reportes en hallazgos, recomendaciones y candidates; el humano/orquestador decide.
+AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces aislados, producen reportes con evidencia y no aplican cambios al repo real, no crean workspaces permanentes en `stateRoot`, no hacen commit/push y no implementan features. Las solicitudes, ejecuciones y estados exponen `workloadEnvelope` advisory-only para declarar carga, presupuesto y estados honestos (`completed`, `partial`, `timed_out`, `stale`, `failed`, etc.) sin autorizar ejecución ni promoción de contratos. Idu-pi consolida esos reportes en hallazgos, recomendaciones y candidates; el humano/orquestador decide.
 
 ### Plan Maestro
 

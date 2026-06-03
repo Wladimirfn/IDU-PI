@@ -350,6 +350,7 @@ Garantías:
 - sandbox/clone;
 - guard contra mutaciones del repo real;
 - parsing limpio;
+- `workloadEnvelope` advisory-only en requests/runs/status para reportar carga, presupuesto y estados honestos (`requested`, `completed`, `partial`, `timed_out`, `stale`, `failed`) sin autorizar auto-run, escritura de repo real ni promoción de contratos;
 - consolidación read-only.
 
 ## AgentRouter y Pi RPC

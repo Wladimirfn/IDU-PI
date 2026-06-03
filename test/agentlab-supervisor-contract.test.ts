@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	buildAgentLabReviewRequest,
+	buildAgentLabWorkloadEnvelope,
 	formatAgentLabReviewReport,
 	formatAgentLabReviewRequestForPrompt,
 	mapRiskToAgentLabSpecialties,
@@ -94,6 +95,31 @@ test("validateAgentLabReviewRequest acepta request válido", () => {
 		assert.equal(result.request.requestedBy, "supervisor");
 		assert.equal(result.request.requiresHumanApproval, true);
 	}
+});
+
+test("buildAgentLabWorkloadEnvelope crea metadata advisory-only", () => {
+	const envelope = buildAgentLabWorkloadEnvelope({
+		status: "requested",
+		statusReason: "Solicitud AgentLab creada; no ejecuta revisión.",
+		generatedAt: "2026-05-25T00:00:00.000Z",
+		source: "request",
+		requests: [validRequest()],
+	});
+
+	assert.equal(envelope.version, 1);
+	assert.equal(envelope.authority, "advisory");
+	assert.equal(envelope.advisoryOnly, true);
+	assert.equal(envelope.autoRunAllowed, false);
+	assert.equal(envelope.repoWriteAllowed, false);
+	assert.equal(envelope.contractPromotionAllowed, false);
+	assert.equal(envelope.status, "requested");
+	assert.equal(envelope.totalRequests, 1);
+	assert.equal(envelope.requestedRequests, 1);
+	assert.equal(envelope.completedRequests, 0);
+	assert.equal(envelope.maxCommands, 3);
+	assert.equal(envelope.maxMinutes, 10);
+	assert.equal(envelope.tokenBudgetHint, "medium");
+	assert.equal(envelope.requiresHumanApproval, true);
 });
 
 test("validateAgentLabReviewRequest falla si falta objective", () => {
@@ -227,8 +253,9 @@ test("buildAgentLabReviewRequest aplica context budget determinístico", () => {
 	const request = buildAgentLabReviewRequest({
 		...validRequest(),
 		contextSummary: "x".repeat(2_000),
-		evidence: Array.from({ length: 25 }, (_, index) =>
-			`evidence-${index}-${"y".repeat(400)}`,
+		evidence: Array.from(
+			{ length: 25 },
+			(_, index) => `evidence-${index}-${"y".repeat(400)}`,
 		),
 	});
 
@@ -350,7 +377,15 @@ test("librarian request modela external source intelligence sin promover contrat
 		trigger: "external_source_intelligence",
 		externalSourceIntelligence: {
 			status: "requested",
-			allowedSourceKinds: ["official_docs", "changelog", "advisory", "cve_nvd", "github_advisory", "npm_advisory", "community_signal"],
+			allowedSourceKinds: [
+				"official_docs",
+				"changelog",
+				"advisory",
+				"cve_nvd",
+				"github_advisory",
+				"npm_advisory",
+				"community_signal",
+			],
 			freshness: "latest available",
 			queries: ["official docs", "CVE NVD", "npm advisories"],
 			relatedContracts: ["security", "data"],
@@ -358,8 +393,15 @@ test("librarian request modela external source intelligence sin promover contrat
 		},
 		allowedActions: ["leer fuentes externas", "commit", "aplicar contrato"],
 	});
-	assert.equal(request.externalSourceIntelligence?.contractPromotionAllowed, false);
-	assert.ok(!request.allowedActions.some((action) => /commit|aplicar contrato/iu.test(action)));
+	assert.equal(
+		request.externalSourceIntelligence?.contractPromotionAllowed,
+		false,
+	);
+	assert.ok(
+		!request.allowedActions.some((action) =>
+			/commit|aplicar contrato/iu.test(action),
+		),
+	);
 	assert.equal(validateAgentLabReviewRequest(request).ok, true);
 
 	const invalid = validateAgentLabReviewRequest({
@@ -370,7 +412,10 @@ test("librarian request modela external source intelligence sin promover contrat
 		},
 	});
 	assert.equal(invalid.ok, false);
-	assert.match(invalid.errors.join("\n"), /contractPromotionAllowed|auto-promote/u);
+	assert.match(
+		invalid.errors.join("\n"),
+		/contractPromotionAllowed|auto-promote/u,
+	);
 });
 
 test("security/database request exige human approval", () => {

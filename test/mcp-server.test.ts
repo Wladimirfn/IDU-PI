@@ -2326,6 +2326,18 @@ test("postflight request create remains request-only and review-run reports sand
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.match(request.summary, /solicitud/i);
+	const requestWorkload = request.data.workloadEnvelope as {
+		authority?: string;
+		status?: string;
+		autoRunAllowed?: boolean;
+		repoWriteAllowed?: boolean;
+		contractPromotionAllowed?: boolean;
+	};
+	assert.equal(requestWorkload.authority, "advisory");
+	assert.equal(requestWorkload.status, "requested");
+	assert.equal(requestWorkload.autoRunAllowed, false);
+	assert.equal(requestWorkload.repoWriteAllowed, false);
+	assert.equal(requestWorkload.contractPromotionAllowed, false);
 	assert.equal(
 		(request.data.decisionEnvelope as DecisionEnvelope).authority,
 		"advisory",
@@ -2437,6 +2449,14 @@ test("postflight request create remains request-only and review-run reports sand
 		},
 	);
 	const staleDecision = staleStatus.data.decisionEnvelope as DecisionEnvelope;
+	const staleWorkload = staleStatus.data.workloadEnvelope as {
+		status?: string;
+		authority?: string;
+		autoRunAllowed?: boolean;
+	};
+	assert.equal(staleWorkload.status, "stale");
+	assert.equal(staleWorkload.authority, "advisory");
+	assert.equal(staleWorkload.autoRunAllowed, false);
 	assert.equal(staleStatus.ok, false);
 	assert.equal(staleDecision.recommendation, "block");
 	assert.equal(staleDecision.allowedToProceed, false);
@@ -2456,6 +2476,12 @@ test("postflight request create remains request-only and review-run reports sand
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(run.ok, true);
+	const runWorkload = run.data.workloadEnvelope as {
+		authority?: string;
+		autoRunAllowed?: boolean;
+	};
+	assert.equal(runWorkload.authority, "advisory");
+	assert.equal(runWorkload.autoRunAllowed, false);
 	assert.match(run.summary, /review/i);
 	assert.ok(
 		run.safeNotes.some((note) => /sandbox|review-only|clone/iu.test(note)),

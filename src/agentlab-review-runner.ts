@@ -14,6 +14,7 @@ import type { AgentProfile } from "./config.js";
 import type { AgentRouter } from "./agent-router.js";
 import { loadLabProjectContext } from "./lab-context.js";
 import {
+	buildAgentLabWorkloadEnvelope,
 	formatAgentLabReviewRequestForPrompt,
 	validateAgentLabReportAgainstSupervisorContract,
 	validateAgentLabReviewRequest,
@@ -22,6 +23,7 @@ import {
 	type AgentLabReviewReport,
 	type AgentLabReviewRequest,
 	type AgentLabSpecialty,
+	type AgentLabWorkloadEnvelope,
 } from "./agentlab-supervisor-contract.js";
 import {
 	reviewAgentLabReviewRequest,
@@ -36,6 +38,8 @@ import {
 
 export type AgentLabReviewRunStatus =
 	| "completed"
+	| "partial"
+	| "timed_out"
 	| "skipped"
 	| "failed"
 	| "security_violation";
@@ -60,6 +64,7 @@ export type AgentLabReviewRunSummary = {
 	realRepoChangedFiles?: string[];
 	securityWarnings?: string[];
 	qualityWarnings?: string[];
+	workloadEnvelope?: AgentLabWorkloadEnvelope;
 };
 
 export type AgentLabReviewRunResult = {
@@ -73,6 +78,7 @@ export type AgentLabReviewRunResult = {
 	recommendedNext: string;
 	requiresHumanApproval: boolean;
 	safeNotes: string[];
+	workloadEnvelope?: AgentLabWorkloadEnvelope;
 	path?: string;
 };
 
@@ -82,6 +88,7 @@ export type AgentLabReviewStatus = {
 	valid: boolean;
 	errors: string[];
 	result?: AgentLabReviewRunResult;
+	workloadEnvelope?: AgentLabWorkloadEnvelope;
 };
 
 export type RunAgentLabReviewRequestFileInput = {
@@ -156,6 +163,20 @@ export async function runAgentLabReviewRequestFile(
 				recommendations: [],
 				testsSuggested: [],
 				requiresHumanApproval: true,
+				workloadEnvelope: buildAgentLabWorkloadEnvelope({
+					status: "failed",
+					statusReason: "AgentLab request file was invalid; no labs were executed.",
+					generatedAt,
+					source: "run",
+					requestIds: ["invalid-request-file"],
+					runs: [
+						{
+							requestId: "invalid-request-file",
+							status: "failed",
+							requiresHumanApproval: true,
+						},
+					],
+				}),
 			},
 		];
 	} else {
@@ -280,6 +301,7 @@ export async function runAgentLabReviewRequest(
 				? "Tiempo máximo alcanzado; agente cancelado."
 				: "Ejecución falló.",
 			[error instanceof Error ? error.message : String(error)],
+			timeout ? "timed_out" : "failed",
 		);
 	} finally {
 		runtime.session.stop("AgentLab review-only finalizado.");
@@ -324,6 +346,13 @@ export function getAgentLabReviewStatus(
 				name: basename(resolved.path),
 				valid: false,
 				errors: bindingErrors,
+				workloadEnvelope: buildAgentLabWorkloadEnvelope({
+					status: "stale",
+					statusReason: bindingErrors[0] ?? "AgentLab run stale.",
+					generatedAt: result.generatedAt,
+					source: "status",
+					runs: result.runs,
+				}),
 			};
 		}
 		return {
@@ -349,7 +378,11 @@ function currentRequestBindingErrors(
 	result: AgentLabReviewRunResult,
 ): string[] {
 	const selector = pathOrLatest.trim();
-	if (selector && selector !== "latest" && basename(selector) !== RUN_CURRENT_FILE) {
+	if (
+		selector &&
+		selector !== "latest" &&
+		basename(selector) !== RUN_CURRENT_FILE
+	) {
 		return [];
 	}
 	const requestReview = reviewAgentLabReviewRequest("latest", reportsPath);
@@ -375,9 +408,7 @@ function currentRequestBindingErrors(
 		`Request actual: ${requestReview.name}`,
 		`Run leído: ${result.generatedAt}`,
 		...(missingCurrentRequestIds.length > 0
-			? [
-					`Requests pendientes sin run: ${missingCurrentRequestIds.join(", ")}`,
-				]
+			? [`Requests pendientes sin run: ${missingCurrentRequestIds.join(", ")}`]
 			: []),
 	];
 }
@@ -967,6 +998,27 @@ async function runPlanRequests(input: {
 	return runs;
 }
 
+function workloadForRequestRun(
+	request: AgentLabReviewRequest,
+	status: AgentLabReviewRunStatus,
+	statusReason: string,
+): AgentLabWorkloadEnvelope {
+	return buildAgentLabWorkloadEnvelope({
+		status,
+		statusReason,
+		generatedAt: new Date().toISOString(),
+		source: "run",
+		requests: [request],
+		runs: [
+			{
+				requestId: request.id,
+				status,
+				requiresHumanApproval: request.requiresHumanApproval,
+			},
+		],
+	});
+}
+
 function completedRun(
 	request: AgentLabReviewRequest,
 	profile: AgentProfile,
@@ -979,10 +1031,13 @@ function completedRun(
 	},
 ): AgentLabReviewRunSummary {
 	const reportFindings = parsed.report ? allFindings(parsed.report) : [];
+	const status: AgentLabReviewRunStatus = parsed.qualityWarnings?.length
+		? "partial"
+		: "completed";
 	return {
 		requestId: request.id,
 		specialty: request.specialty,
-		status: "completed",
+		status,
 		agentId: profile.id,
 		workspace,
 		commandsExecuted: parsed.report?.testsExecuted ?? [],
@@ -1000,6 +1055,13 @@ function completedRun(
 			: {}),
 		requiresHumanApproval:
 			parsed.report?.requiresHumanApproval ?? request.requiresHumanApproval,
+		workloadEnvelope: workloadForRequestRun(
+			request,
+			status,
+			status === "partial"
+				? "AgentLab output required fallback/repair; evidence is partial."
+				: "AgentLab completed with valid report.",
+		),
 	};
 }
 
@@ -1009,11 +1071,12 @@ function failedRun(
 	workspace: string,
 	summary: string,
 	errors: string[],
+	status: Extract<AgentLabReviewRunStatus, "failed" | "timed_out"> = "failed",
 ): AgentLabReviewRunSummary {
 	return {
 		requestId: request.id,
 		specialty: request.specialty,
-		status: "failed",
+		status,
 		agentId: profile.id,
 		workspace,
 		commandsExecuted: [],
@@ -1023,6 +1086,13 @@ function failedRun(
 		recommendations: [],
 		testsSuggested: [],
 		requiresHumanApproval: request.requiresHumanApproval,
+		workloadEnvelope: workloadForRequestRun(
+			request,
+			status,
+			status === "timed_out"
+				? "AgentLab reached the explicit time limit."
+				: "AgentLab run failed.",
+		),
 	};
 }
 
@@ -1046,6 +1116,11 @@ function skippedRun(
 		recommendations: [],
 		testsSuggested: [],
 		requiresHumanApproval: request.requiresHumanApproval,
+		workloadEnvelope: workloadForRequestRun(
+			request,
+			"skipped",
+			"AgentLab request was skipped before execution.",
+		),
 	};
 }
 
@@ -1084,6 +1159,11 @@ function securityViolationRun(
 		requiresHumanApproval: true,
 		realRepoChangedFiles: diff.changedFiles,
 		securityWarnings: warnings,
+		workloadEnvelope: workloadForRequestRun(
+			request,
+			"security_violation",
+			"AgentLab caused or attempted changes in the real repository.",
+		),
 	};
 }
 
@@ -1097,6 +1177,7 @@ function buildRunResult(input: {
 	const requiresHumanApproval =
 		input.runs.some((run) => run.requiresHumanApproval) ||
 		highCriticalFindings(consolidatedFindings).length > 0;
+	const aggregateStatus = aggregateWorkloadStatus(input.runs);
 	return {
 		generatedAt: input.generatedAt,
 		sourceRequestFile: input.sourceRequestFile,
@@ -1118,7 +1199,26 @@ function buildRunResult(input: {
 				? ["AgentLab intentó o causó cambios en repo real."]
 				: []),
 		],
+		workloadEnvelope: buildAgentLabWorkloadEnvelope({
+			status: aggregateStatus,
+			statusReason: `AgentLab run aggregate status: ${aggregateStatus}.`,
+			generatedAt: input.generatedAt,
+			source: "run",
+			runs: input.runs,
+		}),
 	};
+}
+
+function aggregateWorkloadStatus(
+	runs: AgentLabReviewRunSummary[],
+): AgentLabReviewRunStatus {
+	const statuses = runs.map((run) => run.status);
+	if (statuses.includes("security_violation")) return "security_violation";
+	if (statuses.includes("timed_out")) return "timed_out";
+	if (statuses.includes("failed")) return "failed";
+	if (statuses.includes("partial")) return "partial";
+	if (statuses.includes("completed")) return "completed";
+	return "skipped";
 }
 
 export function snapshotRealRepoState(projectPath: string): RealRepoSnapshot {
@@ -1547,7 +1647,7 @@ function highCriticalFindings(findings: AgentLabFinding[]): AgentLabFinding[] {
 
 function summaryForRuns(runs: AgentLabReviewRunSummary[]): string {
 	const counts = countRuns(runs);
-	return `${runs.length} requests: ${counts.completed} completed, ${counts.skipped} skipped, ${counts.failed} failed, ${counts.security_violation} security_violation.`;
+	return `${runs.length} requests: ${counts.completed} completed, ${counts.partial} partial, ${counts.timed_out} timed_out, ${counts.skipped} skipped, ${counts.failed} failed, ${counts.security_violation} security_violation.`;
 }
 
 function countRuns(
@@ -1555,6 +1655,8 @@ function countRuns(
 ): Record<AgentLabReviewRunStatus, number> {
 	return {
 		completed: runs.filter((run) => run.status === "completed").length,
+		partial: runs.filter((run) => run.status === "partial").length,
+		timed_out: runs.filter((run) => run.status === "timed_out").length,
 		skipped: runs.filter((run) => run.status === "skipped").length,
 		failed: runs.filter((run) => run.status === "failed").length,
 		security_violation: runs.filter(

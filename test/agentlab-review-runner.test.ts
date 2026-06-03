@@ -356,7 +356,11 @@ test("run latest lee request válido", async () => {
 		router,
 		now: () => new Date("2026-05-25T10:01:00.000Z"),
 	});
-	assert.equal(result.runs[0]?.status, "completed");
+	assert.equal(result.runs[0]?.status, "partial");
+	assert.match(
+		result.runs[0]?.qualityWarnings?.join("\n") ?? "",
+		/parcial|fallback/u,
+	);
 	assert.match(result.path ?? "", /agentlabs[\\/]runs[\\/]current\.json$/u);
 });
 
@@ -502,7 +506,7 @@ test("status ruta legacy relativa busca en reports", async () => {
 	);
 	const status = getAgentLabReviewStatus(legacyName, reportsPath);
 	assert.equal(status.valid, true);
-	assert.equal(status.result?.runs[0]?.status, "completed");
+	assert.equal(status.result?.runs[0]?.status, "partial");
 });
 
 test("status latest rechaza run current viejo para request current nuevo", async () => {
@@ -540,6 +544,10 @@ test("status latest rechaza run current viejo para request current nuevo", async
 
 	assert.equal(status.valid, false);
 	assert.match(status.errors.join("\n"), /stale|pendiente|request actual/u);
+	assert.equal(status.workloadEnvelope?.status, "stale");
+	assert.equal(status.workloadEnvelope?.authority, "advisory");
+	assert.equal(status.workloadEnvelope?.autoRunAllowed, false);
+	assert.equal(status.workloadEnvelope?.staleRequests, 1);
 	assert.equal(status.result, undefined);
 });
 
@@ -579,6 +587,12 @@ test("request inválido se salta y reporta error", async () => {
 		router,
 	});
 	assert.equal(result.runs[0]?.status, "failed");
+	assert.equal(result.workloadEnvelope?.status, "failed");
+	assert.equal(result.workloadEnvelope?.authority, "advisory");
+	assert.equal(result.workloadEnvelope?.autoRunAllowed, false);
+	assert.equal(result.runs[0]?.workloadEnvelope?.status, "failed");
+	assert.equal(result.runs[0]?.workloadEnvelope?.authority, "advisory");
+	assert.equal(result.runs[0]?.workloadEnvelope?.failedRequests, 1);
 	assert.match(result.runs[0]!.rawSummary, /Request file inválido/u);
 });
 
@@ -621,6 +635,10 @@ test("si no hay agente compatible, run skipped no rompe", async () => {
 		request: request("security"),
 	});
 	assert.equal(run.status, "skipped");
+	assert.equal(run.workloadEnvelope?.status, "skipped");
+	assert.equal(run.workloadEnvelope?.authority, "advisory");
+	assert.equal(run.workloadEnvelope?.autoRunAllowed, false);
+	assert.equal(run.workloadEnvelope?.skippedRequests, 1);
 });
 
 test("run usa review-only y forbiddenActions", async () => {
@@ -684,6 +702,10 @@ test("guard detecta archivo nuevo en repo real", async () => {
 	assert.match(run.contractValidation.errors.join("\n"), /security_violation/u);
 	assert.deepEqual(run.realRepoChangedFiles, ["intruder.txt"]);
 	assert.equal(run.requiresHumanApproval, true);
+	assert.equal(run.workloadEnvelope?.status, "security_violation");
+	assert.equal(run.workloadEnvelope?.authority, "advisory");
+	assert.equal(run.workloadEnvelope?.repoWriteAllowed, false);
+	assert.equal(run.workloadEnvelope?.securityViolations, 1);
 });
 
 test("guard detecta mutación limpia con commit en repo real", async () => {
@@ -790,7 +812,8 @@ test("report texto legacy se convierte en contrato válido sin inventar findings
 		projectPath,
 		request: request("security"),
 	});
-	assert.equal(run.status, "completed");
+	assert.equal(run.status, "partial");
+	assert.equal(run.workloadEnvelope?.status, "partial");
 	assert.equal(run.contractValidation.valid, true);
 	assert.equal(run.findings.length, 0);
 	assert.match(run.qualityWarnings?.join("\n") ?? "", /fallback/u);

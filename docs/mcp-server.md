@@ -189,9 +189,9 @@ Herramientas mínimas:
 | `idu_source_skill_candidates_create` | Genera reporte JSON de candidatas de skill desde digests; reports-only, no instala skills, no escribe `.agents`/`.atl`, tokens/cost `no medido`. |
 | `idu_source_skill_candidates_review` | Revisa un reporte de candidatas de skill y valida superficie advisory/reports-only. |
 | `idu_source_refresh` | Recalcula hashes/estado de fuentes; no cambia contratos, Project Core, Constitution, flows, skills ni AgentLabs. |
-| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft` y `external-source-intelligence`. |
-| `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard. |
-| `idu_agentlab_review_status` | Lee estado de review AgentLab. |
+| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft` y `external-source-intelligence`; devuelve `data.workloadEnvelope` advisory-only con carga y presupuesto estimados. |
+| `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard; devuelve `data.workloadEnvelope` con estado agregado (`completed`, `partial`, `timed_out`, `failed`, etc.). |
+| `idu_agentlab_review_status` | Lee estado de review AgentLab y expone `data.workloadEnvelope`; estados `stale`/fallidos siguen bloqueando en el decision envelope. |
 
 ## Seguridad
 
@@ -206,6 +206,7 @@ El MCP adapter:
 - no borra memoria;
 - no devuelve secretos de errores/logs sin redacción básica;
 - no ejecuta AgentLabs salvo la herramienta explícita `idu_agentlab_review_run`;
+- `workloadEnvelope` es metadata advisory-only: no permite auto-run, escritura de repo real ni promoción de contratos;
 - no escribe registry desde `idu_status`, `idu_activate` ni `idu_start`;
 - no crea `config/project-*.json` salvo `idu_bootstrap_project` con `allowCreateDrafts=true`.
 

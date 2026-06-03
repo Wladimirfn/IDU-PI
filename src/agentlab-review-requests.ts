@@ -8,10 +8,12 @@ import {
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
 	buildAgentLabReviewRequest,
+	buildAgentLabWorkloadEnvelope,
 	mapRiskToAgentLabSpecialties,
 	validateAgentLabReviewRequest,
 	type AgentLabReviewRequest,
 	type AgentLabSpecialty,
+	type AgentLabWorkloadEnvelope,
 } from "./agentlab-supervisor-contract.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
 import {
@@ -41,6 +43,7 @@ export type AgentLabReviewRequestPlan = {
 	projectId: string;
 	source: AgentLabReviewRequestSource;
 	warning: "Solicitud AgentLab. No ejecuta revisión por sí sola.";
+	workloadEnvelope?: AgentLabWorkloadEnvelope;
 	requests: AgentLabReviewRequest[];
 	errors: string[];
 	path?: string;
@@ -92,6 +95,14 @@ export function createAgentLabReviewRequests(
 		projectId: input.projectId,
 		source: input.source,
 		warning: WARNING,
+		workloadEnvelope: buildAgentLabWorkloadEnvelope({
+			status: "requested",
+			statusReason:
+				"Solicitud AgentLab creada; no ejecuta revisión automáticamente.",
+			generatedAt,
+			source: "request",
+			requests,
+		}),
 		requests,
 		errors,
 	};
@@ -522,7 +533,8 @@ function requestsFromExternalSourceIntelligence(
 					"npm_advisory",
 					"community_signal",
 				],
-				freshness: input.externalSourceFreshness ?? "latest available at review time",
+				freshness:
+					input.externalSourceFreshness ?? "latest available at review time",
 				queries,
 				relatedContracts,
 				contractPromotionAllowed: false,
@@ -860,6 +872,14 @@ function normalizePlan(value: unknown): AgentLabReviewRequestPlan {
 		projectId: value.projectId,
 		source: value.source,
 		warning: WARNING,
+		workloadEnvelope: buildAgentLabWorkloadEnvelope({
+			status: "requested",
+			statusReason:
+				"Solicitud AgentLab normalizada; no ejecuta revisión automáticamente.",
+			generatedAt: value.generatedAt,
+			source: "request",
+			requests,
+		}),
 		requests,
 		errors: Array.isArray(value.errors)
 			? value.errors.filter(
@@ -945,9 +965,9 @@ function formatRequestDetail(request: AgentLabReviewRequest): string[] {
 			: []),
 		...(request.externalSourceIntelligence
 			? [
-				`  externalSourceStatus: ${request.externalSourceIntelligence.status}`,
-				`  contractPromotionAllowed: ${String(request.externalSourceIntelligence.contractPromotionAllowed)}`,
-			]
+					`  externalSourceStatus: ${request.externalSourceIntelligence.status}`,
+					`  contractPromotionAllowed: ${String(request.externalSourceIntelligence.contractPromotionAllowed)}`,
+				]
 			: []),
 		`  forbiddenActions: ${request.forbiddenActions.join("; ")}`,
 		`  maxCommands: ${request.maxCommands}`,

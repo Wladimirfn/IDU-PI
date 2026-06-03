@@ -54,6 +54,10 @@ import {
 } from "./projects.js";
 import type { StructuredTask } from "./structured-task-queue.js";
 import { recordIduUsageEventDeferred } from "./usage-events.js";
+import {
+	buildAgentLabWorkloadEnvelope,
+	type AgentLabWorkloadEnvelope,
+} from "./agentlab-supervisor-contract.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -2400,6 +2404,16 @@ async function dispatchTool(
 			]);
 			const selector = stringArg(args, "selector") ?? "latest";
 			const plan = runtime.agentLabRequestCreate(source, selector);
+			const workloadEnvelope =
+				plan.workloadEnvelope ??
+				buildAgentLabWorkloadEnvelope({
+					status: "requested",
+					statusReason:
+						"Solicitud AgentLab creada; no ejecuta revisión automáticamente.",
+					generatedAt: plan.generatedAt,
+					source: "mcp",
+					requests: plan.requests,
+				});
 			const decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
 				recommendation: plan.errors.length > 0 ? "block" : "warn",
@@ -2427,6 +2441,7 @@ async function dispatchTool(
 				summary: `Solicitud AgentLab creada: ${plan.path ?? "sin ruta"}`,
 				data: {
 					decisionEnvelope,
+					workloadEnvelope,
 					requestFilePath: plan.path,
 					specialties: [
 						...new Set(plan.requests.map((request) => request.specialty)),
@@ -2444,6 +2459,26 @@ async function dispatchTool(
 		case "idu_agentlab_review_run": {
 			const selector = stringArg(args, "selector") ?? "latest";
 			const result = await runtime.agentLabReviewRun(selector);
+			const aggregateStatus = aggregateRunStatus(
+				result.runs.map((run) => run.status),
+			);
+			const envelopeStatus =
+				aggregateStatus === "unknown" ? "skipped" : aggregateStatus;
+			const workloadEnvelope =
+				result.workloadEnvelope ??
+				buildAgentLabWorkloadEnvelope({
+					status: envelopeStatus as
+						| "completed"
+						| "partial"
+						| "timed_out"
+						| "skipped"
+						| "failed"
+						| "security_violation",
+					statusReason: `AgentLab run aggregate status: ${aggregateStatus}.`,
+					generatedAt: result.generatedAt,
+					source: "mcp",
+					runs: result.runs,
+				});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -2451,8 +2486,9 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 				summary: `AgentLab review run: ${result.consolidatedSummary}`,
 				data: {
+					workloadEnvelope,
 					runFilePath: result.path,
-					status: aggregateRunStatus(result.runs.map((run) => run.status)),
+					status: aggregateStatus,
 					findingsCount: result.consolidatedFindings.length,
 					securityViolations: result.runs.filter(
 						(run) => run.status === "security_violation",
@@ -2470,6 +2506,7 @@ async function dispatchTool(
 			const selector = stringArg(args, "selector") ?? "latest";
 			const status = runtime.agentLabReviewStatus(selector);
 			const runs = status.result?.runs ?? [];
+			const workloadEnvelope = agentLabStatusWorkloadEnvelope(status);
 			const recommendations = runs.flatMap((run) => run.recommendations);
 			const agentLabRequiresHuman =
 				!status.valid ||
@@ -2532,6 +2569,7 @@ async function dispatchTool(
 					: "Estado AgentLab inválido.",
 				data: {
 					decisionEnvelope,
+					workloadEnvelope,
 					statusBySpecialty: Object.fromEntries(
 						runs.map((run) => [run.specialty, run.status]),
 					),
@@ -3353,9 +3391,45 @@ function isStructuredTask(value: unknown): value is StructuredTask {
 
 function aggregateRunStatus(statuses: string[]): string {
 	if (statuses.includes("security_violation")) return "security_violation";
+	if (statuses.includes("timed_out")) return "timed_out";
 	if (statuses.includes("failed")) return "failed";
+	if (statuses.includes("partial")) return "partial";
 	if (statuses.includes("completed")) return "completed";
-	return statuses[0] ?? "skipped";
+	if (statuses.includes("skipped")) return "skipped";
+	return "unknown";
+}
+
+function agentLabStatusWorkloadEnvelope(status: {
+	valid: boolean;
+	errors: string[];
+	result?: {
+		generatedAt: string;
+		runs: Array<{
+			requestId: string;
+			status: string;
+			requiresHumanApproval?: boolean;
+		}>;
+		workloadEnvelope?: AgentLabWorkloadEnvelope;
+	};
+	workloadEnvelope?: AgentLabWorkloadEnvelope;
+}): AgentLabWorkloadEnvelope {
+	if (status.workloadEnvelope) return status.workloadEnvelope;
+	if (status.result?.workloadEnvelope) return status.result.workloadEnvelope;
+	const stale =
+		!status.valid &&
+		status.errors.some((error) =>
+			/stale|pendiente|request actual/iu.test(error),
+		);
+	return buildAgentLabWorkloadEnvelope({
+		status: stale ? "stale" : "failed",
+		statusReason:
+			status.errors[0] ??
+			(stale ? "AgentLab run stale." : "AgentLab status unavailable."),
+		generatedAt: status.result?.generatedAt ?? "deterministic",
+		source: "status",
+		runs: status.result?.runs ?? [],
+		requestIds: [],
+	});
 }
 
 function dedupe(items: string[]): string[] {
