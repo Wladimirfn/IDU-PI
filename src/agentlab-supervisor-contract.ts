@@ -276,16 +276,26 @@ const BENEFITS = new Set<AgentLabRecommendationBenefit>([
 
 const MANDATORY_FORBIDDEN_ACTIONS = [
 	"no modificar repo real",
+	"no escribir en repo real",
 	"no commit",
 	"no push",
+	"no merge",
+	"no rebase",
 	"no aplicar cambios",
+	"no auto-ejecutar AgentLabs",
+	"no auto-aprobar recomendaciones",
+	"no promover contratos",
 	"no modificar Project Core",
 	"no modificar Constitution",
 	"no modificar flows",
 	"no modificar skills reales",
+	"no crear workers ni workspaces en stateRoot",
 	"no borrar datos",
 	"no exponer secretos",
 ];
+
+const UNSAFE_AGENTLAB_ACTION_PATTERN =
+	/\b(?:commit|push|merge|rebase)\b|git\s+(?:commit|push|merge|rebase)|\bforce\s+push\b|\b(?:apply|edit|delete|promote|approve)\b|(?:write|modify)\s+(?:to\s+)?(?:the\s+)?real\s+repo|create\s+workers?\s+in\s+stateroot|create\s+workspaces?\s+in\s+stateroot|aplicar\s+(?:cambios|contratos?|skills?|reglas)|aprobar|auto[-\s]?aprobar|promover|editar\s+c[oó]digo|modificar\s+repo\s+real|escribir\s+en\s+repo\s+real|crear\s+workers?\s+en\s+stateroot|crear\s+workspaces?\s+en\s+stateroot|borrar|eliminar/iu;
 
 export function buildAgentLabReviewRequest(
 	input: BuildAgentLabReviewRequestInput,
@@ -338,9 +348,7 @@ export function buildAgentLabReviewRequest(
 			"tests suggested/executed",
 			"recommendations with human approval flag",
 		]),
-		requiresHumanApproval:
-			input.requiresHumanApproval ??
-			(input.specialty === "security" || input.specialty === "database"),
+		requiresHumanApproval: true,
 		createdAt: input.createdAt ?? new Date().toISOString(),
 	};
 }
@@ -450,6 +458,9 @@ export function validateAgentLabReviewRequest(
 	const createdAt = requiredString(request.createdAt, "createdAt", errors);
 
 	if (forbiddenActions) validateForbiddenActions(forbiddenActions, errors);
+	if (allowedActions) {
+		validateAuditOnlyTextArray(allowedActions, "allowedActions", errors);
+	}
 	if (specialty === "librarian" || trigger === "external_source_intelligence") {
 		if (!externalSourceIntelligence) {
 			errors.push("librarian requests require externalSourceIntelligence");
@@ -479,11 +490,8 @@ export function validateAgentLabReviewRequest(
 			errors.push("skill_review must forbid modifying real skills");
 		}
 	}
-	if (
-		(specialty === "security" || specialty === "database") &&
-		requiresHumanApproval === false
-	) {
-		errors.push("security/database requests require human approval");
+	if (requiresHumanApproval === false) {
+		errors.push("AgentLab requests require human approval");
 	}
 
 	if (
@@ -652,6 +660,40 @@ export function validateAgentLabReviewReport(
 	if (evidence && status === "completed" && evidence.length === 0) {
 		errors.push("evidence is required for completed reports");
 	}
+	if (requiresHumanApproval === false) {
+		errors.push("AgentLab reports require requiresHumanApproval true");
+	}
+	if (testsExecuted) {
+		validateAuditOnlyTextArray(testsExecuted, "testsExecuted", errors);
+	}
+	if (proposedSupervisorActions) {
+		validateAuditOnlyTextArray(
+			proposedSupervisorActions,
+			"proposedSupervisorActions",
+			errors,
+		);
+	}
+	if (suggestedSkillUpdates) {
+		validateAuditOnlyTextArray(
+			suggestedSkillUpdates,
+			"suggestedSkillUpdates",
+			errors,
+		);
+	}
+	if (suggestedRuleUpdates) {
+		validateAuditOnlyTextArray(
+			suggestedRuleUpdates,
+			"suggestedRuleUpdates",
+			errors,
+		);
+	}
+	if (suggestedAgentTasks) {
+		validateAuditOnlyTextArray(
+			suggestedAgentTasks,
+			"suggestedAgentTasks",
+			errors,
+		);
+	}
 	const allFindings = [
 		...(qualityFindings ?? []),
 		...(safetyFindings ?? []),
@@ -759,6 +801,11 @@ export function validateAgentLabReportAgainstSupervisorContract(
 		errors.push(
 			"report.requiresHumanApproval must be true when request requires it",
 		);
+	}
+	if (
+		reportResult.report.testsExecuted.length > requestResult.request.maxCommands
+	) {
+		errors.push("report.testsExecuted must not exceed request.maxCommands");
 	}
 	if (errors.length > 0) return { ok: false, errors };
 	return {
@@ -1147,6 +1194,14 @@ function recommendationsArray(
 			`${itemPath}.suggestedNextStep`,
 			errors,
 		);
+		if (requiresHumanApproval === false) {
+			errors.push(`${itemPath}.requiresHumanApproval must be true`);
+		}
+		if (suggestedNextStep && isUnsafeAgentLabAction(suggestedNextStep)) {
+			errors.push(
+				`${itemPath}.suggestedNextStep contains unsafe non audit-only action`,
+			);
+		}
 		if (
 			title &&
 			description &&
@@ -1239,9 +1294,27 @@ function validateForbiddenActions(actions: string[], errors: string[]): void {
 			label: "no modificar repo real",
 			pattern: /no modificar repo real|no real repo changes/u,
 		},
+		{
+			label: "no escribir en repo real",
+			pattern: /no escribir en repo real|no real repo writes/u,
+		},
 		{ label: "no commit", pattern: /no commit/u },
 		{ label: "no push", pattern: /no push/u },
+		{ label: "no merge", pattern: /no merge/u },
+		{ label: "no rebase", pattern: /no rebase/u },
 		{ label: "no aplicar cambios", pattern: /no aplicar cambios/u },
+		{
+			label: "no auto-ejecutar AgentLabs",
+			pattern: /no auto-ejecutar agentlabs|no auto-run agentlabs/u,
+		},
+		{
+			label: "no auto-aprobar recomendaciones",
+			pattern: /no auto-aprobar recomendaciones|no auto-approve/u,
+		},
+		{
+			label: "no promover contratos",
+			pattern: /no promover contratos|no contract promotion/u,
+		},
 		{
 			label: "no modificar Project Core",
 			pattern: /no modificar project core/u,
@@ -1254,6 +1327,11 @@ function validateForbiddenActions(actions: string[], errors: string[]): void {
 		{
 			label: "no modificar skills reales",
 			pattern: /no modificar skills reales/u,
+		},
+		{
+			label: "no crear workers ni workspaces en stateRoot",
+			pattern:
+				/no crear workers ni workspaces en stateroot|no stateRoot workspace creation/iu,
 		},
 		{ label: "no borrar datos", pattern: /no borrar datos/u },
 		{ label: "no exponer secretos", pattern: /no exponer secretos/u },
@@ -1289,19 +1367,25 @@ function defaultAllowedActions(specialty: AgentLabSpecialty): string[] {
 
 function sanitizeAllowedActions(
 	actions: string[],
-	specialty: AgentLabSpecialty,
+	_specialty: AgentLabSpecialty,
 ): string[] {
-	const cleaned = cleanArray(actions);
-	if (specialty === "librarian") {
-		return cleaned.filter(
-			(action) =>
-				!/apply\s+contract|aplicar\s+contrato|edit\s+code|commit|push/iu.test(
-					action,
-				),
-		);
-	}
-	if (specialty !== "skill_review") return cleaned;
-	return cleaned.filter((action) => !/aplicar\s+skills/iu.test(action));
+	return cleanArray(actions).filter((action) => !isUnsafeAgentLabAction(action));
+}
+
+function isUnsafeAgentLabAction(value: string): boolean {
+	return UNSAFE_AGENTLAB_ACTION_PATTERN.test(value);
+}
+
+function validateAuditOnlyTextArray(
+	values: string[],
+	path: string,
+	errors: string[],
+): void {
+	values.forEach((value, index) => {
+		if (isUnsafeAgentLabAction(value)) {
+			errors.push(`${path}[${index}] contains unsafe non audit-only action`);
+		}
+	});
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

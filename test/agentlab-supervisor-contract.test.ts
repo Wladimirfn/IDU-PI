@@ -72,16 +72,16 @@ function validReport(
 				rationale: "Reduce regresiones de seguridad.",
 				expectedBenefit: "safety",
 				risk: "low",
-				requiresHumanApproval: false,
-				suggestedNextStep: "Crear test antes de modificar auth.",
+				requiresHumanApproval: true,
+				suggestedNextStep: "Registrar hallazgo para revisión humana.",
 			},
 		],
-		proposedSupervisorActions: ["Crear tarea de revisión"],
+		proposedSupervisorActions: ["Registrar tarea de revisión humana"],
 		suggestedSkillUpdates: [],
 		suggestedRuleUpdates: [],
 		suggestedAgentTasks: [],
 		confidence: "high",
-		requiresHumanApproval: false,
+		requiresHumanApproval: true,
 		createdAt: "2026-05-25T00:00:00.000Z",
 		...patch,
 	};
@@ -118,6 +118,39 @@ test("validateAgentLabReviewRequest falla si forbiddenActions no contiene no com
 test("validateAgentLabReviewReport acepta report válido", () => {
 	const result = validateAgentLabReviewReport(validReport());
 	assert.equal(result.ok, true);
+});
+
+test("validateAgentLabReviewReport exige human approval para todo output AgentLab", () => {
+	const result = validateAgentLabReviewReport(
+		validReport({ requiresHumanApproval: false }),
+	);
+	assert.equal(result.ok, false);
+	assert.match(result.errors.join("\n"), /requiresHumanApproval/u);
+});
+
+test("validateAgentLabReviewReport rechaza acciones inseguras en campos accionables", () => {
+	const unsafeFields: Array<Partial<AgentLabReviewReport>> = [
+		{ testsExecuted: ["git commit -m fix"] },
+		{ proposedSupervisorActions: ["aprobar automáticamente el contrato"] },
+		{ suggestedSkillUpdates: ["aplicar skill real"] },
+		{ suggestedRuleUpdates: ["promote contract to production"] },
+		{ suggestedAgentTasks: ["edit code and push"] },
+		{ proposedSupervisorActions: ["write to real repo"] },
+		{ suggestedAgentTasks: ["create workers in stateRoot"] },
+		{
+			recommendations: [
+				{
+					...validReport().recommendations[0]!,
+					suggestedNextStep: "push changes",
+				},
+			],
+		},
+	];
+	for (const patch of unsafeFields) {
+		const result = validateAgentLabReviewReport(validReport(patch));
+		assert.equal(result.ok, false, JSON.stringify(patch));
+		assert.match(result.errors.join("\n"), /audit-only|unsafe/u);
+	}
 });
 
 test("validateAgentLabReviewReport falla si finding no tiene evidence", () => {
@@ -207,6 +240,58 @@ test("summarizeAgentLabReports agrupa findings por control pillar", () => {
 	assert.match(summary, /safety/u);
 	assert.match(summary, /token_cost/u);
 	assert.match(summary, /resources/u);
+});
+
+test("request allowedActions filtra y rechaza intenciones inseguras para toda especialidad", () => {
+	const request = buildAgentLabReviewRequest({
+		...validRequest(),
+		specialty: "architecture",
+		allowedActions: [
+			"inspeccionar arquitectura",
+			"commit",
+			"push changes",
+			"write to real repo",
+			"modify real repo",
+			"create workers in stateRoot",
+		],
+	});
+	assert.deepEqual(request.allowedActions, ["inspeccionar arquitectura"]);
+
+	const validation = validateAgentLabReviewRequest({
+		...request,
+		allowedActions: ["write to real repo", "create workers in stateRoot"],
+	});
+	assert.equal(validation.ok, false);
+	assert.match(validation.errors.join("\n"), /audit-only|unsafe/u);
+});
+
+test("toda request AgentLab exige human approval", () => {
+	const request = buildAgentLabReviewRequest({
+		...validRequest(),
+		specialty: "architecture",
+		requiresHumanApproval: false,
+	});
+	assert.equal(request.requiresHumanApproval, true);
+
+	const validation = validateAgentLabReviewRequest({
+		...request,
+		requiresHumanApproval: false,
+	});
+	assert.equal(validation.ok, false);
+	assert.match(validation.errors.join("\n"), /human approval/u);
+});
+
+test("cross-contract rechaza testsExecuted sobre maxCommands", () => {
+	const request = { ...validRequest(), maxCommands: 1 };
+	const report = validReport({
+		testsExecuted: ["pnpm test", "pnpm build"],
+	});
+	const result = validateAgentLabReportAgainstSupervisorContract(
+		report,
+		request,
+	);
+	assert.equal(result.ok, false);
+	assert.match(result.errors.join("\n"), /maxCommands/u);
 });
 
 test("skill_review request no permite aplicar skills", () => {
