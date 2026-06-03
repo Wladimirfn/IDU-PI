@@ -28,6 +28,15 @@ import {
 	decisionEnvelopeFromEvidence,
 } from "./decision-envelope.js";
 import { buildPostflightTaskTrace } from "./postflight-core.js";
+import {
+	CONTEXT_BUDGETS,
+	createContextBudgetUsage,
+	mergeContextBudgetUsage,
+	sliceListToBudget,
+	sliceTextToBudget,
+	type ContextBudgetProfile,
+	type ContextBudgetUsage,
+} from "./context-budget.js";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
@@ -1969,7 +1978,11 @@ async function dispatchTool(
 			});
 		}
 		case "idu_source_read": {
-			const result = runtime.sourceLibraryRead(requiredText(args, "sourceId"));
+			const result = withSourceContentBudget(
+				runtime.sourceLibraryRead(requiredText(args, "sourceId")),
+				"source_chunk_read",
+				"result.content",
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -2023,7 +2036,9 @@ async function dispatchTool(
 			});
 		}
 		case "idu_source_research_report": {
-			const result = runtime.sourceLibraryResearch(requiredText(args, "query"));
+			const result = withSourceResearchBudget(
+				runtime.sourceLibraryResearch(requiredText(args, "query")),
+			);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -2073,9 +2088,13 @@ async function dispatchTool(
 			});
 		}
 		case "idu_source_chunk_read": {
-			const result = runtime.sourceChunkRead(
-				requiredText(args, "sourceId"),
-				requiredText(args, "chunkId"),
+			const result = withSourceContentBudget(
+				runtime.sourceChunkRead(
+					requiredText(args, "sourceId"),
+					requiredText(args, "chunkId"),
+				),
+				"source_chunk_read",
+				"result.content",
 			);
 			return envelope({
 				ok: true,
@@ -2343,6 +2362,7 @@ type PlanSnapshot = JsonObject & {
 	objective: string;
 	operationalContracts: unknown[];
 	flows: unknown[];
+	contextBudget: ContextBudgetUsage;
 };
 
 function defaultRuntimeFactory(projectPath?: string): CliRuntime {
@@ -2357,39 +2377,232 @@ function buildPlanSnapshot(
 	const status = String(plan.status ?? "unknown");
 	const criticalRisks = arrayField(plan, "criticalRisks");
 	const driftFindings = arrayField(plan, "driftFindings");
+	const objective = budgetTextField(
+		String(
+			plan.inferredObjective ??
+				plan.executiveSummary ??
+				"Objetivo no definido.",
+		),
+		"plan_snapshot",
+		"objective",
+	);
+	const summary = budgetTextField(
+		String(plan.executiveSummary ?? ""),
+		"plan_snapshot",
+		"summary",
+	);
+	const approvedClaims = budgetJsonArray(
+		arrayField(plan, "canonicalClaims"),
+		"plan_snapshot",
+		"approvedClaims",
+	);
+	const operationalContracts = budgetJsonArray(
+		arrayField(plan, "operationalContracts"),
+		"plan_snapshot",
+		"operationalContracts",
+	);
+	const workMilestones = budgetJsonArray(
+		arrayField(plan, "workMilestones"),
+		"plan_snapshot",
+		"workMilestones",
+	);
+	const budgetedDriftFindings = budgetJsonArray(
+		driftFindings,
+		"plan_snapshot",
+		"driftFindings",
+	);
+	const risks = budgetStringArray(
+		dedupe([
+			...criticalRisks.map(String),
+			...arrayField(plan, "qualityRisks").map(String),
+			...arrayField(plan, "securityRisks").map(String),
+			...arrayField(plan, "architectureRisks").map(String),
+		]),
+		"plan_snapshot",
+		"risks",
+	);
+	const flows = budgetJsonArray(
+		arrayField(plan, "projectFlows"),
+		"plan_snapshot",
+		"flows",
+	);
+	const blockers = budgetJsonArray(
+		status === "approved" ? criticalRisks : ["Plan Maestro no aprobado"],
+		"plan_snapshot",
+		"blockers",
+	);
+	const recommendedNext = budgetJsonArray(
+		arrayField(plan, "recommendedNext"),
+		"plan_snapshot",
+		"recommendedNext",
+	);
+	const recommendedAgentLabs = budgetJsonArray(
+		arrayField(
+			(review.revisionAntesDeZarpar as JsonObject | undefined) ?? {},
+			"recommendedAgentLabs",
+		),
+		"plan_snapshot",
+		"recommendedAgentLabs",
+	);
 	return {
 		authority: "advisory",
 		planStatus: status,
 		planApproved: status === "approved",
 		projectId: runtime.projectId,
 		projectPath: runtime.projectPath,
-		objective: String(
-			plan.inferredObjective ??
-				plan.executiveSummary ??
-				"Objetivo no definido.",
-		),
-		summary: String(plan.executiveSummary ?? ""),
-		approvedClaims: arrayField(plan, "canonicalClaims"),
-		operationalContracts: arrayField(plan, "operationalContracts"),
-		workMilestones: arrayField(plan, "workMilestones"),
-		driftFindings,
-		risks: dedupe([
-			...criticalRisks.map(String),
-			...arrayField(plan, "qualityRisks").map(String),
-			...arrayField(plan, "securityRisks").map(String),
-			...arrayField(plan, "architectureRisks").map(String),
-		]),
-		flows: arrayField(plan, "projectFlows"),
+		objective: objective.value,
+		summary: summary.value,
+		approvedClaims: approvedClaims.items,
+		operationalContracts: operationalContracts.items,
+		workMilestones: workMilestones.items,
+		driftFindings: budgetedDriftFindings.items,
+		risks: risks.items,
+		flows: flows.items,
 		flowArtifact: String(plan.flowArtifact ?? "master-plan.flows.json"),
-		blockers:
-			status === "approved" ? criticalRisks : ["Plan Maestro no aprobado"],
-		recommendedNext: arrayField(plan, "recommendedNext"),
-		recommendedAgentLabs: arrayField(
-			(review.revisionAntesDeZarpar as JsonObject | undefined) ?? {},
-			"recommendedAgentLabs",
-		),
+		blockers: blockers.items,
+		recommendedNext: recommendedNext.items,
+		recommendedAgentLabs: recommendedAgentLabs.items,
 		governanceConfig: governanceConfigData(),
 		workerBoundary: workerBoundaryData(),
+		contextBudget: mergeContextBudgetUsage("plan_snapshot", [
+			objective.usage,
+			summary.usage,
+			approvedClaims.usage,
+			operationalContracts.usage,
+			workMilestones.usage,
+			budgetedDriftFindings.usage,
+			risks.usage,
+			flows.usage,
+			blockers.usage,
+			recommendedNext.usage,
+			recommendedAgentLabs.usage,
+		]),
+	};
+}
+
+function budgetTextField(
+	value: string,
+	profile: ContextBudgetProfile,
+	path: string,
+): { value: string; usage: ContextBudgetUsage } {
+	const result = sliceTextToBudget({ text: value, profile, path });
+	return { value: result.text, usage: result.usage };
+}
+
+function budgetStringArray(
+	items: string[],
+	profile: ContextBudgetProfile,
+	path: string,
+): { items: string[]; usage: ContextBudgetUsage } {
+	return sliceListToBudget({ items, profile, path });
+}
+
+function budgetJsonArray(
+	items: unknown[],
+	profile: ContextBudgetProfile,
+	path: string,
+): { items: unknown[]; usage: ContextBudgetUsage } {
+	const budget = CONTEXT_BUDGETS[profile];
+	const selected = items.slice(0, budget.maxArrayItems);
+	const usages: ContextBudgetUsage[] = [];
+	const budgetedItems = selected.map((item, index) => {
+		const serialized = JSON.stringify(item) ?? String(item);
+		const result = sliceTextToBudget({
+			text: serialized,
+			profile,
+			path: `${path}[${index}]`,
+			maxChars: budget.maxArrayItemChars,
+		});
+		usages.push(result.usage);
+		if (!result.usage.truncated) return item;
+		return {
+			contextBudgetTruncated: true,
+			excerpt: result.text,
+			originalType: Array.isArray(item) ? "array" : typeof item,
+		};
+	});
+	if (items.length > budget.maxArrayItems) {
+		usages.push(
+			createContextBudgetUsage(profile, {
+				truncated: true,
+				omitted: [
+					{
+						path,
+						reason: "max_items",
+						omittedItems: items.length - budget.maxArrayItems,
+					},
+				],
+			}),
+		);
+	}
+	return {
+		items: budgetedItems,
+		usage: mergeContextBudgetUsage(profile, usages),
+	};
+}
+
+function withSourceContentBudget<T extends { content: string; truncated?: boolean }>(
+	result: T,
+	profile: ContextBudgetProfile,
+	path: string,
+): T & { contextBudgetUsage: ContextBudgetUsage } {
+	const budget = CONTEXT_BUDGETS[profile];
+	const sliced = sliceTextToBudget({
+		text: result.content,
+		profile,
+		path,
+		maxChars: budget.maxSourceChars || budget.maxTextFieldChars,
+	});
+	const upstreamUsage = result.truncated
+		? createContextBudgetUsage(profile, {
+				truncated: true,
+				omitted: [{ path, reason: "max_chars" }],
+			})
+		: createContextBudgetUsage(profile);
+	const contextBudgetUsage = mergeContextBudgetUsage(profile, [
+		sliced.usage,
+		upstreamUsage,
+	]);
+	return {
+		...result,
+		content: sliced.text,
+		truncated: Boolean(result.truncated) || sliced.usage.truncated,
+		contextBudgetUsage,
+	};
+}
+
+function withSourceResearchBudget<
+	T extends {
+		searchedSourceIds?: string[];
+		signals?: unknown[];
+		limitations?: string[];
+	},
+>(result: T): T & { contextBudgetUsage: ContextBudgetUsage } {
+	const searchedSourceIds = budgetStringArray(
+		(result.searchedSourceIds ?? []).map(String),
+		"source_research",
+		"result.searchedSourceIds",
+	);
+	const limitations = budgetStringArray(
+		(result.limitations ?? []).map(String),
+		"source_research",
+		"result.limitations",
+	);
+	const signals = budgetJsonArray(
+		result.signals ?? [],
+		"source_research",
+		"result.signals",
+	);
+	return {
+		...result,
+		searchedSourceIds: searchedSourceIds.items,
+		limitations: limitations.items,
+		signals: signals.items,
+		contextBudgetUsage: mergeContextBudgetUsage("source_research", [
+			searchedSourceIds.usage,
+			limitations.usage,
+			signals.usage,
+		]),
 	};
 }
 

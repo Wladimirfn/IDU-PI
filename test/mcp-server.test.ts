@@ -27,6 +27,7 @@ import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { DecisionEnvelope } from "../src/decision-envelope.js";
+import type { ContextBudgetUsage } from "../src/context-budget.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
 import type { IduSupervisorCronPlanResult } from "../src/idu-supervisor-cron.js";
@@ -1143,6 +1144,10 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.match(String(snapshot.data.objective), /gobernanza preventiva/u);
 	assert.ok((snapshot.data.operationalContracts as unknown[]).length > 0);
 	assert.ok((snapshot.data.flows as unknown[]).length > 0);
+	const snapshotBudget = snapshot.data.contextBudget as ContextBudgetUsage;
+	assert.equal(snapshotBudget.profile, "plan_snapshot");
+	assert.equal(snapshotBudget.advisoryOnly, true);
+	assert.equal(snapshotBudget.contractPromotionAllowed, false);
 
 	const next = await callIduMcpTool(
 		"idu_next_advisory_action",
@@ -1220,6 +1225,74 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 			/AgentLab/u.test(condition),
 		),
 	);
+});
+
+test("MCP context budgets report plan and source truncation explicitly", async () => {
+	const runtime = fakeRuntime();
+	runtime.masterPlanReview = () =>
+		({
+			current: {},
+			jsonPath: "C:/idu/workspace/projects/sistema/master-plan.json",
+			markdown: "# Plan Maestro approved",
+			revisionAntesDeZarpar: { recommendedAgentLabs: [] },
+			plan: {
+				status: "approved",
+				executiveSummary: "Resumen ".repeat(400),
+				inferredObjective: "Objetivo ".repeat(400),
+				criticalRisks: [],
+				operationalContracts: Array.from({ length: 20 }, (_, index) => ({
+					area: "agent",
+					title: `Contrato ${index}`,
+					rules: [`Regla extensa ${index} ${"x".repeat(900)}`],
+				})),
+				projectFlows: Array.from({ length: 20 }, (_, index) => ({
+					name: `Flujo ${index}`,
+					rules: [`Regla de flujo ${"y".repeat(900)}`],
+				})),
+			},
+		}) as never;
+	runtime.sourceLibraryRead = () => ({
+		...fakeRuntime().sourceLibraryRead("source-demo-manual-abc123"),
+		content: "manual ".repeat(2_000),
+		maxChars: 100,
+		truncated: true,
+	});
+
+	const options = {
+		runtimeFactory: () => runtime,
+		projectResolver: () => registered(),
+	};
+	const snapshot = await callIduMcpTool("idu_plan_snapshot", {}, options);
+	const snapshotBudget = snapshot.data.contextBudget as ContextBudgetUsage;
+	assert.equal(snapshotBudget.profile, "plan_snapshot");
+	assert.equal(snapshotBudget.truncated, true);
+	assert.ok(
+		snapshotBudget.omitted.some(
+			(omission) =>
+				omission.path === "objective" ||
+				omission.path === "operationalContracts",
+		),
+	);
+	assert.equal(snapshotBudget.advisoryOnly, true);
+	assert.equal(snapshotBudget.contractPromotionAllowed, false);
+
+	const read = await callIduMcpTool(
+		"idu_source_read",
+		{ sourceId: "source-demo-manual-abc123" },
+		options,
+	);
+	const readBudget = (read.data.result as { contextBudgetUsage: ContextBudgetUsage })
+		.contextBudgetUsage;
+	assert.equal(readBudget.profile, "source_chunk_read");
+	assert.equal(readBudget.truncated, true);
+	assert.ok(
+		readBudget.omitted.some(
+			(omission) =>
+				omission.path === "result.content" && omission.reason === "max_chars",
+		),
+	);
+	assert.equal(readBudget.advisoryOnly, true);
+	assert.equal(readBudget.contractPromotionAllowed, false);
 });
 
 test("task package blocks implementation when Plan Maestro is not approved", async () => {
@@ -1865,6 +1938,20 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(read.ok, true);
+	assert.equal(
+		(
+			(read.data.result as { contextBudgetUsage: ContextBudgetUsage })
+				.contextBudgetUsage
+		).profile,
+		"source_chunk_read",
+	);
+	assert.equal(
+		(
+			(read.data.result as { contextBudgetUsage: ContextBudgetUsage })
+				.contextBudgetUsage
+		).advisoryOnly,
+		true,
+	);
 	assert.ok(read.safeNotes.some((note) => /No consulté web/u.test(note)));
 
 	const extract = await callIduMcpTool(
@@ -1893,6 +1980,13 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(research.ok, true);
+	assert.equal(
+		(
+			(research.data.result as { contextBudgetUsage: ContextBudgetUsage })
+				.contextBudgetUsage
+		).profile,
+		"source_research",
+	);
 	assert.ok(research.safeNotes.some((note) => /No consulté web/u.test(note)));
 
 	const digest = await callIduMcpTool(
@@ -1922,6 +2016,13 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(chunk.ok, true);
+	assert.equal(
+		(
+			(chunk.data.result as { contextBudgetUsage: ContextBudgetUsage })
+				.contextBudgetUsage
+		).profile,
+		"source_chunk_read",
+	);
 	assert.ok(chunk.safeNotes.some((note) => /No consulté web/u.test(note)));
 
 	const recommend = await callIduMcpTool(
