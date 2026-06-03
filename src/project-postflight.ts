@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import type { PhysicalGateEvidence } from "./physical-gates.js";
 import type { ProjectConnectionReport } from "./project-connection.js";
 import {
 	evaluateConstitutionGates,
@@ -32,6 +33,7 @@ export type ProjectPostflightReport = {
 	requiresHumanConfirmation: boolean;
 	diffSummary?: string;
 	constitutionGate?: ConstitutionGateResult;
+	physicalGates?: PhysicalGateEvidence[];
 };
 
 export type ProjectPostflightGitState = {

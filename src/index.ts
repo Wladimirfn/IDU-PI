@@ -116,6 +116,7 @@ import {
 	reviewProjectCoreResearchDraft,
 	saveProjectCoreResearchDraft,
 } from "./project-core-research.js";
+import { buildPostflightPhysicalGates } from "./physical-gates.js";
 import { inspectProjectConnection } from "./project-connection.js";
 import {
 	analyzeProjectPreflight,
@@ -840,9 +841,17 @@ function buildPostflightReport(): ProjectPostflightReport {
 		changedFiles: gitState.changedFiles,
 		diffSummary: gitState.diffSummary,
 	});
-	return {
+	const reportWithWarnings = {
 		...report,
 		warnings: [...gitState.warnings, ...report.warnings],
+	};
+	return {
+		...reportWithWarnings,
+		physicalGates: buildPostflightPhysicalGates({
+			projectPath,
+			gitState,
+			report: reportWithWarnings,
+		}),
 	};
 }
 

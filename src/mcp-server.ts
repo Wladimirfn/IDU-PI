@@ -16,6 +16,7 @@ import {
 	buildSupervisorLoopOrchestratorAdvisory,
 } from "./orchestrator-advisory.js";
 import {
+	buildPhysicalEvidenceGateways,
 	buildPostflightEvidenceGateways,
 	buildPreflightEvidenceGateways,
 	buildSourceRequiredActionsEvidenceGateways,
@@ -1663,10 +1664,16 @@ async function dispatchTool(
 				expectedChangeMode,
 				report,
 			});
-			const evidenceGateways = buildPostflightEvidenceGateways({
-				report,
-				taskTrace,
-			});
+			const physicalGateways = buildPhysicalEvidenceGateways(
+				report.physicalGates ?? [],
+			);
+			const evidenceGateways = [
+				...buildPostflightEvidenceGateways({
+					report,
+					taskTrace,
+				}),
+				...physicalGateways,
+			];
 			const decisionEnvelope = decisionEnvelopeFromEvidence(
 				name,
 				report.recommendedNext,
@@ -1696,6 +1703,8 @@ async function dispatchTool(
 					observedChangeMode: report.observedChangeMode ?? "code",
 					risk: report.risk,
 					gates: report.constitutionGate ?? null,
+					physicalGates: report.physicalGates ?? [],
+					physicalGateways,
 					evidenceGateways,
 					suggestedAgentLabs: report.suggestedAgentLabs,
 					requiresHumanConfirmation: report.requiresHumanConfirmation,
@@ -1705,6 +1714,7 @@ async function dispatchTool(
 				safeNotes: [
 					...resolution.safeNotes,
 					"Postflight lee estado git; no hace commit ni push.",
+					"Physical gates reportan evidencia disponible; Idu-pi no ejecutó build/test automáticamente.",
 					"Trazabilidad advisory: no cierra ni aplica cambios automáticamente.",
 				],
 			});

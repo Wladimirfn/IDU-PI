@@ -150,6 +150,7 @@ import {
 	scanProjectMap,
 	suggestProjectFlowsFromScan,
 } from "./project-map-scanner.js";
+import { buildPostflightPhysicalGates } from "./physical-gates.js";
 import {
 	analyzeProjectPostflight,
 	formatProjectPostflightReport,
@@ -2062,9 +2063,17 @@ function buildPostflightReport(
 		changedFiles: gitState.changedFiles,
 		diffSummary: gitState.diffSummary,
 	});
-	return {
+	const reportWithWarnings = {
 		...report,
 		warnings: [...gitState.warnings, ...report.warnings],
+	};
+	return {
+		...reportWithWarnings,
+		physicalGates: buildPostflightPhysicalGates({
+			projectPath,
+			gitState,
+			report: reportWithWarnings,
+		}),
 	};
 }
 

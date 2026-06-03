@@ -141,6 +141,16 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			shouldRunAgentLab: false,
 			suggestedAgentLabs: [],
 			requiresHumanConfirmation: false,
+			physicalGates: [
+				{
+					id: "physical-git-status",
+					kind: "git_status",
+					status: "warn",
+					summary: "Git status observed 1 changed file.",
+					advisoryOnly: true,
+					destructive: false,
+				},
+			],
 		}),
 		formatPostflight: () => "postflight",
 		prepare: (): IduPrepareResult => ({
@@ -1266,9 +1276,21 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 		),
 	);
 	assert.ok(Array.isArray(result.data.evidenceGateways));
+	assert.ok(Array.isArray(result.data.physicalGates));
+	assert.ok(Array.isArray(result.data.physicalGateways));
 	assert.equal(
 		(result.data.evidenceGateways as Array<{ source: string }>)[0]?.source,
 		"postflight",
+	);
+	assert.equal(
+		(result.data.physicalGateways as Array<{ source: string }>)[0]?.source,
+		"physical_gate",
+	);
+	assert.equal(
+		(result.data.physicalGates as Array<{ destructive: boolean }>).every(
+			(gate) => gate.destructive === false,
+		),
+		true,
 	);
 	const trace = result.data.taskTrace as {
 		actionId: string;
@@ -1290,6 +1312,7 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 	assert.deepEqual(trace.contractDelta, [
 		{ contract: "data", status: "expected_not_observed" },
 	]);
+	assert.match(result.safeNotes.join("\n"), /no ejecutó build\/test automáticamente/u);
 	assert.match(result.safeNotes.join("\n"), /no cierra ni aplica/u);
 });
 

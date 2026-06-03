@@ -1,3 +1,4 @@
+import type { PhysicalGateEvidence } from "./physical-gates.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
 import type { ProjectPreflightReport } from "./project-preflight.js";
 import type { SourceRequiredActionsReport } from "./source-digest.js";
@@ -16,11 +17,21 @@ export type EvidenceGatewaySource =
 	| "postflight"
 	| "task_package"
 	| "source_required_actions"
-	| "constitution";
+	| "constitution"
+	| "physical_gate";
 
 export type EvidenceItem = {
 	id: string;
-	type: "risk" | "context" | "file" | "rule" | "source" | "trace" | "policy";
+	type:
+		| "risk"
+		| "context"
+		| "file"
+		| "rule"
+		| "source"
+		| "trace"
+		| "policy"
+		| "physical"
+		| "command";
 	source: EvidenceGatewaySource;
 	summary: string;
 	status: EvidenceGatewayStatus;
@@ -276,6 +287,43 @@ export function buildPostflightEvidenceGateways(input: {
 	];
 }
 
+export function buildPhysicalEvidenceGateways(
+	physicalGates: PhysicalGateEvidence[],
+): EvidenceGateway[] {
+	if (physicalGates.length === 0) return [];
+	const evidence: EvidenceItem[] = physicalGates.map((gate) => ({
+		id: gate.id,
+		type: gate.command ? "command" : "physical",
+		source: "physical_gate",
+		summary: gate.summary,
+		status: evidenceStatusFromPhysicalGate(gate.status),
+		data: gate as unknown as JsonObject,
+	}));
+	const requiredActions: EvidenceRequiredAction[] = physicalGates
+		.filter((gate) =>
+			["fail", "error", "needs_evidence"].includes(gate.status),
+		)
+		.map((gate) => ({
+			id: `${gate.id}-resolve`,
+			owner: "orchestrator",
+			action: "resolve_failed_physical_gate",
+			reason: gate.summary,
+			blocking: gate.status === "fail",
+			data: { gateId: gate.id, kind: gate.kind, status: gate.status },
+		}));
+	const status = gatewayStatusFromPhysicalGates(physicalGates);
+	return [
+		gateway({
+			id: "physical-gates",
+			source: "physical_gate",
+			status,
+			summary: physicalGatewaySummary(physicalGates),
+			evidence,
+			requiredActions,
+		}),
+	];
+}
+
 export function buildTaskPackageEvidenceGateways(
 	taskPackage: JsonObject,
 ): EvidenceGateway[] {
@@ -414,6 +462,46 @@ export function buildSourceRequiredActionsEvidenceGateways(
 			})),
 		}),
 	];
+}
+
+function evidenceStatusFromPhysicalGate(
+	status: PhysicalGateEvidence["status"],
+): EvidenceGatewayStatus {
+	if (status === "fail") return "block";
+	if (status === "error" || status === "needs_evidence") return "needs_evidence";
+	if (status === "warn" || status === "not_run") return "warn";
+	return "pass";
+}
+
+function gatewayStatusFromPhysicalGates(
+	physicalGates: PhysicalGateEvidence[],
+): EvidenceGatewayStatus {
+	if (physicalGates.some((gate) => gate.status === "fail")) return "block";
+	if (
+		physicalGates.some((gate) =>
+			["error", "needs_evidence"].includes(gate.status),
+		)
+	) {
+		return "needs_evidence";
+	}
+	if (
+		physicalGates.some((gate) =>
+			["warn", "not_run"].includes(gate.status),
+		)
+	) {
+		return "warn";
+	}
+	return "pass";
+}
+
+function physicalGatewaySummary(physicalGates: PhysicalGateEvidence[]): string {
+	const counts = physicalGates.reduce<Record<string, number>>((acc, gate) => {
+		acc[gate.status] = (acc[gate.status] ?? 0) + 1;
+		return acc;
+	}, {});
+	return `Physical gates: ${Object.entries(counts)
+		.map(([status, count]) => `${status}=${count}`)
+		.join(", ")}`;
 }
 
 function gateway(
