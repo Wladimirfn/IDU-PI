@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	buildUnifiedModelCatalog,
+	groupModelCatalogByDisplayProvider,
 	groupModelCatalogByProvider,
+	modelProviderDisplayLabel,
 	normalizeModelCatalogId,
 	readPiModelCatalogSnapshot,
 	resolvePiModelCatalogSnapshotPath,
@@ -56,6 +58,41 @@ test("catalog groups providers without hardcoding MiniMax or OpenCode", () => {
 		(group) => group.provider,
 	);
 	assert.deepEqual(providers, ["minimax", "opencode"]);
+});
+
+test("catalog groups OpenAI technical providers under a human provider label", () => {
+	const catalog = buildUnifiedModelCatalog({
+		piModels: [
+			{ provider: "openai-codex", id: "gpt-5.4", name: "GPT-5.4" },
+			{ provider: "openai", id: "gpt-4o", name: "GPT-4o" },
+			{ provider: "google", id: "gemini-3-pro", name: "Gemini 3 Pro" },
+		],
+	});
+	const groups = groupModelCatalogByDisplayProvider(catalog.entries);
+	assert.deepEqual(
+		groups.map((group) => ({
+			key: group.key,
+			label: group.label,
+			providers: group.providers,
+			models: group.models.map((model) => model.canonicalId),
+		})),
+		[
+			{
+				key: "google",
+				label: "Google",
+				providers: ["google"],
+				models: ["google/gemini-3-pro"],
+			},
+			{
+				key: "openai",
+				label: "OpenAI",
+				providers: ["openai", "openai-codex"],
+				models: ["openai/gpt-4o", "openai-codex/gpt-5.4"],
+			},
+		],
+	);
+	assert.equal(modelProviderDisplayLabel("minimax"), "MiniMax");
+	assert.equal(modelProviderDisplayLabel("custom-provider"), "Custom Provider");
 });
 
 test("normalizeModelCatalogId accepts provider/model and rejects unsafe text", () => {

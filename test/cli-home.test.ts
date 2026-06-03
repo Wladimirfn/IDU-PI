@@ -639,7 +639,7 @@ test("interactive model role assignment accepts unified catalog direct models", 
 	}
 });
 
-test("interactive model role assignment accepts Pi registry snapshot direct models", async () => {
+test("interactive model role assignment selects snapshot models by provider group", async () => {
 	const root = tempDir();
 	const projectPath = join(root, "project");
 	const stateRoot = join(root, "state");
@@ -678,13 +678,7 @@ test("interactive model role assignment accepts Pi registry snapshot direct mode
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
 		process.env.IDU_PI_MODEL_CATALOG_PATH = snapshotPath;
 		process.env.PI_AGENT_PROFILES = "default|Pi default";
-		const answers = [
-			"4",
-			"1",
-			"agentlab-librarian",
-			"minimax/MiniMax-M2.7",
-			"s",
-		];
+		const answers = ["4", "1", "agentlab-librarian", "2", "1", "s"];
 		const output = await runInteractiveHomeWithQuestion(
 			async () => answers.shift() ?? "",
 		);

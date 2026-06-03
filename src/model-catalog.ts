@@ -185,6 +185,83 @@ export function groupModelCatalogByProvider(
 		}));
 }
 
+export type ModelProviderDisplayGroup = {
+	key: string;
+	label: string;
+	providers: string[];
+	models: UnifiedModelCatalogEntry[];
+};
+
+export function modelProviderDisplayKey(provider: string): string {
+	const normalized = provider.trim().toLowerCase();
+	if (normalized === "openai" || normalized === "openai-codex") {
+		return "openai";
+	}
+	return normalized;
+}
+
+export function modelProviderDisplayLabel(provider: string): string {
+	const key = modelProviderDisplayKey(provider);
+	const knownLabels: Record<string, string> = {
+		google: "Google",
+		minimax: "MiniMax",
+		openai: "OpenAI",
+		opencode: "OpenCode",
+		"opencode-go": "OpenCode Go",
+		"opencode-zen": "OpenCode Zen",
+		openrouter: "OpenRouter",
+	};
+	return knownLabels[key] ?? humanizeProviderLabel(provider);
+}
+
+export function groupModelCatalogByDisplayProvider(
+	entries: UnifiedModelCatalogEntry[],
+): ModelProviderDisplayGroup[] {
+	const groups = new Map<string, ModelProviderDisplayGroup>();
+	for (const entry of entries) {
+		const key = modelProviderDisplayKey(entry.provider);
+		const current = groups.get(key) ?? {
+			key,
+			label: modelProviderDisplayLabel(entry.provider),
+			providers: [],
+			models: [],
+		};
+		if (!current.providers.includes(entry.provider)) {
+			current.providers.push(entry.provider);
+		}
+		current.models.push(entry);
+		groups.set(key, current);
+	}
+	return [...groups.values()]
+		.map((group) => ({
+			...group,
+			providers: [...group.providers].sort((left, right) =>
+				left.localeCompare(right),
+			),
+			models: sortEntries(group.models),
+		}))
+		.sort(
+			(left, right) =>
+				left.label.localeCompare(right.label) ||
+				left.key.localeCompare(right.key),
+		);
+}
+
+function humanizeProviderLabel(provider: string): string {
+	const normalized = provider.trim();
+	if (!normalized) return "Modelo";
+	return normalized
+		.split(/[-_\s]+/u)
+		.filter(Boolean)
+		.map((segment) => {
+			const lower = segment.toLowerCase();
+			if (lower === "api") return "API";
+			if (lower === "ai") return "AI";
+			return `${segment.slice(0, 1).toUpperCase()}${segment.slice(1)}`;
+		})
+		.join(" ");
+}
+
 function sortEntries(
 	entries: UnifiedModelCatalogEntry[],
 ): UnifiedModelCatalogEntry[] {

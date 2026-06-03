@@ -349,6 +349,8 @@ import {
 } from "./model-assignments.js";
 import {
 	buildUnifiedModelCatalog,
+	modelProviderDisplayKey,
+	modelProviderDisplayLabel,
 	readPiModelCatalogSnapshot,
 	resolvePiModelCatalogSnapshotPath,
 } from "./model-catalog.js";
@@ -3140,26 +3142,7 @@ async function assignModelRoleTui(
 		);
 		if (roleId === "exit" || roleId === "__back" || roleId === "__exit")
 			return "Cancelado sin cambios.";
-		const assignmentOptions = modelAssignmentOptions(status);
-		profileId = await selectSearchableMenu(
-			"Elegir modelo para el rol",
-			[
-				...assignmentOptions.map((option) => ({
-					label: option.label,
-					value: option.value,
-				})),
-				{ label: "← Volver a roles", value: "__back" },
-				{ label: "Exit", value: "__exit" },
-			],
-			{
-				search: true,
-				content: [
-					`Rol: ${roleId}`,
-					"Lista plana: perfiles existentes, modelos directos del catálogo unificado y fallback custom.",
-					"Usá Custom sólo si el proveedor/modelo no aparece todavía.",
-				].join("\n"),
-			},
-		);
+		profileId = await selectModelAssignmentTui(status, roleId);
 		if (profileId === "__back") continue;
 		if (profileId === "exit" || profileId === "__exit")
 			return "Cancelado sin cambios.";
@@ -3201,6 +3184,127 @@ async function assignModelRoleTui(
 	}
 }
 
+async function selectModelAssignmentTui(
+	status: ReturnType<typeof buildCliHomeStatus>,
+	roleId: string,
+): Promise<string> {
+	const groups = modelAssignmentOptionGroups(status);
+	while (true) {
+		const choice = await selectSearchableMenu(
+			"Elegir proveedor/modelo para el rol",
+			[
+				...groups.profiles.map((option) => ({
+					label: option.label,
+					value: option.value,
+				})),
+				...groups.providerGroups.map((group) => ({
+					label: `[proveedor] ${group.label} — ${group.models.length} modelo${group.models.length === 1 ? "" : "s"}`,
+					value: `__provider__:${group.key}`,
+				})),
+				...(groups.custom
+					? [
+							{
+								label: `[avanzado] ${groups.custom.label}`,
+								value: groups.custom.value,
+							},
+						]
+					: []),
+				{ label: "← Volver a roles", value: "__back" },
+				{ label: "Exit", value: "__exit" },
+			],
+			{
+				search: true,
+				content: [
+					`Rol: ${roleId}`,
+					"Modelos detectados en este entorno.",
+					"Elegí un perfil, un proveedor/familia o la opción avanzada manual.",
+				].join("\n"),
+			},
+		);
+		if (!choice.startsWith("__provider__:")) return choice;
+		const providerKey = choice.slice("__provider__:".length);
+		const group = groups.providerGroups.find(
+			(candidate) => candidate.key === providerKey,
+		);
+		if (!group) continue;
+		const modelChoice = await selectSearchableMenu(
+			`Elegir modelo — ${group.label}`,
+			[
+				...group.models.map((option) => ({
+					label: option.label,
+					value: option.value,
+				})),
+				{ label: "← Volver a proveedores", value: "__back" },
+				{ label: "Exit", value: "__exit" },
+			],
+			{
+				search: true,
+				content: [
+					`Rol: ${roleId}`,
+					`${group.label}: ${group.models.length} modelo${group.models.length === 1 ? "" : "s"} detectado${group.models.length === 1 ? "" : "s"}.`,
+					"Se guarda el identificador técnico exacto provider/model.",
+				].join("\n"),
+			},
+		);
+		if (modelChoice === "__back") continue;
+		return modelChoice;
+	}
+}
+
+async function promptModelAssignment(
+	question: CliQuestion,
+	status: ReturnType<typeof buildCliHomeStatus>,
+): Promise<string | undefined> {
+	const groups = modelAssignmentOptionGroups(status);
+	const providerOptions = groups.providerGroups.map((group) => ({
+		value: `__provider__:${group.key}`,
+		label: `[proveedor] ${group.label} — ${group.models.length} modelo${group.models.length === 1 ? "" : "s"}`,
+	}));
+	const firstStepOptions = [
+		...groups.profiles.map((option) => ({
+			value: option.value,
+			label: option.label,
+		})),
+		...providerOptions,
+		...(groups.custom
+			? [
+					{
+						value: groups.custom.value,
+						label: `[avanzado] ${groups.custom.label}`,
+					},
+				]
+			: []),
+	];
+	const directOptions = modelAssignmentOptions(status);
+	const firstStepText = firstStepOptions
+		.map((option, index) => `${index + 1}. ${option.label}`)
+		.join("\n");
+	const answer = (
+		await question(
+			`Elegí perfil o proveedor/familia:\nModelos detectados en este entorno.\n${firstStepText}\nperfil/proveedor: `,
+		)
+	).trim();
+	const directSelection = Number.isInteger(Number(answer))
+		? undefined
+		: resolveAssignmentSelection(answer, directOptions);
+	if (directSelection) return directSelection;
+	const firstSelection = resolveAssignmentSelection(answer, firstStepOptions);
+	if (!firstSelection) return undefined;
+	if (!firstSelection.startsWith("__provider__:")) return firstSelection;
+	const providerKey = firstSelection.slice("__provider__:".length);
+	const group = groups.providerGroups.find(
+		(candidate) => candidate.key === providerKey,
+	);
+	if (!group) return undefined;
+	const modelText = group.models
+		.map((option, index) => `${index + 1}. ${option.label}`)
+		.join("\n");
+	const modelAnswer = (
+		await question(`Elegí modelo de ${group.label}:\n${modelText}\nmodelo: `)
+	).trim();
+	return resolveAssignmentSelection(modelAnswer, group.models);
+}
+
 async function assignModelRole(
 	question: CliQuestion,
 	status: ReturnType<typeof buildCliHomeStatus>,
@@ -3218,19 +3322,7 @@ async function assignModelRole(
 	).trim();
 	const roleId = resolveRoleSelection(roleAnswer);
 	if (!roleId) return "Rol no reconocido. No escribí model-assignments.json.";
-	const assignmentOptions = modelAssignmentOptions(status);
-	const assignmentOptionsText = assignmentOptions
-		.map((option, index) => `${index + 1}. ${option.label}`)
-		.join("\n");
-	const assignmentAnswer = (
-		await question(
-			`Elegí modelo/perfil por número o id:\n${assignmentOptionsText}\nmodelo/perfil: `,
-		)
-	).trim();
-	let profileId = resolveAssignmentSelection(
-		assignmentAnswer,
-		assignmentOptions,
-	);
+	let profileId = await promptModelAssignment(question, status);
 	if (profileId === "__custom_model__") {
 		profileId = (await question("Custom model id (provider/model): ")).trim();
 	}
@@ -3261,9 +3353,28 @@ async function assignModelRole(
 	}
 }
 
+type ModelAssignmentMenuOption = {
+	value: string;
+	label: string;
+	source: "profile" | "model" | "custom";
+	providerKey?: string;
+	providerLabel?: string;
+};
+
+type ModelAssignmentMenuGroups = {
+	profiles: ModelAssignmentMenuOption[];
+	providerGroups: Array<{
+		key: string;
+		label: string;
+		providers: string[];
+		models: ModelAssignmentMenuOption[];
+	}>;
+	custom?: ModelAssignmentMenuOption;
+};
+
 function modelAssignmentOptions(
 	status: ReturnType<typeof buildCliHomeStatus>,
-): Array<{ value: string; label: string }> {
+): ModelAssignmentMenuOption[] {
 	const snapshot = readPiModelCatalogSnapshot(
 		resolvePiModelCatalogSnapshotPath(),
 	);
@@ -3275,10 +3386,81 @@ function modelAssignmentOptions(
 	return assignmentOptionsFromModelCatalog(
 		status.agentProfiles,
 		catalog.entries,
-	).map((option) => ({
-		value: option.value,
-		label: formatModelAssignmentOptionLabel(option),
-	}));
+	).map((option) => {
+		const provider = option.value.split("/")[0];
+		return {
+			value: option.value,
+			label: formatModelAssignmentOptionLabel(option),
+			source: option.source,
+			...(option.source === "model" && provider
+				? {
+						providerKey: modelProviderDisplayKey(provider),
+						providerLabel: modelProviderDisplayLabel(provider),
+					}
+				: {}),
+		};
+	});
+}
+
+function modelAssignmentOptionGroups(
+	status: ReturnType<typeof buildCliHomeStatus>,
+): ModelAssignmentMenuGroups {
+	const options = modelAssignmentOptions(status);
+	const providerGroups = new Map<
+		string,
+		{
+			key: string;
+			label: string;
+			providers: string[];
+			models: ModelAssignmentMenuOption[];
+		}
+	>();
+	let custom: ModelAssignmentMenuOption | undefined;
+	const profiles: ModelAssignmentMenuOption[] = [];
+	for (const option of options) {
+		if (option.source === "profile") {
+			profiles.push(option);
+			continue;
+		}
+		if (option.source === "custom") {
+			custom = option;
+			continue;
+		}
+		const provider = option.value.split("/")[0];
+		if (!provider) continue;
+		const key = option.providerKey ?? modelProviderDisplayKey(provider);
+		const label = option.providerLabel ?? modelProviderDisplayLabel(provider);
+		const current = providerGroups.get(key) ?? {
+			key,
+			label,
+			providers: [],
+			models: [],
+		};
+		if (!current.providers.includes(provider)) current.providers.push(provider);
+		current.models.push(option);
+		providerGroups.set(key, current);
+	}
+	return {
+		profiles,
+		providerGroups: [...providerGroups.values()]
+			.map((group) => ({
+				...group,
+				providers: [...group.providers].sort((left, right) =>
+					left.localeCompare(right),
+				),
+				models: [...group.models].sort(
+					(left, right) =>
+						left.label.localeCompare(right.label) ||
+						left.value.localeCompare(right.value),
+				),
+			}))
+			.sort(
+				(left, right) =>
+					left.label.localeCompare(right.label) ||
+					left.key.localeCompare(right.key),
+			),
+		custom,
+	};
 }
 
 function formatModelAssignmentOptionLabel(option: {
@@ -3287,9 +3469,9 @@ function formatModelAssignmentOptionLabel(option: {
 	source: "profile" | "model" | "custom";
 }): string {
 	if (option.source === "profile") return `[perfil] ${option.label}`;
-	if (option.source === "custom") return `[custom] ${option.label}`;
+	if (option.source === "custom") return `${option.label}`;
 	const provider = option.value.split("/")[0] ?? "modelo";
-	return `[${provider}] ${option.label}`;
+	return `${option.label} — ${modelProviderDisplayLabel(provider)}`;
 }
 
 function resolveRoleSelection(input: string): string | undefined {
