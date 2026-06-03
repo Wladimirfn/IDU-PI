@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 type ExtensionCommandContext = {
 	cwd: string;
@@ -7,6 +10,9 @@ type ExtensionCommandContext = {
 		setStatus(key: string, value: string | undefined): void;
 	};
 	waitForIdle(): Promise<void>;
+	modelRegistry?: {
+		getAvailable(): Promise<unknown[]>;
+	};
 };
 
 type ExtensionAPI = {
@@ -44,6 +50,7 @@ type CliCommand = {
 
 const MAX_OUTPUT_CHARS = 12_000;
 const IDU_PI_PACKAGE_ROOT: string = "__IDU_PI_PACKAGE_ROOT__";
+const SAFE_MODEL_SEGMENT_RE = /^[A-Za-z0-9._~:@%+-]+$/u;
 
 function cliProcess(cliArgs: string[]): { command: string; args: string[] } {
 	const cliScript =
@@ -59,6 +66,112 @@ function cliProcess(cliArgs: string[]): { command: string; args: string[] } {
 function trimOutput(value: string): string {
 	if (value.length <= MAX_OUTPUT_CHARS) return value;
 	return `${value.slice(0, MAX_OUTPUT_CHARS)}\n\n[Salida truncada por extensión Pi: ${value.length} caracteres totales]`;
+}
+
+function resolveModelCatalogSnapshotPath(): string {
+	const override = process.env.IDU_PI_MODEL_CATALOG_PATH?.trim();
+	if (override) return override;
+	const home =
+		process.env.USERPROFILE?.trim() || process.env.HOME?.trim() || homedir();
+	return join(home, ".pi", "idu-pi", "model-catalog.json");
+}
+
+function normalizeModelCatalogId(value: string): string | undefined {
+	const trimmed = value.trim();
+	const [provider, ...modelSegments] = trimmed.split("/");
+	if (!provider || modelSegments.length === 0) return undefined;
+	if (!SAFE_MODEL_SEGMENT_RE.test(provider)) return undefined;
+	if (
+		modelSegments.some(
+			(segment) =>
+				!segment ||
+				segment === "." ||
+				segment === ".." ||
+				!SAFE_MODEL_SEGMENT_RE.test(segment),
+		)
+	) {
+		return undefined;
+	}
+	return `${provider}/${modelSegments.join("/")}`;
+}
+
+function sanitizeRegistryModel(value: unknown):
+	| {
+			provider: string;
+			id: string;
+			name?: string;
+			inputCost?: number;
+			outputCost?: number;
+	  }
+	| undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return undefined;
+	}
+	const record = value as Record<string, unknown>;
+	if (typeof record.provider !== "string" || typeof record.id !== "string") {
+		return undefined;
+	}
+	const provider = record.provider.trim();
+	const id = record.id.trim();
+	if (!normalizeModelCatalogId(`${provider}/${id}`)) return undefined;
+	const model: {
+		provider: string;
+		id: string;
+		name?: string;
+		inputCost?: number;
+		outputCost?: number;
+	} = { provider, id };
+	if (typeof record.name === "string" && record.name.trim()) {
+		model.name = record.name.trim();
+	}
+	if (
+		typeof record.inputCost === "number" &&
+		Number.isFinite(record.inputCost)
+	) {
+		model.inputCost = record.inputCost;
+	}
+	if (
+		typeof record.outputCost === "number" &&
+		Number.isFinite(record.outputCost)
+	) {
+		model.outputCost = record.outputCost;
+	}
+	return model;
+}
+
+async function refreshPiModelCatalogSnapshot(
+	ctx: ExtensionCommandContext,
+): Promise<void> {
+	const getAvailable = ctx.modelRegistry?.getAvailable;
+	if (!getAvailable) return;
+	try {
+		const rawModels = await getAvailable.call(ctx.modelRegistry);
+		const models = rawModels.flatMap((model) => {
+			const sanitized = sanitizeRegistryModel(model);
+			return sanitized ? [sanitized] : [];
+		});
+		const path = resolveModelCatalogSnapshotPath();
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(
+			path,
+			`${JSON.stringify(
+				{
+					version: 1,
+					generatedAt: new Date().toISOString(),
+					source: "pi-model-registry",
+					models,
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+	} catch (error) {
+		ctx.ui.notify(
+			`Idu-pi no pudo refrescar catálogo de modelos: ${error instanceof Error ? error.message : String(error)}`,
+			"warning",
+		);
+	}
 }
 
 function formatCliResult(
@@ -203,6 +316,7 @@ export default function (pi: ExtensionAPI) {
 		ctx: ExtensionCommandContext,
 	) {
 		await ctx.waitForIdle();
+		await refreshPiModelCatalogSnapshot(ctx);
 		ctx.ui.setStatus("idu-pi", `running ${command}`);
 		try {
 			if (command === "idu") {

@@ -347,7 +347,11 @@ import {
 	saveModelAssignment,
 	saveModelAssignments,
 } from "./model-assignments.js";
-import { buildUnifiedModelCatalog } from "./model-catalog.js";
+import {
+	buildUnifiedModelCatalog,
+	readPiModelCatalogSnapshot,
+	resolvePiModelCatalogSnapshotPath,
+} from "./model-catalog.js";
 
 export type CliResult = {
 	exitCode: number;
@@ -3260,7 +3264,11 @@ async function assignModelRole(
 function modelAssignmentOptions(
 	status: ReturnType<typeof buildCliHomeStatus>,
 ): Array<{ value: string; label: string }> {
+	const snapshot = readPiModelCatalogSnapshot(
+		resolvePiModelCatalogSnapshotPath(),
+	);
 	const catalog = buildUnifiedModelCatalog({
+		snapshotModels: snapshot?.models,
 		gentleModelIds: readGentleModelRouting(status.cwd),
 		profileModelIds: status.agentProfiles.map(profileModelLabel),
 	});

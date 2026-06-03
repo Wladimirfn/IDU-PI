@@ -51,6 +51,7 @@ function snapshotEnv(): EnvSnapshot {
 		PI_AGENT_PROFILES: process.env.PI_AGENT_PROFILES,
 		IDU_PI_ENV_PATH: process.env.IDU_PI_ENV_PATH,
 		IDU_PI_REGISTRY_PATH: process.env.IDU_PI_REGISTRY_PATH,
+		IDU_PI_MODEL_CATALOG_PATH: process.env.IDU_PI_MODEL_CATALOG_PATH,
 	};
 }
 
@@ -630,6 +631,112 @@ test("interactive model role assignment accepts unified catalog direct models", 
 		assert.match(
 			readFileSync(join(stateRoot, "model-assignments.json"), "utf8"),
 			/minimax\/MiniMax-M2\.7/u,
+		);
+	} finally {
+		process.chdir(previousCwd);
+		restoreEnv(previous);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("interactive model role assignment accepts Pi registry snapshot direct models", async () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state");
+	const snapshotPath = join(root, "model-catalog.json");
+	mkdirSync(join(root, "data"), { recursive: true });
+	mkdirSync(projectPath, { recursive: true });
+	writeFileSync(
+		join(root, "data", "projects.json"),
+		JSON.stringify({
+			activeProjectId: "project",
+			projects: [
+				{ id: "project", name: "project", path: projectPath, stateRoot },
+			],
+		}),
+		"utf8",
+	);
+	writeFileSync(
+		snapshotPath,
+		JSON.stringify({
+			version: 1,
+			generatedAt: "2026-06-03T00:00:00.000Z",
+			source: "pi-model-registry",
+			models: [
+				{ provider: "minimax", id: "MiniMax-M2.7", name: "MiniMax M2.7" },
+			],
+		}),
+		"utf8",
+	);
+	const previous = snapshotEnv();
+	const previousCwd = process.cwd();
+	try {
+		process.chdir(projectPath);
+		process.env.DEFAULT_CWD = projectPath;
+		process.env.ALLOWED_ROOTS = root;
+		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
+		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
+		process.env.IDU_PI_MODEL_CATALOG_PATH = snapshotPath;
+		process.env.PI_AGENT_PROFILES = "default|Pi default";
+		const answers = [
+			"4",
+			"1",
+			"agentlab-librarian",
+			"minimax/MiniMax-M2.7",
+			"s",
+		];
+		const output = await runInteractiveHomeWithQuestion(
+			async () => answers.shift() ?? "",
+		);
+		assert.match(output, /Asignación guardada/u);
+		assert.match(
+			readFileSync(join(stateRoot, "model-assignments.json"), "utf8"),
+			/minimax\/MiniMax-M2\.7/u,
+		);
+	} finally {
+		process.chdir(previousCwd);
+		restoreEnv(previous);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("malformed Pi registry snapshot does not crash model assignment fallback", async () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state");
+	const snapshotPath = join(root, "model-catalog.json");
+	mkdirSync(join(root, "data"), { recursive: true });
+	mkdirSync(projectPath, { recursive: true });
+	writeFileSync(
+		join(root, "data", "projects.json"),
+		JSON.stringify({
+			activeProjectId: "project",
+			projects: [
+				{ id: "project", name: "project", path: projectPath, stateRoot },
+			],
+		}),
+		"utf8",
+	);
+	writeFileSync(snapshotPath, "{invalid json", "utf8");
+	const previous = snapshotEnv();
+	const previousCwd = process.cwd();
+	try {
+		process.chdir(projectPath);
+		process.env.DEFAULT_CWD = projectPath;
+		process.env.ALLOWED_ROOTS = root;
+		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
+		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
+		process.env.IDU_PI_MODEL_CATALOG_PATH = snapshotPath;
+		process.env.PI_AGENT_PROFILES =
+			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt";
+		const answers = ["4", "1", "agentlab-security", "codex", "s"];
+		const output = await runInteractiveHomeWithQuestion(
+			async () => answers.shift() ?? "",
+		);
+		assert.match(output, /Asignación guardada/u);
+		assert.match(
+			readFileSync(join(stateRoot, "model-assignments.json"), "utf8"),
+			/codex/u,
 		);
 	} finally {
 		process.chdir(previousCwd);

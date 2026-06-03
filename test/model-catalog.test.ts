@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
 	buildUnifiedModelCatalog,
 	groupModelCatalogByProvider,
 	normalizeModelCatalogId,
+	readPiModelCatalogSnapshot,
+	resolvePiModelCatalogSnapshotPath,
 } from "../src/model-catalog.js";
 
 test("unified catalog deduplicates by provider/model id and preserves sources", () => {
@@ -80,5 +85,107 @@ test("catalog keeps dynamic provider names and sorts models inside provider grou
 	assert.deepEqual(
 		group?.models.map((entry) => entry.canonicalId),
 		["custom-provider/alpha", "custom-provider/zeta"],
+	);
+});
+
+test("readPiModelCatalogSnapshot accepts valid snapshots and drops invalid model entries", () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-model-catalog-"));
+	try {
+		const path = join(root, "model-catalog.json");
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				generatedAt: "2026-06-03T00:00:00.000Z",
+				source: "pi-model-registry",
+				models: [
+					{
+						provider: "minimax",
+						id: "MiniMax-M2.7",
+						name: "MiniMax M2.7",
+						inputCost: 0.1,
+						outputCost: 0.2,
+					},
+					{ provider: "openrouter", id: "meta/llama-3.1-405b" },
+					{ provider: "openai", id: "../secret" },
+					{ provider: "bad provider", id: "model" },
+					{ provider: "openai", id: "gpt-5.4", inputCost: Number.NaN },
+				],
+			}),
+			"utf8",
+		);
+		const snapshot = readPiModelCatalogSnapshot(path);
+		assert.equal(snapshot?.version, 1);
+		assert.equal(snapshot?.source, "pi-model-registry");
+		assert.deepEqual(
+			snapshot?.models.map((model) => `${model.provider}/${model.id}`),
+			[
+				"minimax/MiniMax-M2.7",
+				"openrouter/meta/llama-3.1-405b",
+				"openai/gpt-5.4",
+			],
+		);
+		assert.equal(snapshot?.models[0]?.name, "MiniMax M2.7");
+		assert.equal(snapshot?.models[0]?.inputCost, 0.1);
+		assert.equal(snapshot?.models[2]?.inputCost, undefined);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("readPiModelCatalogSnapshot rejects invalid outer snapshot shapes", () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-model-catalog-invalid-"));
+	try {
+		const path = join(root, "model-catalog.json");
+		for (const value of [
+			{
+				version: 2,
+				generatedAt: "now",
+				source: "pi-model-registry",
+				models: [],
+			},
+			{ version: 1, generatedAt: "now", source: "other", models: [] },
+			{ version: 1, generatedAt: "now", source: "pi-model-registry" },
+		]) {
+			writeFileSync(path, JSON.stringify(value), "utf8");
+			assert.equal(readPiModelCatalogSnapshot(path), undefined);
+		}
+		writeFileSync(path, "{not json", "utf8");
+		assert.equal(readPiModelCatalogSnapshot(path), undefined);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("snapshot models merge with other catalog sources and dedupe", () => {
+	const catalog = buildUnifiedModelCatalog({
+		snapshotModels: [
+			{ provider: "minimax", id: "MiniMax-M2.7", name: "MiniMax M2.7" },
+		],
+		gentleModelIds: ["minimax/MiniMax-M2.7"],
+		profileModelIds: ["minimax/MiniMax-M2.7"],
+	});
+	assert.equal(catalog.entries.length, 1);
+	assert.equal(catalog.entries[0]?.canonicalId, "minimax/MiniMax-M2.7");
+	assert.deepEqual([...(catalog.entries[0]?.sources ?? [])].sort(), [
+		"gentle-routing",
+		"profile",
+		"snapshot",
+	]);
+});
+
+test("resolvePiModelCatalogSnapshotPath supports override and defaults under home", () => {
+	assert.equal(
+		resolvePiModelCatalogSnapshotPath({
+			IDU_PI_MODEL_CATALOG_PATH: "C:/tmp/model-catalog.json",
+		}),
+		"C:/tmp/model-catalog.json",
+	);
+	assert.equal(
+		resolvePiModelCatalogSnapshotPath({ USERPROFILE: "C:/Users/test" }).replace(
+			/\\/gu,
+			"/",
+		),
+		"C:/Users/test/.pi/idu-pi/model-catalog.json",
 	);
 });
