@@ -8,13 +8,9 @@ import {
 	parseAgentProfiles,
 	type AgentProfile,
 } from "./config.js";
-import { profileModelLabel } from "./agent-router.js";
 import {
-	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
-	profileModelInventory,
-	recommendAgentLabModelAssignments,
 } from "./model-assignments.js";
 import {
 	detectGlobalIduInstall,
@@ -152,9 +148,10 @@ function safeParseAgentProfiles(raw?: string): AgentProfile[] {
 	}
 }
 
-function profileLabel(profile: AgentProfile | undefined): string {
-	if (!profile) return "(not set)";
-	return `${profile.label} / ${profileModelLabel(profile)}`;
+function formatModelProjectLabel(project: CliHomeProjectStatus): string {
+	if (!project.registered) return "proyecto no registrado";
+	if (project.isGitRepository) return project.projectId;
+	return `${project.projectId} (detectado desde carpeta no-git)`;
 }
 
 export function formatMainMenu(status: CliHomeStatus): string {
@@ -278,64 +275,34 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 	const profiles = status.agentProfiles.length
 		? status.agentProfiles
 		: parseAgentProfiles();
-	const defaultProfile = profiles[0];
 	const assignments = status.project.stateRoot
 		? loadModelAssignments(status.project.stateRoot)
 		: { version: 1 as const, assignments: {} };
-	const proposal = recommendAgentLabModelAssignments(profiles, assignments, {
-		cwd: status.cwd,
-	});
-	const inventory = profileModelInventory(profiles.slice(1));
 	return [
 		"Modelos Idu-pi",
 		"",
-		"Assign models by role for the Idu-pi supervisor and AgentLabs.",
-		"Primary flow: choose a role, choose a model, confirm the assignment.",
+		"Configurá qué modelo usa cada rol del supervisor y AgentLabs.",
+		"Los cambios se guardan por proyecto después de confirmación.",
 		"",
-		"Current assignments:",
+		"Contexto actual:",
+		`- Proyecto: ${formatModelProjectLabel(status.project)}`,
+		...(status.project.stateRoot
+			? [`- StateRoot: ${status.project.stateRoot}`]
+			: ["- StateRoot: no configurado"]),
 		"",
-		`  ▸ Supervisor principal       ${profileLabel(defaultProfile)}`,
-		`    Supervisor semántico       ${profileLabel(defaultProfile)}`,
-		`    Supervisor compactación    ${profileLabel(defaultProfile)}`,
+		"Asignaciones actuales:",
+		"",
 		...(status.project.stateRoot
 			? formatModelAssignments(assignments, profiles).split("\n").slice(2)
-			: ["    AgentLabs                sin stateRoot"]),
+			: ["  - sin stateRoot; registrá el proyecto antes de guardar asignaciones"]),
 		"",
-		"Acciones principales:",
+		"Acciones disponibles:",
 		"- Asignar modelo por rol",
-		"- Propuesta automática por AgentLab",
+		"- Ver asignaciones actuales",
 		"- Validar configuración",
+		"- Avanzado: editar PI_AGENT_PROFILES",
 		"",
-		"Advanced compatibility: PI_AGENT_PROFILES",
-		"Current profiles:",
-		"",
-		...profiles.map(
-			(profile, index) =>
-				`  ${index === 0 ? "▸" : " "} ${profile.label} (${profile.id})  ${profileModelLabel(profile)}`,
-		),
-		"",
-		"Unique AgentLab profile models:",
-		...(inventory.uniqueModelIds.length
-			? inventory.uniqueModelIds.map((modelId) => `  - ${modelId}`)
-			: ["  - ninguno explícito"]),
-		...(inventory.duplicateModelGroups.length
-			? [
-					"",
-					"Duplicate model warnings:",
-					...inventory.duplicateModelGroups.map(
-						(group) => `  - ${group.modelId}: ${group.profileIds.join(", ")}`,
-					),
-				]
-			: []),
-		"",
-		"Recommended AgentLab proposal:",
-		...formatAgentLabModelAssignmentProposal(proposal, profiles)
-			.split("\n")
-			.slice(4)
-			.map((line) => (line ? `  ${line}` : "")),
-		"",
-		"Advanced: editar PI_AGENT_PROFILES guarda .env con backup.",
-		"Asignar modelo por rol guarda stateRoot/model-assignments.json tras confirmación.",
+		"Tip: abrí idu-pi desde la carpeta del proyecto que querés configurar.",
 	].join("\n");
 }
 

@@ -2564,7 +2564,8 @@ type CliHomeActionOptions = {
 type MenuOption = { label: string; value: string };
 
 const ANSI_RESET = "\x1b[0m";
-const ANSI_CLEAR = "\x1b[H\x1b[J";
+const ANSI_HOME = "\x1b[H";
+const ANSI_CLEAR_TO_END = "\x1b[J";
 const ANSI_ALT_SCREEN_ON = "\x1b[?1049h";
 const ANSI_ALT_SCREEN_OFF = "\x1b[?1049l";
 const ANSI_HIDE_CURSOR = "\x1b[?25l";
@@ -2819,7 +2820,6 @@ async function selectSearchableMenu(
 		);
 	};
 	const render = () => {
-		process.stdout.write(ANSI_CLEAR);
 		const width = ANSI_PANEL_WIDTH;
 		const visible = filteredOptions();
 		selected = Math.min(selected, Math.max(0, visible.length - 1));
@@ -2869,7 +2869,7 @@ async function selectSearchableMenu(
 					.join("\n")
 			: panelLine("Sin resultados", width, ANSI_DIM);
 		const footer = bottomBorder(width);
-		process.stdout.write(`${header}\n${rows}\n${footer}`);
+		process.stdout.write(`${ANSI_HOME}${header}\n${rows}\n${footer}${ANSI_CLEAR_TO_END}`);
 	};
 	try {
 		render();

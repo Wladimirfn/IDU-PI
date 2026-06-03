@@ -367,7 +367,7 @@ test("interactive telegram remote lifecycle uses injected launcher", async () =>
 	assert.match(output, /Abriendo bridge/u);
 });
 
-test("model profile panel renders role-first Idu-pi assignments and advanced compatibility", () => {
+test("model profile panel stays focused on project context and assignments", () => {
 	const status = buildCliHomeStatus({
 		env: {
 			PATH: "",
@@ -379,26 +379,20 @@ test("model profile panel renders role-first Idu-pi assignments and advanced com
 	});
 	const panel = formatModelProfilesStatus(status);
 	assert.match(panel, /Modelos Idu-pi/u);
-	assert.match(panel, /Primary flow: choose a role/u);
-	assert.match(panel, /Current assignments:/u);
-	assert.match(panel, /Supervisor principal.*Pi default/u);
-	assert.match(panel, /Advanced compatibility: PI_AGENT_PROFILES/u);
-	assert.match(panel, /Current profiles:/u);
-	assert.match(panel, /Pi default \(default\).*nvidia\/kimi-k2/u);
-	assert.match(panel, /Barato \(barato\).*nvidia\/deepseek-v3/u);
-	assert.match(panel, /Unique AgentLab profile models:/u);
-	assert.match(panel, /nvidia\/deepseek-v3/u);
-	assert.match(panel, /AgentLab general/u);
-	assert.match(panel, /recomendado: Barato/u);
-	assert.match(panel, /AgentLab seguridad/u);
-	assert.match(panel, /recomendado: Seguridad/u);
-	assert.match(
-		panel,
-		/Advanced: editar PI_AGENT_PROFILES guarda \.env con backup/u,
-	);
+	assert.match(panel, /Configurá qué modelo usa cada rol/u);
+	assert.match(panel, /Contexto actual:/u);
+	assert.match(panel, /Proyecto:/u);
+	assert.match(panel, /Asignaciones actuales:/u);
+	assert.match(panel, /Acciones disponibles:/u);
+	assert.match(panel, /Asignar modelo por rol/u);
+	assert.match(panel, /Validar configuración/u);
+	assert.match(panel, /Avanzado: editar PI_AGENT_PROFILES/u);
+	assert.doesNotMatch(panel, /Unique AgentLab profile models:/u);
+	assert.doesNotMatch(panel, /Duplicate model warnings:/u);
+	assert.doesNotMatch(panel, /Recommended AgentLab proposal:/u);
 });
 
-test("model profile panel warns when AgentLab profiles duplicate the same model", () => {
+test("model profile overview hides duplicate diagnostics from the main panel", () => {
 	const status = buildCliHomeStatus({
 		env: {
 			PATH: "",
@@ -409,10 +403,9 @@ test("model profile panel warns when AgentLab profiles duplicate the same model"
 		stdinInteractive: false,
 	});
 	const panel = formatModelProfilesStatus(status);
-	assert.match(panel, /Duplicate model warnings:/u);
-	assert.match(panel, /codex, spark/u);
-	assert.match(panel, /estado: blocked/u);
-	assert.match(panel, /Diversidad insuficiente/u);
+	assert.doesNotMatch(panel, /Duplicate model warnings:/u);
+	assert.doesNotMatch(panel, /estado: blocked/u);
+	assert.doesNotMatch(panel, /Diversidad insuficiente/u);
 });
 
 test("model profiles submenu exposes role-first actions and advanced compatibility", () => {
