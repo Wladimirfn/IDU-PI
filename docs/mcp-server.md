@@ -189,7 +189,7 @@ Herramientas mínimas:
 | `idu_source_skill_candidates_create` | Genera reporte JSON de candidatas de skill desde digests; reports-only, no instala skills, no escribe `.agents`/`.atl`, tokens/cost `no medido`. |
 | `idu_source_skill_candidates_review` | Revisa un reporte de candidatas de skill y valida superficie advisory/reports-only. |
 | `idu_source_refresh` | Recalcula hashes/estado de fuentes; no cambia contratos, Project Core, Constitution, flows, skills ni AgentLabs. |
-| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft` y `external-source-intelligence`; devuelve `data.workloadEnvelope` advisory-only con carga y presupuesto estimados. |
+| `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft`, `external-source-intelligence` y `specialist-audit-plan`; devuelve `data.workloadEnvelope` advisory-only con carga/presupuesto estimados. Para `specialist-audit-plan`, el orquestador pasa `specialties` explícitas y recibe `plan.specialtyWorkloadEnvelopes` más `explicitRunRequirement`; la ejecución sigue siendo sólo `idu_agentlab_review_run`. |
 | `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard; devuelve `data.workloadEnvelope` con estado agregado (`completed`, `partial`, `timed_out`, `failed`, etc.). |
 | `idu_agentlab_review_status` | Lee estado de review AgentLab y expone `data.workloadEnvelope`; estados `stale`/fallidos siguen bloqueando en el decision envelope. |
 

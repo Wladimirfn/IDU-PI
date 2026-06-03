@@ -109,6 +109,54 @@ function writeSkillDraft(reportsPath: string): void {
 	);
 }
 
+test("specialist audit plan crea requests y workload por especialidad sin ejecutar labs", () => {
+	const reportsPath = join(root(), "reports");
+	const plan = createAgentLabReviewRequests({
+		source: "specialist_audit_plan",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath: root(),
+		manualObjective: "Audit MCP and AgentLab governance",
+		manualContext: "Check advisory-only boundaries.",
+		specialties: ["security", "architecture", "database"],
+		now,
+	});
+
+	assert.equal(plan.requests.length, 3);
+	assert.deepEqual(
+		plan.requests.map((request) => request.specialty),
+		["security", "architecture", "database"],
+	);
+	assert.equal(plan.explicitRunRequirement?.required, true);
+	assert.equal(plan.explicitRunRequirement?.tool, "idu_agentlab_review_run");
+	assert.equal(plan.specialtyWorkloadEnvelopes?.length, 3);
+	assert.equal(
+		plan.specialtyWorkloadEnvelopes?.[0]?.workloadEnvelope.status,
+		"requested",
+	);
+	assert.equal(
+		plan.specialtyWorkloadEnvelopes?.[0]?.workloadEnvelope.totalRequests,
+		1,
+	);
+	assert.equal(plan.workloadEnvelope?.autoRunAllowed, false);
+	assert.equal(plan.workloadEnvelope?.repoWriteAllowed, false);
+	assert.equal(plan.workloadEnvelope?.contractPromotionAllowed, false);
+	for (const request of plan.requests) {
+		assert.equal(request.requiresHumanApproval, true);
+		assert.ok(
+			request.forbiddenActions.some((action) =>
+				/telemetry|telemetría/iu.test(action),
+			),
+		);
+		assert.ok(
+			request.forbiddenActions.some((action) =>
+				/auto[- ]?run|auto[- ]?ejecutar/iu.test(action),
+			),
+		);
+	}
+	assert.ok(existsSync(plan.path!));
+});
+
 test("postflight high crea request security/database según impacto", () => {
 	const reportsPath = join(root(), "reports");
 	const security = createAgentLabReviewRequests({

@@ -56,6 +56,7 @@ import type { StructuredTask } from "./structured-task-queue.js";
 import { recordIduUsageEventDeferred } from "./usage-events.js";
 import {
 	buildAgentLabWorkloadEnvelope,
+	type AgentLabSpecialty,
 	type AgentLabWorkloadEnvelope,
 } from "./agentlab-supervisor-contract.js";
 
@@ -548,8 +549,14 @@ const TOOLS: IduMcpToolDefinition[] = [
 				"master-plan",
 				"skill-draft",
 				"external-source-intelligence",
+				"specialist-audit-plan",
 			]),
 			selector: optionalString("Selector; usar latest por defecto."),
+			objective: optionalString("Objetivo acotado para specialist-audit-plan."),
+			context: optionalString("Contexto compacto para specialist-audit-plan."),
+			specialties: optionalStringArray(
+				"Especialidades explícitas para specialist-audit-plan.",
+			),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -2401,9 +2408,31 @@ async function dispatchTool(
 				"master-plan",
 				"skill-draft",
 				"external-source-intelligence",
+				"specialist-audit-plan",
 			]);
 			const selector = stringArg(args, "selector") ?? "latest";
-			const plan = runtime.agentLabRequestCreate(source, selector);
+			const specialties = agentLabSpecialtiesArg(args, "specialties");
+			if (source === "specialist-audit-plan" && specialties.errors.length > 0) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Solicitud AgentLab specialist-audit-plan inválida.",
+					data: {},
+					safeNotes: [
+						...resolution.safeNotes,
+						"No ejecuté AgentLabs.",
+						"No creé solicitud AgentLab inválida.",
+					],
+					errors: specialties.errors,
+				});
+			}
+			const plan = runtime.agentLabRequestCreate(source, selector, {
+				objective: stringArg(args, "objective"),
+				context: stringArg(args, "context"),
+				specialties: specialties.values,
+			});
 			const workloadEnvelope =
 				plan.workloadEnvelope ??
 				buildAgentLabWorkloadEnvelope({
@@ -3349,6 +3378,34 @@ function stringListArg(args: JsonObject, key: string): string[] {
 		.filter((item): item is string => typeof item === "string")
 		.map((item) => item.trim())
 		.filter(Boolean);
+}
+
+const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([
+	"security",
+	"database",
+	"architecture",
+	"code_quality",
+	"ui_ux",
+	"performance",
+	"skill_review",
+	"project_understanding",
+	"docs",
+	"token_cost",
+	"librarian",
+	"general",
+]);
+
+function agentLabSpecialtiesArg(
+	args: JsonObject,
+	key: string,
+): { values?: AgentLabSpecialty[]; errors: string[] } {
+	const rawValues = stringListArg(args, key);
+	if (rawValues.length === 0) return { errors: [] };
+	const errors = rawValues
+		.filter((value) => !AGENTLAB_SPECIALTIES.has(value as AgentLabSpecialty))
+		.map((value) => `specialty inválida: ${value}`);
+	if (errors.length > 0) return { errors };
+	return { values: [...new Set(rawValues)] as AgentLabSpecialty[], errors: [] };
 }
 
 function requiredText(args: JsonObject, key: string): string {

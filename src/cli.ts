@@ -272,6 +272,7 @@ import {
 	reviewAgentLabReviewRequest,
 	type AgentLabReviewRequestPlan,
 	type AgentLabReviewRequestReview,
+	type AgentLabSpecialistAuditPlanOptions,
 } from "./agentlab-review-requests.js";
 import {
 	formatAgentLabReviewRunResult,
@@ -591,6 +592,7 @@ export type CliRuntime = {
 	agentLabRequestCreate: (
 		source: string,
 		pathOrLatest?: string,
+		options?: AgentLabSpecialistAuditPlanOptions,
 	) => AgentLabReviewRequestPlan;
 	formatAgentLabReviewRequestPlan: (plan: AgentLabReviewRequestPlan) => string;
 	agentLabRequestReview: (pathOrLatest: string) => AgentLabReviewRequestReview;
@@ -1128,7 +1130,7 @@ export function createCliRuntime(
 		skillDraftReview: (pathOrLatest) =>
 			reviewSkillDraft(pathOrLatest, reportsPath),
 		formatSkillDraftReview,
-		agentLabRequestCreate: (source, pathOrLatest) => {
+		agentLabRequestCreate: (source, pathOrLatest, options) => {
 			if (source === "postflight") {
 				return createAgentLabReviewRequests({
 					source: "postflight",
@@ -1162,6 +1164,17 @@ export function createCliRuntime(
 					reportsPath: reportsPath,
 					projectId: activeProject.id,
 					projectPath: activeProject.path,
+				});
+			}
+			if (source === "specialist-audit-plan") {
+				return createAgentLabReviewRequests({
+					source: "specialist_audit_plan",
+					reportsPath: reportsPath,
+					projectId: activeProject.id,
+					projectPath: activeProject.path,
+					manualObjective: options?.objective,
+					manualContext: options?.context,
+					specialties: options?.specialties,
 				});
 			}
 			throw new Error(

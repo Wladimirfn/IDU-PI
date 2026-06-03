@@ -36,7 +36,19 @@ export type AgentLabReviewRequestSource =
 	| "supervisor_improvements"
 	| "project_core_constitution"
 	| "external_source_intelligence"
+	| "specialist_audit_plan"
 	| "manual";
+
+export type AgentLabSpecialtyWorkloadEnvelope = {
+	specialty: AgentLabSpecialty;
+	workloadEnvelope: AgentLabWorkloadEnvelope;
+};
+
+export type AgentLabExplicitRunRequirement = {
+	required: true;
+	tool: "idu_agentlab_review_run";
+	reason: string;
+};
 
 export type AgentLabReviewRequestPlan = {
 	generatedAt: string;
@@ -44,6 +56,8 @@ export type AgentLabReviewRequestPlan = {
 	source: AgentLabReviewRequestSource;
 	warning: "Solicitud AgentLab. No ejecuta revisión por sí sola.";
 	workloadEnvelope?: AgentLabWorkloadEnvelope;
+	specialtyWorkloadEnvelopes?: AgentLabSpecialtyWorkloadEnvelope[];
+	explicitRunRequirement?: AgentLabExplicitRunRequirement;
 	requests: AgentLabReviewRequest[];
 	errors: string[];
 	path?: string;
@@ -55,6 +69,12 @@ export type AgentLabReviewRequestReview = {
 	valid: boolean;
 	errors: string[];
 	plan?: AgentLabReviewRequestPlan;
+};
+
+export type AgentLabSpecialistAuditPlanOptions = {
+	objective?: string;
+	context?: string;
+	specialties?: AgentLabSpecialty[];
 };
 
 export type CreateAgentLabReviewRequestsInput = {
@@ -72,6 +92,7 @@ export type CreateAgentLabReviewRequestsInput = {
 	externalSourceQueries?: string[];
 	externalSourceRelatedContracts?: string[];
 	externalSourceFreshness?: string;
+	specialties?: AgentLabSpecialty[];
 	now?: () => Date;
 };
 
@@ -103,6 +124,7 @@ export function createAgentLabReviewRequests(
 			source: "request",
 			requests,
 		}),
+		...specialistAuditPlanMetadata(input, requests, generatedAt),
 		requests,
 		errors,
 	};
@@ -224,6 +246,9 @@ function emptyRequestErrors(
 			`No encontré skill draft válido para AgentLab (${selector}): ${review.errors.join("; ") || "sin drafts revisables"}.`,
 		];
 	}
+	if (input.source === "specialist_audit_plan") {
+		return ["Specialist audit plan requires at least one valid specialty."];
+	}
 	if (input.source === "master_plan") {
 		const selector = input.masterPlanPathOrLatest ?? "latest";
 		const review = reviewMasterPlan({
@@ -260,6 +285,8 @@ function buildRequests(
 			return requestsFromSemanticTasks(input, createdAt);
 		case "external_source_intelligence":
 			return requestsFromExternalSourceIntelligence(input, createdAt);
+		case "specialist_audit_plan":
+			return requestsFromSpecialistAuditPlan(input, createdAt);
 		case "manual":
 			return requestsFromManual(input, createdAt);
 		case "supervisor_improvements":
@@ -568,6 +595,60 @@ function requestsFromExternalSourceIntelligence(
 	];
 }
 
+function requestsFromSpecialistAuditPlan(
+	input: CreateAgentLabReviewRequestsInput,
+	createdAt: string,
+): AgentLabReviewRequest[] {
+	const objective = input.manualObjective ?? "Specialist AgentLab audit plan";
+	const context = input.manualContext ?? objective;
+	const specialties = dedupeSpecialties(input.specialties ?? []);
+	return specialties.map((specialty, index) =>
+		buildAgentLabReviewRequest({
+			id: requestId(input.projectId, "specialist-audit", specialty, index + 1),
+			projectId: input.projectId,
+			projectPath: input.projectPath,
+			specialty,
+			trigger: "manual",
+			objective: `${objective} — ${specialty}`,
+			contextSummary: context,
+			evidence: [context, `specialty: ${specialty}`],
+			filesToInspect: [],
+			flowsToCheck: ["AgentLab audit-only", "explicit run required"],
+			rulesToCheck: [
+				"AgentLabs are audit-only",
+				"request creation does not run labs",
+				"contract and skill promotion require explicit human/orchestrator review",
+			],
+			constraints: [
+				"Specialist audit request only; do not run AgentLabs automatically.",
+				"No telemetry, repo writes, commits, contract promotion, or skill promotion.",
+			],
+			allowedActions: [
+				"inspeccionar evidencia provista",
+				"reportar hallazgos con evidencia",
+				"recomendar revisión humana u orquestador sin aplicar cambios",
+			],
+			forbiddenActions: [
+				"no telemetry",
+				"no ejecutar AgentLabs automáticamente",
+				"no escribir en repo real",
+				"no promover contratos",
+				"no promover skills",
+			],
+			maxCommands: 3,
+			maxMinutes: 10,
+			tokenBudgetHint: "bounded-specialist-audit",
+			expectedOutputs: [
+				"hallazgos por especialidad con evidencia",
+				"omisiones y límites de cobertura",
+				"siguiente acción segura para el orquestador",
+			],
+			createdAt,
+			requiresHumanApproval: true,
+		}),
+	);
+}
+
 function requestsFromManual(
 	input: CreateAgentLabReviewRequestsInput,
 	createdAt: string,
@@ -598,6 +679,35 @@ function requestsFromManual(
 			createdAt,
 		}),
 	);
+}
+
+function specialistAuditPlanMetadata(
+	input: CreateAgentLabReviewRequestsInput,
+	requests: AgentLabReviewRequest[],
+	generatedAt: string,
+): Pick<
+	AgentLabReviewRequestPlan,
+	"specialtyWorkloadEnvelopes" | "explicitRunRequirement"
+> {
+	if (input.source !== "specialist_audit_plan") return {};
+	return {
+		explicitRunRequirement: {
+			required: true,
+			tool: "idu_agentlab_review_run",
+			reason:
+				"Specialist audit plan only creates requests; execution requires explicit orchestrator call.",
+		},
+		specialtyWorkloadEnvelopes: requests.map((request) => ({
+			specialty: request.specialty,
+			workloadEnvelope: buildAgentLabWorkloadEnvelope({
+				status: "requested",
+				statusReason: `Specialist ${request.specialty} audit requested; no AgentLab executed.`,
+				generatedAt,
+				source: "request",
+				requests: [request],
+			}),
+		})),
+	};
 }
 
 function masterPlanSpecialties(plan: MasterPlan): AgentLabSpecialty[] {
@@ -880,6 +990,17 @@ function normalizePlan(value: unknown): AgentLabReviewRequestPlan {
 			source: "request",
 			requests,
 		}),
+		...specialistAuditPlanMetadata(
+			{
+				source: value.source,
+				reportsPath: "",
+				projectId: value.projectId,
+				projectPath: "",
+				specialties: requests.map((request) => request.specialty),
+			},
+			requests,
+			value.generatedAt,
+		),
 		requests,
 		errors: Array.isArray(value.errors)
 			? value.errors.filter(
@@ -898,6 +1019,7 @@ function isSource(value: unknown): value is AgentLabReviewRequestSource {
 		value === "supervisor_improvements" ||
 		value === "project_core_constitution" ||
 		value === "external_source_intelligence" ||
+		value === "specialist_audit_plan" ||
 		value === "manual"
 	);
 }

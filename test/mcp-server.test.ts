@@ -34,7 +34,10 @@ import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
 import type { IduSupervisorCronPlanResult } from "../src/idu-supervisor-cron.js";
 import type { SemanticAuditStatusReport } from "../src/semantic-audit-command.js";
-import type { AgentLabReviewRequestPlan } from "../src/agentlab-review-requests.js";
+import {
+	createAgentLabReviewRequests,
+	type AgentLabReviewRequestPlan,
+} from "../src/agentlab-review-requests.js";
 import type {
 	AgentLabReviewRunResult,
 	AgentLabReviewStatus,
@@ -2370,6 +2373,70 @@ test("postflight request create remains request-only and review-run reports sand
 	assert.ok(
 		external.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
 	);
+
+	const specialistRuntime = fakeRuntime();
+	specialistRuntime.agentLabRequestCreate = (_source, _selector, options) =>
+		createAgentLabReviewRequests({
+			source: "specialist_audit_plan",
+			reportsPath: join(
+				mkdtempSync(join(tmpdir(), "idu-mcp-specialist-")),
+				"reports",
+			),
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			manualObjective: options?.objective,
+			manualContext: options?.context,
+			specialties: options?.specialties,
+		});
+	const specialist = await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{
+			source: "specialist-audit-plan",
+			objective: "Audit MCP and AgentLab governance",
+			context: "Check advisory-only boundaries.",
+			specialties: ["security", "architecture", "code_quality"],
+		},
+		{
+			runtimeFactory: () => specialistRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(specialist.ok, true);
+	assert.deepEqual(specialist.data.specialties, [
+		"security",
+		"architecture",
+		"code_quality",
+	]);
+	const specialistPlan = specialist.data.plan as AgentLabReviewRequestPlan;
+	assert.equal(specialistPlan.source, "specialist_audit_plan");
+	assert.equal(specialistPlan.explicitRunRequirement?.required, true);
+	assert.equal(
+		specialistPlan.explicitRunRequirement?.tool,
+		"idu_agentlab_review_run",
+	);
+	assert.equal(specialistPlan.specialtyWorkloadEnvelopes?.length, 3);
+	assert.equal(
+		specialistPlan.specialtyWorkloadEnvelopes?.[0]?.workloadEnvelope.status,
+		"requested",
+	);
+	assert.ok(!specialist.data.run);
+	assert.ok(
+		specialist.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
+	);
+
+	const invalidSpecialist = await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{
+			source: "specialist-audit-plan",
+			specialties: ["security", "not-a-specialty"],
+		},
+		{
+			runtimeFactory: () => specialistRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(invalidSpecialist.ok, false);
+	assert.match(invalidSpecialist.errors.join("\n"), /specialty inválida/u);
 
 	const approvalRuntime = fakeRuntime();
 	approvalRuntime.agentLabReviewStatus = (): AgentLabReviewStatus => ({
