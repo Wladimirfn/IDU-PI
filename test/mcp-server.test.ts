@@ -44,8 +44,42 @@ import type {
 	SourceLibraryMutationResult,
 	SourceLibraryStatus,
 } from "../src/source-library.js";
+import type {
+	SourceSkillCandidateCreationResult,
+	SourceSkillCandidateReview,
+} from "../src/source-skill-candidates.js";
 
 const UNUSED = "unused";
+
+function fakeSourceSkillCandidateCreation(): SourceSkillCandidateCreationResult {
+	return {
+		ok: true,
+		path: "C:/idu/workspace/reports/source-skill-candidates-20260603-120000.json",
+		report: {
+			version: 1,
+			projectId: "sistema_de_mantencion",
+			createdAt: "2026-06-03T12:00:00.000Z",
+			source: "source_library",
+			warning: "Reports-only",
+			contractPromotionAllowed: false,
+			requiresHumanApproval: true,
+			tokensCostMeasured: false,
+			efficiencyEvidence: "no medido",
+			candidates: [],
+			limitations: [],
+			requiredActions: [],
+		},
+	};
+}
+
+function fakeSourceSkillCandidateReview(): SourceSkillCandidateReview {
+	return {
+		ok: true,
+		path: "C:/idu/workspace/reports/source-skill-candidates-20260603-120000.json",
+		report: fakeSourceSkillCandidateCreation().report,
+		errors: [],
+	};
+}
 
 function connection(
 	projectPath = "C:/projects/sistema",
@@ -730,6 +764,8 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			limitations: [],
 			contractPromotionAllowed: false,
 		}),
+		sourceSkillCandidatesCreate: () => fakeSourceSkillCandidateCreation(),
+		sourceSkillCandidatesReview: () => fakeSourceSkillCandidateReview(),
 		sourceLibraryRefresh: (): SourceLibraryStatus =>
 			fakeRuntime().sourceLibraryStatus(),
 		formatSourceLibraryStatus: () => "source library status",
@@ -744,6 +780,10 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		formatSourceChunkRead: () => "source chunk read",
 		formatSourceRecommendationReport: () => "source recommend",
 		formatSourceRequiredActionsReport: () => "source required actions",
+		formatSourceSkillCandidateCreationResult: () =>
+			"Source skill candidates\n\nReports-only\ntokens/cost: no medido",
+		formatSourceSkillCandidateReview: () =>
+			"Source skill candidates review\n\nvalid",
 		formatSourceLibraryRefreshResult: () => "source library refresh",
 		agentLabRequestCreate: (source: string): AgentLabReviewRequestPlan => ({
 			generatedAt: "2026-05-25T00:00:00.000Z",
@@ -870,12 +910,18 @@ test("mcp server lists Idu-pi tools", async () => {
 		tools.some((tool) => tool.name === "idu_source_recommend_for_task"),
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_source_required_actions"));
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_source_skill_candidates_create"),
+	);
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_source_skill_candidates_review"),
+	);
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
 	);
-	assert.equal(tools.length, 44);
+	assert.equal(tools.length, 46);
 });
 
 test("MCP exposes direct Master Plan lifecycle tools", async () => {
@@ -2106,6 +2152,29 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 			/lector bibliotecario/u.test(note),
 		),
 	);
+
+	const candidates = await callIduMcpTool(
+		"idu_source_skill_candidates_create",
+		{ selector: "all" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(candidates.ok, true);
+	assert.equal(
+		(candidates.data.result as { report: { tokensCostMeasured: boolean } })
+			.report.tokensCostMeasured,
+		false,
+	);
+	assert.match(candidates.safeNotes.join("\n"), /No instalé skills/u);
+	assert.match(candidates.safeNotes.join("\n"), /tokens\/cost: no medido/u);
+
+	const candidateReview = await callIduMcpTool(
+		"idu_source_skill_candidates_review",
+		{ pathOrLatest: "latest" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(candidateReview.ok, true);
+	assert.match(candidateReview.summary, /valid/u);
+	assert.match(candidateReview.safeNotes.join("\n"), /reports-only/u);
 
 	const refresh = await callIduMcpTool(
 		"idu_source_refresh",

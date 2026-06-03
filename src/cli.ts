@@ -82,6 +82,14 @@ import {
 	type SourceRecommendationReport,
 	type SourceRequiredActionsReport,
 } from "./source-digest.js";
+import {
+	createSourceSkillCandidates,
+	formatSourceSkillCandidateCreationResult,
+	formatSourceSkillCandidateReview,
+	reviewSourceSkillCandidates,
+	type SourceSkillCandidateCreationResult,
+	type SourceSkillCandidateReview,
+} from "./source-skill-candidates.js";
 import { formatCommandCatalog } from "./command-catalog.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -411,6 +419,12 @@ export type CliRuntime = {
 	sourceChunkRead: (sourceId: string, chunkId: string) => SourceChunkReadResult;
 	sourceRecommend: (request: string) => SourceRecommendationReport;
 	sourceRequiredActions: () => SourceRequiredActionsReport;
+	sourceSkillCandidatesCreate: (
+		selector?: string,
+	) => SourceSkillCandidateCreationResult;
+	sourceSkillCandidatesReview: (
+		pathOrLatest: string,
+	) => SourceSkillCandidateReview;
 	sourceLibraryRefresh: () => SourceLibraryStatus;
 	formatSourceLibraryStatus: (status: SourceLibraryStatus) => string;
 	formatSourceLibraryAddResult: (result: SourceLibraryMutationResult) => string;
@@ -431,6 +445,12 @@ export type CliRuntime = {
 	) => string;
 	formatSourceRequiredActionsReport: (
 		result: SourceRequiredActionsReport,
+	) => string;
+	formatSourceSkillCandidateCreationResult: (
+		result: SourceSkillCandidateCreationResult,
+	) => string;
+	formatSourceSkillCandidateReview: (
+		review: SourceSkillCandidateReview,
 	) => string;
 	formatSourceLibraryRefreshResult: (status: SourceLibraryStatus) => string;
 	formatMasterPlanStatus?: (result: MasterPlanStatusResult) => string;
@@ -886,6 +906,15 @@ export function createCliRuntime(
 				stateRoot: masterPlanStateRoot,
 				projectId: activeProject.id,
 			}),
+		sourceSkillCandidatesCreate: (selector = "all") =>
+			createSourceSkillCandidates({
+				stateRoot: masterPlanStateRoot,
+				reportsPath,
+				projectId: activeProject.id,
+				selector,
+			}),
+		sourceSkillCandidatesReview: (pathOrLatest) =>
+			reviewSourceSkillCandidates(pathOrLatest, reportsPath),
 		sourceLibraryRefresh: () =>
 			refreshSourceLibrary({
 				stateRoot: masterPlanStateRoot,
@@ -903,6 +932,8 @@ export function createCliRuntime(
 		formatSourceChunkRead,
 		formatSourceRecommendationReport,
 		formatSourceRequiredActionsReport,
+		formatSourceSkillCandidateCreationResult,
+		formatSourceSkillCandidateReview,
 		formatSourceLibraryRefreshResult,
 		formatMasterPlanStatus,
 		formatMasterPlanReview,
@@ -1441,6 +1472,24 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSourceRequiredActionsReport(
 						activeRuntime.sourceRequiredActions(),
+					),
+				);
+			case "idu-source-skill-candidates-create":
+			case "source-skill-candidates-create":
+				return ok(
+					activeRuntime.formatSourceSkillCandidateCreationResult(
+						activeRuntime.sourceSkillCandidatesCreate(
+							rest.join(" ").trim() || "all",
+						),
+					),
+				);
+			case "idu-source-skill-candidates-review":
+			case "source-skill-candidates-review":
+				return ok(
+					activeRuntime.formatSourceSkillCandidateReview(
+						activeRuntime.sourceSkillCandidatesReview(
+							rest.join(" ").trim() || "latest",
+						),
 					),
 				);
 			case "idu-source-refresh":
@@ -2547,6 +2596,8 @@ export function helpText(): string {
 		"  idu-pi idu-source-chunk-read <source-id> <chunk-id>",
 		'  idu-pi idu-source-recommend "tarea"',
 		"  idu-pi idu-source-required-actions",
+		"  idu-pi idu-source-skill-candidates-create all",
+		"  idu-pi idu-source-skill-candidates-review latest",
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-improvements-review latest",
@@ -2913,7 +2964,10 @@ type SelectSearchableMenuSettings = {
 };
 
 type SelectSearchableMenuInput = {
-	on: (event: "keypress", listener: (chunk: string, key: { name?: string }) => void) => unknown;
+	on: (
+		event: "keypress",
+		listener: (chunk: string, key: { name?: string }) => void,
+	) => unknown;
 	removeAllListeners: (event: "keypress") => unknown;
 	resume: () => unknown;
 	isTTY?: boolean;
@@ -2945,7 +2999,8 @@ async function selectSearchableMenu(
 	const startInterval: (callback: () => void, intervalMs: number) => unknown =
 		deps.setInterval ?? setInterval;
 	const stopInterval: (timer: unknown) => void =
-		deps.clearInterval ?? ((timer: unknown) => clearInterval(timer as NodeJS.Timeout));
+		deps.clearInterval ??
+		((timer: unknown) => clearInterval(timer as NodeJS.Timeout));
 	emitKeypressEvents(input as NodeJS.ReadStream);
 	const rawMode = input.isTTY;
 	if (rawMode) input.setRawMode?.(true);

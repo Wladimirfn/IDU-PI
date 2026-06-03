@@ -126,6 +126,14 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /corepack pnpm cli -- idu-skill-drafts-review latest/);
 	assert.match(
 		text,
+		/corepack pnpm cli -- idu-source-skill-candidates-create all/,
+	);
+	assert.match(
+		text,
+		/corepack pnpm cli -- idu-source-skill-candidates-review latest/,
+	);
+	assert.match(
+		text,
 		/corepack pnpm cli -- idu-agentlab-request-create postflight/,
 	);
 	assert.match(text, /corepack pnpm cli -- idu-agentlab-request-review latest/);

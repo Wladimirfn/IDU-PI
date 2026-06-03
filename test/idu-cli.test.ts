@@ -65,6 +65,10 @@ import type {
 	SkillDraftReview,
 } from "../src/skill-drafts.js";
 import type {
+	SourceSkillCandidateCreationResult,
+	SourceSkillCandidateReview,
+} from "../src/source-skill-candidates.js";
+import type {
 	SkillImprovementCreationResult,
 	SkillImprovementPlan,
 	SkillImprovementStatusResult,
@@ -795,6 +799,38 @@ function fakeSkillDraftReview(): SkillDraftReview {
 	};
 }
 
+function fakeSourceSkillCandidateCreation(
+	selector = "all",
+): SourceSkillCandidateCreationResult {
+	return {
+		ok: true,
+		path: "reports/source-skill-candidates-20260603-120000.json",
+		report: {
+			version: 1,
+			projectId: "idu-pi",
+			createdAt: "2026-06-03T12:00:00.000Z",
+			source: "source_library",
+			warning: `selector ${selector}; Reports-only`,
+			contractPromotionAllowed: false,
+			requiresHumanApproval: true,
+			tokensCostMeasured: false,
+			efficiencyEvidence: "no medido",
+			candidates: [],
+			limitations: [],
+			requiredActions: [],
+		},
+	};
+}
+
+function fakeSourceSkillCandidateReview(): SourceSkillCandidateReview {
+	return {
+		ok: true,
+		path: "reports/source-skill-candidates-20260603-120000.json",
+		errors: [],
+		report: fakeSourceSkillCandidateCreation().report,
+	};
+}
+
 function fakeSkillImprovementStatus(): SkillImprovementStatusResult {
 	return {
 		path: "reports/skill-improvement-proposals-20260525-000000.json",
@@ -1120,6 +1156,8 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 			limitations: [],
 			contractPromotionAllowed: false,
 		}),
+		sourceSkillCandidatesCreate: fakeSourceSkillCandidateCreation,
+		sourceSkillCandidatesReview: () => fakeSourceSkillCandidateReview(),
 		sourceLibraryRefresh: () => runtime.sourceLibraryStatus(),
 		formatSourceLibraryStatus: (status) =>
 			["Idu-pi Source Library", "", "Estado:", status.state].join("\n"),
@@ -1142,6 +1180,21 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		formatSourceChunkRead: () => "Idu-pi Source Chunk Read",
 		formatSourceRecommendationReport: () => "Idu-pi Source Recommend For Task",
 		formatSourceRequiredActionsReport: () => "Idu-pi Source Required Actions",
+		formatSourceSkillCandidateCreationResult: (result) =>
+			[
+				"Source skill candidates",
+				"",
+				`candidates: ${result.report.candidates.length}`,
+				`warning: ${result.report.warning}`,
+				"tokens/cost: no medido",
+			].join("\n"),
+		formatSourceSkillCandidateReview: (review) =>
+			[
+				"Source skill candidates review",
+				"",
+				"Estado:",
+				review.ok ? "valid" : "invalid",
+			].join("\n"),
 		formatSourceLibraryRefreshResult: (status) =>
 			["Idu-pi Source Library Refresh", "", status.state].join("\n"),
 		formatMasterPlanOperation: (result: { plan: { status: string } }) =>
@@ -1608,6 +1661,20 @@ test("CLI source library commands are wired with aliases", async () => {
 		);
 		assert.equal(requiredActions.exitCode, 0);
 		assert.match(requiredActions.stdout, /Source Required Actions/u);
+		const candidates = await runCliCommand(
+			["idu-source-skill-candidates-create", "all"],
+			runtime,
+		);
+		assert.equal(candidates.exitCode, 0);
+		assert.match(candidates.stdout, /Source skill candidates/u);
+		assert.match(candidates.stdout, /Reports-only/u);
+		assert.match(candidates.stdout, /tokens\/cost: no medido/u);
+		const candidateReview = await runCliCommand(
+			["source-skill-candidates-review", "latest"],
+			runtime,
+		);
+		assert.equal(candidateReview.exitCode, 0);
+		assert.match(candidateReview.stdout, /Source skill candidates review/u);
 		const refresh = await runCliCommand(["source-refresh"], runtime);
 		assert.equal(refresh.exitCode, 0);
 		assert.match(refresh.stdout, /Source Library Refresh/u);

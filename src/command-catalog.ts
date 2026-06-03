@@ -924,6 +924,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-skill-drafts-review latest",
 	},
 	{
+		label: "Source skill candidates create",
+		command: "corepack pnpm cli -- idu-source-skill-candidates-create all",
+	},
+	{
+		label: "Source skill candidates review",
+		command: "corepack pnpm cli -- idu-source-skill-candidates-review latest",
+	},
+	{
 		label: "Supervisor learning rules status",
 		command: "corepack pnpm cli -- idu-supervisor-learning-rules-status",
 	},

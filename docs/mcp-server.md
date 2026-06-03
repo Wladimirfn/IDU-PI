@@ -184,6 +184,8 @@ Herramientas mínimas:
 | `idu_source_chunk_read` | Lee un chunk/tomo específico bajo Source Library stateRoot. |
 | `idu_source_recommend_for_task` | Recomienda fuentes/chunks para una tarea del orquestador; no implementa ni aprueba contratos. |
 | `idu_source_required_actions` | Lista fuentes no leídas que obligan al orquestador a despachar un lector bibliotecario/document-reader. |
+| `idu_source_skill_candidates_create` | Genera reporte JSON de candidatas de skill desde digests; reports-only, no instala skills, no escribe `.agents`/`.atl`, tokens/cost `no medido`. |
+| `idu_source_skill_candidates_review` | Revisa un reporte de candidatas de skill y valida superficie advisory/reports-only. |
 | `idu_source_refresh` | Recalcula hashes/estado de fuentes; no cambia contratos, Project Core, Constitution, flows, skills ni AgentLabs. |
 | `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft` y `external-source-intelligence`. |
 | `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard. |

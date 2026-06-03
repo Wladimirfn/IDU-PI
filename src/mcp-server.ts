@@ -96,6 +96,8 @@ export type IduMcpToolName =
 	| "idu_source_chunk_read"
 	| "idu_source_recommend_for_task"
 	| "idu_source_required_actions"
+	| "idu_source_skill_candidates_create"
+	| "idu_source_skill_candidates_review"
 	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
@@ -491,6 +493,22 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"idu_source_required_actions",
 		"Lista fuentes sin lectura real que requieren que el orquestador despache un lector bibliotecario/document-reader.",
 		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_skill_candidates_create",
+		"Genera reporte JSON de candidatas de skill derivadas de Source Library; reports-only, no instala skills ni promueve contratos.",
+		{
+			selector: optionalString("Selector de fuente o all; all por defecto."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_skill_candidates_review",
+		"Revisa un reporte de candidatas de skill derivadas de Source Library; latest por defecto.",
+		{
+			pathOrLatest: optionalString("Ruta de reporte o latest."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -2231,6 +2249,65 @@ async function dispatchTool(
 					"No implementé, no ejecuté AgentLabs y no consulté web/live sources.",
 					"No promoví contratos.",
 				],
+			});
+		}
+		case "idu_source_skill_candidates_create": {
+			const result = runtime.sourceSkillCandidatesCreate(
+				stringArg(args, "selector") ?? "all",
+			);
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: result.report.candidates.length
+					? "needs_approval"
+					: "allow",
+				severity: result.report.candidates.length ? "warning" : "info",
+				confidence: 0.72,
+				summary: `Source skill candidates: ${result.report.candidates.length}`,
+				requiresHuman: true,
+				orchestratorDecisionRequired: result.report.candidates.length > 0,
+				allowedToProceed: true,
+				evidenceRefs: result.report.candidates.flatMap(
+					(candidate) => candidate.evidenceRefs,
+				),
+				nextActions: [
+					"Human/orchestrator must review before any skill promotion.",
+					"Optional future AgentLab review can audit comprehension and duplicates.",
+				],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Source skill candidates: ${result.report.candidates.length}`,
+				data: { result, decisionEnvelope },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Creé sólo un reporte JSON bajo stateRoot/reports.",
+					"No instalé skills, no escribí .agents/.atl y no promoví contratos.",
+					"tokens/cost: no medido.",
+				],
+			});
+		}
+		case "idu_source_skill_candidates_review": {
+			const review = runtime.sourceSkillCandidatesReview(
+				stringArg(args, "pathOrLatest") ?? "latest",
+			);
+			return envelope({
+				ok: review.ok,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: review.ok
+					? `Source skill candidate report valid: ${review.report.candidates.length} candidates`
+					: `Source skill candidate report invalid: ${review.errors.length} errors`,
+				data: { review },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Validé reporte advisory/reports-only; no instalé skills ni ejecuté AgentLabs.",
+					"tokens/cost: no medido.",
+				],
+				errors: review.ok ? [] : review.errors,
 			});
 		}
 		case "idu_source_refresh": {
