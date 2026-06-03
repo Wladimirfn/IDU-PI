@@ -23,6 +23,11 @@ import {
 } from "./idu-installer.js";
 import { resolveProjectStatePaths } from "./project-state.js";
 import { slugifyProjectId } from "./projects.js";
+import {
+	buildIduUsageReport,
+	formatIduUsagePanel,
+	readIduUsageEvents,
+} from "./usage-events.js";
 
 export type CliHomeOptions = {
 	cwd?: string;
@@ -294,7 +299,9 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 		"",
 		...(status.project.stateRoot
 			? formatModelAssignments(assignments, profiles).split("\n").slice(2)
-			: ["  - sin stateRoot; registrá el proyecto antes de guardar asignaciones"]),
+			: [
+					"  - sin stateRoot; registrá el proyecto antes de guardar asignaciones",
+				]),
 		"",
 		"Acciones disponibles:",
 		"- Asignar modelo por rol",
@@ -356,6 +363,14 @@ export function formatDiagnosticsStatus(status: CliHomeStatus): string {
 
 export function formatCliProjectStatus(status: CliHomeStatus): string {
 	const project = status.project;
+	const usagePanel = project.registered && project.stateRoot
+		? [
+				"",
+				formatIduUsagePanel(
+					buildIduUsageReport(readIduUsageEvents(project.stateRoot, 500)),
+				),
+			]
+		: [];
 	return [
 		"Proyecto actual",
 		"",
@@ -368,6 +383,7 @@ export function formatCliProjectStatus(status: CliHomeStatus): string {
 		`session: ${project.supervisor}`,
 		`Project Core: ${project.projectCore}`,
 		`Constitution: ${project.constitution}`,
+		...usagePanel,
 		`recommended next: ${project.recommendedNext}`,
 		...(project.warning ? [`aviso: ${project.warning}`] : []),
 	].join("\n");

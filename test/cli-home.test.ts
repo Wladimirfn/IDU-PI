@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -31,6 +32,7 @@ import {
 	runInteractiveHomeWithQuestion,
 } from "../src/cli.js";
 import { saveModelAssignment } from "../src/model-assignments.js";
+import { recordIduUsageEvent } from "../src/usage-events.js";
 
 function tempDir(prefix = "idu-cli-home-"): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -310,6 +312,166 @@ test("project status renderer shows enrolled and unregistered project states", (
 	});
 	assert.match(formatCliProjectStatus(registered), /enrolado: sí/u);
 	rmSync(root, { recursive: true, force: true });
+});
+
+test("current project panel shows local usage metrics from stateRoot", async () => {
+	const root = tempDir("idu-cli-home-usage-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "project",
+			surface: "cli",
+			action: "idu-status",
+			active: true,
+			allowedToProceed: true,
+			ok: true,
+		});
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /Uso local/u);
+		assert.match(output, /eventos: 1/u);
+		assert.match(output, /superficie: cli 1 · mcp 0/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel shows empty usage metrics without state writes", () => {
+	const root = tempDir("idu-cli-home-empty-usage-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /Uso local/u);
+		assert.match(output, /eventos: 0/u);
+		assert.equal(
+			existsSync(join(stateRoot, "reports", "idu-usage-events.jsonl")),
+			false,
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel hides usage metrics for unregistered projects", async () => {
+	const root = tempDir("idu-cli-home-unregistered-usage-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "project",
+			surface: "cli",
+			action: "idu-status",
+		});
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: false,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.doesNotMatch(output, /Uso local/u);
+		assert.doesNotMatch(output, /eventos: 1/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel usage metrics ignore workspaceRoot usage file", async () => {
+	const root = tempDir("idu-cli-home-usage-root-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordIduUsageEvent(projectPath, {
+			projectId: "wrong-root",
+			surface: "mcp",
+			action: "wrong-root-event",
+		});
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /Uso local/u);
+		assert.match(output, /eventos: 0/u);
+		assert.doesNotMatch(output, /wrong-root-event/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("telegram remote submenu exposes real management actions", () => {

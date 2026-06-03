@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+	buildIduUsageReport,
+	formatIduUsagePanel,
 	formatIduUsageSummary,
 	readIduUsageEvents,
 	recordIduUsageEvent,
@@ -116,4 +118,61 @@ test("usage summary counts surfaces actions recommendations and tri-state fields
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("usage report calculates compact project panel metrics", async () => {
+	const root = tempStateRoot();
+	try {
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "idu-status",
+			active: true,
+			recommendation: "ok",
+			allowedToProceed: true,
+			requiresHuman: false,
+			ok: true,
+		});
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_postflight",
+			active: false,
+			recommendation: "ask_human",
+			allowedToProceed: false,
+			requiresHuman: true,
+			ok: false,
+		});
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "idu-status",
+			active: true,
+			recommendation: "ok",
+			allowedToProceed: true,
+			requiresHuman: false,
+			ok: true,
+		});
+		const report = buildIduUsageReport(readIduUsageEvents(root));
+		assert.equal(report.totalEvents, 3);
+		assert.equal(report.surface.cli, 2);
+		assert.equal(report.surface.mcp, 1);
+		assert.equal(report.active.true, 2);
+		assert.equal(report.active.false, 1);
+		assert.equal(report.requiresHuman, 1);
+		assert.equal(report.notAllowed, 1);
+		assert.equal(report.failed, 1);
+		assert.equal(report.topActions[0]?.action, "idu-status");
+		assert.match(formatIduUsagePanel(report), /Uso local/u);
+		assert.match(formatIduUsagePanel(report), /requiere humano: 1/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("usage panel formats empty report without errors", () => {
+	const panel = formatIduUsagePanel(buildIduUsageReport([]));
+	assert.match(panel, /Uso local/u);
+	assert.match(panel, /eventos: 0/u);
+	assert.match(panel, /última actividad: sin eventos/u);
 });

@@ -46,6 +46,20 @@ export type IduUsageSummary = {
 	recent: IduUsageEvent[];
 };
 
+export type IduUsageReport = {
+	version: 1;
+	totalEvents: number;
+	lastActivity?: string;
+	surface: { cli: number; mcp: number; other: number };
+	active: { true: number; false: number; unknown: number };
+	requiresHuman: number;
+	notAllowed: number;
+	failed: number;
+	topActions: { action: string; count: number }[];
+	topRecommendations: { recommendation: string; count: number }[];
+	recent: IduUsageEvent[];
+};
+
 const SAFE_LABEL_RE = /[^A-Za-z0-9._:-]/gu;
 const MAX_LABEL_LENGTH = 96;
 const pendingUsageWrites = new Set<Promise<IduUsageRecordResult>>();
@@ -140,6 +154,74 @@ export function summarizeIduUsageEvents(
 		requiresHuman,
 		recent: events.slice(-10),
 	};
+}
+
+export function buildIduUsageReport(
+	events: IduUsageEvent[],
+	options: { topLimit?: number; recentLimit?: number } = {},
+): IduUsageReport {
+	const topLimit = Math.max(1, options.topLimit ?? 5);
+	const recentLimit = Math.max(0, options.recentLimit ?? 5);
+	const byAction: Record<string, number> = {};
+	const byRecommendation: Record<string, number> = {};
+	const surface = { cli: 0, mcp: 0, other: 0 };
+	const active = { true: 0, false: 0, unknown: 0 };
+	let requiresHuman = 0;
+	let notAllowed = 0;
+	let failed = 0;
+	for (const event of events) {
+		if (event.surface === "cli") surface.cli += 1;
+		else if (event.surface === "mcp") surface.mcp += 1;
+		else surface.other += 1;
+		incrementTriState(active, event.active);
+		if (event.requiresHuman === true) requiresHuman += 1;
+		if (event.allowedToProceed === false) notAllowed += 1;
+		if (event.ok === false) failed += 1;
+		increment(byAction, event.action);
+		increment(byRecommendation, event.recommendation ?? "unknown");
+	}
+	return {
+		version: 1,
+		totalEvents: events.length,
+		...(events.length
+			? { lastActivity: events[events.length - 1]?.timestamp }
+			: {}),
+		surface,
+		active,
+		requiresHuman,
+		notAllowed,
+		failed,
+		topActions: topEntries(byAction, topLimit).map(([action, count]) => ({
+			action,
+			count,
+		})),
+		topRecommendations: topEntries(byRecommendation, topLimit).map(
+			([recommendation, count]) => ({ recommendation, count }),
+		),
+		recent: events.slice(-recentLimit),
+	};
+}
+
+export function formatIduUsagePanel(report: IduUsageReport): string {
+	if (report.totalEvents === 0) {
+		return ["Uso local", "eventos: 0", "última actividad: sin eventos"].join(
+			"\n",
+		);
+	}
+	return [
+		"Uso local",
+		`eventos: ${report.totalEvents}`,
+		`última actividad: ${formatRelativeUsageTime(report.lastActivity)}`,
+		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp}`,
+		`activo/inactivo: ${report.active.true} / ${report.active.false}`,
+		`requiere humano: ${report.requiresHuman}`,
+		`bloqueados/no permitido: ${report.notAllowed}`,
+		`errores: ${report.failed}`,
+		"acciones top:",
+		...(report.topActions.length
+			? report.topActions.map((entry) => `- ${entry.action} ${entry.count}`)
+			: ["- sin acciones"]),
+	].join("\n");
 }
 
 export function formatIduUsageSummary(summary: IduUsageSummary): string {
@@ -258,6 +340,29 @@ function incrementTriState(
 	if (value === true) state.true += 1;
 	else if (value === false) state.false += 1;
 	else state.unknown += 1;
+}
+
+function topEntries(
+	record: Record<string, number>,
+	limit: number,
+): [string, number][] {
+	return Object.entries(record)
+		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+		.slice(0, limit);
+}
+
+function formatRelativeUsageTime(timestamp?: string): string {
+	if (!timestamp) return "sin eventos";
+	const time = Date.parse(timestamp);
+	if (!Number.isFinite(time)) return timestamp;
+	const diffMs = Math.max(0, Date.now() - time);
+	const diffMinutes = Math.floor(diffMs / 60_000);
+	if (diffMinutes < 1) return "recién";
+	if (diffMinutes < 60) return `hace ${diffMinutes}m`;
+	const diffHours = Math.floor(diffMinutes / 60);
+	if (diffHours < 24) return `hace ${diffHours}h`;
+	const diffDays = Math.floor(diffHours / 24);
+	return `hace ${diffDays}d`;
 }
 
 function sortRecord(record: Record<string, number>): Record<string, number> {
