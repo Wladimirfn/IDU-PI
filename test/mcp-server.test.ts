@@ -1297,6 +1297,31 @@ test("idu_orchestrator_procedure and task_context guide without implementing", a
 		),
 	);
 
+	const implementProcedure = await callIduMcpTool(
+		"idu_orchestrator_procedure",
+		{ purpose: "implement_change", request: "implementar cambio" },
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+	assert.equal(implementProcedure.ok, true);
+	const implementProcedureText = JSON.stringify(
+		implementProcedure.data.procedure,
+	);
+	assert.match(implementProcedureText, /idu_supervisor_context_pack/u);
+	assert.match(implementProcedureText, /idu_task_context/u);
+	assert.match(
+		JSON.stringify(implementProcedure.data.mustConsult),
+		/idu_supervisor_context_pack/u,
+	);
+	assert.equal(
+		(implementProcedure.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(implementProcedure.data.decisionEnvelope as DecisionEnvelope)
+			.orchestratorDecisionRequired,
+		true,
+	);
+
 	const context = await callIduMcpTool(
 		"idu_task_context",
 		{ request: "cambiar login" },
@@ -1335,6 +1360,21 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.equal(snapshotBudget.profile, "plan_snapshot");
 	assert.equal(snapshotBudget.advisoryOnly, true);
 	assert.equal(snapshotBudget.contractPromotionAllowed, false);
+
+	const contextPack = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "mejorar MCP" },
+		options,
+	);
+	assert.equal(contextPack.ok, true);
+	assert.equal(contextPack.data.authority, "advisory");
+	assert.equal(contextPack.data.audience, "orchestrator_subagents");
+	const contextPackBudget = contextPack.data
+		.contextBudget as ContextBudgetUsage;
+	assert.equal(contextPackBudget.profile, "supervisor_context_pack");
+	assert.ok(contextPack.data.taskPackage);
+	assert.ok(contextPack.data.taskContext);
+	assert.ok(Array.isArray(contextPack.data.autonomyGates));
 
 	const next = await callIduMcpTool(
 		"idu_next_advisory_action",

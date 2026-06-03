@@ -1110,7 +1110,8 @@ function buildOrchestratorProcedure(
 			"Actualizar stateRoot Doc/Plan sólo con evidencia y mantener historial en reports.",
 		],
 		implement_change: [
-			"Llamar idu_task_context para obtener contratos afectados y lecturas obligatorias.",
+			"Llamar idu_supervisor_context_pack para obtener objetivo compacto, Plan Maestro, contratos, riesgos, lecturas y gates antes de delegar.",
+			"Usar idu_task_context como fallback si el pack no está disponible o como consulta puntual adicional.",
 			"Delegar implementación a workers normales del orquestador con ese contexto.",
 			"Ejecutar postflight y auditorías audit-only antes de cerrar.",
 		],
@@ -1136,7 +1137,8 @@ function buildOrchestratorProcedure(
 		procedure: [...baseSteps, ...(purposeSteps[purpose] ?? [])],
 		mustConsult: [
 			"idu_status",
-			"idu_task_context antes de implementar",
+			"idu_supervisor_context_pack antes de delegar implementación",
+			"idu_task_context como fallback o asesoría puntual",
 			"idu_postflight después del diff",
 			"idu_agentlab_* sólo si se requiere auditoría/prueba/drift",
 		],
@@ -1148,7 +1150,7 @@ function buildOrchestratorProcedure(
 		],
 		recommendedNext:
 			connection.alignmentStatus === "aligned"
-				? "Continuar con idu_task_context o idu_postflight según etapa."
+				? "Continuar con idu_supervisor_context_pack, idu_task_context o idu_postflight según etapa."
 				: connection.recommendedNext,
 	};
 }

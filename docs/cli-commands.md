@@ -70,8 +70,8 @@ idu-pi master-plan-approve latest
 Para trabajar con Plan aprobado desde el orquestador, usá MCP:
 
 ```text
-idu_plan_snapshot → idu_next_advisory_action → idu_task_package_create
-→ governance-review → worker normal → idu_postflight
+idu_plan_snapshot → idu_supervisor_context_pack → idu_next_advisory_action
+→ idu_task_package_create → governance-review → worker normal → idu_postflight
 ```
 
 AgentLabs son opcionales/explícitos y audit-only: `idu_agentlab_request_create` crea solicitud; `idu_agentlab_review_run` ejecuta revisión; ninguno implementa código.
