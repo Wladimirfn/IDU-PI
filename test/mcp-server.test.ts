@@ -2287,6 +2287,29 @@ test("postflight request create remains request-only and review-run reports sand
 		),
 	);
 
+	const staleRuntime = fakeRuntime();
+	staleRuntime.agentLabReviewStatus = (): AgentLabReviewStatus => ({
+		path: "current.json",
+		name: "current.json",
+		valid: false,
+		errors: [
+			"AgentLab run stale: el request actual todavía no tiene una revisión AgentLab válida.",
+		],
+	});
+	const staleStatus = await callIduMcpTool(
+		"idu_agentlab_review_status",
+		{ selector: "latest" },
+		{
+			runtimeFactory: () => staleRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	const staleDecision = staleStatus.data.decisionEnvelope as DecisionEnvelope;
+	assert.equal(staleStatus.ok, false);
+	assert.equal(staleDecision.recommendation, "block");
+	assert.equal(staleDecision.allowedToProceed, false);
+	assert.match(staleStatus.errors.join("\n"), /run stale/u);
+
 	const invalid = await callIduMcpTool(
 		"idu_agentlab_request_create",
 		{ source: "implement" },

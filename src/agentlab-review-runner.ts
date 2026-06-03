@@ -313,6 +313,19 @@ export function getAgentLabReviewStatus(
 	try {
 		const raw = JSON.parse(readFileSync(resolved.path, "utf8")) as unknown;
 		const result = normalizeRunResult(raw);
+		const bindingErrors = currentRequestBindingErrors(
+			pathOrLatest,
+			reportsPath,
+			result,
+		);
+		if (bindingErrors.length > 0) {
+			return {
+				path: resolved.path,
+				name: basename(resolved.path),
+				valid: false,
+				errors: bindingErrors,
+			};
+		}
 		return {
 			path: resolved.path,
 			name: basename(resolved.path),
@@ -328,6 +341,45 @@ export function getAgentLabReviewStatus(
 			errors: [error instanceof Error ? error.message : String(error)],
 		};
 	}
+}
+
+function currentRequestBindingErrors(
+	pathOrLatest: string,
+	reportsPath: string,
+	result: AgentLabReviewRunResult,
+): string[] {
+	const selector = pathOrLatest.trim();
+	if (selector && selector !== "latest" && basename(selector) !== RUN_CURRENT_FILE) {
+		return [];
+	}
+	const requestReview = reviewAgentLabReviewRequest("latest", reportsPath);
+	if (!requestReview.valid || !requestReview.plan) return [];
+	const currentRequestIds = new Set(
+		requestReview.plan.requests.map((request) => request.id),
+	);
+	const runRequestIds = result.runs.map((run) => run.requestId);
+	const missingCurrentRequestIds = [...currentRequestIds].filter(
+		(id) => !runRequestIds.includes(id),
+	);
+	const runGeneratedAt = Date.parse(result.generatedAt);
+	const requestGeneratedAt = Date.parse(requestReview.plan.generatedAt);
+	const runIsOlderThanCurrentRequest =
+		Number.isFinite(runGeneratedAt) &&
+		Number.isFinite(requestGeneratedAt) &&
+		runGeneratedAt < requestGeneratedAt;
+	if (!runIsOlderThanCurrentRequest && missingCurrentRequestIds.length === 0) {
+		return [];
+	}
+	return [
+		"AgentLab run stale: el request actual todavía no tiene una revisión AgentLab válida.",
+		`Request actual: ${requestReview.name}`,
+		`Run leído: ${result.generatedAt}`,
+		...(missingCurrentRequestIds.length > 0
+			? [
+					`Requests pendientes sin run: ${missingCurrentRequestIds.join(", ")}`,
+				]
+			: []),
+	];
 }
 
 export function formatAgentLabReviewRunResult(

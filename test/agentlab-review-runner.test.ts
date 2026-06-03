@@ -505,6 +505,44 @@ test("status ruta legacy relativa busca en reports", async () => {
 	assert.equal(status.result?.runs[0]?.status, "completed");
 });
 
+test("status latest rechaza run current viejo para request current nuevo", async () => {
+	const { router, projectPath, workspaceRoot } = routerWith(validReport());
+	const reportsPath = join(workspaceRoot, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	createAgentLabReviewRequests({
+		source: "manual",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		manualObjective: "old review",
+		manualContext: "old review",
+		now: () => new Date("2026-05-25T10:00:00.000Z"),
+	});
+	await runAgentLabReviewRequestFile({
+		pathOrLatest: "latest",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		router,
+		now: () => new Date("2026-05-25T10:01:00.000Z"),
+	});
+	createAgentLabReviewRequests({
+		source: "manual",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		manualObjective: "new review after timeout",
+		manualContext: "new review after timeout",
+		now: () => new Date("2026-05-25T10:02:00.000Z"),
+	});
+
+	const status = getAgentLabReviewStatus("latest", reportsPath);
+
+	assert.equal(status.valid, false);
+	assert.match(status.errors.join("\n"), /stale|pendiente|request actual/u);
+	assert.equal(status.result, undefined);
+});
+
 test("ruta fuera de reports falla", () => {
 	const temp = root();
 	const status = getAgentLabReviewStatus(
