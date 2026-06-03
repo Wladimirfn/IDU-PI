@@ -2705,15 +2705,24 @@ export async function runInteractiveHome(): Promise<string> {
 
 async function runProjectStatusPanelTui(): Promise<"__back" | string> {
 	while (true) {
-		const status = buildCliHomeStatus({
-			argvPath: process.argv[1],
-			stdinInteractive: true,
-		});
+		const buildProjectPanelContent = () =>
+			formatCliProjectStatus(
+				buildCliHomeStatus({
+					argvPath: process.argv[1],
+					stdinInteractive: true,
+				}),
+			);
 		const choice = await selectMenu(
 			"Proyecto actual",
 			projectStatusPanelOptions(),
 			undefined,
-			formatCliProjectStatus(status),
+			buildProjectPanelContent(),
+			{
+				autoRefresh: {
+					intervalMs: 3000,
+					getContent: buildProjectPanelContent,
+				},
+			},
 		);
 		if (choice === "refresh") continue;
 		if (choice === "back") return "__back";
@@ -2882,26 +2891,35 @@ async function selectMenu(
 	options: MenuOption[],
 	status?: ReturnType<typeof buildCliHomeStatus>,
 	content?: string,
+	settings: Pick<SelectSearchableMenuSettings, "autoRefresh"> = {},
 ): Promise<string> {
 	return selectSearchableMenu(title, options, {
 		status,
 		content,
 		search: false,
+		...settings,
 	});
 }
+
+type SelectSearchableMenuSettings = {
+	status?: ReturnType<typeof buildCliHomeStatus>;
+	content?: string;
+	search?: boolean;
+	help?: string;
+	autoRefresh?: {
+		intervalMs: number;
+		getContent: () => string;
+	};
+};
 
 async function selectSearchableMenu(
 	title: string,
 	options: MenuOption[],
-	settings: {
-		status?: ReturnType<typeof buildCliHomeStatus>;
-		content?: string;
-		search?: boolean;
-		help?: string;
-	} = {},
+	settings: SelectSearchableMenuSettings = {},
 ): Promise<string> {
 	let selected = 0;
 	let query = "";
+	let refreshTimer: NodeJS.Timeout | undefined;
 	emitKeypressEvents(process.stdin);
 	const rawMode = process.stdin.isTTY;
 	if (rawMode) process.stdin.setRawMode(true);
@@ -2970,6 +2988,18 @@ async function selectSearchableMenu(
 	};
 	try {
 		render();
+		if (settings.autoRefresh) {
+			refreshTimer = setInterval(() => {
+				const refreshedContent = settings.autoRefresh?.getContent();
+				if (
+					refreshedContent !== undefined &&
+					refreshedContent !== settings.content
+				) {
+					settings.content = refreshedContent;
+					render();
+				}
+			}, settings.autoRefresh.intervalMs);
+		}
 		return await new Promise<string>((resolve) => {
 			const onKeypress = (chunk: string, key: { name?: string }) => {
 				const visible = filteredOptions();
@@ -3010,6 +3040,7 @@ async function selectSearchableMenu(
 			process.stdin.on("keypress", onKeypress);
 		}).finally(() => process.stdin.removeAllListeners("keypress"));
 	} finally {
+		if (refreshTimer) clearInterval(refreshTimer);
 		if (rawMode) process.stdin.setRawMode(false);
 		process.stdout.write(`${ANSI_SHOW_CURSOR}${ANSI_ALT_SCREEN_OFF}`);
 	}
