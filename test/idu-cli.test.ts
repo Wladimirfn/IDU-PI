@@ -1739,8 +1739,8 @@ test("cli usage-status muestra resumen de eventos locales", async () => {
 
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Uso Idu-pi/u);
-		assert.match(result.stdout, /eventos Idu-pi: 1/u);
-		assert.match(result.stdout, /compactaciones detectadas: 0/u);
+		assert.match(result.stdout, /llamadas Idu-pi: 1/u);
+		assert.match(result.stdout, /compactaciones detectadas: no medido/u);
 		assert.match(result.stdout, /tokens Idu-pi: no medido/u);
 		assert.match(result.stdout, /% contexto Idu-pi: no medido/u);
 		assert.match(result.stdout, /cli/u);

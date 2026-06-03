@@ -200,16 +200,16 @@ export function buildIduUsageReport(
 	let lastActivity: string | undefined;
 	let lastActivityMs = Number.NEGATIVE_INFINITY;
 	for (const event of events) {
-		const eventMs = Date.parse(event.timestamp);
-		if (Number.isFinite(eventMs) && eventMs > lastActivityMs) {
-			lastActivity = event.timestamp;
-			lastActivityMs = eventMs;
-		}
 		if (event.sessionId) sessions.add(event.sessionId);
 		const eventType = effectiveEventType(event);
 		if (eventType === "pi_compaction_detected") {
 			compactionsDetected += 1;
 			continue;
+		}
+		const eventMs = Date.parse(event.timestamp);
+		if (Number.isFinite(eventMs) && eventMs > lastActivityMs) {
+			lastActivity = event.timestamp;
+			lastActivityMs = eventMs;
 		}
 		totalIduCalls += 1;
 		if (event.surface === "cli") surface.cli += 1;
@@ -252,9 +252,10 @@ export function formatIduUsagePanel(report: IduUsageReport): string {
 	return [
 		"Uso local",
 		"actualizado: recién",
-		`último evento: ${report.totalIduCalls ? formatRelativeUsageTime(report.lastActivity) : "sin eventos"}`,
-		`eventos Idu-pi: ${report.totalIduCalls}`,
+		`última llamada Idu-pi: ${report.totalIduCalls ? formatRelativeUsageTime(report.lastActivity) : "sin eventos"}`,
+		`llamadas Idu-pi: ${report.totalIduCalls}`,
 		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp} · tui ${report.surface.tui}`,
+		"actividad automática supervisor: no medida",
 		`activo/inactivo: ${report.active.true} / ${report.active.false}`,
 		`requiere humano: ${report.requiresHuman}`,
 		`bloqueados/no permitido: ${report.notAllowed}`,
@@ -265,7 +266,7 @@ export function formatIduUsagePanel(report: IduUsageReport): string {
 			: ["- sin acciones"]),
 		"",
 		"Sesión Pi",
-		`compactaciones detectadas: ${report.compactionsDetected}`,
+		`compactaciones detectadas: ${formatCompactionsDetected(report.compactionsDetected)}`,
 		"tokens Idu-pi: no medido",
 		"% contexto Idu-pi: no medido",
 	].join("\n");
@@ -276,8 +277,8 @@ export function formatIduUsageSummary(summary: IduUsageSummary): string {
 		"Uso Idu-pi",
 		"",
 		`eventos totales JSONL: ${summary.totalEvents}`,
-		`eventos Idu-pi: ${summary.totalIduCalls}`,
-		`compactaciones detectadas: ${summary.compactionsDetected}`,
+		`llamadas Idu-pi: ${summary.totalIduCalls}`,
+		`compactaciones detectadas: ${formatCompactionsDetected(summary.compactionsDetected)}`,
 		`sesiones observadas: ${summary.observedSessions}`,
 		"tokens Idu-pi: no medido",
 		"% contexto Idu-pi: no medido",
@@ -303,6 +304,10 @@ export function formatIduUsageSummary(summary: IduUsageSummary): string {
 				)
 			: ["- sin eventos"]),
 	].join("\n");
+}
+
+function formatCompactionsDetected(count: number): string {
+	return count > 0 ? String(count) : "no medido";
 }
 
 function normalizeEventType(value: unknown): IduUsageEventType | undefined {

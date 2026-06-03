@@ -352,8 +352,9 @@ test("current project panel shows local usage metrics from stateRoot", async () 
 			},
 		});
 		assert.match(output, /Uso local/u);
-		assert.match(output, /eventos Idu-pi: 1/u);
+		assert.match(output, /llamadas Idu-pi: 1/u);
 		assert.match(output, /superficie: cli 1 · mcp 0 · tui 0/u);
+		assert.match(output, /actividad automática supervisor: no medida/u);
 		assert.match(output, /tokens Idu-pi: no medido/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -388,8 +389,8 @@ test("current project panel shows empty usage metrics without state writes", () 
 			},
 		});
 		assert.match(output, /Uso local/u);
-		assert.match(output, /eventos Idu-pi: 0/u);
-		assert.match(output, /compactaciones detectadas: 0/u);
+		assert.match(output, /llamadas Idu-pi: 0/u);
+		assert.match(output, /compactaciones detectadas: no medido/u);
 		assert.equal(
 			existsSync(join(stateRoot, "reports", "idu-usage-events.jsonl")),
 			false,
@@ -432,7 +433,7 @@ test("current project panel hides usage metrics for unregistered projects", asyn
 			},
 		});
 		assert.doesNotMatch(output, /Uso local/u);
-		assert.doesNotMatch(output, /eventos Idu-pi: 1/u);
+		assert.doesNotMatch(output, /llamadas Idu-pi: 1/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -471,7 +472,7 @@ test("current project panel usage metrics ignore workspaceRoot usage file", asyn
 			},
 		});
 		assert.match(output, /Uso local/u);
-		assert.match(output, /eventos Idu-pi: 0/u);
+		assert.match(output, /llamadas Idu-pi: 0/u);
 		assert.doesNotMatch(output, /wrong-root-event/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

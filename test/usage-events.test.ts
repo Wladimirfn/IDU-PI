@@ -229,10 +229,12 @@ test("usage report calculates compact project panel metrics", async () => {
 		assert.equal(report.topActions[0]?.action, "idu-status");
 		const panel = formatIduUsagePanel(report);
 		assert.match(panel, /Uso local/u);
-		assert.match(panel, /eventos Idu-pi: 3/u);
+		assert.match(panel, /llamadas Idu-pi: 3/u);
+		assert.doesNotMatch(panel, /eventos Idu-pi: 3/u);
 		assert.match(panel, /superficie: cli 2 · mcp 1 · tui 0/u);
+		assert.match(panel, /actividad automática supervisor: no medida/u);
 		assert.match(panel, /requiere humano: 1/u);
-		assert.match(panel, /compactaciones detectadas: 0/u);
+		assert.match(panel, /compactaciones detectadas: no medido/u);
 		assert.match(panel, /tokens Idu-pi: no medido/u);
 		assert.match(panel, /% contexto Idu-pi: no medido/u);
 	} finally {
@@ -319,6 +321,34 @@ test("usage summary counts only idu calls for action metrics", () => {
 	assert.equal(summary.byAction.pi_compaction_detected, undefined);
 });
 
+test("usage report uses newest Idu-pi call timestamp, ignoring newer compaction events", () => {
+	const olderCall = new Date(Date.now() - 10 * 60_000).toISOString();
+	const newerCompaction = new Date(Date.now() - 1 * 60_000).toISOString();
+	const report = buildIduUsageReport([
+		{
+			version: 1,
+			id: "call",
+			timestamp: olderCall,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_status",
+			eventType: "idu_call",
+		},
+		{
+			version: 1,
+			id: "compact",
+			timestamp: newerCompaction,
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "pi_compaction_detected",
+			eventType: "pi_compaction_detected",
+		},
+	]);
+	assert.equal(report.lastActivity, olderCall);
+	assert.match(formatIduUsagePanel(report), /última llamada Idu-pi: hace 10m/u);
+	assert.doesNotMatch(formatIduUsagePanel(report), /última llamada Idu-pi: hace 1m/u);
+});
+
 test("usage report uses newest timestamp instead of event order", () => {
 	const newer = new Date(Date.now() - 3 * 60_000).toISOString();
 	const older = new Date(Date.now() - 10 * 60_000).toISOString();
@@ -341,8 +371,8 @@ test("usage report uses newest timestamp instead of event order", () => {
 		},
 	]);
 	assert.equal(report.lastActivity, newer);
-	assert.match(formatIduUsagePanel(report), /último evento: hace 3m/u);
-	assert.doesNotMatch(formatIduUsagePanel(report), /último evento: hace 10m/u);
+	assert.match(formatIduUsagePanel(report), /última llamada Idu-pi: hace 3m/u);
+	assert.doesNotMatch(formatIduUsagePanel(report), /última llamada Idu-pi: hace 10m/u);
 });
 
 test("usage panel distinguishes refresh time from last recorded event", async () => {
@@ -357,7 +387,8 @@ test("usage panel distinguishes refresh time from last recorded event", async ()
 			buildIduUsageReport(readIduUsageEvents(root)),
 		);
 		assert.match(panel, /actualizado: recién/u);
-		assert.match(panel, /último evento: recién/u);
+		assert.match(panel, /última llamada Idu-pi: recién/u);
+		assert.doesNotMatch(panel, /último evento/u);
 		assert.doesNotMatch(panel, /última actividad/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -367,10 +398,11 @@ test("usage panel distinguishes refresh time from last recorded event", async ()
 test("usage panel formats empty report without errors", () => {
 	const panel = formatIduUsagePanel(buildIduUsageReport([]));
 	assert.match(panel, /Uso local/u);
-	assert.match(panel, /eventos Idu-pi: 0/u);
+	assert.match(panel, /llamadas Idu-pi: 0/u);
 	assert.match(panel, /actualizado: recién/u);
-	assert.match(panel, /último evento: sin eventos/u);
-	assert.match(panel, /compactaciones detectadas: 0/u);
+	assert.match(panel, /última llamada Idu-pi: sin eventos/u);
+	assert.match(panel, /actividad automática supervisor: no medida/u);
+	assert.match(panel, /compactaciones detectadas: no medido/u);
 	assert.match(panel, /tokens Idu-pi: no medido/u);
 	assert.match(panel, /% contexto Idu-pi: no medido/u);
 });

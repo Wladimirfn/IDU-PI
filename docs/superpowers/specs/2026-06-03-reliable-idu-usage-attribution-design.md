@@ -21,20 +21,20 @@ Expected compact display shape:
 
 ```text
 Uso local
-eventos Idu-pi: 9
+llamadas Idu-pi: 9
 superficie: cli 0 · mcp 9 · tui 0
 acciones top:
 - idu_postflight 9
 
 Sesión Pi
-compactaciones detectadas: 0
+compactaciones detectadas: no medido
 tokens Idu-pi: no medido
 % contexto Idu-pi: no medido
 ```
 
 The detailed usage status command may show the same fields with more detail.
 
-Key rule: `eventos Idu-pi` is cumulative for the project stateRoot and must not reset when the Pi CLI compacts or starts a new context window.
+Key rule: `llamadas Idu-pi` is cumulative for the project stateRoot and must not reset when the Pi CLI compacts or starts a new context window. It means actual Idu-pi CLI/MCP/TUI calls, not autonomous supervisor activity.
 
 ## Data model
 Extend local usage/event reporting around two reliable event classes:
@@ -46,7 +46,7 @@ pi_compaction_detected
 
 `idu_call` is recorded when an actual Idu-pi CLI/MCP/TUI action is invoked and passes existing safe-field constraints.
 
-`pi_compaction_detected` is recorded only when the runtime provides a reliable observable signal. If no such signal exists, compactations remain `0` or `no medido`, not guessed.
+`pi_compaction_detected` is recorded only when the runtime provides a reliable observable signal. If no such signal exists, compaction detection renders as `no medido`, not `0` and not guessed.
 
 Safe fields should remain limited to structured operational metadata, for example:
 
@@ -94,7 +94,7 @@ A project can accumulate many Pi sessions. Each usage event may include `session
 - calls by action;
 - calls by surface;
 - observed session count when session IDs exist;
-- detected compaction count when explicit compaction events exist.
+- detected compaction count when explicit compaction events exist; otherwise render compaction detection as `no medido`, not `0`.
 
 Compaction affects the Pi context window but not the project event history.
 
