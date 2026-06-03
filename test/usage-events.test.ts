@@ -170,9 +170,29 @@ test("usage report calculates compact project panel metrics", async () => {
 	}
 });
 
+test("usage panel distinguishes refresh time from last recorded event", async () => {
+	const root = tempStateRoot();
+	try {
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_postflight",
+		});
+		const panel = formatIduUsagePanel(
+			buildIduUsageReport(readIduUsageEvents(root)),
+		);
+		assert.match(panel, /actualizado: recién/u);
+		assert.match(panel, /último evento: recién/u);
+		assert.doesNotMatch(panel, /última actividad/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("usage panel formats empty report without errors", () => {
 	const panel = formatIduUsagePanel(buildIduUsageReport([]));
 	assert.match(panel, /Uso local/u);
 	assert.match(panel, /eventos: 0/u);
-	assert.match(panel, /última actividad: sin eventos/u);
+	assert.match(panel, /actualizado: recién/u);
+	assert.match(panel, /último evento: sin eventos/u);
 });

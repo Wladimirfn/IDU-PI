@@ -204,14 +204,18 @@ export function buildIduUsageReport(
 
 export function formatIduUsagePanel(report: IduUsageReport): string {
 	if (report.totalEvents === 0) {
-		return ["Uso local", "eventos: 0", "última actividad: sin eventos"].join(
-			"\n",
-		);
+		return [
+			"Uso local",
+			"actualizado: recién",
+			"último evento: sin eventos",
+			"eventos: 0",
+		].join("\n");
 	}
 	return [
 		"Uso local",
+		"actualizado: recién",
+		`último evento: ${formatRelativeUsageTime(report.lastActivity)}`,
 		`eventos: ${report.totalEvents}`,
-		`última actividad: ${formatRelativeUsageTime(report.lastActivity)}`,
 		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp}`,
 		`activo/inactivo: ${report.active.true} / ${report.active.false}`,
 		`requiere humano: ${report.requiresHuman}`,
