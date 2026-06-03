@@ -18,7 +18,16 @@ import {
 	normalizeCliArgs,
 	type CliRuntime,
 } from "../src/cli.js";
-import { flushIduUsageEvents } from "../src/usage-events.js";
+import {
+	flushIduUsageEvents,
+	readIduUsageEvents,
+} from "../src/usage-events.js";
+import {
+	flushSupervisorActivityEvents,
+	readSupervisorActivityEvents,
+	recordSupervisorActivityEventDeferred,
+	supervisorActivityInputFromLoopResult,
+} from "../src/supervisor-activity-events.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
@@ -2319,6 +2328,40 @@ test("CLI supervisor-tick funciona sin AgentLabs", async () => {
 		assert.match(result.stdout, /Idu-pi Supervisor Tick/u);
 		assert.match(result.stdout, /Estado:\ncompleted/u);
 		assert.match(result.stdout, /No ejecuté AgentLabs/u);
+	});
+});
+
+test("supervisor tick records supervisor activity without incrementing Idu-pi calls", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		const instrumentedRuntime: CliRuntime = {
+			...runtime,
+			supervisorTick: (options) => {
+				const result = runtime.supervisorTick(options);
+				recordSupervisorActivityEventDeferred(
+					workspaceRoot,
+					supervisorActivityInputFromLoopResult(result, {
+						origin: "supervisor_manual_tick",
+						eventType: "supervisor_tick",
+					}),
+				);
+				return result;
+			},
+		};
+		const result = await runCliCommand(
+			["idu-supervisor-tick"],
+			instrumentedRuntime,
+		);
+		await flushSupervisorActivityEvents();
+		await flushIduUsageEvents();
+
+		assert.equal(result.exitCode, 0);
+		const activity = readSupervisorActivityEvents(workspaceRoot);
+		assert.equal(activity.length, 1);
+		assert.equal(activity[0]?.eventType, "supervisor_tick");
+		assert.equal(activity[0]?.origin, "supervisor_manual_tick");
+		assert.equal(activity[0]?.trigger, "manual");
+		assert.equal(activity[0]?.status, "completed");
+		assert.equal(readIduUsageEvents(workspaceRoot).length, 0);
 	});
 });
 

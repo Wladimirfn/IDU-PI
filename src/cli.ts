@@ -369,6 +369,10 @@ import {
 	recordIduUsageEventDeferred,
 	summarizeIduUsageEvents,
 } from "./usage-events.js";
+import {
+	recordSupervisorActivityEventDeferred,
+	supervisorActivityInputFromLoopResult,
+} from "./supervisor-activity-events.js";
 
 export type CliResult = {
 	exitCode: number;
@@ -689,6 +693,13 @@ export function createCliRuntime(
 		: undefined;
 	const runtimeWorkspaceRoot =
 		projectStatePaths?.stateRoot ?? config.agentWorkspaceRoot;
+	const runtimeStateRoot =
+		projectStatePaths?.stateRoot ??
+		resolveProjectStatePaths({
+			workspaceRoot: config.agentWorkspaceRoot,
+			projectId: activeProject.id,
+			projectPath: activeProject.path,
+		}).stateRoot;
 	const reportsPath =
 		projectStatePaths?.reportsDir ?? join(config.agentWorkspaceRoot, "reports");
 	const labDbPath =
@@ -714,6 +725,7 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
+				supervisorActivityStateRoot: runtimeStateRoot,
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
 				semanticTrigger,
@@ -737,22 +749,17 @@ export function createCliRuntime(
 		modelAssignments,
 		config.agentProfiles,
 	);
+	const masterPlanStateRoot = runtimeStateRoot;
 	const context = {
 		config,
 		registry,
 		activeProject,
 		structuredTaskQueue,
 		runtimeWorkspaceRoot,
+		masterPlanStateRoot,
 		reportsPath,
 		labDbPath,
 	};
-	const masterPlanStateRoot =
-		projectStatePaths?.stateRoot ??
-		resolveProjectStatePaths({
-			workspaceRoot: config.agentWorkspaceRoot,
-			projectId: activeProject.id,
-			projectPath: activeProject.path,
-		}).stateRoot;
 	return {
 		projectId: activeProject.id,
 		projectPath: activeProject.path,
@@ -774,6 +781,7 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
+				supervisorActivityStateRoot: runtimeStateRoot,
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
 				risk: report.risk,
@@ -979,8 +987,9 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 			}),
 		formatSemanticAgentTaskCreationResult,
-		supervisorTick: (options = {}) =>
-			runIduSupervisorLoop({
+		supervisorTick: (options = {}) => {
+			const startedAt = Date.now();
+			const result = runIduSupervisorLoop({
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
@@ -992,7 +1001,17 @@ export function createCliRuntime(
 				},
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
-			}),
+			});
+			recordSupervisorActivityEventDeferred(
+				runtimeStateRoot,
+				supervisorActivityInputFromLoopResult(result, {
+					origin: "supervisor_manual_tick",
+					eventType: "supervisor_tick",
+					durationMs: Date.now() - startedAt,
+				}),
+			);
+			return result;
+		},
 		supervisorCronPlan: () =>
 			planIduSupervisorCron({
 				projectId: activeProject.id,
@@ -1014,6 +1033,7 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
+				supervisorActivityStateRoot: runtimeStateRoot,
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
 			});
@@ -1176,6 +1196,7 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
+				supervisorActivityStateRoot: runtimeStateRoot,
 				structuredTaskQueue,
 				labDbRepository,
 				preflight: (request) => buildPreflightReport(request, context),
@@ -2261,6 +2282,7 @@ export function createCliTask(
 		projectId: string;
 		projectPath: string;
 		workspaceRoot: string;
+		supervisorActivityStateRoot?: string;
 		structuredTaskQueue: StructuredTaskQueue;
 		labDbRepository: LabDbRepository;
 		preflight: (request: string) => ProjectPreflightReport;
@@ -2324,6 +2346,8 @@ export function createCliTask(
 		projectId: context.projectId,
 		projectPath: context.projectPath,
 		workspaceRoot: context.workspaceRoot,
+		supervisorActivityStateRoot:
+			context.supervisorActivityStateRoot ?? context.workspaceRoot,
 		repository: context.labDbRepository,
 		queue: context.structuredTaskQueue,
 		task,

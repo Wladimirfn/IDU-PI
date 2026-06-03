@@ -14,6 +14,11 @@ import type {
 	StructuredTask,
 	StructuredTaskQueue,
 } from "./structured-task-queue.js";
+import {
+	recordSupervisorActivityEventDeferred,
+	supervisorActivityInputFromLoopResult,
+	type SupervisorActivityRecordInput,
+} from "./supervisor-activity-events.js";
 
 export type IduSupervisorHookReason =
 	| "idu_inactive"
@@ -60,6 +65,8 @@ type CommonHookInput = {
 	now?: () => Date;
 	throttleMs?: number;
 	options?: Partial<IduSupervisorLoopInput["options"]>;
+	supervisorActivityStateRoot?: string;
+	recordSupervisorActivity?: (event: SupervisorActivityRecordInput) => void;
 };
 
 export type MaybeRunSupervisorAfterTaskInput = CommonHookInput & {
@@ -137,7 +144,11 @@ export function maybeRunSupervisorAfterSemanticTrigger(
 	input: MaybeRunSupervisorAfterSemanticTriggerInput,
 ): IduSupervisorHookResult {
 	if (input.semanticTrigger.decision !== "executed") {
-		return skipped(input, "after_semantic_threshold", "no_new_events");
+		return emitHookActivity(
+			input,
+			skipped(input, "after_semantic_threshold", "no_new_events"),
+			false,
+		);
 	}
 	const reason = input.semanticTrigger.triggerReason;
 	const majorOrCritical =
@@ -191,12 +202,23 @@ function maybeRunSupervisor(
 		relevantEvent: boolean;
 	},
 ): IduSupervisorHookResult {
-	if (!input.relevantEvent)
-		return skipped(input, input.trigger, "no_new_events");
+	if (!input.relevantEvent) {
+		return emitHookActivity(
+			input,
+			skipped(input, input.trigger, "no_new_events"),
+			false,
+		);
+	}
 	const active = (input.isIduActive ?? shouldUseAutomaticGuardrails)(
 		input.projectId,
 	);
-	if (!active) return skipped(input, input.trigger, "idu_inactive");
+	if (!active) {
+		return emitHookActivity(
+			input,
+			skipped(input, input.trigger, "idu_inactive"),
+			false,
+		);
+	}
 
 	const now = input.now?.() ?? new Date();
 	const throttleStatePath = statePath(input.workspaceRoot);
@@ -210,16 +232,20 @@ function maybeRunSupervisor(
 			throttleMs: input.throttleMs,
 		})
 	) {
-		return {
-			status: "skipped",
-			reason: "throttled",
-			trigger: input.trigger,
-			projectId: input.projectId,
-			bypassedThrottle: false,
-			throttleStatePath,
-			summary: "Supervisor omitido por throttle de 10 minutos.",
-			safety: SAFE_FLAGS,
-		};
+		return emitHookActivity(
+			input,
+			{
+				status: "skipped",
+				reason: "throttled",
+				trigger: input.trigger,
+				projectId: input.projectId,
+				bypassedThrottle: false,
+				throttleStatePath,
+				summary: "Supervisor omitido por throttle de 10 minutos.",
+				safety: SAFE_FLAGS,
+			},
+			true,
+		);
 	}
 
 	try {
@@ -243,29 +269,83 @@ function maybeRunSupervisor(
 			isIduActive: input.isIduActive,
 		});
 		writeState(throttleStatePath, input.projectId, now);
-		return {
-			status: supervisor.status === "warning" ? "warning" : "completed",
-			trigger: input.trigger,
-			projectId: input.projectId,
-			bypassedThrottle: input.bypassThrottle,
-			throttleStatePath,
-			summary: supervisor.summary,
-			supervisor,
-			safety: SAFE_FLAGS,
-		};
+		return emitHookActivity(
+			input,
+			{
+				status: supervisor.status === "warning" ? "warning" : "completed",
+				trigger: input.trigger,
+				projectId: input.projectId,
+				bypassedThrottle: input.bypassThrottle,
+				throttleStatePath,
+				summary: supervisor.summary,
+				supervisor,
+				safety: SAFE_FLAGS,
+			},
+			true,
+		);
 	} catch (error) {
-		return {
-			status: "warning",
-			reason: "supervisor_failed",
-			trigger: input.trigger,
-			projectId: input.projectId,
-			bypassedThrottle: input.bypassThrottle,
-			throttleStatePath,
-			summary: "Supervisor automático falló; el flujo principal continúa.",
-			warning: error instanceof Error ? error.message : String(error),
-			safety: SAFE_FLAGS,
-		};
+		return emitHookActivity(
+			input,
+			{
+				status: "warning",
+				reason: "supervisor_failed",
+				trigger: input.trigger,
+				projectId: input.projectId,
+				bypassedThrottle: input.bypassThrottle,
+				throttleStatePath,
+				summary: "Supervisor automático falló; el flujo principal continúa.",
+				warning: error instanceof Error ? error.message : String(error),
+				safety: SAFE_FLAGS,
+			},
+			true,
+		);
 	}
+}
+
+function emitHookActivity(
+	input: Pick<
+		CommonHookInput,
+		| "projectId"
+		| "workspaceRoot"
+		| "supervisorActivityStateRoot"
+		| "recordSupervisorActivity"
+	>,
+	result: IduSupervisorHookResult,
+	active: boolean,
+): IduSupervisorHookResult {
+	try {
+		const event: SupervisorActivityRecordInput = result.supervisor
+			? {
+					...supervisorActivityInputFromLoopResult(result.supervisor, {
+						origin: "supervisor_auto_hook",
+						eventType: "supervisor_hook",
+					}),
+					status: result.status,
+					...(result.reason ? { reason: result.reason } : {}),
+					bypassedThrottle: result.bypassedThrottle,
+				}
+			: {
+					projectId: input.projectId,
+					eventType: "supervisor_hook",
+					origin: "supervisor_auto_hook",
+					trigger: result.trigger,
+					status: result.status,
+					...(result.reason ? { reason: result.reason } : {}),
+					active,
+					bypassedThrottle: result.bypassedThrottle,
+					ok: result.status !== "warning",
+				};
+		if (input.recordSupervisorActivity) input.recordSupervisorActivity(event);
+		else {
+			recordSupervisorActivityEventDeferred(
+				input.supervisorActivityStateRoot ?? input.workspaceRoot,
+				event,
+			);
+		}
+	} catch {
+		// Supervisor activity telemetry is best-effort and must never block hooks.
+	}
+	return result;
 }
 
 function skipped(

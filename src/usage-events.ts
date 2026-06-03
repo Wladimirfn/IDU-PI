@@ -255,7 +255,6 @@ export function formatIduUsagePanel(report: IduUsageReport): string {
 		`última llamada Idu-pi: ${report.totalIduCalls ? formatRelativeUsageTime(report.lastActivity) : "sin eventos"}`,
 		`llamadas Idu-pi: ${report.totalIduCalls}`,
 		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp} · tui ${report.surface.tui}`,
-		"actividad automática supervisor: no medida",
 		`activo/inactivo: ${report.active.true} / ${report.active.false}`,
 		`requiere humano: ${report.requiresHuman}`,
 		`bloqueados/no permitido: ${report.notAllowed}`,

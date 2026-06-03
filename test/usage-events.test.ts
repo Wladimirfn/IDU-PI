@@ -106,7 +106,10 @@ test("usage event reader counts tui surface in reliable report", async () => {
 		const report = buildIduUsageReport(readIduUsageEvents(root));
 		assert.equal(report.totalIduCalls, 1);
 		assert.equal(report.surface.tui, 1);
-		assert.match(formatIduUsagePanel(report), /superficie: cli 0 · mcp 0 · tui 1/u);
+		assert.match(
+			formatIduUsagePanel(report),
+			/superficie: cli 0 · mcp 0 · tui 1/u,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -232,7 +235,7 @@ test("usage report calculates compact project panel metrics", async () => {
 		assert.match(panel, /llamadas Idu-pi: 3/u);
 		assert.doesNotMatch(panel, /eventos Idu-pi: 3/u);
 		assert.match(panel, /superficie: cli 2 · mcp 1 · tui 0/u);
-		assert.match(panel, /actividad automática supervisor: no medida/u);
+		assert.doesNotMatch(panel, /actividad automática supervisor/u);
 		assert.match(panel, /requiere humano: 1/u);
 		assert.match(panel, /compactaciones detectadas: no medido/u);
 		assert.match(panel, /tokens Idu-pi: no medido/u);
@@ -346,7 +349,10 @@ test("usage report uses newest Idu-pi call timestamp, ignoring newer compaction 
 	]);
 	assert.equal(report.lastActivity, olderCall);
 	assert.match(formatIduUsagePanel(report), /última llamada Idu-pi: hace 10m/u);
-	assert.doesNotMatch(formatIduUsagePanel(report), /última llamada Idu-pi: hace 1m/u);
+	assert.doesNotMatch(
+		formatIduUsagePanel(report),
+		/última llamada Idu-pi: hace 1m/u,
+	);
 });
 
 test("usage report uses newest timestamp instead of event order", () => {
@@ -372,7 +378,10 @@ test("usage report uses newest timestamp instead of event order", () => {
 	]);
 	assert.equal(report.lastActivity, newer);
 	assert.match(formatIduUsagePanel(report), /última llamada Idu-pi: hace 3m/u);
-	assert.doesNotMatch(formatIduUsagePanel(report), /última llamada Idu-pi: hace 10m/u);
+	assert.doesNotMatch(
+		formatIduUsagePanel(report),
+		/última llamada Idu-pi: hace 10m/u,
+	);
 });
 
 test("usage panel distinguishes refresh time from last recorded event", async () => {
@@ -401,7 +410,7 @@ test("usage panel formats empty report without errors", () => {
 	assert.match(panel, /llamadas Idu-pi: 0/u);
 	assert.match(panel, /actualizado: recién/u);
 	assert.match(panel, /última llamada Idu-pi: sin eventos/u);
-	assert.match(panel, /actividad automática supervisor: no medida/u);
+	assert.doesNotMatch(panel, /actividad automática supervisor/u);
 	assert.match(panel, /compactaciones detectadas: no medido/u);
 	assert.match(panel, /tokens Idu-pi: no medido/u);
 	assert.match(panel, /% contexto Idu-pi: no medido/u);

@@ -35,6 +35,7 @@ import {
 } from "../src/cli.js";
 import { saveModelAssignment } from "../src/model-assignments.js";
 import { recordIduUsageEvent } from "../src/usage-events.js";
+import { recordSupervisorActivityEvent } from "../src/supervisor-activity-events.js";
 
 function tempDir(prefix = "idu-cli-home-"): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -354,8 +355,54 @@ test("current project panel shows local usage metrics from stateRoot", async () 
 		assert.match(output, /Uso local/u);
 		assert.match(output, /llamadas Idu-pi: 1/u);
 		assert.match(output, /superficie: cli 1 · mcp 0 · tui 0/u);
-		assert.match(output, /actividad automática supervisor: no medida/u);
+		assert.match(output, /Actividad supervisor local/u);
 		assert.match(output, /tokens Idu-pi: no medido/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel shows supervisor activity metrics from stateRoot", async () => {
+	const root = tempDir("idu-cli-home-supervisor-activity-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordSupervisorActivityEvent(stateRoot, {
+			projectId: "project",
+			eventType: "supervisor_hook",
+			origin: "supervisor_auto_hook",
+			trigger: "after_postflight",
+			status: "completed",
+			createdTasks: 2,
+			auditRunRecorded: true,
+		});
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /Actividad supervisor local/u);
+		assert.match(output, /eventos supervisor: 1/u);
+		assert.match(output, /hooks automáticos: 1/u);
+		assert.match(output, /tareas propuestas: 2/u);
+		assert.match(output, /llamadas Idu-pi: 0/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

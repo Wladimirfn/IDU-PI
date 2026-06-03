@@ -28,6 +28,11 @@ import {
 	formatIduUsagePanel,
 	readIduUsageEvents,
 } from "./usage-events.js";
+import {
+	buildSupervisorActivityReport,
+	formatSupervisorActivityPanel,
+	readSupervisorActivityEvents,
+} from "./supervisor-activity-events.js";
 
 export type CliHomeOptions = {
 	cwd?: string;
@@ -363,14 +368,26 @@ export function formatDiagnosticsStatus(status: CliHomeStatus): string {
 
 export function formatCliProjectStatus(status: CliHomeStatus): string {
 	const project = status.project;
-	const usagePanel = project.registered && project.stateRoot
-		? [
-				"",
-				formatIduUsagePanel(
-					buildIduUsageReport(readIduUsageEvents(project.stateRoot, 500)),
-				),
-			]
-		: [];
+	const usagePanel =
+		project.registered && project.stateRoot
+			? [
+					"",
+					formatIduUsagePanel(
+						buildIduUsageReport(readIduUsageEvents(project.stateRoot, 500)),
+					),
+				]
+			: [];
+	const supervisorActivityPanel =
+		project.registered && project.stateRoot
+			? [
+					"",
+					formatSupervisorActivityPanel(
+						buildSupervisorActivityReport(
+							readSupervisorActivityEvents(project.stateRoot, 500),
+						),
+					),
+				]
+			: [];
 	return [
 		"Proyecto actual",
 		"",
@@ -384,6 +401,7 @@ export function formatCliProjectStatus(status: CliHomeStatus): string {
 		`Project Core: ${project.projectCore}`,
 		`Constitution: ${project.constitution}`,
 		...usagePanel,
+		...supervisorActivityPanel,
 		`recommended next: ${project.recommendedNext}`,
 		...(project.warning ? [`aviso: ${project.warning}`] : []),
 	].join("\n");
