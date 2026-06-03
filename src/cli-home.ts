@@ -262,13 +262,13 @@ export function formatTelegramRemoteStatus(status: CliHomeStatus): string {
 
 export function formatModelProfilesMenu(): string {
 	return [
-		"Modelos y perfiles",
+		"Modelos Idu-pi",
 		"",
-		"1. Ver perfiles actuales",
-		"2. Editar perfiles",
+		"1. Asignar modelo por rol",
+		"2. Ver asignaciones actuales",
 		"3. Propuesta automática por AgentLab",
-		"4. Asignar modelos por rol",
-		"5. Validar configuración",
+		"4. Validar configuración",
+		"5. Avanzado: editar PI_AGENT_PROFILES",
 		"6. ← Volver",
 		"7. Exit",
 	].join("\n");
@@ -287,11 +287,26 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 	});
 	const inventory = profileModelInventory(profiles.slice(1));
 	return [
-		"Modelos y perfiles",
+		"Modelos Idu-pi",
 		"",
-		"Assign Models",
-		"Assign models for IDU-Pi supervisor and AgentLabs.",
+		"Assign models by role for the Idu-pi supervisor and AgentLabs.",
+		"Primary flow: choose a role, choose a model, confirm the assignment.",
 		"",
+		"Current assignments:",
+		"",
+		`  ▸ Supervisor principal       ${profileLabel(defaultProfile)}`,
+		`    Supervisor semántico       ${profileLabel(defaultProfile)}`,
+		`    Supervisor compactación    ${profileLabel(defaultProfile)}`,
+		...(status.project.stateRoot
+			? formatModelAssignments(assignments, profiles).split("\n").slice(2)
+			: ["    AgentLabs                sin stateRoot"]),
+		"",
+		"Acciones principales:",
+		"- Asignar modelo por rol",
+		"- Propuesta automática por AgentLab",
+		"- Validar configuración",
+		"",
+		"Advanced compatibility: PI_AGENT_PROFILES",
 		"Current profiles:",
 		"",
 		...profiles.map(
@@ -313,30 +328,14 @@ export function formatModelProfilesStatus(status: CliHomeStatus): string {
 				]
 			: []),
 		"",
-		"Current assignments:",
-		"",
-		`  ▸ Supervisor principal       ${profileLabel(defaultProfile)}`,
-		`    Supervisor semántico       ${profileLabel(defaultProfile)}`,
-		`    Supervisor compactación    ${profileLabel(defaultProfile)}`,
-		...(status.project.stateRoot
-			? formatModelAssignments(assignments, profiles).split("\n").slice(2)
-			: ["    AgentLabs                sin stateRoot"]),
-		"",
 		"Recommended AgentLab proposal:",
 		...formatAgentLabModelAssignmentProposal(proposal, profiles)
 			.split("\n")
 			.slice(4)
 			.map((line) => (line ? `  ${line}` : "")),
 		"",
-		"Acciones disponibles en el menú:",
-		"- Ver perfiles actuales",
-		"- Editar perfiles",
-		"- Propuesta automática por AgentLab",
-		"- Asignar modelos por rol",
-		"- Validar configuración",
-		"",
-		"Editar perfiles guarda PI_AGENT_PROFILES en .env con backup.",
-		"Asignar modelos por rol guarda stateRoot/model-assignments.json.",
+		"Advanced: editar PI_AGENT_PROFILES guarda .env con backup.",
+		"Asignar modelo por rol guarda stateRoot/model-assignments.json tras confirmación.",
 	].join("\n");
 }
 

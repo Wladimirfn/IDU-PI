@@ -366,7 +366,7 @@ test("interactive telegram remote lifecycle uses injected launcher", async () =>
 	assert.match(output, /Abriendo bridge/u);
 });
 
-test("model profile panel renders current profiles and planned Idu-pi roles", () => {
+test("model profile panel renders role-first Idu-pi assignments and advanced compatibility", () => {
 	const status = buildCliHomeStatus({
 		env: {
 			PATH: "",
@@ -377,19 +377,24 @@ test("model profile panel renders current profiles and planned Idu-pi roles", ()
 		stdinInteractive: false,
 	});
 	const panel = formatModelProfilesStatus(status);
-	assert.match(panel, /Modelos y perfiles/u);
+	assert.match(panel, /Modelos Idu-pi/u);
+	assert.match(panel, /Primary flow: choose a role/u);
+	assert.match(panel, /Current assignments:/u);
+	assert.match(panel, /Supervisor principal.*Pi default/u);
+	assert.match(panel, /Advanced compatibility: PI_AGENT_PROFILES/u);
 	assert.match(panel, /Current profiles:/u);
 	assert.match(panel, /Pi default \(default\).*nvidia\/kimi-k2/u);
 	assert.match(panel, /Barato \(barato\).*nvidia\/deepseek-v3/u);
-	assert.match(panel, /Current assignments:/u);
-	assert.match(panel, /Supervisor principal.*Pi default/u);
 	assert.match(panel, /Unique AgentLab profile models:/u);
 	assert.match(panel, /nvidia\/deepseek-v3/u);
 	assert.match(panel, /AgentLab general/u);
 	assert.match(panel, /recomendado: Barato/u);
 	assert.match(panel, /AgentLab seguridad/u);
 	assert.match(panel, /recomendado: Seguridad/u);
-	assert.match(panel, /guarda PI_AGENT_PROFILES en \.env con backup/u);
+	assert.match(
+		panel,
+		/Advanced: editar PI_AGENT_PROFILES guarda \.env con backup/u,
+	);
 });
 
 test("model profile panel warns when AgentLab profiles duplicate the same model", () => {
@@ -409,13 +414,14 @@ test("model profile panel warns when AgentLab profiles duplicate the same model"
 	assert.match(panel, /Diversidad insuficiente/u);
 });
 
-test("model profiles submenu exposes navigable actions", () => {
+test("model profiles submenu exposes role-first actions and advanced compatibility", () => {
 	const menu = formatModelProfilesMenu();
-	assert.match(menu, /1\. Ver perfiles actuales/u);
-	assert.match(menu, /2\. Editar perfiles/u);
+	assert.match(menu, /Modelos Idu-pi/u);
+	assert.match(menu, /1\. Asignar modelo por rol/u);
+	assert.match(menu, /2\. Ver asignaciones actuales/u);
 	assert.match(menu, /3\. Propuesta automática por AgentLab/u);
-	assert.match(menu, /4\. Asignar modelos por rol/u);
-	assert.match(menu, /5\. Validar configuración/u);
+	assert.match(menu, /4\. Validar configuración/u);
+	assert.match(menu, /5\. Avanzado: editar PI_AGENT_PROFILES/u);
 	assert.doesNotMatch(menu, /Save/u);
 	assert.match(menu, /6\. ← Volver/u);
 	assert.match(menu, /7\. Exit/u);
@@ -430,12 +436,12 @@ test("interactive home model option is non-mutating", async () => {
 		process.env.PI_AGENT_PROFILES =
 			"default|Pi default|--model nvidia/kimi-k2;barato|Barato|--model nvidia/deepseek-v3";
 		const before = readdirSync(root);
-		const answers = ["4", "1"];
+		const answers = ["4", "2"];
 		const output = await runInteractiveHomeWithQuestion(
 			async () => answers.shift() ?? "7",
 		);
 		const after = readdirSync(root);
-		assert.match(output, /Modelos y perfiles/u);
+		assert.match(output, /Modelos Idu-pi/u);
 		assert.match(output, /Supervisor principal/u);
 		assert.deepEqual(after, before);
 	} finally {
@@ -459,7 +465,7 @@ test("interactive model profile edit writes env with backup", async () => {
 		process.env.IDU_PI_ENV_PATH = envPath;
 		const answers = [
 			"4",
-			"2",
+			"5",
 			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt",
 			"s",
 		];
@@ -564,7 +570,7 @@ test("interactive model role assignment writes project state", async () => {
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
 		process.env.PI_AGENT_PROFILES =
 			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt";
-		const answers = ["4", "4", "agentlab-security", "codex", "s"];
+		const answers = ["4", "1", "agentlab-security", "codex", "s"];
 		const output = await runInteractiveHomeWithQuestion(
 			async () => answers.shift() ?? "",
 		);
@@ -572,6 +578,58 @@ test("interactive model role assignment writes project state", async () => {
 		assert.match(
 			readFileSync(join(stateRoot, "model-assignments.json"), "utf8"),
 			/agentlab-security/u,
+		);
+	} finally {
+		process.chdir(previousCwd);
+		restoreEnv(previous);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("interactive model role assignment accepts unified catalog direct models", async () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state");
+	mkdirSync(join(root, "data"), { recursive: true });
+	mkdirSync(join(projectPath, ".pi", "gentle-ai"), { recursive: true });
+	writeFileSync(
+		join(root, "data", "projects.json"),
+		JSON.stringify({
+			activeProjectId: "project",
+			projects: [
+				{ id: "project", name: "project", path: projectPath, stateRoot },
+			],
+		}),
+		"utf8",
+	);
+	writeFileSync(
+		join(projectPath, ".pi", "gentle-ai", "models.json"),
+		JSON.stringify({ "agentlab-librarian": "minimax/MiniMax-M2.7" }),
+		"utf8",
+	);
+	const previous = snapshotEnv();
+	const previousCwd = process.cwd();
+	try {
+		process.chdir(projectPath);
+		process.env.DEFAULT_CWD = projectPath;
+		process.env.ALLOWED_ROOTS = root;
+		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
+		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
+		process.env.PI_AGENT_PROFILES = "default|Pi default";
+		const answers = [
+			"4",
+			"1",
+			"agentlab-librarian",
+			"minimax/MiniMax-M2.7",
+			"s",
+		];
+		const output = await runInteractiveHomeWithQuestion(
+			async () => answers.shift() ?? "",
+		);
+		assert.match(output, /Asignación guardada/u);
+		assert.match(
+			readFileSync(join(stateRoot, "model-assignments.json"), "utf8"),
+			/minimax\/MiniMax-M2\.7/u,
 		);
 	} finally {
 		process.chdir(previousCwd);

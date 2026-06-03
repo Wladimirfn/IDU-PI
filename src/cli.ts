@@ -338,6 +338,7 @@ import {
 import {
 	IDU_MODEL_ROLES,
 	applySupervisorModelAssignment,
+	assignmentOptionsFromModelCatalog,
 	formatAgentLabModelAssignmentProposal,
 	formatModelAssignments,
 	loadModelAssignments,
@@ -346,6 +347,7 @@ import {
 	saveModelAssignment,
 	saveModelAssignments,
 } from "./model-assignments.js";
+import { buildUnifiedModelCatalog } from "./model-catalog.js";
 
 export type CliResult = {
 	exitCode: number;
@@ -2718,11 +2720,11 @@ async function runTelegramRemoteMenuTui(
 
 function modelProfilesMenuOptions(): MenuOption[] {
 	return [
-		{ label: "Ver perfiles actuales", value: "status" },
-		{ label: "Editar perfiles", value: "edit" },
+		{ label: "Asignar modelo por rol", value: "assign" },
+		{ label: "Ver asignaciones actuales", value: "status" },
 		{ label: "Propuesta automática por AgentLab", value: "proposal" },
-		{ label: "Asignar modelos por rol", value: "assign" },
 		{ label: "Validar configuración", value: "validate" },
+		{ label: "Avanzado: editar PI_AGENT_PROFILES", value: "edit" },
 		{ label: "← Volver", value: "back" },
 		{ label: "Exit", value: "exit" },
 	];
@@ -2733,7 +2735,7 @@ async function runModelProfilesMenuTui(
 ): Promise<string> {
 	while (true) {
 		const choice = await selectMenu(
-			"Modelos y perfiles",
+			"Modelos Idu-pi",
 			modelProfilesMenuOptions(),
 			undefined,
 			formatModelProfilesStatus(status),
@@ -2768,7 +2770,7 @@ async function runModelProfilesMenuTui(
 				rl.close();
 			}
 		}
-		const result = await showTextView("Modelos y perfiles", message);
+		const result = await showTextView("Modelos Idu-pi", message);
 		if (result === "exit") return "Salida sin cambios.";
 	}
 }
@@ -3115,23 +3117,28 @@ async function assignModelRoleTui(
 	let roleId: string;
 	let profileId: string;
 	while (true) {
+		const assignments = loadModelAssignments(stateRoot);
 		roleId = await selectSearchableMenu(
-			"Elegir rol",
+			"Elegir rol Idu-pi",
 			[
 				...IDU_MODEL_ROLES.map((role) => ({
-					label: `${role.label} (${role.id})`,
+					label: `${role.label} (${role.id}) — ${assignments.assignments[role.id] ?? "inherit"}`,
 					value: role.id,
 				})),
 				{ label: "← Volver", value: "__back" },
 				{ label: "Exit", value: "__exit" },
 			],
-			{ search: true },
+			{
+				search: true,
+				content:
+					"Seleccioná qué rol querés configurar. Idu-pi sólo guarda la asignación después de confirmar.",
+			},
 		);
 		if (roleId === "exit" || roleId === "__back" || roleId === "__exit")
 			return "Cancelado sin cambios.";
 		const assignmentOptions = modelAssignmentOptions(status);
 		profileId = await selectSearchableMenu(
-			"Elegir modelo/perfil",
+			"Elegir modelo para el rol",
 			[
 				...assignmentOptions.map((option) => ({
 					label: option.label,
@@ -3144,8 +3151,8 @@ async function assignModelRoleTui(
 				search: true,
 				content: [
 					`Rol: ${roleId}`,
-					"Elegí un perfil existente o un modelo directo conocido por Gentle AI.",
-					"Custom sólo si el modelo no aparece en la lista.",
+					"Lista plana: perfiles existentes, modelos directos del catálogo unificado y fallback custom.",
+					"Usá Custom sólo si el proveedor/modelo no aparece todavía.",
 				].join("\n"),
 			},
 		);
@@ -3197,8 +3204,10 @@ async function assignModelRole(
 	const stateRoot = status.project.stateRoot;
 	if (!stateRoot)
 		return "No hay stateRoot. Enrolá o bootstrappeá el proyecto antes de asignar modelos por rol.";
+	const assignments = loadModelAssignments(stateRoot);
 	const roleOptions = IDU_MODEL_ROLES.map(
-		(role, index) => `${index + 1}. ${role.label} (${role.id})`,
+		(role, index) =>
+			`${index + 1}. ${role.label} (${role.id}) — ${assignments.assignments[role.id] ?? "inherit"}`,
 	).join("\n");
 	const roleAnswer = (
 		await question(`Elegí rol por número o id:\n${roleOptions}\nrol: `)
@@ -3211,7 +3220,7 @@ async function assignModelRole(
 		.join("\n");
 	const assignmentAnswer = (
 		await question(
-			`Elegí perfil/modelo por número o id:\n${assignmentOptionsText}\nperfil/modelo: `,
+			`Elegí modelo/perfil por número o id:\n${assignmentOptionsText}\nmodelo/perfil: `,
 		)
 	).trim();
 	let profileId = resolveAssignmentSelection(
@@ -3251,21 +3260,28 @@ async function assignModelRole(
 function modelAssignmentOptions(
 	status: ReturnType<typeof buildCliHomeStatus>,
 ): Array<{ value: string; label: string }> {
-	const knownModelIds = readGentleModelRouting(status.cwd);
-	return [
-		...status.agentProfiles.map((profile) => ({
-			value: profile.id,
-			label: `${profile.label} (${profile.id}) — ${profileModelLabel(profile)}`,
-		})),
-		...knownModelIds.map((modelId) => ({
-			value: modelId,
-			label: `${modelId} — modelo directo Gentle AI`,
-		})),
-		{
-			value: "__custom_model__",
-			label: "Custom model id (provider/model)",
-		},
-	];
+	const catalog = buildUnifiedModelCatalog({
+		gentleModelIds: readGentleModelRouting(status.cwd),
+		profileModelIds: status.agentProfiles.map(profileModelLabel),
+	});
+	return assignmentOptionsFromModelCatalog(
+		status.agentProfiles,
+		catalog.entries,
+	).map((option) => ({
+		value: option.value,
+		label: formatModelAssignmentOptionLabel(option),
+	}));
+}
+
+function formatModelAssignmentOptionLabel(option: {
+	value: string;
+	label: string;
+	source: "profile" | "model" | "custom";
+}): string {
+	if (option.source === "profile") return `[perfil] ${option.label}`;
+	if (option.source === "custom") return `[custom] ${option.label}`;
+	const provider = option.value.split("/")[0] ?? "modelo";
+	return `[${provider}] ${option.label}`;
 }
 
 function resolveRoleSelection(input: string): string | undefined {
@@ -3427,15 +3443,16 @@ async function runModelProfilesMenu(
 	if (choice === "6" || /^volver$/iu.test(choice)) return "Volver sin cambios.";
 	if (choice === "7" || /^exit|salir$/iu.test(choice))
 		return "Salida sin cambios.";
-	if (choice === "1") return formatModelProfilesStatus(status);
-	if (choice === "2" || choice === "edit")
-		return editAgentProfiles(question, status);
+	if (choice === "1" || choice === "assign")
+		return assignModelRole(question, status);
+	if (choice === "2" || choice === "status")
+		return formatModelProfilesStatus(status);
 	if (choice === "3" || choice === "proposal")
 		return proposeAgentLabModelAssignments(question, status);
-	if (choice === "4" || choice === "assign")
-		return assignModelRole(question, status);
-	if (choice === "5" || choice === "validate")
+	if (choice === "4" || choice === "validate")
 		return validateAgentProfiles(status);
+	if (choice === "5" || choice === "edit")
+		return editAgentProfiles(question, status);
 	return "Opción no reconocida. No ejecuté acciones.";
 }
 
