@@ -169,7 +169,14 @@ export function buildIduUsageReport(
 	let requiresHuman = 0;
 	let notAllowed = 0;
 	let failed = 0;
+	let lastActivity: string | undefined;
+	let lastActivityMs = Number.NEGATIVE_INFINITY;
 	for (const event of events) {
+		const eventMs = Date.parse(event.timestamp);
+		if (Number.isFinite(eventMs) && eventMs > lastActivityMs) {
+			lastActivity = event.timestamp;
+			lastActivityMs = eventMs;
+		}
 		if (event.surface === "cli") surface.cli += 1;
 		else if (event.surface === "mcp") surface.mcp += 1;
 		else surface.other += 1;
@@ -183,9 +190,7 @@ export function buildIduUsageReport(
 	return {
 		version: 1,
 		totalEvents: events.length,
-		...(events.length
-			? { lastActivity: events[events.length - 1]?.timestamp }
-			: {}),
+		...(lastActivity ? { lastActivity } : {}),
 		surface,
 		active,
 		requiresHuman,

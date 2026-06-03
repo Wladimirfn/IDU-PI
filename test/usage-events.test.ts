@@ -170,6 +170,32 @@ test("usage report calculates compact project panel metrics", async () => {
 	}
 });
 
+test("usage report uses newest timestamp instead of event order", () => {
+	const newer = new Date(Date.now() - 3 * 60_000).toISOString();
+	const older = new Date(Date.now() - 10 * 60_000).toISOString();
+	const report = buildIduUsageReport([
+		{
+			version: 1,
+			id: "newer",
+			timestamp: newer,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_status",
+		},
+		{
+			version: 1,
+			id: "older",
+			timestamp: older,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_postflight",
+		},
+	]);
+	assert.equal(report.lastActivity, newer);
+	assert.match(formatIduUsagePanel(report), /último evento: hace 3m/u);
+	assert.doesNotMatch(formatIduUsagePanel(report), /último evento: hace 10m/u);
+});
+
 test("usage panel distinguishes refresh time from last recorded event", async () => {
 	const root = tempStateRoot();
 	try {
