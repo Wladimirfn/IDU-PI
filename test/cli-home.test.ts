@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import {
 	applyPackageEnvDefaults,
@@ -27,6 +28,7 @@ import {
 	formatTelegramRemoteMenu,
 } from "../src/cli-home.js";
 import {
+	__testSelectSearchableMenu,
 	createCliRuntime,
 	runCliCommand,
 	runInteractiveHomeWithQuestion,
@@ -1054,6 +1056,63 @@ test("project panel auto-refresh is scoped and cleaned up", () => {
 	assert.match(menuBlock, /clearInterval/u);
 	assert.match(menuBlock, /refreshedContent !== settings\.content/u);
 	assert.doesNotMatch(menuBlock, /watchFile|fs\.watch/u);
+});
+
+test("interactive project panel auto-refresh re-renders changed content and clears timer on exit", async () => {
+	const input = new EventEmitter() as EventEmitter & {
+		isTTY?: boolean;
+		resume: () => void;
+		setRawMode: (enabled: boolean) => void;
+	};
+	input.isTTY = false;
+	input.resume = () => undefined;
+	input.setRawMode = () => undefined;
+	const writes: string[] = [];
+	const output = {
+		write: (value: string) => {
+			writes.push(value);
+		},
+	};
+	let intervalCallback: (() => void) | undefined;
+	let cleared = false;
+	let content = "eventos: 7";
+	const menuPromise = __testSelectSearchableMenu(
+		"Proyecto actual",
+		[
+			{ label: "↻ Actualizar métricas", value: "refresh" },
+			{ label: "← Volver", value: "back" },
+		],
+		{
+			content,
+			autoRefresh: {
+				intervalMs: 3000,
+				getContent: () => content,
+			},
+		},
+		{
+			input,
+			output,
+			setInterval: (callback: () => void, intervalMs: number) => {
+				assert.equal(intervalMs, 3000);
+				intervalCallback = callback;
+				return "timer";
+			},
+			clearInterval: (timer: unknown) => {
+				assert.equal(timer, "timer");
+				cleared = true;
+			},
+		},
+	);
+
+	assert.equal(writes.filter((entry) => entry.includes("eventos: 7")).length, 1);
+	intervalCallback?.();
+	assert.equal(writes.filter((entry) => entry.includes("eventos: 7")).length, 1);
+	content = "eventos: 8";
+	intervalCallback?.();
+	assert.equal(writes.some((entry) => entry.includes("eventos: 8")), true);
+	input.emit("keypress", "q", { name: "q" });
+	assert.equal(await menuPromise, "exit");
+	assert.equal(cleared, true);
 });
 
 test("wizard source avoids AgentLabs scans prepare and bootstrap", () => {

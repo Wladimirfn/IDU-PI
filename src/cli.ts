@@ -2912,19 +2912,45 @@ type SelectSearchableMenuSettings = {
 	};
 };
 
+type SelectSearchableMenuInput = {
+	on: (event: "keypress", listener: (chunk: string, key: { name?: string }) => void) => unknown;
+	removeAllListeners: (event: "keypress") => unknown;
+	resume: () => unknown;
+	isTTY?: boolean;
+	setRawMode?: (enabled: boolean) => void;
+};
+
+type SelectSearchableMenuOutput = {
+	write: (value: string) => unknown;
+};
+
+type SelectSearchableMenuDeps = {
+	input?: SelectSearchableMenuInput;
+	output?: SelectSearchableMenuOutput;
+	setInterval?: (callback: () => void, intervalMs: number) => unknown;
+	clearInterval?: (timer: unknown) => void;
+};
+
 async function selectSearchableMenu(
 	title: string,
 	options: MenuOption[],
 	settings: SelectSearchableMenuSettings = {},
+	deps: SelectSearchableMenuDeps = {},
 ): Promise<string> {
 	let selected = 0;
 	let query = "";
-	let refreshTimer: NodeJS.Timeout | undefined;
-	emitKeypressEvents(process.stdin);
-	const rawMode = process.stdin.isTTY;
-	if (rawMode) process.stdin.setRawMode(true);
-	process.stdin.resume();
-	process.stdout.write(`${ANSI_ALT_SCREEN_ON}${ANSI_HIDE_CURSOR}`);
+	let refreshTimer: unknown;
+	const input = deps.input ?? process.stdin;
+	const output = deps.output ?? process.stdout;
+	const startInterval: (callback: () => void, intervalMs: number) => unknown =
+		deps.setInterval ?? setInterval;
+	const stopInterval: (timer: unknown) => void =
+		deps.clearInterval ?? ((timer: unknown) => clearInterval(timer as NodeJS.Timeout));
+	emitKeypressEvents(input as NodeJS.ReadStream);
+	const rawMode = input.isTTY;
+	if (rawMode) input.setRawMode?.(true);
+	input.resume();
+	output.write(`${ANSI_ALT_SCREEN_ON}${ANSI_HIDE_CURSOR}`);
 	const filteredOptions = () => {
 		if (!settings.search || !query.trim()) return options;
 		const normalized = query.trim().toLowerCase();
@@ -2982,14 +3008,14 @@ async function selectSearchableMenu(
 					.join("\n")
 			: panelLine("Sin resultados", width, ANSI_DIM);
 		const footer = bottomBorder(width);
-		process.stdout.write(
+		output.write(
 			`${ANSI_HOME}${header}\n${rows}\n${footer}${ANSI_CLEAR_TO_END}`,
 		);
 	};
 	try {
 		render();
 		if (settings.autoRefresh) {
-			refreshTimer = setInterval(() => {
+			refreshTimer = startInterval(() => {
 				const refreshedContent = settings.autoRefresh?.getContent();
 				if (
 					refreshedContent !== undefined &&
@@ -3037,13 +3063,22 @@ async function selectSearchableMenu(
 					render();
 				}
 			};
-			process.stdin.on("keypress", onKeypress);
-		}).finally(() => process.stdin.removeAllListeners("keypress"));
+			input.on("keypress", onKeypress);
+		}).finally(() => input.removeAllListeners("keypress"));
 	} finally {
-		if (refreshTimer) clearInterval(refreshTimer);
-		if (rawMode) process.stdin.setRawMode(false);
-		process.stdout.write(`${ANSI_SHOW_CURSOR}${ANSI_ALT_SCREEN_OFF}`);
+		if (refreshTimer !== undefined) stopInterval(refreshTimer);
+		if (rawMode) input.setRawMode?.(false);
+		output.write(`${ANSI_SHOW_CURSOR}${ANSI_ALT_SCREEN_OFF}`);
 	}
+}
+
+export async function __testSelectSearchableMenu(
+	title: string,
+	options: MenuOption[],
+	settings: SelectSearchableMenuSettings = {},
+	deps: SelectSearchableMenuDeps = {},
+): Promise<string> {
+	return selectSearchableMenu(title, options, settings, deps);
 }
 
 async function showTextView(
