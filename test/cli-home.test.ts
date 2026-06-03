@@ -352,8 +352,9 @@ test("current project panel shows local usage metrics from stateRoot", async () 
 			},
 		});
 		assert.match(output, /Uso local/u);
-		assert.match(output, /eventos: 1/u);
-		assert.match(output, /superficie: cli 1 · mcp 0/u);
+		assert.match(output, /eventos Idu-pi: 1/u);
+		assert.match(output, /superficie: cli 1 · mcp 0 · tui 0/u);
+		assert.match(output, /tokens Idu-pi: no medido/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -387,7 +388,8 @@ test("current project panel shows empty usage metrics without state writes", () 
 			},
 		});
 		assert.match(output, /Uso local/u);
-		assert.match(output, /eventos: 0/u);
+		assert.match(output, /eventos Idu-pi: 0/u);
+		assert.match(output, /compactaciones detectadas: 0/u);
 		assert.equal(
 			existsSync(join(stateRoot, "reports", "idu-usage-events.jsonl")),
 			false,
@@ -430,7 +432,7 @@ test("current project panel hides usage metrics for unregistered projects", asyn
 			},
 		});
 		assert.doesNotMatch(output, /Uso local/u);
-		assert.doesNotMatch(output, /eventos: 1/u);
+		assert.doesNotMatch(output, /eventos Idu-pi: 1/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -469,7 +471,7 @@ test("current project panel usage metrics ignore workspaceRoot usage file", asyn
 			},
 		});
 		assert.match(output, /Uso local/u);
-		assert.match(output, /eventos: 0/u);
+		assert.match(output, /eventos Idu-pi: 0/u);
 		assert.doesNotMatch(output, /wrong-root-event/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -1104,12 +1106,21 @@ test("interactive project panel auto-refresh re-renders changed content and clea
 		},
 	);
 
-	assert.equal(writes.filter((entry) => entry.includes("eventos: 7")).length, 1);
+	assert.equal(
+		writes.filter((entry) => entry.includes("eventos: 7")).length,
+		1,
+	);
 	intervalCallback?.();
-	assert.equal(writes.filter((entry) => entry.includes("eventos: 7")).length, 1);
+	assert.equal(
+		writes.filter((entry) => entry.includes("eventos: 7")).length,
+		1,
+	);
 	content = "eventos: 8";
 	intervalCallback?.();
-	assert.equal(writes.some((entry) => entry.includes("eventos: 8")), true);
+	assert.equal(
+		writes.some((entry) => entry.includes("eventos: 8")),
+		true,
+	);
 	input.emit("keypress", "q", { name: "q" });
 	assert.equal(await menuPromise, "exit");
 	assert.equal(cleared, true);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -45,6 +45,68 @@ test("usage events append safe JSONL under stateRoot reports", async () => {
 		assert.equal(events[0]?.allowedToProceed, false);
 		assert.equal(events[0]?.requiresHuman, true);
 		assert.equal(events[0]?.durationMs, 12);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("usage event reader preserves safe event type and session id", async () => {
+	const root = tempStateRoot();
+	try {
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "pi_compaction_detected",
+			eventType: "pi_compaction_detected",
+			sessionId: "session with spaces",
+		});
+		const events = readIduUsageEvents(root);
+		assert.equal(events[0]?.eventType, "pi_compaction_detected");
+		assert.equal(events[0]?.sessionId, "session_with_spaces");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("usage event reader treats legacy JSONL without event type as idu calls", () => {
+	const root = tempStateRoot();
+	try {
+		const path = usageEventsPath(root);
+		mkdirSync(join(root, "reports"), { recursive: true });
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				id: "legacy",
+				timestamp: new Date().toISOString(),
+				projectId: "idu-pi",
+				surface: "mcp",
+				action: "idu_postflight",
+			}) + "\n",
+			"utf8",
+		);
+		const report = buildIduUsageReport(readIduUsageEvents(root));
+		assert.equal(report.totalEvents, 1);
+		assert.equal(report.totalIduCalls, 1);
+		assert.equal(report.compactionsDetected, 0);
+		assert.equal(report.topActions[0]?.action, "idu_postflight");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("usage event reader counts tui surface in reliable report", async () => {
+	const root = tempStateRoot();
+	try {
+		await recordIduUsageEvent(root, {
+			projectId: "idu-pi",
+			surface: "tui",
+			action: "project_panel_open",
+		});
+		const report = buildIduUsageReport(readIduUsageEvents(root));
+		assert.equal(report.totalIduCalls, 1);
+		assert.equal(report.surface.tui, 1);
+		assert.match(formatIduUsagePanel(report), /superficie: cli 0 · mcp 0 · tui 1/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -155,6 +217,8 @@ test("usage report calculates compact project panel metrics", async () => {
 		});
 		const report = buildIduUsageReport(readIduUsageEvents(root));
 		assert.equal(report.totalEvents, 3);
+		assert.equal(report.totalIduCalls, 3);
+		assert.equal(report.compactionsDetected, 0);
 		assert.equal(report.surface.cli, 2);
 		assert.equal(report.surface.mcp, 1);
 		assert.equal(report.active.true, 2);
@@ -163,11 +227,96 @@ test("usage report calculates compact project panel metrics", async () => {
 		assert.equal(report.notAllowed, 1);
 		assert.equal(report.failed, 1);
 		assert.equal(report.topActions[0]?.action, "idu-status");
-		assert.match(formatIduUsagePanel(report), /Uso local/u);
-		assert.match(formatIduUsagePanel(report), /requiere humano: 1/u);
+		const panel = formatIduUsagePanel(report);
+		assert.match(panel, /Uso local/u);
+		assert.match(panel, /eventos Idu-pi: 3/u);
+		assert.match(panel, /superficie: cli 2 · mcp 1 · tui 0/u);
+		assert.match(panel, /requiere humano: 1/u);
+		assert.match(panel, /compactaciones detectadas: 0/u);
+		assert.match(panel, /tokens Idu-pi: no medido/u);
+		assert.match(panel, /% contexto Idu-pi: no medido/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("usage report separates idu calls from compaction events", () => {
+	const now = new Date().toISOString();
+	const report = buildIduUsageReport([
+		{
+			version: 1,
+			id: "legacy-call",
+			timestamp: now,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_postflight",
+		},
+		{
+			version: 1,
+			id: "typed-call",
+			timestamp: now,
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "idu_status",
+			eventType: "idu_call",
+			sessionId: "pi-session-1",
+		},
+		{
+			version: 1,
+			id: "compact-1",
+			timestamp: now,
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "pi_compaction_detected",
+			eventType: "pi_compaction_detected",
+			sessionId: "pi-session-1",
+		},
+	]);
+
+	assert.equal(report.totalEvents, 3);
+	assert.equal(report.totalIduCalls, 2);
+	assert.equal(report.compactionsDetected, 1);
+	assert.equal(report.observedSessions, 1);
+	assert.equal(report.surface.cli, 1);
+	assert.equal(report.surface.mcp, 1);
+	assert.equal(
+		report.topActions.some(
+			(entry) => entry.action === "pi_compaction_detected",
+		),
+		false,
+	);
+	assert.equal(report.tokensMeasured, false);
+	assert.equal(report.contextPercentMeasured, false);
+});
+
+test("usage summary counts only idu calls for action metrics", () => {
+	const now = new Date().toISOString();
+	const summary = summarizeIduUsageEvents([
+		{
+			version: 1,
+			id: "call",
+			timestamp: now,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_postflight",
+			eventType: "idu_call",
+		},
+		{
+			version: 1,
+			id: "compact",
+			timestamp: now,
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "pi_compaction_detected",
+			eventType: "pi_compaction_detected",
+		},
+	]);
+
+	assert.equal(summary.totalEvents, 2);
+	assert.equal(summary.totalIduCalls, 1);
+	assert.equal(summary.compactionsDetected, 1);
+	assert.equal(summary.byAction.idu_postflight, 1);
+	assert.equal(summary.byAction.pi_compaction_detected, undefined);
 });
 
 test("usage report uses newest timestamp instead of event order", () => {
@@ -218,7 +367,10 @@ test("usage panel distinguishes refresh time from last recorded event", async ()
 test("usage panel formats empty report without errors", () => {
 	const panel = formatIduUsagePanel(buildIduUsageReport([]));
 	assert.match(panel, /Uso local/u);
-	assert.match(panel, /eventos: 0/u);
+	assert.match(panel, /eventos Idu-pi: 0/u);
 	assert.match(panel, /actualizado: recién/u);
 	assert.match(panel, /último evento: sin eventos/u);
+	assert.match(panel, /compactaciones detectadas: 0/u);
+	assert.match(panel, /tokens Idu-pi: no medido/u);
+	assert.match(panel, /% contexto Idu-pi: no medido/u);
 });

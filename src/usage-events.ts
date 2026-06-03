@@ -3,7 +3,9 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 
-export type IduUsageSurface = "cli" | "mcp";
+export type IduUsageSurface = "cli" | "mcp" | "tui";
+
+export type IduUsageEventType = "idu_call" | "pi_compaction_detected";
 
 export type IduUsageEvent = {
 	version: 1;
@@ -12,6 +14,8 @@ export type IduUsageEvent = {
 	projectId: string;
 	surface: IduUsageSurface;
 	action: string;
+	eventType?: IduUsageEventType;
+	sessionId?: string;
 	active?: boolean;
 	risk?: string;
 	recommendation?: string;
@@ -37,6 +41,9 @@ export type IduUsageRecordResult =
 export type IduUsageSummary = {
 	version: 1;
 	totalEvents: number;
+	totalIduCalls: number;
+	compactionsDetected: number;
+	observedSessions: number;
 	bySurface: Record<string, number>;
 	byAction: Record<string, number>;
 	byRecommendation: Record<string, number>;
@@ -49,8 +56,13 @@ export type IduUsageSummary = {
 export type IduUsageReport = {
 	version: 1;
 	totalEvents: number;
+	totalIduCalls: number;
+	compactionsDetected: number;
+	observedSessions: number;
+	tokensMeasured: false;
+	contextPercentMeasured: false;
 	lastActivity?: string;
-	surface: { cli: number; mcp: number; other: number };
+	surface: { cli: number; mcp: number; tui: number; other: number };
 	active: { true: number; false: number; unknown: number };
 	requiresHuman: number;
 	notAllowed: number;
@@ -135,7 +147,17 @@ export function summarizeIduUsageEvents(
 	const active = { true: 0, false: 0, unknown: 0 };
 	const allowedToProceed = { true: 0, false: 0, unknown: 0 };
 	const requiresHuman = { true: 0, false: 0, unknown: 0 };
+	const sessions = new Set<string>();
+	let totalIduCalls = 0;
+	let compactionsDetected = 0;
 	for (const event of events) {
+		if (event.sessionId) sessions.add(event.sessionId);
+		const eventType = effectiveEventType(event);
+		if (eventType === "pi_compaction_detected") {
+			compactionsDetected += 1;
+			continue;
+		}
+		totalIduCalls += 1;
 		increment(bySurface, event.surface);
 		increment(byAction, event.action);
 		increment(byRecommendation, event.recommendation ?? "unknown");
@@ -146,6 +168,9 @@ export function summarizeIduUsageEvents(
 	return {
 		version: 1,
 		totalEvents: events.length,
+		totalIduCalls,
+		compactionsDetected,
+		observedSessions: sessions.size,
 		bySurface: sortRecord(bySurface),
 		byAction: sortRecord(byAction),
 		byRecommendation: sortRecord(byRecommendation),
@@ -164,8 +189,11 @@ export function buildIduUsageReport(
 	const recentLimit = Math.max(0, options.recentLimit ?? 5);
 	const byAction: Record<string, number> = {};
 	const byRecommendation: Record<string, number> = {};
-	const surface = { cli: 0, mcp: 0, other: 0 };
+	const surface = { cli: 0, mcp: 0, tui: 0, other: 0 };
 	const active = { true: 0, false: 0, unknown: 0 };
+	const sessions = new Set<string>();
+	let totalIduCalls = 0;
+	let compactionsDetected = 0;
 	let requiresHuman = 0;
 	let notAllowed = 0;
 	let failed = 0;
@@ -177,8 +205,16 @@ export function buildIduUsageReport(
 			lastActivity = event.timestamp;
 			lastActivityMs = eventMs;
 		}
+		if (event.sessionId) sessions.add(event.sessionId);
+		const eventType = effectiveEventType(event);
+		if (eventType === "pi_compaction_detected") {
+			compactionsDetected += 1;
+			continue;
+		}
+		totalIduCalls += 1;
 		if (event.surface === "cli") surface.cli += 1;
 		else if (event.surface === "mcp") surface.mcp += 1;
+		else if (event.surface === "tui") surface.tui += 1;
 		else surface.other += 1;
 		incrementTriState(active, event.active);
 		if (event.requiresHuman === true) requiresHuman += 1;
@@ -190,6 +226,11 @@ export function buildIduUsageReport(
 	return {
 		version: 1,
 		totalEvents: events.length,
+		totalIduCalls,
+		compactionsDetected,
+		observedSessions: sessions.size,
+		tokensMeasured: false,
+		contextPercentMeasured: false,
 		...(lastActivity ? { lastActivity } : {}),
 		surface,
 		active,
@@ -208,20 +249,12 @@ export function buildIduUsageReport(
 }
 
 export function formatIduUsagePanel(report: IduUsageReport): string {
-	if (report.totalEvents === 0) {
-		return [
-			"Uso local",
-			"actualizado: recién",
-			"último evento: sin eventos",
-			"eventos: 0",
-		].join("\n");
-	}
 	return [
 		"Uso local",
 		"actualizado: recién",
-		`último evento: ${formatRelativeUsageTime(report.lastActivity)}`,
-		`eventos: ${report.totalEvents}`,
-		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp}`,
+		`último evento: ${report.totalIduCalls ? formatRelativeUsageTime(report.lastActivity) : "sin eventos"}`,
+		`eventos Idu-pi: ${report.totalIduCalls}`,
+		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp} · tui ${report.surface.tui}`,
 		`activo/inactivo: ${report.active.true} / ${report.active.false}`,
 		`requiere humano: ${report.requiresHuman}`,
 		`bloqueados/no permitido: ${report.notAllowed}`,
@@ -230,6 +263,11 @@ export function formatIduUsagePanel(report: IduUsageReport): string {
 		...(report.topActions.length
 			? report.topActions.map((entry) => `- ${entry.action} ${entry.count}`)
 			: ["- sin acciones"]),
+		"",
+		"Sesión Pi",
+		`compactaciones detectadas: ${report.compactionsDetected}`,
+		"tokens Idu-pi: no medido",
+		"% contexto Idu-pi: no medido",
 	].join("\n");
 }
 
@@ -237,7 +275,12 @@ export function formatIduUsageSummary(summary: IduUsageSummary): string {
 	return [
 		"Uso Idu-pi",
 		"",
-		`eventos: ${summary.totalEvents}`,
+		`eventos totales JSONL: ${summary.totalEvents}`,
+		`eventos Idu-pi: ${summary.totalIduCalls}`,
+		`compactaciones detectadas: ${summary.compactionsDetected}`,
+		`sesiones observadas: ${summary.observedSessions}`,
+		"tokens Idu-pi: no medido",
+		"% contexto Idu-pi: no medido",
 		"",
 		"por superficie:",
 		...formatCountRecord(summary.bySurface),
@@ -262,6 +305,15 @@ export function formatIduUsageSummary(summary: IduUsageSummary): string {
 	].join("\n");
 }
 
+function normalizeEventType(value: unknown): IduUsageEventType | undefined {
+	if (value === "idu_call" || value === "pi_compaction_detected") return value;
+	return undefined;
+}
+
+function effectiveEventType(event: IduUsageEvent): IduUsageEventType {
+	return event.eventType ?? "idu_call";
+}
+
 function normalizeUsageEvent(input: IduUsageRecordInput): IduUsageEvent {
 	return {
 		version: 1,
@@ -270,6 +322,10 @@ function normalizeUsageEvent(input: IduUsageRecordInput): IduUsageEvent {
 		projectId: sanitizeLabel(input.projectId),
 		surface: input.surface,
 		action: sanitizeLabel(input.action),
+		...(normalizeEventType(input.eventType)
+			? { eventType: normalizeEventType(input.eventType) }
+			: { eventType: "idu_call" as const }),
+		...(input.sessionId ? { sessionId: sanitizeLabel(input.sessionId) } : {}),
 		...(typeof input.active === "boolean" ? { active: input.active } : {}),
 		...(input.risk ? { risk: sanitizeLabel(input.risk) } : {}),
 		...(input.recommendation
@@ -299,7 +355,12 @@ function parseUsageEvent(value: unknown): IduUsageEvent | undefined {
 	if (typeof value.projectId !== "string" || !value.projectId.trim()) {
 		return undefined;
 	}
-	if (value.surface !== "cli" && value.surface !== "mcp") return undefined;
+	if (
+		value.surface !== "cli" &&
+		value.surface !== "mcp" &&
+		value.surface !== "tui"
+	)
+		return undefined;
 	if (typeof value.action !== "string" || !value.action.trim())
 		return undefined;
 	return {
@@ -309,6 +370,12 @@ function parseUsageEvent(value: unknown): IduUsageEvent | undefined {
 		projectId: sanitizeLabel(value.projectId),
 		surface: value.surface,
 		action: sanitizeLabel(value.action),
+		...(normalizeEventType(value.eventType)
+			? { eventType: normalizeEventType(value.eventType) }
+			: {}),
+		...(typeof value.sessionId === "string" && value.sessionId.trim()
+			? { sessionId: sanitizeLabel(value.sessionId) }
+			: {}),
 		...(typeof value.active === "boolean" ? { active: value.active } : {}),
 		...(typeof value.risk === "string"
 			? { risk: sanitizeLabel(value.risk) }
