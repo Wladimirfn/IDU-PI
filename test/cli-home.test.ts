@@ -1033,6 +1033,22 @@ test("wizard activation does not create missing stateRoot", async () => {
 	}
 });
 
+test("project panel exposes manual usage metrics refresh without auto refresh", () => {
+	const source = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
+	assert.match(source, /↻ Actualizar métricas/u);
+	assert.match(source, /runProjectStatusPanelTui/u);
+	const projectPanelBlock = source.slice(
+		source.indexOf("async function runProjectStatusPanelTui"),
+		source.indexOf("function mainMenuOptions"),
+	);
+	assert.match(projectPanelBlock, /buildCliHomeStatus/u);
+	assert.match(projectPanelBlock, /formatCliProjectStatus/u);
+	assert.doesNotMatch(
+		projectPanelBlock,
+		/setInterval|setTimeout|watchFile|fs\.watch/u,
+	);
+});
+
 test("wizard source avoids AgentLabs scans prepare and bootstrap", () => {
 	const source = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
 	const interactiveBlock = source.slice(

@@ -2661,12 +2661,9 @@ export async function runInteractiveHome(): Promise<string> {
 			return result;
 		}
 		if (choice === "project") {
-			const result = await showTextView(
-				"Proyecto actual",
-				formatCliProjectStatus(status),
-			);
-			if (result === "back") continue;
-			return "Salida sin cambios.";
+			const result = await runProjectStatusPanelTui();
+			if (result === "__back") continue;
+			return result;
 		}
 		if (choice === "telegram") {
 			const result = await runTelegramRemoteMenuTui(status);
@@ -2704,6 +2701,32 @@ export async function runInteractiveHome(): Promise<string> {
 		}
 		return "Salida sin cambios.";
 	}
+}
+
+async function runProjectStatusPanelTui(): Promise<"__back" | string> {
+	while (true) {
+		const status = buildCliHomeStatus({
+			argvPath: process.argv[1],
+			stdinInteractive: true,
+		});
+		const choice = await selectMenu(
+			"Proyecto actual",
+			projectStatusPanelOptions(),
+			undefined,
+			formatCliProjectStatus(status),
+		);
+		if (choice === "refresh") continue;
+		if (choice === "back") return "__back";
+		return "Salida sin cambios.";
+	}
+}
+
+function projectStatusPanelOptions(): MenuOption[] {
+	return [
+		{ label: "↻ Actualizar métricas", value: "refresh" },
+		{ label: "← Volver", value: "back" },
+		{ label: "Exit", value: "exit" },
+	];
 }
 
 function mainMenuOptions(): MenuOption[] {
