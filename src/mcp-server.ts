@@ -126,6 +126,7 @@ export type IduMcpToolName =
 	| "idu_external_source_recommend"
 	| "idu_task"
 	| "idu_queue_detail"
+	| "idu_queue_complete"
 	| "idu_semantic_audit_status"
 	| "idu_source_status"
 	| "idu_source_add"
@@ -492,6 +493,17 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Devuelve cola estructurada con ids completos y guardStatus.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_queue_complete",
+		"Marca una tarea estructurada como completada con evidencia explícita; no ejecuta IA ni AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			taskId: requiredString("ID o prefijo de tarea a completar."),
+			evidence: requiredString(
+				"Evidencia de cierre: commit, tests, postflight o reviewer.",
+			),
 		},
 	),
 	tool(
@@ -2536,17 +2548,59 @@ async function dispatchTool(
 						priority: task.priority,
 						semanticPriority: task.semanticPriority,
 						status: task.status,
+						completionEvidence: task.completionEvidence,
 						guardStatus: task.guardStatus ?? "clear",
 						guardRisk: task.guardRisk,
 						guardReason: task.guardReason,
 					})),
 					guardStatus: tasks.some(
-						(task) => task.guardStatus === "needs_confirmation",
+						(task) =>
+							task.status !== "done" && task.guardStatus === "needs_confirmation",
 					)
 						? "needs_confirmation"
 						: "clear",
 				},
 				safeNotes: resolution.safeNotes,
+			});
+		}
+		case "idu_queue_complete": {
+			const taskId = requiredText(args, "taskId");
+			const evidence = requiredText(args, "evidence");
+			const runtimeWithComplete = runtime as CliRuntime & {
+				queueComplete?: (
+					idOrPrefix: string,
+					evidence: string,
+				) => StructuredTask | undefined;
+			};
+			const task = runtimeWithComplete.queueComplete?.(taskId, evidence);
+			if (!task) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Tarea no encontrada para completar.",
+					data: { taskId },
+					safeNotes: resolution.safeNotes,
+					errors: ["Tarea no encontrada para completar."],
+				});
+			}
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Tarea completada: ${task.id}`,
+				data: {
+					taskId: task.id,
+					status: task.status,
+					task: task as unknown as JsonObject,
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Marqué tarea como completada con evidencia explícita.",
+					"No ejecuté IA ni AgentLabs.",
+				],
 			});
 		}
 		case "idu_semantic_audit_status": {
@@ -3363,10 +3417,7 @@ function buildSupervisorContextPack(
 			? ["Task package está bloqueado por precondiciones."]
 			: []),
 	];
-	const sourceEvidence = buildSupervisorSourceEvidence(
-		runtime,
-		compactRequest,
-	);
+	const sourceEvidence = buildSupervisorSourceEvidence(runtime, compactRequest);
 	const embeddedPlanSnapshot = includePlanSnapshot
 		? compactPlanSnapshotForContextPack(snapshot)
 		: undefined;
@@ -3601,7 +3652,10 @@ function pushHumanVisionLine(
 ): void {
 	const compact = compactHumanVisionLine(line);
 	if (!compact || selected.includes(compact)) return;
-	if (selected.length >= maxLines || [...selected, compact].join("\n").length > 900)
+	if (
+		selected.length >= maxLines ||
+		[...selected, compact].join("\n").length > 900
+	)
 		return;
 	selected.push(compact);
 }
@@ -4099,7 +4153,8 @@ function selectContinuationCandidate(
 	const milestone = firstMilestoneAction(snapshot);
 	if (milestone) return { origin: "master_plan_milestone", text: milestone };
 	const recommendedNext = arrayField(snapshot, "recommendedNext").find(
-		(item): item is string => typeof item === "string" && item.trim().length > 0,
+		(item): item is string =>
+			typeof item === "string" && item.trim().length > 0,
 	);
 	if (recommendedNext) {
 		return { origin: "recommended_next", text: recommendedNext.trim() };

@@ -134,6 +134,7 @@ idu_plan_snapshot
 → subagente governance-review del orquestador
 → worker normal del orquestador
 → idu_postflight con actionId/taskPackageId
+→ idu_queue_complete con evidencia si una tarea estructurada quedó resuelta
 → AgentLab audit-only si el orquestador decide ejecutarlo explícitamente
 ```
 
@@ -177,7 +178,8 @@ Herramientas mínimas:
 | `idu_external_source_recommend` | Recomienda fuentes externas desde registry no-fetch por tarea/dominio/lenguaje/framework: oficial, académico, comunitario o blocked/manual; no consulta web/live, no guarda raw docs, no importa Source Library ni promueve contratos. |
 | `idu_external_intelligence_report` | Consulta fuentes externas exactas/allowlist y guarda reporte normalizado stateRoot-only para factibilidad/seguridad/releases; no acepta URL libre, no guarda raw bodies/docs, no actualiza dependencias, no ejecuta AgentLabs ni promueve contratos. |
 | `idu_task` | Interpreta intención humana y registra tarea estructurada. |
-| `idu_queue_detail` | Devuelve cola estructurada con ids completos y guardStatus. |
+| `idu_queue_detail` | Devuelve cola estructurada con ids completos, status, evidencia de cierre y guardStatus. |
+| `idu_queue_complete` | Marca una tarea estructurada como `done` con evidencia explícita; no ejecuta IA ni AgentLabs. |
 | `idu_semantic_audit_status` | Lee stats/checkpoint/decisión de auditoría semántica. |
 | `idu_source_status` | Lee Source Library en `stateRoot` y reporta `missing | empty | ready | stale | invalid`; no escribe ni promueve contratos. |
 | `idu_source_add` | Copia/registra `.md`, `.txt` o `.pdf` local en `Doc/<project>/sources/local`; para PDFs intenta conversión best-effort desde texto embebido a Markdown, sin OCR/dependencias nuevas. |

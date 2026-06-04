@@ -223,6 +223,7 @@ idu_advisory
 idu_postflight
 idu_task
 idu_queue_detail
+idu_queue_complete
 idu_semantic_audit_status
 idu_supervisor_tick
 

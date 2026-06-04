@@ -11,6 +11,7 @@ import {
 } from "../src/idu-session.js";
 import {
 	approveStructuredTaskById,
+	completeStructuredTaskById,
 	createCliTask,
 	formatCliTaskResult,
 	rejectStructuredTaskById,
@@ -2654,8 +2655,8 @@ test("CLI queue-approve sin ID falla y no modifica cola", async () => {
 	});
 });
 
-test("CLI queue helpers exigen ID completo", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-queue-exact-"));
+test("CLI queue helpers aceptan prefijo de ID", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-cli-queue-prefix-"));
 	try {
 		const queue = new StructuredTaskQueue({ workspaceRoot: root });
 		const task = queue.enqueueTask({
@@ -2663,22 +2664,36 @@ test("CLI queue helpers exigen ID completo", async () => {
 			category: "bug",
 			priority: 5,
 		});
+		queue.enqueueTask({
+			text: "Second task",
+			category: "bug",
+			priority: 5,
+		});
 		queue.markNeedsConfirmation(task.id, {
 			guardRisk: "high",
 			guardReason: "preflight high",
 		});
+		const prefix = task.id;
 
+		assert.equal(approveStructuredTaskById(queue, "task-"), undefined);
 		assert.equal(
-			approveStructuredTaskById(queue, task.id.slice(0, 12)),
-			undefined,
-		);
-		assert.equal(queue.getTask(task.id)?.guardStatus, "needs_confirmation");
-		assert.equal(
-			approveStructuredTaskById(queue, task.id)?.guardStatus,
+			approveStructuredTaskById(queue, prefix)?.guardStatus,
 			"approved",
 		);
 		assert.equal(
-			rejectStructuredTaskById(queue, task.id.slice(0, 12)),
+			completeStructuredTaskById(queue, "task-", "wrong task"),
+			undefined,
+		);
+		const completed = completeStructuredTaskById(
+			queue,
+			prefix,
+			"commit abc; tests green",
+		);
+		assert.equal(completed?.completionEvidence, "commit abc; tests green");
+		assert.equal(completed?.guardStatus, undefined);
+		assert.equal(queue.getTask(task.id)?.status, "done");
+		assert.equal(
+			rejectStructuredTaskById(queue, "missing-prefix"),
 			undefined,
 		);
 	} finally {

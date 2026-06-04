@@ -871,9 +871,36 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		queueDetail: () => JSON.stringify(tasks),
 		listTasks: () => tasks,
 		queueClearStructured: () => 0,
-		queueApprove: () => undefined,
+		queueApprove: (idOrPrefix: string) => {
+			const matches = tasks.filter((candidate) =>
+				candidate.id.startsWith(idOrPrefix),
+			);
+			if (matches.length !== 1) return undefined;
+			const task = matches[0];
+			task.guardStatus = "approved";
+			return task;
+		},
 		queueReject: () => undefined,
-	} satisfies CliRuntime & { listTasks: () => StructuredTask[] };
+		queueComplete: (idOrPrefix: string, evidence: string) => {
+			const matches = tasks.filter((candidate) =>
+				candidate.id.startsWith(idOrPrefix),
+			);
+			if (matches.length !== 1) return undefined;
+			const task = matches[0];
+			task.status = "done";
+			task.completionEvidence = evidence;
+			delete task.guardStatus;
+			delete task.guardRisk;
+			delete task.guardReason;
+			return task;
+		},
+	} satisfies CliRuntime & {
+		listTasks: () => StructuredTask[];
+		queueComplete: (
+			idOrPrefix: string,
+			evidence: string,
+		) => StructuredTask | undefined;
+	};
 	return runtime;
 }
 
@@ -934,6 +961,7 @@ test("mcp server lists Idu-pi tools", async () => {
 		tools.some((tool) => tool.name === "idu_source_skill_candidates_review"),
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
+	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
@@ -945,7 +973,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_source_recommend"),
 	);
-	assert.equal(tools.length, 51);
+	assert.equal(tools.length, 52);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -1212,7 +1240,9 @@ test("idu_supervisor_context_pack records context quality without raw prompt tex
 });
 
 test("idu_supervisor_context_pack compacts README human vision before budgeting", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-readme-diet-"));
+	const projectPath = mkdtempSync(
+		join(tmpdir(), "idu-context-pack-readme-diet-"),
+	);
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1251,7 +1281,9 @@ test("idu_supervisor_context_pack compacts README human vision before budgeting"
 });
 
 test("idu_supervisor_context_pack preserves all priority README section hints", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-readme-priority-"));
+	const projectPath = mkdtempSync(
+		join(tmpdir(), "idu-context-pack-readme-priority-"),
+	);
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1845,7 +1877,10 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	);
 
 	const continuationRuntime = fakeRuntime();
-	continuationRuntime.createTask("bug", "mejorar MCP con siguiente tarea segura");
+	continuationRuntime.createTask(
+		"bug",
+		"mejorar MCP con siguiente tarea segura",
+	);
 	const continuation = await callIduMcpTool(
 		"idu_continuation_proposal",
 		{ autonomyWindowMinutes: 240, maxScope: "medium" },
@@ -1888,7 +1923,10 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.match(continuation.safeNotes.join("\n"), /no implementa/iu);
 
 	const riskyContinuationRuntime = fakeRuntime();
-	riskyContinuationRuntime.createTask("bug", "arreglar login auth con cambio sensible");
+	riskyContinuationRuntime.createTask(
+		"bug",
+		"arreglar login auth con cambio sensible",
+	);
 	const riskyContinuation = await callIduMcpTool(
 		"idu_continuation_proposal",
 		{ autonomyWindowMinutes: 240, maxScope: "medium" },
@@ -2065,7 +2103,10 @@ test("idu_supervisor_context_pack budgets only embedded compact plan snapshot", 
 		(pack.data.planSnapshot as Record<string, unknown>).operationalContracts,
 		undefined,
 	);
-	assert.equal((pack.data.planSnapshot as Record<string, unknown>).flows, undefined);
+	assert.equal(
+		(pack.data.planSnapshot as Record<string, unknown>).flows,
+		undefined,
+	);
 	const packBudget = pack.data.contextBudget as ContextBudgetUsage;
 	assert.equal(packBudget.profile, "supervisor_context_pack");
 	assert.equal(
@@ -2112,19 +2153,22 @@ test("idu_supervisor_context_pack budgets actual embedded plan snapshot size", a
 		}) as never;
 	const pack = await callIduMcpTool(
 		"idu_supervisor_context_pack",
-		{ request: "measure huge compact embedded snapshot", includePlanSnapshot: true },
+		{
+			request: "measure huge compact embedded snapshot",
+			includePlanSnapshot: true,
+		},
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
 	assert.equal(pack.ok, true);
-	const serializedPlanSnapshotLength = JSON.stringify(pack.data.planSnapshot).length;
+	const serializedPlanSnapshotLength = JSON.stringify(
+		pack.data.planSnapshot,
+	).length;
 	const packBudget = pack.data.contextBudget as ContextBudgetUsage;
 	assert.ok(serializedPlanSnapshotLength > 2_200);
 	assert.ok(packBudget.usedChars >= serializedPlanSnapshotLength);
 	assert.equal(
-		packBudget.omitted.some(
-			(omission) => omission.path === "planSnapshot",
-		),
+		packBudget.omitted.some((omission) => omission.path === "planSnapshot"),
 		false,
 	);
 });
@@ -2688,6 +2732,46 @@ test("idu_external_source_recommend is registry-only and advisory", async () => 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("idu_queue_complete marks a task done with evidence", async () => {
+	const runtime = fakeRuntime();
+	const task = runtime.createTask(
+		"feature",
+		"compactar contexto con evidencia",
+	);
+	const completed = await callIduMcpTool(
+		"idu_queue_complete",
+		{
+			taskId: task.id.slice(0, 14),
+			evidence: "commit abc123; build/test/postflight passed",
+		},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+
+	assert.equal(completed.ok, true);
+	assert.equal(completed.data.taskId, task.id);
+	assert.equal(completed.data.status, "done");
+	assert.equal(
+		(completed.data.task as StructuredTask).completionEvidence,
+		"commit abc123; build/test/postflight passed",
+	);
+	assert.match(completed.safeNotes.join("\n"), /no ejecuté IA ni AgentLabs/iu);
+
+	const detail = await callIduMcpTool(
+		"idu_queue_detail",
+		{},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	assert.equal(
+		((detail.data.tasks as StructuredTask[])[0] as StructuredTask).status,
+		"done",
+	);
+	assert.equal(
+		((detail.data.tasks as StructuredTask[])[0] as StructuredTask).guardStatus,
+		"clear",
+	);
+	assert.equal(detail.data.guardStatus, "clear");
 });
 
 test("idu_queue_detail returns complete ids and guard status", async () => {
