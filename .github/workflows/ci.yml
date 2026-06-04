@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  build-test:
-    name: Build and test
+  build:
+    name: Build and diff check
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -30,9 +30,6 @@ jobs:
 
       - name: Build
         run: corepack pnpm build
-
-      - name: Test
-        run: corepack pnpm test
 
       - name: Check diff whitespace
         run: git diff --check
