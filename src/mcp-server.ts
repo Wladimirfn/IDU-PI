@@ -61,6 +61,10 @@ import {
 	recordAgentLabEffectivenessEventDeferred,
 } from "./agentlab-effectiveness-events.js";
 import {
+	contextQualityEventFromSupervisorContextPack,
+	recordContextQualityEventDeferred,
+} from "./context-quality-events.js";
+import {
 	buildAgentLabWorkloadEnvelope,
 	type AgentLabSpecialty,
 	type AgentLabWorkloadEnvelope,
@@ -750,6 +754,28 @@ function recordMcpUsage(
 	});
 }
 
+function recordMcpContextQuality(
+	runtime: CliRuntime,
+	result: IduMcpToolResult,
+	stateRoot?: string,
+): void {
+	if (
+		!stateRoot ||
+		result.tool !== "idu_supervisor_context_pack" ||
+		!result.ok
+	) {
+		return;
+	}
+	recordContextQualityEventDeferred(
+		stateRoot,
+		contextQualityEventFromSupervisorContextPack(
+			runtime.projectId,
+			result.data,
+			"mcp",
+		),
+	);
+}
+
 function recordMcpAgentLabEffectiveness(
 	runtime: CliRuntime,
 	result: IduMcpToolResult,
@@ -859,6 +885,7 @@ export async function callIduMcpTool(
 			resolution.stateRoot,
 		);
 		recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
+		recordMcpContextQuality(runtime, result, resolution.stateRoot);
 		return result;
 	} catch (error) {
 		return envelope({

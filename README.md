@@ -111,7 +111,7 @@ Roles:
 | --- | --- |
 | Humano | Define intención, aprueba decisiones críticas, commits, pushes y cambios de verdad. |
 | Orquestador | Ejecuta trabajo, coordina subagentes, aplica decisiones aprobadas. |
-| Idu-pi | Supervisa plan, riesgo, contexto, memoria, reportes, propuestas, gates, costo, calidad, seguridad, emoción y aprendizaje. |
+| Idu-pi | Supervisa plan, riesgo, contexto, memoria, reportes, propuestas, gates, costo, calidad, seguridad, emoción y aprendizaje; mide calidad de contexto local sin guardar prompts/docs crudos. |
 | AgentLabs | Inspeccionan en sandbox como especialistas y reportan evidencia. |
 | Subagentes | Ejecutan tareas acotadas bajo coordinación del orquestador. |
 
@@ -291,7 +291,7 @@ Los gates son validadores deterministas. Revisan intención, archivos cambiados 
 
 ### AgentLabs
 
-AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces aislados, producen reportes con evidencia y no aplican cambios al repo real, no crean workspaces permanentes en `stateRoot`, no hacen commit/push y no implementan features. Las solicitudes, ejecuciones y estados exponen `workloadEnvelope` advisory-only para declarar carga, presupuesto y estados honestos (`completed`, `partial`, `timed_out`, `stale`, `failed`, etc.) sin autorizar ejecución ni promoción de contratos. Para bibliotecario, `external-source-intelligence` usa refs locales de Source Library/digests antes que prompts genéricos y no hace web/live fetch automático. Para auditorías grandes, `specialist-audit-plan` divide la solicitud en especialistas con envelopes por especialidad y exige ejecución explícita posterior. Idu-pi registra efectividad AgentLab localmente en `stateRoot/reports/agentlab-effectiveness-events.jsonl` con counts/outcomes/severidades/completitud de evidencia, sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota. Idu-pi consolida esos reportes en hallazgos, recomendaciones y candidates; el humano/orquestador decide.
+AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces aislados, producen reportes con evidencia y no aplican cambios al repo real, no crean workspaces permanentes en `stateRoot`, no hacen commit/push y no implementan features. Las solicitudes, ejecuciones y estados exponen `workloadEnvelope` advisory-only para declarar carga, presupuesto y estados honestos (`completed`, `partial`, `timed_out`, `stale`, `failed`, etc.) sin autorizar ejecución ni promoción de contratos. Para bibliotecario, `external-source-intelligence` usa refs locales de Source Library/digests antes que prompts genéricos y no hace web/live fetch automático. Para auditorías grandes, `specialist-audit-plan` divide la solicitud en especialistas con envelopes por especialidad y exige ejecución explícita posterior. Idu-pi registra efectividad AgentLab localmente en `stateRoot/reports/agentlab-effectiveness-events.jsonl` con counts/outcomes/severidades/completitud de evidencia, sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota. La calidad del contexto supervisor se mide aparte en `stateRoot/reports/context-quality-events.jsonl` con ratings/cuentas derivadas, sin guardar prompts/docs crudos ni medir tokens/costo/% contexto. Idu-pi consolida esos reportes en hallazgos, recomendaciones y candidates; el humano/orquestador decide.
 
 ### Plan Maestro
 

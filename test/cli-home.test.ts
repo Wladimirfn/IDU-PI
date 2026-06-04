@@ -36,6 +36,7 @@ import {
 import { saveModelAssignment } from "../src/model-assignments.js";
 import { recordIduUsageEvent } from "../src/usage-events.js";
 import { recordSupervisorActivityEvent } from "../src/supervisor-activity-events.js";
+import { recordContextQualityEvent } from "../src/context-quality-events.js";
 
 function tempDir(prefix = "idu-cli-home-"): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -357,6 +358,70 @@ test("current project panel shows local usage metrics from stateRoot", async () 
 		assert.match(output, /superficie: cli 1 · mcp 0 · tui 0/u);
 		assert.match(output, /Actividad supervisor local/u);
 		assert.match(output, /tokens Idu-pi: no medido/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel shows context quality metrics from stateRoot", async () => {
+	const root = tempDir("idu-cli-home-context-quality-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordContextQualityEvent(stateRoot, {
+			projectId: "project",
+			source: "mcp",
+			scope: "supervisor_context_pack",
+			profile: "supervisor_context_pack",
+			compactness: "warning",
+			relevance: "ok",
+			noise: "ok",
+			completeness: "ok",
+			usedChars: 9000,
+			maxTotalChars: 10000,
+			truncated: true,
+			omittedCount: 1,
+			omittedReasons: { max_chars: 1 },
+			contractsCount: 1,
+			requiredReadsCount: 1,
+			risksCount: 1,
+			autonomyGatesCount: 1,
+			skipNoiseGuidanceCount: 1,
+			hasHumanVision: true,
+			hasPlanObjective: true,
+			hasTaskGoal: true,
+			hasTaskPackage: true,
+			hasTaskContext: true,
+			ok: true,
+		});
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /Calidad de contexto local/u);
+		assert.match(output, /eventos contexto: 1/u);
+		assert.match(output, /compacto: ok 0 · warning 1 · incomplete 0/u);
+		assert.match(output, /prompts\/docs crudos: no almacenado/u);
+		assert.match(output, /tokens\/costo\/% contexto: no medido/u);
+		assert.match(output, /analytics remota: no/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

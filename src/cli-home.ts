@@ -33,6 +33,11 @@ import {
 	formatSupervisorActivityPanel,
 	readSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
+import {
+	buildContextQualityReport,
+	formatContextQualityPanel,
+	readContextQualityEvents,
+} from "./context-quality-events.js";
 
 export type CliHomeOptions = {
 	cwd?: string;
@@ -388,6 +393,17 @@ export function formatCliProjectStatus(status: CliHomeStatus): string {
 					),
 				]
 			: [];
+	const contextQualityPanel =
+		project.registered && project.stateRoot
+			? [
+					"",
+					formatContextQualityPanel(
+						buildContextQualityReport(
+							readContextQualityEvents(project.stateRoot, 500),
+						),
+					),
+				]
+			: [];
 	return [
 		"Proyecto actual",
 		"",
@@ -402,6 +418,7 @@ export function formatCliProjectStatus(status: CliHomeStatus): string {
 		`Constitution: ${project.constitution}`,
 		...usagePanel,
 		...supervisorActivityPanel,
+		...contextQualityPanel,
 		`recommended next: ${project.recommendedNext}`,
 		...(project.warning ? [`aviso: ${project.warning}`] : []),
 	].join("\n");

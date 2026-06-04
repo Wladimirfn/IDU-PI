@@ -34,6 +34,10 @@ import {
 	flushAgentLabEffectivenessEvents,
 	readAgentLabEffectivenessEvents,
 } from "../src/agentlab-effectiveness-events.js";
+import {
+	flushContextQualityEvents,
+	readContextQualityEvents,
+} from "../src/context-quality-events.js";
 import type { ContextBudgetUsage } from "../src/context-budget.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
@@ -984,6 +988,43 @@ test("idu_supervisor_context_pack compone visión plan y gates compactos", async
 	const budget = result.data.contextBudget as ContextBudgetUsage;
 	assert.equal(budget.profile, "supervisor_context_pack");
 	assert.equal(budget.contractPromotionAllowed, false);
+});
+
+test("idu_supervisor_context_pack records context quality without raw prompt text", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-context-quality-mcp-"));
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state");
+	mkdirSync(projectPath, { recursive: true });
+	writeFileSync(
+		join(projectPath, "README.md"),
+		"# Idu-pi\n\nIdu-pi es un cerebelo supervisor compacto.",
+		"utf8",
+	);
+	const hugeMarker = "PROMPT_GIGANTE_CONTEXT_QUALITY";
+	const result = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{
+			request: `audit context quality ${`${hugeMarker} `.repeat(300)}`,
+			includePlanSnapshot: false,
+		},
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => ({
+				...registered(projectPath),
+				stateRoot,
+			}),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	await flushContextQualityEvents();
+	const events = readContextQualityEvents(stateRoot);
+	assert.equal(events.length, 1);
+	assert.equal(events[0]?.scope, "supervisor_context_pack");
+	assert.equal(events[0]?.profile, "supervisor_context_pack");
+	assert.equal(events[0]?.hasTaskGoal, true);
+	assert.equal(events[0]?.hasTaskPackage, true);
+	assert.equal(JSON.stringify(events).includes(hugeMarker), false);
 });
 
 test("idu_supervisor_context_pack limita README y request gigantes sin redistribuir prompt crudo", async () => {

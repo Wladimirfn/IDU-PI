@@ -142,6 +142,7 @@ Ejemplos:
 | `agentlabs/requests/current.json` | Solicitud formal AgentLab actual. |
 | `agentlabs/runs/current.json` | Resultado AgentLab review-only actual. |
 | `agentlabs/reports/consolidated-current.json` | Consolidación actual de reportes AgentLab. |
+| `context-quality-events.jsonl` | Señales locales de calidad de contexto derivadas de context packs; no guarda prompts/docs crudos ni mide tokens/costo/% contexto. |
 | `master-plan.json` / `master-plan.md` | Plan Maestro canónico vivo generado por AutoDepth/Supervisor. |
 | `project-index.json` | Índice Supervisor del proyecto: tipos, áreas funcionales y ruido ignorado. |
 
@@ -354,6 +355,7 @@ Garantías:
 - planes `specialist-audit-plan` que dividen auditorías grandes en requests por especialidad con `specialtyWorkloadEnvelopes` y `explicitRunRequirement`, siempre sin ejecutar labs automáticamente;
 - requests bibliotecario `external-source-intelligence` alimentados por refs locales de Source Library/digests (`sourceId`, `chunkIds`, limitaciones) sin web/live fetch automático ni documentos/chunks crudos;
 - eventos locales de efectividad en `reports/agentlab-effectiveness-events.jsonl` para contar requests, runs, status, estados (`completed`, `partial`, `timed_out`, `stale`, `failed`, `security_violation`), hallazgos por severidad y completitud de evidencia sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota;
+- eventos locales de calidad de contexto en `reports/context-quality-events.jsonl` derivados de `idu_supervisor_context_pack`, con ratings de compacto/relevante/ruido/completo y omisiones agregadas por razón, sin guardar prompts/docs crudos ni medir tokens/costo/% contexto;
 - consolidación read-only.
 
 ## AgentRouter y Pi RPC
