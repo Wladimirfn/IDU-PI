@@ -143,6 +143,8 @@ Las tools advisory nuevas no ejecutan cambios ni AgentLabs. Producen lineamiento
 Para proyectos con persistencia, el Plan Maestro debe expresar gobernanza de datos: stores detectados/canónicos, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de artefactos SQLite/JSON/JSONL. Los flujos de ingesta, reporting y API deben apuntar a stores existentes; Idu-pi no inventa stores sin evidencia.
 
 
+`idu_bibliotecario_proactive_advisory` compone cuatro superficies coordinadas sin implementar ni escribir: Plan Librarian, Source/Ecosystem, Skill Optimization y Failure/Semantic Debt. Devuelve refs compactas, límites y un `resourceContextCheck` para decidir si falta evidencia, si conviene pedir humano/AgentLab audit-only o si hay bloat antes de cargar más contexto. No lee chunks/documentos crudos, no consulta web/live, no crea reportes, no promueve contratos ni skills y no ejecuta AgentLabs.
+
 `idu_postflight` separa cambios funcionales de ruido operativo: ignora artefactos locales de subagentes, informa `ignoredFiles`, clasifica `observedChangeMode` y normaliza contratos observados (`data`, `security`, `frontend`, `agent`, `docs`, `tests`). Esto reduce falsos positivos en loops no-op/docs/stateRoot sin degradar blockers reales como `.env` o runtime DB/JSONL trackeado.
 
 Herramientas mínimas:
@@ -175,6 +177,7 @@ Herramientas mínimas:
 | `idu_postflight` | Lee cambios/gates y sugiere AgentLabs sin aplicar cambios; puede recibir `actionId`, `taskPackageId`, `expectedContracts`, `expectedFiles` y `expectedChangeMode` (`no-op`, `docs`, `tests`, `code`, `stateRoot`) para trazabilidad advisory. |
 | `idu_supervisor_tick` | Tick supervisor seguro con flags explícitos. |
 | `idu_context_pruning_advisory` | Reporta deuda semántica/context pruning read-only: context bloat, evidencia/digests stale, planes/specs viejos y ruido de artefactos; no borra, no archiva, no refactoriza ni promueve contratos. |
+| `idu_bibliotecario_proactive_advisory` | Coordina Plan Librarian, Source/Ecosystem, Skill Optimization y Failure/Semantic Debt con chequeo de recursos/contexto; no escribe, no lee raw docs, no consulta web/live, no promueve contratos/skills ni ejecuta AgentLabs. |
 | `idu_external_source_recommend` | Recomienda fuentes externas desde registry no-fetch por tarea/dominio/lenguaje/framework: oficial, académico, comunitario o blocked/manual; no consulta web/live, no guarda raw docs, no importa Source Library ni promueve contratos. |
 | `idu_external_intelligence_report` | Consulta fuentes externas exactas/allowlist y guarda reporte normalizado stateRoot-only para factibilidad/seguridad/releases; no acepta URL libre, no guarda raw bodies/docs, no actualiza dependencias, no ejecuta AgentLabs ni promueve contratos. |
 | `idu_task` | Interpreta intención humana y registra tarea estructurada. |

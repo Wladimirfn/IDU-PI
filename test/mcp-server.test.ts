@@ -80,7 +80,26 @@ function fakeSourceSkillCandidateCreation(): SourceSkillCandidateCreationResult 
 			requiresHumanApproval: true,
 			tokensCostMeasured: false,
 			efficiencyEvidence: "no medido",
-			candidates: [],
+			candidates: [
+				{
+					candidateId: "skill-candidate-001",
+					title: "Robust manual reader",
+					suggestedSkillName: "robust-manual-reader",
+					purpose: "Use source evidence without leaking raw manual text.",
+					triggers: ["manual robusto"],
+					sourceIds: ["source-demo-manual-abc123"],
+					chunkIds: ["source-demo-manual-abc123-chunk-001"],
+					evidenceRefs: ["source:source-demo-manual-abc123"],
+					draftTargetPath: ".agents/skills/robust-manual-reader/SKILL.md",
+					draftPreview: "RAW DRAFT PREVIEW manual robusto should not leak",
+					limitations: ["proposal only"],
+					duplicateHints: [],
+					requiresHumanApproval: true,
+					contractPromotionAllowed: false,
+					tokensCostMeasured: false,
+					efficiencyEvidence: "no medido",
+				},
+			],
 			limitations: [],
 			requiredActions: [],
 		},
@@ -973,7 +992,10 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_source_recommend"),
 	);
-	assert.equal(tools.length, 52);
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
+	);
+	assert.equal(tools.length, 53);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2527,6 +2549,57 @@ test("idu_architectural_pruning_plan is advisory-only", async () => {
 		),
 	);
 	assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
+});
+
+test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", async () => {
+	const result = await callIduMcpTool(
+		"idu_bibliotecario_proactive_advisory",
+		{
+			request:
+				"plan contracts npm TypeScript repeated failures and skill optimization",
+			domains: ["security", "web"],
+			language: "typescript",
+			framework: "node",
+		},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+
+	assert.equal(result.ok, true);
+	const data = result.data as {
+		decisionEnvelope: DecisionEnvelope;
+		planLibrarian: unknown;
+		sourceEcosystem: unknown;
+		skillOptimization: { skillPromotionAllowed: boolean };
+		failureSemanticDebt: unknown;
+		resourceContextCheck: {
+			rawContentIncluded: boolean;
+			webFetchAllowed: boolean;
+			writesAllowed: boolean;
+			agentLabAutoRunAllowed: boolean;
+			contractPromotionAllowed: boolean;
+			skillPromotionAllowed: boolean;
+		};
+	};
+	assert.equal(data.decisionEnvelope.authority, "advisory");
+	assert.equal(data.decisionEnvelope.allowedToProceed, false);
+	assert.ok(data.planLibrarian);
+	assert.ok(data.sourceEcosystem);
+	assert.ok(data.skillOptimization);
+	assert.ok(data.failureSemanticDebt);
+	assert.ok(data.resourceContextCheck);
+	assert.equal(data.resourceContextCheck.rawContentIncluded, false);
+	assert.equal(data.resourceContextCheck.webFetchAllowed, false);
+	assert.equal(data.resourceContextCheck.writesAllowed, false);
+	assert.equal(data.resourceContextCheck.agentLabAutoRunAllowed, false);
+	assert.equal(data.resourceContextCheck.contractPromotionAllowed, false);
+	assert.equal(data.resourceContextCheck.skillPromotionAllowed, false);
+	assert.equal(data.skillOptimization.skillPromotionAllowed, false);
+	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/iu);
+	const serialized = JSON.stringify(result.data);
+	assert.doesNotMatch(serialized, /manual robusto/u);
+	assert.doesNotMatch(serialized, /RAW DRAFT PREVIEW/u);
+	assert.doesNotMatch(serialized, /draftPreview/u);
+	assert.doesNotMatch(serialized, /draftTargetPath/u);
 });
 
 test("idu_context_pruning_advisory is read-only and advisory-only", async () => {

@@ -122,6 +122,7 @@ export type IduMcpToolName =
 	| "idu_supervisor_cron_plan"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
+	| "idu_bibliotecario_proactive_advisory"
 	| "idu_external_intelligence_report"
 	| "idu_external_source_recommend"
 	| "idu_task"
@@ -451,6 +452,24 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"idu_context_pruning_advisory",
 		"Devuelve reporte advisory-only de deuda semántica/context pruning; no borra, no archiva y no promueve contratos.",
 		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_bibliotecario_proactive_advisory",
+		"Coordina superficies Bibliotecario proactivas: plan, fuentes/ecosistema, skills y deuda semántica; advisory-only, sin writes ni AgentLabs.",
+		{
+			request: requiredString(
+				"Decisión, tarea o duda a fundamentar con Bibliotecario.",
+			),
+			domains: optionalStringArray(
+				"Dominios para registry externo no-fetch, e.g. security, web, database.",
+			),
+			language: optionalString("Lenguaje opcional, e.g. typescript."),
+			framework: optionalString("Framework/runtime opcional, e.g. node."),
+			maxMatches: optionalString(
+				"Máximo opcional de fuentes externas registry.",
+			),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -2380,6 +2399,191 @@ async function dispatchTool(
 				],
 			});
 		}
+		case "idu_bibliotecario_proactive_advisory": {
+			const request = requiredText(args, "request");
+			const sourceRecommendations = runtime.sourceRecommend(request);
+			const requiredSourceActions = runtime.sourceRequiredActions();
+			const externalRegistry = recommendExternalSources({
+				projectId: runtime.projectId,
+				request,
+				domains: stringListArg(args, "domains") as ExternalSourceDomain[],
+				language: stringArg(args, "language"),
+				framework: stringArg(args, "framework"),
+				maxMatches: positiveIntegerArg(args, "maxMatches"),
+			});
+			const semanticDebt = buildContextPruningAdvisoryReport({
+				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
+				projectId: runtime.projectId,
+				repoRoot: runtime.projectPath,
+			});
+			let skillReview: JsonObject;
+			let skillReviewStatus = "missing";
+			try {
+				skillReview = compactSourceSkillCandidateReview(
+					runtime.sourceSkillCandidatesReview("latest"),
+				);
+				skillReviewStatus = skillReview.ok === true ? "available" : "missing";
+			} catch (error) {
+				skillReviewStatus = "missing";
+				skillReview = compactSourceSkillCandidateReview({
+					ok: false,
+					errors: [error instanceof Error ? error.message : String(error)],
+				});
+			}
+			const planLibrarian = {
+				surface: "plan_librarian",
+				recommendation: "review_evidence_before_plan_or_contract_change",
+				evidenceRefs: ["plan:snapshot", "source:recommendations"],
+				requiredReads: [
+					"Plan Maestro vigente",
+					"master-plan.flows.json",
+					"Doc/<project>/04-contratos-aprobados.md",
+					"Source Library recommendation refs",
+				],
+				contractPromotionAllowed: false,
+				limitations: [
+					"No crea, aprueba ni rechaza Plan Maestro.",
+					"No promueve contratos; sólo pide evidencia y revisión del orquestador.",
+				],
+			};
+			const sourceEcosystem = {
+				surface: "source_ecosystem",
+				local: {
+					matches: sourceRecommendations.matches.map((match) => ({
+						sourceId: match.sourceId,
+						title: match.title,
+						chunkIds: match.chunkIds,
+						confidence: match.confidence,
+						whyRelevant: match.whyRelevant,
+					})),
+					missingKnowledge: sourceRecommendations.missingKnowledge,
+					limitations: sourceRecommendations.limitations,
+					requiredActions: requiredSourceActions.actions,
+				},
+				externalRegistry: {
+					matches: externalRegistry.matches.map((match) => ({
+						sourceId: match.sourceId,
+						name: match.name,
+						category: match.category,
+						whyRelevant: match.whyRelevant,
+						automationMode: match.automationMode,
+						promotionAllowed: match.promotionAllowed,
+					})),
+					limitations: externalRegistry.limitations,
+					fetchAllowed: externalRegistry.fetchAllowed,
+					rawDocsStored: externalRegistry.rawDocsStored,
+				},
+				rawContentIncluded: false,
+				webFetchAllowed: false,
+				contractPromotionAllowed: false,
+			};
+			const skillOptimization = {
+				surface: "skill_optimization",
+				recommendation: "proposal_only",
+				skillPromotionAllowed: false,
+				writesAllowed: false,
+				installAllowed: false,
+				existingCandidateReportStatus: skillReviewStatus,
+				existingCandidateReport: skillReview,
+				limitations: [
+					"No crea ni instala skills desde esta advisory.",
+					"Las skills se proponen, el supervisor enruta, el humano/orquestador aprueba y un único writer aplica.",
+				],
+			};
+			const failureSemanticDebt = {
+				surface: "failure_semantic_debt",
+				signals: semanticDebt.signals.map((signal) => ({
+					id: signal.id,
+					category: signal.category,
+					severity: signal.severity,
+					evidenceRefs: signal.evidenceRefs,
+					summary: signal.summary,
+					recommendedAction: signal.recommendedAction,
+				})),
+				totals: semanticDebt.totals,
+				limitations: semanticDebt.limitations,
+			};
+			const resourceContextCheck = {
+				rawContentIncluded: false,
+				webFetchAllowed: false,
+				writesAllowed: false,
+				agentLabAutoRunAllowed: false,
+				contractPromotionAllowed: false,
+				skillPromotionAllowed: false,
+				surfacesConsulted: 4,
+				localSourceMatches: sourceRecommendations.matches.length,
+				externalRegistryMatches: externalRegistry.matches.length,
+				semanticDebtSignals: semanticDebt.signals.length,
+				contextBudgetSignals: semanticDebt.totals.contextQualityEvents,
+				recommendation:
+					semanticDebt.signals.length > 0
+						? "review_resource_and_semantic_debt_before_adding_more_context"
+						: "bounded_context_ok",
+			};
+			const evidenceRefs = [
+				...sourceRecommendations.matches.map(
+					(match) => `source:${match.sourceId}`,
+				),
+				...externalRegistry.matches.map(
+					(match) => `external-source:${match.sourceId}`,
+				),
+				...semanticDebt.signals.map((signal) => signal.id),
+			];
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: "warn",
+				severity: semanticDebt.signals.some(
+					(signal) => signal.severity === "high",
+				)
+					? "warning"
+					: "info",
+				confidence: 0.78,
+				summary: "Bibliotecario proactive advisory surfaces composed.",
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs,
+				nextActions: [
+					"Use this advisory to choose a bounded next slice; do not implement from it directly.",
+					"Ask human/orchestrator before contracts, skills, AgentLabs, dependency updates, or cleanup.",
+					"Prefer exact source/chunk refs and resource checks over loading broad docs.",
+				],
+				requiredActions: [
+					{
+						id: "bibliotecario-surfaces-orchestrator-review",
+						owner: "orchestrator",
+						action: "review_bibliotecario_surfaces_before_changes",
+						reason:
+							"Composite Bibliotecario advisory coordinates evidence but must not authorize implementation, contract promotion, skill writes, web fetch, or AgentLabs.",
+						blocking: true,
+					},
+				],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: "Bibliotecario proactive advisory surfaces composed.",
+				data: {
+					decisionEnvelope,
+					planLibrarian,
+					sourceEcosystem,
+					skillOptimization,
+					failureSemanticDebt,
+					resourceContextCheck,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Bibliotecario proactive advisory es sólo coordinación de evidencia; no implementa.",
+					"No hice writes, no consulté web/live sources, no promoví contratos ni skills.",
+					"No ejecuté AgentLabs ni creé solicitudes AgentLab.",
+					"No incluí documentos, chunks, prompts ni reportes crudos; sólo refs, conteos y metadata compacta.",
+				],
+			});
+		}
 		case "idu_external_intelligence_report": {
 			if (!resolution.stateRoot) {
 				return envelope({
@@ -2555,7 +2759,8 @@ async function dispatchTool(
 					})),
 					guardStatus: tasks.some(
 						(task) =>
-							task.status !== "done" && task.guardStatus === "needs_confirmation",
+							task.status !== "done" &&
+							task.guardStatus === "needs_confirmation",
 					)
 						? "needs_confirmation"
 						: "clear",
@@ -4526,6 +4731,45 @@ function compactSourceLibraryEvidence(
 		limitations: report.limitations,
 		contractPromotionAllowed: false,
 	};
+}
+
+function compactSourceSkillCandidateReview(review: unknown): JsonObject {
+	if (!isRecord(review)) {
+		return {
+			ok: false,
+			reportRef: "latest",
+			errors: ["Invalid source skill candidate review"],
+		};
+	}
+	const report = isRecord(review.report) ? review.report : undefined;
+	const candidates = Array.isArray(report?.candidates)
+		? report.candidates.filter(isRecord)
+		: [];
+	return {
+		ok: review.ok === true,
+		reportRef: "latest",
+		candidateCount: candidates.length,
+		candidateRefs: candidates.slice(0, 5).map((candidate) => ({
+			candidateId: stringValue(candidate.candidateId),
+			title: stringValue(candidate.title),
+			suggestedSkillName: stringValue(candidate.suggestedSkillName),
+			sourceIds: stringArrayValue(candidate.sourceIds).slice(0, 5),
+			chunkIds: stringArrayValue(candidate.chunkIds).slice(0, 5),
+			evidenceRefs: stringArrayValue(candidate.evidenceRefs).slice(0, 5),
+		})),
+		limitations: stringArrayValue(report?.limitations).slice(0, 5),
+		requiredActions: stringArrayValue(report?.requiredActions).slice(0, 5),
+		errors: stringArrayValue(review.errors).slice(0, 5),
+		rawContentIncluded: false,
+		contractPromotionAllowed: false,
+		skillPromotionAllowed: false,
+	};
+}
+
+function stringArrayValue(value: unknown): string[] {
+	return Array.isArray(value)
+		? value.filter((item): item is string => typeof item === "string")
+		: [];
 }
 
 function agentLabSpecialtiesArg(
