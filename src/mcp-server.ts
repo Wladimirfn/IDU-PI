@@ -1827,16 +1827,24 @@ async function dispatchTool(
 				request,
 				booleanArg(args, "includePlanSnapshot", false),
 			);
+			const supervisorConsultation = pack.supervisorConsultation as
+				| SupervisorConsultation
+				| undefined;
 			pack.decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
-				recommendation: "warn",
-				severity: pack.humanApprovalRequired ? "needs_approval" : "warning",
-				confidence: 0.78,
+				recommendation:
+					supervisorConsultation?.supervisorRecommendation ?? "warn",
+				severity: supervisorConsultation?.severity ?? "warning",
+				confidence: supervisorConsultation?.confidence ?? 0.78,
 				summary: String(pack.summary),
 				requiresHuman: Boolean(pack.humanApprovalRequired),
 				orchestratorDecisionRequired: true,
-				allowedToProceed: true,
-				evidenceRefs: ["readme:vision", "plan:snapshot", "task:context"],
+				allowedToProceed: supervisorConsultation?.proceed ?? true,
+				evidenceRefs: supervisorConsultation?.evidenceRefs ?? [
+					"readme:vision",
+					"plan:snapshot",
+					"task:context",
+				],
 				nextActions: arrayField(pack, "autonomyGates").map(String),
 			});
 			return envelope({
@@ -1901,6 +1909,18 @@ async function dispatchTool(
 				name,
 				alignmentAdvisory,
 			);
+			const supervisorConsultation = buildConsultationFromAdvisory({
+				source: name,
+				planObjective: planObjectiveForRuntime(runtime),
+				advisory: alignmentAdvisory as unknown as JsonObject,
+				risks: [
+					String(report.risk),
+					...arrayField(report as unknown as JsonObject, "warnings").map(
+						String,
+					),
+				],
+				gates: ["Preflight antes de delegar", "Orquestador decide si procede"],
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1910,6 +1930,7 @@ async function dispatchTool(
 				data: {
 					alignmentAdvisory,
 					decisionEnvelope,
+					supervisorConsultation,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					report,
@@ -1931,6 +1952,21 @@ async function dispatchTool(
 				alignmentAdvisory,
 				evidenceGateways,
 			);
+			const supervisorConsultation = buildConsultationFromAdvisory({
+				source: name,
+				planObjective: planObjectiveForRuntime(runtime),
+				advisory: alignmentAdvisory as unknown as JsonObject,
+				risks: [
+					String(report.risk),
+					...arrayField(report as unknown as JsonObject, "warnings").map(
+						String,
+					),
+				],
+				gates: [
+					"Preflight antes de delegar",
+					"No implementar si requiere aprobación humana",
+				],
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1940,6 +1976,7 @@ async function dispatchTool(
 				data: {
 					alignmentAdvisory,
 					decisionEnvelope,
+					supervisorConsultation,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					evidenceGateways,
@@ -1965,6 +2002,13 @@ async function dispatchTool(
 				name,
 				alignmentAdvisory,
 			);
+			const supervisorConsultation = buildConsultationFromAdvisory({
+				source: name,
+				planObjective: planObjectiveForRuntime(runtime),
+				advisory: alignmentAdvisory as unknown as JsonObject,
+				risks: [String(advisory.level)],
+				gates: ["Advisory al orquestador", "Sin scan/IA/AgentLab automático"],
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1974,6 +2018,7 @@ async function dispatchTool(
 				data: {
 					alignmentAdvisory,
 					decisionEnvelope,
+					supervisorConsultation,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					risk: advisory.level,
@@ -2027,6 +2072,38 @@ async function dispatchTool(
 					nextActions: [report.recommendedNext, String(taskTrace.nextAdvisory)],
 				},
 			);
+			const postflightStops = [
+				...taskTrace.contractDelta.map(
+					(delta) => `Contrato esperado no observado: ${delta.contract}`,
+				),
+				...taskTrace.unexpectedAreas.map(
+					(area) => `Área inesperada en cambios: ${area}`,
+				),
+				...(taskTrace.modeDelta ? [String(taskTrace.modeDelta)] : []),
+			];
+			const supervisorConsultation = buildSupervisorConsultation({
+				source: name,
+				planObjective: planObjectiveForRuntime(runtime),
+				supervisorRecommendation: String(decisionEnvelope.recommendation),
+				severity: String(decisionEnvelope.severity),
+				confidence: decisionEnvelope.confidence,
+				risks: [String(report.risk), ...report.warnings],
+				gates: [
+					"Postflight antes de cerrar",
+					"Resolver taskTrace antes de merge si hay delta",
+				],
+				contracts: taskTrace.observedContracts,
+				evidenceRefs: decisionEnvelope.evidenceRefs,
+				proceed: Boolean(
+					decisionEnvelope.allowedToProceed && taskTrace.matchesIntent,
+				),
+				proceedRationale: taskTrace.matchesIntent
+					? "Postflight coincide con intención esperada; el orquestador puede proceder si gates físicos/evidencia son suficientes."
+					: "Postflight requiere evidencia adicional antes de cerrar.",
+				stopRationale: postflightStops,
+				requiresHuman: decisionEnvelope.requiresHuman,
+				suggestedAgentLabs: report.suggestedAgentLabs,
+			});
 			return envelope({
 				ok: true,
 				tool: name,
@@ -2035,6 +2112,7 @@ async function dispatchTool(
 				summary: report.recommendedNext,
 				data: {
 					decisionEnvelope,
+					supervisorConsultation,
 					governanceConfig: governanceConfigData(),
 					workerBoundary: workerBoundaryData(),
 					changedFiles: report.changedFiles,
@@ -3019,8 +3097,118 @@ type PlanSnapshot = JsonObject & {
 	contextBudget: ContextBudgetUsage;
 };
 
+type SupervisorConsultation = JsonObject & {
+	version: 1;
+	authority: "advisory";
+	source: string;
+	supervisorRecommendation: string;
+	severity: string;
+	confidence: number;
+	risks: string[];
+	gates: string[];
+	contracts: string[];
+	evidenceRefs: string[];
+	proceed: boolean;
+	proceedRationale: string;
+	stopRationale: string[];
+	requiresHuman: boolean;
+	agentLabs: { mode: "audit_only"; autoRun: false; suggested: string[] };
+};
+
 function defaultRuntimeFactory(projectPath?: string): CliRuntime {
 	return createCliRuntime({ projectPath, requireTelegramConfig: false });
+}
+
+function buildSupervisorConsultation(input: {
+	source: string;
+	planObjective?: string;
+	supervisorRecommendation: string;
+	severity: string;
+	confidence: number;
+	risks?: string[];
+	gates?: string[];
+	contracts?: string[];
+	evidenceRefs?: string[];
+	proceed: boolean;
+	proceedRationale: string;
+	stopRationale?: string[];
+	requiresHuman: boolean;
+	suggestedAgentLabs?: string[];
+}): SupervisorConsultation {
+	return {
+		version: 1,
+		authority: "advisory",
+		source: input.source,
+		...(input.planObjective ? { planObjective: input.planObjective } : {}),
+		supervisorRecommendation: input.supervisorRecommendation,
+		severity: input.severity,
+		confidence: input.confidence,
+		risks: (input.risks ?? []).slice(0, 8),
+		gates: (input.gates ?? []).slice(0, 8),
+		contracts: dedupe(input.contracts ?? []).slice(0, 8),
+		evidenceRefs: dedupe(input.evidenceRefs ?? []).slice(0, 12),
+		proceed: input.proceed,
+		proceedRationale: input.proceedRationale,
+		stopRationale: (input.stopRationale ?? []).slice(0, 8),
+		requiresHuman: input.requiresHuman,
+		agentLabs: {
+			mode: "audit_only",
+			autoRun: false,
+			suggested: dedupe(input.suggestedAgentLabs ?? []).slice(0, 8),
+		},
+	};
+}
+
+function planObjectiveForRuntime(runtime: CliRuntime): string | undefined {
+	if (!runtime.masterPlanReview) return undefined;
+	try {
+		const review = runtime.masterPlanReview("latest");
+		const plan = review.plan as unknown as JsonObject;
+		return (
+			String(plan.inferredObjective ?? plan.executiveSummary ?? "").trim() ||
+			undefined
+		);
+	} catch {
+		return undefined;
+	}
+}
+
+function buildConsultationFromAdvisory(input: {
+	source: string;
+	planObjective?: string;
+	advisory: JsonObject;
+	risks?: string[];
+	gates?: string[];
+	proceedRationale?: string;
+}): SupervisorConsultation {
+	const requiresHuman = Boolean(input.advisory.requiresHuman);
+	const recommendation = String(input.advisory.recommendation ?? "warn");
+	const severity = String(input.advisory.severity ?? "warning");
+	const stopRationale = requiresHuman
+		? ["Supervisor requiere revisión humana/orquestador antes de proceder."]
+		: [];
+	return buildSupervisorConsultation({
+		source: input.source,
+		planObjective: input.planObjective,
+		supervisorRecommendation: recommendation,
+		severity,
+		confidence: Number(input.advisory.confidence ?? 0.7),
+		risks: input.risks,
+		gates: input.gates,
+		contracts: arrayField(input.advisory, "contractsAffected").map(String),
+		evidenceRefs: arrayField(input.advisory, "evidenceRefs").map(String),
+		proceed: !requiresHuman && recommendation !== "block",
+		proceedRationale:
+			input.proceedRationale ??
+			(!requiresHuman
+				? "Supervisor no detectó bloqueo; el orquestador puede proceder con gates y evidencia."
+				: "Supervisor recomienda detenerse hasta resolver revisión humana/orquestador."),
+		stopRationale,
+		requiresHuman,
+		suggestedAgentLabs: arrayField(input.advisory, "suggestedAgentLabs").map(
+			String,
+		),
+	});
 }
 
 function buildSupervisorContextPack(
@@ -3105,6 +3293,48 @@ function buildSupervisorContextPack(
 		"No trates safeNotes o memoria como contrato aprobado; el Plan Maestro gobierna.",
 		"No infieras tokens/costo/contexto si no hay evidencia estructurada.",
 	];
+	const humanApprovalRequired =
+		Boolean(alignmentAdvisory.requiresHuman) ||
+		Boolean(
+			(taskPackage.agentLabPolicy as JsonObject | undefined)
+				?.requiresHumanApproval,
+		);
+	const preconditions = taskPackage.preconditions as JsonObject | undefined;
+	const preconditionBlocked = Boolean(preconditions?.blocked);
+	const stopRationale = [
+		...(alignmentAdvisory.requiresHuman
+			? [
+					"Supervisor requiere revisión humana/orquestador por riesgo o alcance.",
+				]
+			: []),
+		...(preconditionBlocked
+			? ["Task package está bloqueado por precondiciones."]
+			: []),
+	];
+	const supervisorConsultation = buildSupervisorConsultation({
+		source: "idu_supervisor_context_pack",
+		planObjective: snapshot.objective,
+		supervisorRecommendation: String(alignmentAdvisory.recommendation),
+		severity: String(alignmentAdvisory.severity),
+		confidence: Number(alignmentAdvisory.confidence ?? 0.78),
+		risks: safeRisks.items,
+		gates: autonomyGates,
+		contracts,
+		evidenceRefs: dedupe([
+			"readme:vision",
+			"plan:snapshot",
+			"task:context",
+			...alignmentAdvisory.evidenceRefs,
+		]),
+		proceed: !alignmentAdvisory.requiresHuman && !preconditionBlocked,
+		proceedRationale:
+			!alignmentAdvisory.requiresHuman && !preconditionBlocked
+				? "Supervisor no detectó bloqueo; el orquestador puede proceder mostrando gates y evidencia."
+				: "Supervisor exige resolver stopRationale antes de proceder.",
+		stopRationale,
+		requiresHuman: humanApprovalRequired,
+		suggestedAgentLabs: alignmentAdvisory.suggestedAgentLabs,
+	});
 	return {
 		packVersion: 1,
 		authority: "advisory",
@@ -3123,12 +3353,8 @@ function buildSupervisorContextPack(
 		requiredReads: safeReads.items,
 		skipNoiseGuidance,
 		autonomyGates,
-		humanApprovalRequired:
-			Boolean(alignmentAdvisory.requiresHuman) ||
-			Boolean(
-				(taskPackage.agentLabPolicy as JsonObject | undefined)
-					?.requiresHumanApproval,
-			),
+		humanApprovalRequired,
+		supervisorConsultation,
 		taskPackage,
 		taskContext: {
 			recommendation: alignmentAdvisory.recommendation,

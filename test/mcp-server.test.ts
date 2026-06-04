@@ -994,6 +994,37 @@ test("idu_supervisor_context_pack compone visión plan y gates compactos", async
 	assert.ok(result.data.taskPackage);
 	assert.ok(result.data.taskContext);
 	assert.ok(result.data.planSnapshot);
+	const consultation = result.data.supervisorConsultation as {
+		version: number;
+		authority: string;
+		planObjective: string;
+		supervisorRecommendation: string;
+		risks: string[];
+		gates: string[];
+		contracts: string[];
+		evidenceRefs: string[];
+		proceed: boolean;
+		proceedRationale: string;
+		stopRationale: string[];
+		agentLabs: { mode: string; autoRun: boolean };
+	};
+	assert.equal(consultation.version, 1);
+	assert.equal(consultation.authority, "advisory");
+	assert.match(consultation.planObjective, /gobernanza preventiva/u);
+	assert.ok(consultation.supervisorRecommendation);
+	assert.ok(consultation.risks.length > 0);
+	assert.ok(consultation.gates.some((gate) => /Plan Maestro/u.test(gate)));
+	assert.ok(consultation.contracts.includes("agent"));
+	assert.ok(consultation.evidenceRefs.includes("plan:snapshot"));
+	assert.equal(typeof consultation.proceed, "boolean");
+	assert.ok(consultation.proceedRationale);
+	assert.equal(Array.isArray(consultation.stopRationale), true);
+	assert.equal(consultation.agentLabs.mode, "audit_only");
+	assert.equal(consultation.agentLabs.autoRun, false);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		consultation.proceed,
+	);
 	const budget = result.data.contextBudget as ContextBudgetUsage;
 	assert.equal(budget.profile, "supervisor_context_pack");
 	assert.equal(budget.contractPromotionAllowed, false);
@@ -1068,6 +1099,12 @@ test("idu_supervisor_context_pack limita README y request gigantes sin redistrib
 	assert.match(
 		String((result.data.taskPackage as Record<string, unknown>).request),
 		/context truncated/u,
+	);
+	assert.equal(
+		JSON.stringify(result.data.supervisorConsultation).includes(
+			"PROMPT_GIGANTE_NO_REDISTRIBUIR",
+		),
+		false,
 	);
 	const budget = result.data.contextBudget as ContextBudgetUsage;
 	assert.equal(budget.profile, "supervisor_context_pack");
@@ -1384,6 +1421,16 @@ test("idu_preflight detects high auth/login risk", async () => {
 			.recommendation,
 		"ask_human",
 	);
+	const consultation = result.data.supervisorConsultation as {
+		proceed: boolean;
+		requiresHuman: boolean;
+		stopRationale: string[];
+		agentLabs: { autoRun: boolean };
+	};
+	assert.equal(consultation.proceed, false);
+	assert.equal(consultation.requiresHuman, true);
+	assert.ok(consultation.stopRationale.length > 0);
+	assert.equal(consultation.agentLabs.autoRun, false);
 	assert.equal(
 		(result.data.governanceConfig as { mcpAuthorityMode: string })
 			.mcpAuthorityMode,
@@ -1742,6 +1789,17 @@ test("idu_postflight reports advisory task trace without applying changes", asyn
 	assert.deepEqual(trace.contractDelta, [
 		{ contract: "data", status: "expected_not_observed" },
 	]);
+	const consultation = result.data.supervisorConsultation as {
+		proceed: boolean;
+		stopRationale: string[];
+		evidenceRefs: string[];
+		agentLabs: { mode: string; autoRun: boolean };
+	};
+	assert.equal(consultation.proceed, false);
+	assert.ok(consultation.stopRationale.some((item) => /data/u.test(item)));
+	assert.ok(consultation.evidenceRefs.length > 0);
+	assert.equal(consultation.agentLabs.mode, "audit_only");
+	assert.equal(consultation.agentLabs.autoRun, false);
 	assert.match(
 		result.safeNotes.join("\n"),
 		/no ejecutó build\/test automáticamente/u,

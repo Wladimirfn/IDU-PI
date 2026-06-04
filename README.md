@@ -103,7 +103,7 @@ Humano → Orquestador → Subagentes / código
            Idu-pi Supervisor → AgentLabs / reports / DB / memoria
 ```
 
-Idu-pi no compite con el orquestador: lo supervisa. Si detecta desvío del plan, falta de evidencia, costo excesivo, riesgo crítico o confusión del usuario, le avisa al orquestador con una recomendación accionable.
+Idu-pi no compite con el orquestador: lo supervisa. Si detecta desvío del plan, falta de evidencia, costo excesivo, riesgo crítico o confusión del usuario, le avisa al orquestador con una recomendación accionable. Para que el supervisor no sea invisible, las salidas MCP principales exponen `data.supervisorConsultation`: objetivo del Plan Maestro, recomendación, riesgos, gates, contratos, evidencia y razón de avanzar/frenar.
 
 Roles:
 
