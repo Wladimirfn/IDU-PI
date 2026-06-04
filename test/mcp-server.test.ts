@@ -593,6 +593,7 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		formatSupervisorTick: () => "tick",
 		supervisorOnIduActivation: () => {
 			active = true;
+			return undefined;
 		},
 		supervisorImprovementPlan: () => {
 			throw new Error(UNUSED);
@@ -3259,13 +3260,44 @@ test("idu_start does not enroll unregistered projects and activates registered p
 		/idu_project_enroll/u,
 	);
 
+	let startupHookCalls = 0;
+	const runtime = fakeRuntime();
+	runtime.supervisorOnIduActivation = () => {
+		startupHookCalls += 1;
+		return {
+			status: "completed",
+			trigger: "on_idu_activation",
+			projectId: runtime.projectId,
+			bypassedThrottle: false,
+			throttleStatePath: "reports/idu-supervisor-hook-state.json",
+			summary: "Supervisor startup check completed.",
+			safety: {
+				agentLabsExecuted: false,
+				rulesApplied: false,
+				memoryDeleted: false,
+				projectCoreModified: false,
+			},
+		};
+	};
 	const registeredStart = await callIduMcpTool(
 		"idu_start",
 		{ projectPath: "C:/projects/sistema" },
-		{ projectResolver: () => registered(), runtimeFactory: factory() },
+		{ projectResolver: () => registered(), runtimeFactory: () => runtime },
 	);
 	assert.equal(registeredStart.ok, true);
 	assert.equal(registeredStart.data.active, true);
+	assert.equal(startupHookCalls, 1);
+	assert.deepEqual(registeredStart.data.supervisorStartup, {
+		status: "completed",
+		trigger: "on_idu_activation",
+		summary: "Supervisor startup check completed.",
+		safety: {
+			agentLabsExecuted: false,
+			rulesApplied: false,
+			memoryDeleted: false,
+			projectCoreModified: false,
+		},
+	});
 });
 
 test("idu_activate remains activate-only and does not bootstrap unregistered projects", async () => {

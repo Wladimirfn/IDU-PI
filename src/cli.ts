@@ -228,6 +228,7 @@ import {
 	maybeRunSupervisorAfterSemanticTrigger,
 	maybeRunSupervisorAfterTask,
 	maybeRunSupervisorOnIduActivation,
+	type IduSupervisorHookResult,
 } from "./idu-supervisor-hooks.js";
 import {
 	buildSupervisorImprovementPlan,
@@ -492,7 +493,7 @@ export type CliRuntime = {
 	}) => IduSupervisorLoopResult;
 	supervisorCronPlan: () => IduSupervisorCronPlanResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
-	supervisorOnIduActivation: () => void;
+	supervisorOnIduActivation: () => IduSupervisorHookResult | undefined;
 	supervisorImprovementPlan: (
 		pathOrLatest: string,
 	) => SupervisorImprovementPlan;
@@ -1044,7 +1045,7 @@ export function createCliRuntime(
 			}),
 		formatSupervisorTick: formatIduSupervisorLoopResult,
 		supervisorOnIduActivation: () => {
-			maybeRunSupervisorOnIduActivation({
+			return maybeRunSupervisorOnIduActivation({
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,

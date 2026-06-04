@@ -1266,6 +1266,7 @@ async function handleProjectLifecycleTool(
 					resolution.projectPath,
 				);
 				activateIduSession(runtime.projectId);
+				const supervisorStartup = runtime.supervisorOnIduActivation();
 				const connection = runtime.inspectConnection();
 				return envelope({
 					ok: true,
@@ -1279,11 +1280,13 @@ async function handleProjectLifecycleTool(
 						configStatus: connection.configStatus,
 						alignmentStatus: connection.alignmentStatus,
 						recommendedNext: connection.recommendedNext,
+						supervisorStartup: compactSupervisorStartup(supervisorStartup),
 						connection,
 					},
 					safeNotes: [
 						...resolution.safeNotes,
 						"idu_start no enrola proyectos ni crea drafts.",
+						"Arranque supervisor ejecutado con límites seguros; no ejecuta AgentLabs ni aplica reglas por sí solo.",
 					],
 				});
 			}
@@ -1299,6 +1302,27 @@ async function handleProjectLifecycleTool(
 			errors: [redactSecrets(errorMessage(error))],
 		});
 	}
+}
+
+function compactSupervisorStartup(
+	startup:
+		| {
+				status: string;
+				trigger: string;
+				reason?: string;
+				summary: string;
+				safety: JsonObject;
+			}
+		| undefined,
+): JsonObject | null {
+	if (!startup) return null;
+	return {
+		status: startup.status,
+		trigger: startup.trigger,
+		reason: startup.reason,
+		summary: startup.summary,
+		safety: startup.safety,
+	};
 }
 
 function governanceConfigData(): JsonObject {

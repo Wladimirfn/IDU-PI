@@ -28,6 +28,11 @@ test("/idu dashboard with valid local config but no recent scan shows config_rea
 	assert.match(text, /Estado de alineación:\npending_scan/u);
 	assert.match(text, /Estado operativo:\nconfig_ready/u);
 	assert.match(text, /Acción principal:\n\/idu_prepare/u);
+	assert.match(text, /Modo supervisor:\nguardrails automáticos activos/u);
+	assert.match(
+		text,
+		/Límites seguros:\n- no ejecuta AgentLabs automáticamente\n- no aplica reglas ni modifica Project Core sin gates\/aprobación/u,
+	);
 });
 
 test("/idu dashboard can report needs_review from last prepare differences", () => {
