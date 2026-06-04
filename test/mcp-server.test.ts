@@ -1210,6 +1210,93 @@ test("idu_supervisor_context_pack records context quality without raw prompt tex
 	assert.equal(JSON.stringify(events).includes(hugeMarker), false);
 });
 
+test("idu_supervisor_context_pack compacts README human vision before budgeting", async () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-readme-diet-"));
+	writeFileSync(
+		join(projectPath, "README.md"),
+		[
+			"# Idu-pi",
+			"Idu-pi es un cerebelo supervisor de proyecto para el orquestador.",
+			"## Qué problema resuelve",
+			...Array.from(
+				{ length: 80 },
+				(_, index) =>
+					`Supervisor orquestador AgentLab contexto evidencia línea ${index + 1} con mucha explicación repetida que no debe entrar completa al pack.`,
+			),
+			"## Qué NO es",
+			"No reemplaza al humano ni al orquestador.",
+		].join("\n"),
+		"utf8",
+	);
+
+	const result = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "measure readme human vision compactness" },
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => registered(projectPath),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const humanVision = String(
+		(result.data.goals as Record<string, unknown>).humanVision,
+	);
+	assert.match(humanVision, /cerebelo supervisor/u);
+	assert.match(humanVision, /Qué NO es/u);
+	assert.match(humanVision, /No reemplaza/u);
+	assert.equal(humanVision.includes("context truncated"), false);
+	assert.ok(humanVision.length <= 900);
+});
+
+test("idu_supervisor_context_pack preserves all priority README section hints", async () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-readme-priority-"));
+	writeFileSync(
+		join(projectPath, "README.md"),
+		[
+			"# Idu-pi",
+			"Idu-pi es un cerebelo supervisor de proyecto para el orquestador.",
+			"## Qué problema resuelve",
+			"Evita avanzar sin evidencia.",
+			"## Qué NO es",
+			"No reemplaza al humano.",
+			"## Cómo funciona",
+			"Consulta Plan Maestro y gates.",
+			"## Arquitectura simple",
+			"MCP asesora y el orquestador decide.",
+			...Array.from(
+				{ length: 80 },
+				(_, index) =>
+					`Supervisor orquestador AgentLab línea repetida ${index + 1} que no debe desplazar secciones clave.`,
+			),
+		].join("\n"),
+		"utf8",
+	);
+
+	const result = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "measure all readme priority sections" },
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => registered(projectPath),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const humanVision = String(
+		(result.data.goals as Record<string, unknown>).humanVision,
+	);
+	assert.match(humanVision, /Qué problema/u);
+	assert.match(humanVision, /Evita avanzar/u);
+	assert.match(humanVision, /Qué NO es/u);
+	assert.match(humanVision, /No reemplaza/u);
+	assert.match(humanVision, /Cómo funciona/u);
+	assert.match(humanVision, /Consulta Plan/u);
+	assert.match(humanVision, /Arquitectura simple/u);
+	assert.match(humanVision, /MCP asesora/u);
+	assert.ok(humanVision.length <= 900);
+});
+
 test("idu_supervisor_context_pack limita README y request gigantes sin redistribuir prompt crudo", async () => {
 	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-large-"));
 	writeFileSync(

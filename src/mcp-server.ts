@@ -3508,20 +3508,46 @@ function extractHumanVision(projectPath: string): string {
 		.split(/\r?\n/u)
 		.map((line) => line.trim())
 		.filter((line) => line && !line.startsWith("```"));
+	const normalizedLines = lines.map((line) => line.replace(/^#+\s*/u, ""));
 	const selected: string[] = [];
-	for (const line of lines) {
-		const normalized = line.replace(/^#+\s*/u, "");
+	for (const line of normalizedLines.slice(0, 2)) {
+		pushHumanVisionLine(selected, line, 10);
+	}
+	for (const [index, line] of normalizedLines.entries()) {
 		if (
-			selected.length < 2 ||
-			/qué problema|que problema|qué no es|que no es|cómo funciona|como funciona|arquitectura simple|orquestador|supervisor|agentlab/iu.test(
-				normalized,
+			/qué problema|que problema|qué no es|que no es|cómo funciona|como funciona|arquitectura simple/iu.test(
+				line,
 			)
 		) {
-			selected.push(normalized);
+			pushHumanVisionLine(selected, line, 10);
+			pushHumanVisionLine(selected, normalizedLines[index + 1] ?? "", 10);
 		}
-		if (selected.join("\n").length > 3_000) break;
+	}
+	for (const line of normalizedLines) {
+		if (/orquestador|supervisor|agentlab/iu.test(line)) {
+			pushHumanVisionLine(selected, line);
+		}
+		if (selected.length >= 8 || selected.join("\n").length > 850) break;
 	}
 	return selected.join("\n");
+}
+
+function pushHumanVisionLine(
+	selected: string[],
+	line: string,
+	maxLines = 8,
+): void {
+	const compact = compactHumanVisionLine(line);
+	if (!compact || selected.includes(compact)) return;
+	if (selected.length >= maxLines || [...selected, compact].join("\n").length > 900)
+		return;
+	selected.push(compact);
+}
+
+function compactHumanVisionLine(line: string): string {
+	const normalized = line.replace(/\s+/gu, " ").trim();
+	if (normalized.length <= 80) return normalized;
+	return `${normalized.slice(0, 77).trimEnd()}…`;
 }
 
 function buildPlanSnapshot(
