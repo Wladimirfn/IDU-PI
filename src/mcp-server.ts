@@ -55,11 +55,24 @@ import {
 import type { StructuredTask } from "./structured-task-queue.js";
 import { recordIduUsageEventDeferred } from "./usage-events.js";
 import {
+	agentLabEffectivenessEventFromRequestPlan,
+	agentLabEffectivenessEventFromRunResult,
+	agentLabEffectivenessEventFromStatus,
+	recordAgentLabEffectivenessEventDeferred,
+} from "./agentlab-effectiveness-events.js";
+import {
 	buildAgentLabWorkloadEnvelope,
 	type AgentLabSpecialty,
 	type AgentLabWorkloadEnvelope,
 } from "./agentlab-supervisor-contract.js";
-import type { AgentLabSourceLibraryEvidence } from "./agentlab-review-requests.js";
+import type {
+	AgentLabReviewRequestPlan,
+	AgentLabSourceLibraryEvidence,
+} from "./agentlab-review-requests.js";
+import type {
+	AgentLabReviewRunResult,
+	AgentLabReviewStatus,
+} from "./agentlab-review-runner.js";
 import type { SourceRecommendationReport } from "./source-digest.js";
 
 type JsonObject = Record<string, unknown>;
@@ -657,6 +670,52 @@ export function resolveMcpProjectContext(
 	}
 }
 
+function isAgentLabReviewRequestPlan(
+	value: unknown,
+): value is AgentLabReviewRequestPlan {
+	return (
+		isRecord(value) &&
+		typeof value.generatedAt === "string" &&
+		typeof value.projectId === "string" &&
+		Array.isArray(value.requests) &&
+		Array.isArray(value.errors)
+	);
+}
+
+function isAgentLabReviewRunResult(
+	value: unknown,
+): value is AgentLabReviewRunResult {
+	return (
+		isRecord(value) &&
+		typeof value.generatedAt === "string" &&
+		typeof value.projectId === "string" &&
+		Array.isArray(value.runs) &&
+		Array.isArray(value.consolidatedFindings) &&
+		Array.isArray(value.safeNotes)
+	);
+}
+
+function isAgentLabReviewStatus(value: unknown): value is AgentLabReviewStatus {
+	return (
+		isRecord(value) &&
+		typeof value.path === "string" &&
+		typeof value.name === "string" &&
+		typeof value.valid === "boolean" &&
+		Array.isArray(value.errors)
+	);
+}
+
+function isAgentLabWorkloadEnvelope(
+	value: unknown,
+): value is AgentLabWorkloadEnvelope {
+	return (
+		isRecord(value) &&
+		value.authority === "advisory" &&
+		value.advisoryOnly === true &&
+		typeof value.status === "string"
+	);
+}
+
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value : undefined;
 }
@@ -689,6 +748,58 @@ function recordMcpUsage(
 		durationMs,
 		ok: result.ok,
 	});
+}
+
+function recordMcpAgentLabEffectiveness(
+	runtime: CliRuntime,
+	result: IduMcpToolResult,
+	stateRoot?: string,
+): void {
+	if (!stateRoot) return;
+	if (result.tool === "idu_agentlab_request_create") {
+		const plan = result.data.plan;
+		if (isAgentLabReviewRequestPlan(plan)) {
+			recordAgentLabEffectivenessEventDeferred(
+				stateRoot,
+				agentLabEffectivenessEventFromRequestPlan(
+					runtime.projectId,
+					plan,
+					"mcp",
+				),
+			);
+		}
+		return;
+	}
+	if (result.tool === "idu_agentlab_review_run") {
+		const runResult = result.data.result;
+		if (isAgentLabReviewRunResult(runResult)) {
+			recordAgentLabEffectivenessEventDeferred(
+				stateRoot,
+				agentLabEffectivenessEventFromRunResult(
+					runtime.projectId,
+					runResult,
+					"mcp",
+				),
+			);
+		}
+		return;
+	}
+	if (result.tool === "idu_agentlab_review_status") {
+		const status = result.data.status;
+		if (isAgentLabReviewStatus(status)) {
+			recordAgentLabEffectivenessEventDeferred(
+				stateRoot,
+				agentLabEffectivenessEventFromStatus(
+					runtime.projectId,
+					status,
+					isAgentLabWorkloadEnvelope(result.data.workloadEnvelope)
+						? result.data.workloadEnvelope
+						: undefined,
+					"mcp",
+				),
+			);
+		}
+	}
 }
 
 export async function callIduMcpTool(
@@ -747,6 +858,7 @@ export async function callIduMcpTool(
 			Date.now() - startedAt,
 			resolution.stateRoot,
 		);
+		recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
 		return result;
 	} catch (error) {
 		return envelope({

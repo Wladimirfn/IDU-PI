@@ -353,6 +353,7 @@ Garantías:
 - `workloadEnvelope` advisory-only en requests/runs/status para reportar carga, presupuesto y estados honestos (`requested`, `completed`, `partial`, `timed_out`, `stale`, `failed`) sin autorizar auto-run, escritura de repo real ni promoción de contratos;
 - planes `specialist-audit-plan` que dividen auditorías grandes en requests por especialidad con `specialtyWorkloadEnvelopes` y `explicitRunRequirement`, siempre sin ejecutar labs automáticamente;
 - requests bibliotecario `external-source-intelligence` alimentados por refs locales de Source Library/digests (`sourceId`, `chunkIds`, limitaciones) sin web/live fetch automático ni documentos/chunks crudos;
+- eventos locales de efectividad en `reports/agentlab-effectiveness-events.jsonl` para contar requests, runs, status, estados (`completed`, `partial`, `timed_out`, `stale`, `failed`, `security_violation`), hallazgos por severidad y completitud de evidencia sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota;
 - consolidación read-only.
 
 ## AgentRouter y Pi RPC

@@ -29,6 +29,11 @@ import type { ProjectAdvisory } from "../src/project-advisory.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { DecisionEnvelope } from "../src/decision-envelope.js";
 import { flushIduUsageEvents } from "../src/usage-events.js";
+import {
+	buildAgentLabEffectivenessReport,
+	flushAgentLabEffectivenessEvents,
+	readAgentLabEffectivenessEvents,
+} from "../src/agentlab-effectiveness-events.js";
 import type { ContextBudgetUsage } from "../src/context-budget.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
@@ -1162,6 +1167,75 @@ test("MCP usage recording does not write outside stateRoot", async () => {
 		};
 		assert.equal(event.surface, "mcp");
 		assert.equal(event.action, "idu_status");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("MCP AgentLab tools record local effectiveness events without raw text", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-mcp-agentlab-effectiveness-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		const runtime = fakeRuntime("C:/projects/sistema");
+		await callIduMcpTool(
+			"idu_agentlab_request_create",
+			{ source: "postflight", selector: "latest" },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered("C:/projects/sistema"),
+					stateRoot,
+				}),
+			},
+		);
+		await flushAgentLabEffectivenessEvents();
+		let events = readAgentLabEffectivenessEvents(stateRoot);
+		let report = buildAgentLabEffectivenessReport(events);
+		assert.equal(report.requestsCreated, 1);
+		assert.equal(report.reviewRuns, 0);
+
+		await callIduMcpTool(
+			"idu_agentlab_review_run",
+			{ selector: "latest" },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered("C:/projects/sistema"),
+					stateRoot,
+				}),
+			},
+		);
+		await callIduMcpTool(
+			"idu_agentlab_review_status",
+			{ selector: "latest" },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered("C:/projects/sistema"),
+					stateRoot,
+				}),
+			},
+		);
+		await flushAgentLabEffectivenessEvents();
+		events = readAgentLabEffectivenessEvents(stateRoot);
+		report = buildAgentLabEffectivenessReport(events);
+		assert.equal(report.requestsCreated, 1);
+		assert.equal(report.reviewRuns, 1);
+		assert.equal(report.statusChecks, 1);
+		assert.equal(report.remoteAnalytics, false);
+		const serialized = JSON.stringify(events);
+		for (const forbidden of [
+			"prompt",
+			"rawUserText",
+			"env",
+			"headers",
+			"tokens",
+			"cost",
+			"contextPercent",
+			"rawSummary",
+		]) {
+			assert.equal(serialized.includes(forbidden), false, forbidden);
+		}
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
