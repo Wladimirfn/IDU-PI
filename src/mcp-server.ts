@@ -3375,7 +3375,9 @@ function buildSupervisorContextPack(
 			requiresHuman: alignmentAdvisory.requiresHuman,
 			evidenceRefs: alignmentAdvisory.evidenceRefs,
 		},
-		...(includePlanSnapshot ? { planSnapshot: snapshot } : {}),
+		...(includePlanSnapshot
+			? { planSnapshot: compactPlanSnapshotForContextPack(snapshot) }
+			: {}),
 		contextBudget: mergeContextBudgetUsage("supervisor_context_pack", [
 			humanVision.usage,
 			taskGoal.usage,
@@ -3386,6 +3388,16 @@ function buildSupervisorContextPack(
 		governanceConfig: governanceConfigData(),
 		workerBoundary: workerBoundaryData(),
 	};
+}
+
+function compactPlanSnapshotForContextPack(snapshot: PlanSnapshot): JsonObject {
+	const {
+		governanceConfig: _governanceConfig,
+		workerBoundary: _workerBoundary,
+		contextBudget: _contextBudget,
+		...compactSnapshot
+	} = snapshot;
+	return compactSnapshot;
 }
 
 function buildSupervisorSourceEvidence(
