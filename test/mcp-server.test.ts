@@ -1030,6 +1030,119 @@ test("idu_supervisor_context_pack compone visión plan y gates compactos", async
 	assert.equal(budget.contractPromotionAllowed, false);
 });
 
+test("idu_supervisor_context_pack includes bounded Source Library evidence refs", async () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-sources-"));
+	writeFileSync(
+		join(projectPath, "README.md"),
+		"# Idu-pi\n\nIdu-pi es un cerebelo supervisor compacto.",
+		"utf8",
+	);
+	const rawChunkMarker = "RAW_CHUNK_BODY_MUST_NOT_LEAK";
+	const runtime = fakeRuntime(projectPath);
+	runtime.sourceRecommend = (request) => ({
+		projectId: "sistema_de_mantencion",
+		request,
+		generatedAt: "2026-06-04T00:00:00.000Z",
+		matches: [
+			{
+				sourceId: "source-architecture",
+				title: "Architecture Manual",
+				chunkIds: [
+					"chunk-001",
+					"chunk-002",
+					"chunk-003",
+					"chunk-004",
+					"chunk-005",
+					"chunk-006",
+				],
+				whyRelevant: "Explains architecture boundaries for this task.",
+				confidence: "high",
+				orchestratorInstruction:
+					"Read named chunks with idu_source_chunk_read before implementation.",
+				contractPromotionAllowed: false,
+				content: rawChunkMarker,
+			} as never,
+		],
+		missingKnowledge: ["No digest exists for dependency advisories."],
+		limitations: ["Local Source Library only; no web fetch."],
+		contractPromotionAllowed: false,
+	});
+	runtime.sourceRequiredActions = () => ({
+		projectId: "sistema_de_mantencion",
+		generatedAt: "2026-06-04T00:00:00.000Z",
+		actions: [
+			{
+				sourceId: "source-pdf",
+				title: "Manual PDF",
+				kind: "pdf",
+				digestStatus: "blocked_unread",
+				conversionStatus: "metadata_only",
+				requiredAction: {
+					owner: "orchestrator",
+					action: "dispatch_librarian_reader",
+					reason: "PDF has no extracted text.",
+					recommendedAgent: "librarian",
+					recommendedReaderType: "document-reader",
+					instructions:
+						"Dispatch a document reader and return compact findings only.",
+					contractPromotionAllowed: false,
+				},
+				contractPromotionAllowed: false,
+			},
+		],
+		limitations: ["Required actions are advisory."],
+		contractPromotionAllowed: false,
+	});
+
+	const result = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "Use architecture source evidence before implementation" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => registered(projectPath),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const sourceEvidence = result.data.sourceEvidence as {
+		recommendationReport: {
+			matches: Array<{ sourceId: string; chunkIds: string[] }>;
+			contractPromotionAllowed: boolean;
+		};
+		requiredActions: { actions: unknown[]; contractPromotionAllowed: boolean };
+		rawContentIncluded: boolean;
+		agentLabAutoRunAllowed: boolean;
+	};
+	assert.equal(
+		sourceEvidence.recommendationReport.contractPromotionAllowed,
+		false,
+	);
+	assert.equal(sourceEvidence.requiredActions.contractPromotionAllowed, false);
+	assert.equal(sourceEvidence.rawContentIncluded, false);
+	assert.equal(sourceEvidence.agentLabAutoRunAllowed, false);
+	assert.equal(
+		sourceEvidence.recommendationReport.matches[0]?.sourceId,
+		"source-architecture",
+	);
+	assert.deepEqual(sourceEvidence.recommendationReport.matches[0]?.chunkIds, [
+		"chunk-001",
+		"chunk-002",
+		"chunk-003",
+		"chunk-004",
+		"chunk-005",
+	]);
+	assert.equal(sourceEvidence.requiredActions.actions.length, 1);
+	const serialized = JSON.stringify(result.data);
+	assert.equal(serialized.includes(rawChunkMarker), false);
+	assert.match(serialized, /idu_source_chunk_read/u);
+	assert.match(serialized, /dispatch_librarian_reader/u);
+	assert.equal(
+		(result.data.supervisorConsultation as { agentLabs: { autoRun: boolean } })
+			.agentLabs.autoRun,
+		false,
+	);
+});
+
 test("idu_supervisor_context_pack records context quality without raw prompt text", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-context-quality-mcp-"));
 	const projectPath = join(root, "project");

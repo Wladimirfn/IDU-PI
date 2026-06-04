@@ -123,7 +123,7 @@ Idu-pi puede usarse por varias superficies:
 | --- | --- |
 | CLI | Superficie principal para uso local, scripts, validación rápida e integración con Pi. |
 | Telegram | Interfaz remota opcional para usar comandos, estado y confirmaciones del mismo supervisor sin estar en la terminal. |
-| MCP Server | Herramientas stdio para que el orquestador consulte Idu-pi desde cualquier proyecto; incluye `idu_supervisor_context_pack` para inyectar metas, contratos, riesgos y gates sin volcar docs largas. |
+| MCP Server | Herramientas stdio para que el orquestador consulte Idu-pi desde cualquier proyecto; incluye `idu_supervisor_context_pack` para inyectar metas, contratos, riesgos, gates y refs locales de Bibliotecario/Source Library sin volcar docs largas. |
 | Futuras UI/dashboard | Visualizar cola, reportes, propuestas y estado del supervisor. |
 
 Más detalle: [MCP Server](docs/mcp-server.md).

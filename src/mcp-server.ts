@@ -86,7 +86,10 @@ import type {
 	AgentLabReviewRunResult,
 	AgentLabReviewStatus,
 } from "./agentlab-review-runner.js";
-import type { SourceRecommendationReport } from "./source-digest.js";
+import type {
+	SourceRecommendationReport,
+	SourceRequiredActionsReport,
+} from "./source-digest.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -3311,6 +3314,10 @@ function buildSupervisorContextPack(
 			? ["Task package está bloqueado por precondiciones."]
 			: []),
 	];
+	const sourceEvidence = buildSupervisorSourceEvidence(
+		runtime,
+		compactRequest,
+	);
 	const supervisorConsultation = buildSupervisorConsultation({
 		source: "idu_supervisor_context_pack",
 		planObjective: snapshot.objective,
@@ -3355,6 +3362,7 @@ function buildSupervisorContextPack(
 		autonomyGates,
 		humanApprovalRequired,
 		supervisorConsultation,
+		sourceEvidence,
 		taskPackage,
 		taskContext: {
 			recommendation: alignmentAdvisory.recommendation,
@@ -3378,6 +3386,99 @@ function buildSupervisorContextPack(
 		governanceConfig: governanceConfigData(),
 		workerBoundary: workerBoundaryData(),
 	};
+}
+
+function buildSupervisorSourceEvidence(
+	runtime: CliRuntime,
+	request: string,
+): JsonObject {
+	const recommendation = runtime.sourceRecommend(request);
+	const required = runtime.sourceRequiredActions();
+	return {
+		version: 1,
+		authority: "advisory",
+		source: "source_library",
+		rawContentIncluded: false,
+		contractPromotionAllowed: false,
+		agentLabAutoRunAllowed: false,
+		orchestratorGuidance: [
+			"Usar sólo IDs y chunk refs como punteros; no tratar fuentes como contratos.",
+			"Leer chunks nombrados con idu_source_chunk_read o despachar document-reader antes de implementar si la tarea depende de esa evidencia.",
+			"No ejecutar AgentLabs, web fetch, promoción de contratos ni cambios de dependencias desde este pack.",
+		],
+		recommendationReport: boundSupervisorSourceRecommendation(recommendation),
+		requiredActions: boundSupervisorSourceRequiredActions(required),
+	};
+}
+
+function boundSupervisorSourceRecommendation(
+	report: SourceRecommendationReport,
+): JsonObject {
+	return {
+		projectId: report.projectId,
+		request: boundSupervisorSourceText(report.request, 240),
+		generatedAt: report.generatedAt,
+		matches: report.matches.slice(0, 3).map((match) => ({
+			sourceId: boundSupervisorSourceText(match.sourceId, 120),
+			title: boundSupervisorSourceText(match.title, 160),
+			chunkIds: match.chunkIds
+				.slice(0, 5)
+				.map((chunkId) => boundSupervisorSourceText(chunkId, 160)),
+			whyRelevant: boundSupervisorSourceText(match.whyRelevant, 280),
+			confidence: match.confidence,
+			orchestratorInstruction: boundSupervisorSourceText(
+				match.orchestratorInstruction,
+				280,
+			),
+			contractPromotionAllowed: false,
+		})),
+		missingKnowledge: report.missingKnowledge
+			.slice(0, 5)
+			.map((item) => boundSupervisorSourceText(item, 220)),
+		limitations: report.limitations
+			.slice(0, 5)
+			.map((item) => boundSupervisorSourceText(item, 220)),
+		contractPromotionAllowed: false,
+	};
+}
+
+function boundSupervisorSourceRequiredActions(
+	report: SourceRequiredActionsReport,
+): JsonObject {
+	return {
+		projectId: report.projectId,
+		generatedAt: report.generatedAt,
+		actions: report.actions.slice(0, 3).map((item) => ({
+			sourceId: boundSupervisorSourceText(item.sourceId, 120),
+			title: boundSupervisorSourceText(item.title, 160),
+			kind: item.kind,
+			digestStatus: item.digestStatus,
+			conversionStatus: item.conversionStatus,
+			requiredAction: {
+				owner: item.requiredAction.owner,
+				action: item.requiredAction.action,
+				reason: boundSupervisorSourceText(item.requiredAction.reason, 220),
+				recommendedAgent: item.requiredAction.recommendedAgent,
+				recommendedReaderType: item.requiredAction.recommendedReaderType,
+				instructions: boundSupervisorSourceText(
+					item.requiredAction.instructions,
+					280,
+				),
+				contractPromotionAllowed: false,
+			},
+			contractPromotionAllowed: false,
+		})),
+		limitations: report.limitations
+			.slice(0, 5)
+			.map((item) => boundSupervisorSourceText(item, 220)),
+		contractPromotionAllowed: false,
+	};
+}
+
+function boundSupervisorSourceText(value: string, maxChars: number): string {
+	const normalized = value.replace(/\s+/gu, " ").trim();
+	if (normalized.length <= maxChars) return normalized;
+	return `${normalized.slice(0, Math.max(0, maxChars - 28)).trimEnd()}… [source ref truncated]`;
 }
 
 function extractHumanVision(projectPath: string): string {
