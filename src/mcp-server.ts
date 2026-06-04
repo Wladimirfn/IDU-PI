@@ -45,6 +45,10 @@ import {
 	buildExternalIntelligenceReport,
 	writeExternalIntelligenceReport,
 } from "./external-intelligence.js";
+import {
+	recommendExternalSources,
+	type ExternalSourceDomain,
+} from "./external-source-registry.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -115,6 +119,7 @@ export type IduMcpToolName =
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
 	| "idu_external_intelligence_report"
+	| "idu_external_source_recommend"
 	| "idu_task"
 	| "idu_queue_detail"
 	| "idu_semantic_audit_status"
@@ -439,6 +444,22 @@ const TOOLS: IduMcpToolDefinition[] = [
 			sourceIds: optionalStringArray(
 				"IDs exactos allowlist: nodejs-releases, nextjs-releases, npm-advisories. Default: todos.",
 			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_external_source_recommend",
+		"Recomienda fuentes externas desde registry no-fetch por tarea/dominio/lenguaje/framework; no consulta web ni promueve contratos.",
+		{
+			request: requiredString("Tarea o pregunta a contrastar con el registry."),
+			domains: optionalStringArray(
+				"Dominios transversales, e.g. programming_structure, web, security, database, standards, academic.",
+			),
+			language: optionalString("Lenguaje opcional, e.g. html, typescript."),
+			framework: optionalString(
+				"Framework opcional, e.g. nextjs, react, node.",
+			),
+			maxMatches: optionalString("Máximo opcional de recomendaciones (1-20)."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -2300,6 +2321,54 @@ async function dispatchTool(
 				],
 			});
 		}
+		case "idu_external_source_recommend": {
+			const request = requiredText(args, "request");
+			const report = recommendExternalSources({
+				projectId: runtime.projectId,
+				request,
+				domains: stringListArg(args, "domains") as ExternalSourceDomain[],
+				language: stringArg(args, "language"),
+				framework: stringArg(args, "framework"),
+				maxMatches: positiveIntegerArg(args, "maxMatches"),
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: report.matches.length ? "allow" : "warn",
+				severity: report.matches.length ? "info" : "warning",
+				confidence: 0.8,
+				summary: `External source registry matches: ${report.matches.length}`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: report.matches.length > 0,
+				allowedToProceed: true,
+				evidenceRefs: report.matches.map(
+					(match) => `external-source:${match.sourceId}`,
+				),
+				nextActions: [
+					"Use registry matches as source pointers for feasibility and planning, not as fetched evidence.",
+					"Verify official/academic/community sources before changing contracts, dependencies, or implementation structure.",
+				],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `External source registry matches: ${report.matches.length}`,
+				data: {
+					decisionEnvelope,
+					report,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"External source registry: no hice web/live fetch ni acepté URLs libres.",
+					"no guardé raw docs, prompts ni cuerpos externos; sólo devolví descriptores y recomendaciones.",
+					"No importé Source Library, no actualicé dependencias y no aprobé cambios por esta señal.",
+					"No promoví contratos y No ejecuté AgentLabs.",
+				],
+			});
+		}
 		case "idu_task": {
 			const text = requiredText(args, "text");
 			const kind = inferTaskTemplateKind(text);
@@ -3697,6 +3766,18 @@ function stringListArg(args: JsonObject, key: string): string[] {
 		.filter((item): item is string => typeof item === "string")
 		.map((item) => item.trim())
 		.filter(Boolean);
+}
+
+function positiveIntegerArg(args: JsonObject, key: string): number | undefined {
+	const value = args[key];
+	if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+		return value;
+	}
+	if (typeof value === "string" && value.trim()) {
+		const parsed = Number(value.trim());
+		if (Number.isInteger(parsed) && parsed > 0) return parsed;
+	}
+	return undefined;
 }
 
 const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([

@@ -58,6 +58,7 @@ import type {
 	SourceLibraryStatus,
 } from "../src/source-library.js";
 import type { ExternalIntelligenceReport } from "../src/external-intelligence.js";
+import type { ExternalSourceRecommendationReport } from "../src/external-source-registry.js";
 import type {
 	SourceSkillCandidateCreationResult,
 	SourceSkillCandidateReview,
@@ -940,7 +941,10 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_intelligence_report"),
 	);
-	assert.equal(tools.length, 49);
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_external_source_recommend"),
+	);
+	assert.equal(tools.length, 50);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2047,7 +2051,9 @@ test("idu_external_intelligence_report is allowlisted and advisory-only", async 
 });
 
 test("idu_external_intelligence_report refuses workspace fallback without stateRoot", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-external-intelligence-no-state-"));
+	const root = mkdtempSync(
+		join(tmpdir(), "idu-external-intelligence-no-state-"),
+	);
 	try {
 		const projectPath = join(root, "project");
 		mkdirSync(projectPath, { recursive: true });
@@ -2066,7 +2072,62 @@ test("idu_external_intelligence_report refuses workspace fallback without stateR
 		assert.equal(result.data.stateRootRequired, true);
 		assert.equal(result.data.workspaceFallbackAllowed, false);
 		assert.equal(existsSync(join(projectPath, "reports")), false);
-		assert.match(result.safeNotes.join("\n"), /no usa workspaceRoot como fallback/u);
+		assert.match(
+			result.safeNotes.join("\n"),
+			/no usa workspaceRoot como fallback/u,
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_external_source_recommend is registry-only and advisory", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-external-source-registry-mcp-"));
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		mkdirSync(projectPath, { recursive: true });
+		const runtime = fakeRuntime(projectPath);
+		const result = await callIduMcpTool(
+			"idu_external_source_recommend",
+			{
+				request: "HTML sin JS embebido y estructura Next.js TypeScript",
+				domains: ["web", "programming_structure", "separation_of_concerns"],
+				language: "html",
+				framework: "nextjs",
+				maxMatches: 6,
+			},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered(projectPath),
+					stateRoot,
+				}),
+			},
+		);
+
+		assert.equal(result.ok, true);
+		const report = result.data.report as ExternalSourceRecommendationReport;
+		assert.equal(report.fetchAllowed, false);
+		assert.equal(report.rawDocsStored, false);
+		assert.equal(report.promotionAllowed, false);
+		assert.equal(report.agentLabAutoRunAllowed, false);
+		assert.ok(Array.isArray(report.matches));
+		assert.ok(report.matches.length > 0);
+		assert.equal(
+			(result.data.decisionEnvelope as DecisionEnvelope).authority,
+			"advisory",
+		);
+		assert.equal(
+			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+			true,
+		);
+		const safeNotes = result.safeNotes.join("\n");
+		assert.match(safeNotes, /no hice web\/live fetch/u);
+		assert.match(safeNotes, /no guardé raw docs/u);
+		assert.match(safeNotes, /No importé Source Library/u);
+		assert.match(safeNotes, /No promoví contratos/u);
+		assert.match(safeNotes, /No ejecuté AgentLabs/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
