@@ -1384,11 +1384,12 @@ export async function runCliCommand(
 				);
 			case "idu": {
 				activateIduSession(activeRuntime.projectId);
-				activeRuntime.supervisorOnIduActivation();
+				const supervisorStartup = activeRuntime.supervisorOnIduActivation();
 				recordCliUsage(activeRuntime, command, { ok: true });
 				return ok(
 					[
 						"Guardrails automáticos activados para el proyecto activo.",
+						...formatCliSupervisorStartupSection(supervisorStartup),
 						"",
 						activeRuntime.formatDashboard(activeRuntime.inspectConnection()),
 					].join("\n"),
@@ -2035,7 +2036,7 @@ async function runBootstrapIduCommand(): Promise<string> {
 		projectPath: bootstrap.project.path,
 		requireTelegramConfig: false,
 	});
-	activeRuntime.supervisorOnIduActivation();
+	const supervisorStartup = activeRuntime.supervisorOnIduActivation();
 	let sawPlanProgress = false;
 	const onProgress = (event: MasterPlanProgressEvent) => {
 		sawPlanProgress = true;
@@ -2115,7 +2116,9 @@ async function runBootstrapIduCommand(): Promise<string> {
 		requiresHuman: finalBlocked,
 		ok: !finalBlocked,
 	});
-	return finalReport;
+	return [...formatCliSupervisorStartupSection(supervisorStartup), finalReport]
+		.filter((line) => line.length > 0)
+		.join("\n");
 }
 
 function handleSetupCommand(rest: string[]): string {
@@ -2235,6 +2238,14 @@ function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
 		workspaceRoot: context.runtimeWorkspaceRoot,
 		projectId: context.activeProject.id,
 	});
+}
+
+function formatCliSupervisorStartupSection(
+	startup: IduSupervisorHookResult | undefined,
+): string[] {
+	if (!startup) return [""];
+	const reason = startup.reason ? ` (${startup.reason})` : "";
+	return ["", "Arranque supervisor:", `${startup.status}${reason} — ${startup.summary}`];
 }
 
 function formatDashboard(report: ProjectConnectionReport): string {

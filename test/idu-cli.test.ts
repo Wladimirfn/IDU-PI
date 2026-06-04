@@ -1740,11 +1740,29 @@ test("cli natural approval only acts with pending Master Plan action", async () 
 
 test("cli idu activa sesión persistente", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
+		runtime.supervisorOnIduActivation = () => ({
+			status: "completed",
+			trigger: "on_idu_activation",
+			projectId: runtime.projectId,
+			bypassedThrottle: false,
+			throttleStatePath: "reports/idu-supervisor-hook-state.json",
+			summary: "Supervisor startup check completed.",
+			safety: {
+				agentLabsExecuted: false,
+				rulesApplied: false,
+				memoryDeleted: false,
+				projectCoreModified: false,
+			},
+		});
 		const result = await runCliCommand(["idu"], runtime);
 		await flushIduUsageEvents();
 
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Guardrails automáticos activados/u);
+		assert.match(
+			result.stdout,
+			/Arranque supervisor:\ncompleted — Supervisor startup check completed\./u,
+		);
 		assert.equal(
 			existsSync(join(workspaceRoot, "reports", "idu-session-state.json")),
 			true,

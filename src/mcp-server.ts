@@ -1312,7 +1312,7 @@ function compactSupervisorStartup(
 				reason?: string;
 				summary: string;
 				safety: JsonObject;
-			}
+		  }
 		| undefined,
 ): JsonObject | null {
 	if (!startup) return null;
@@ -4461,12 +4461,12 @@ function selectContinuationCandidate(
 	tasks: StructuredTask[],
 	request: string,
 ): { origin: string; text: string; task?: StructuredTask } | undefined {
-	if (request.trim()) return { origin: "request", text: request.trim() };
 	const pending = tasks
 		.filter((task) => task.status === "pending")
 		.sort((a, b) => b.priority - a.priority);
 	const nextTask = pending[0];
 	if (nextTask) return { origin: "queue", text: nextTask.text, task: nextTask };
+	if (request.trim()) return { origin: "request", text: request.trim() };
 	const milestone = firstMilestoneAction(snapshot);
 	if (milestone) return { origin: "master_plan_milestone", text: milestone };
 	const recommendedNext = arrayField(snapshot, "recommendedNext").find(

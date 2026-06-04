@@ -1974,6 +1974,63 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		(continuation.data.agentLabPolicy as { execution: string }).execution,
 		"orchestrator_explicit_call_only",
 	);
+
+	const continuationWithRequestRuntime = fakeRuntime();
+	continuationWithRequestRuntime.createTask(
+		"bug",
+		"mejorar arranque autónomo con siguiente tarea segura",
+	);
+	const continuationWithRequest = await callIduMcpTool(
+		"idu_continuation_proposal",
+		{
+			request: "seguir tarea aprobada de arranque autónomo",
+			autonomyWindowMinutes: 120,
+			maxScope: "medium",
+		},
+		{
+			runtimeFactory: () => continuationWithRequestRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(continuationWithRequest.ok, true);
+	assert.equal(continuationWithRequest.data.decision, "continue_autonomously");
+	assert.equal(continuationWithRequest.data.allowedToProceed, true);
+	assert.equal(
+		(continuationWithRequest.data.candidateAction as { origin: string }).origin,
+		"queue",
+	);
+	assert.match(
+		String(
+			(continuationWithRequest.data.candidateAction as { title: string }).title,
+		),
+		/arranque autónomo/u,
+	);
+	assert.equal(
+		(
+			continuationWithRequest.data.queueProgress as {
+				selectedTaskGuardStatus: string;
+			}
+		).selectedTaskGuardStatus,
+		"clear",
+	);
+	assert.equal(
+		(
+			continuationWithRequest.data.planAlignment as { withinObjective: boolean }
+		).withinObjective,
+		true,
+	);
+	assert.doesNotMatch(
+		(
+			continuationWithRequest.data.planAlignment as { blockers: string[] }
+		).blockers.join("\n"),
+		/tarea de cola aprobada/iu,
+	);
+	assert.equal(
+		(
+			continuationWithRequest.data.decisionEnvelope as DecisionEnvelope
+		).allowedToProceed,
+		true,
+	);
 	assert.equal(
 		(continuation.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
 		true,
