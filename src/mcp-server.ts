@@ -40,6 +40,7 @@ import {
 	type ContextBudgetUsage,
 } from "./context-budget.js";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
+import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -108,6 +109,7 @@ export type IduMcpToolName =
 	| "idu_supervisor_tick"
 	| "idu_supervisor_cron_plan"
 	| "idu_architectural_pruning_plan"
+	| "idu_context_pruning_advisory"
 	| "idu_task"
 	| "idu_queue_detail"
 	| "idu_semantic_audit_status"
@@ -414,6 +416,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool(
 		"idu_architectural_pruning_plan",
 		"Devuelve plan advisory-only de poda arquitectónica; no borra, no aprueba y no refactoriza.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_context_pruning_advisory",
+		"Devuelve reporte advisory-only de deuda semántica/context pruning; no borra, no archiva y no promueve contratos.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
@@ -2133,6 +2142,63 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Plan de poda advisory-only: no borré archivos ni apliqué refactors.",
 					"No aprobé recomendaciones, no ejecuté AgentLabs y no escribí reportes runtime.",
+				],
+			});
+		}
+		case "idu_context_pruning_advisory": {
+			const report = buildContextPruningAdvisoryReport({
+				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
+				projectId: runtime.projectId,
+				repoRoot: runtime.projectPath,
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: report.signals.length ? "warn" : "allow",
+				severity: report.signals.some((signal) => signal.severity === "high")
+					? "warning"
+					: "info",
+				confidence: 0.8,
+				summary: `Semantic debt advisory signals: ${report.signals.length}`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: report.signals.map((signal) => signal.id),
+				nextActions: [
+					"Review signals before adding more context or sources.",
+					"Revalidate stale evidence before plan decisions depend on it.",
+					"Do not delete, archive, refactor, or promote contracts from this report alone.",
+				],
+				requiredActions: report.signals.length
+					? [
+							{
+								id: "semantic-debt-orchestrator-review",
+								owner: "orchestrator",
+								action: "review_semantic_debt_signals_before_cleanup",
+								reason:
+									"Semantic debt signals are advisory and must not trigger automatic cleanup.",
+								blocking: true,
+							},
+						]
+					: [],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Semantic debt advisory signals: ${report.signals.length}`,
+				data: {
+					decisionEnvelope,
+					report,
+					signals: report.signals,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Reporte de deuda semántica advisory-only: no borré archivos, no archivé fuentes y no apliqué refactors.",
+					"No promoví contratos, no degradé contratos, no ejecuté AgentLabs y no escribí analytics remota.",
+					"No guardé prompts ni documentos crudos; sólo devolví conteos, ids, rutas y metadatos derivados.",
 				],
 			});
 		}

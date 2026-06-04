@@ -935,7 +935,8 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
 	);
-	assert.equal(tools.length, 47);
+	assert.ok(tools.some((tool) => tool.name === "idu_context_pruning_advisory"));
+	assert.equal(tools.length, 48);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -1917,6 +1918,73 @@ test("idu_architectural_pruning_plan is advisory-only", async () => {
 		),
 	);
 	assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
+});
+
+test("idu_context_pruning_advisory is read-only and advisory-only", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-context-pruning-mcp-"));
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		mkdirSync(projectPath, { recursive: true });
+		mkdirSync(join(projectPath, "docs", "superpowers", "plans"), {
+			recursive: true,
+		});
+		writeFileSync(
+			join(projectPath, "docs", "superpowers", "plans", "2026-01-01-old.md"),
+			"# Raw task prompt that must not be copied\n- [ ] open\n",
+			"utf8",
+		);
+		const runtime = fakeRuntime(projectPath);
+		runtime.workspaceRoot = stateRoot;
+		const result = await callIduMcpTool(
+			"idu_context_pruning_advisory",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered(projectPath),
+					stateRoot,
+				}),
+			},
+		);
+
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			mode: string;
+			noDeletion: boolean;
+			noAutoDelete: boolean;
+			noContractPromotion: boolean;
+			rawPromptsStored: boolean;
+			rawDocsStored: boolean;
+			remoteAnalytics: boolean;
+			signals: unknown[];
+		};
+		assert.equal(report.mode, "advisory_only");
+		assert.equal(report.noDeletion, true);
+		assert.equal(report.noAutoDelete, true);
+		assert.equal(report.noContractPromotion, true);
+		assert.equal(report.rawPromptsStored, false);
+		assert.equal(report.rawDocsStored, false);
+		assert.equal(report.remoteAnalytics, false);
+		assert.ok(report.signals.length > 0);
+		assert.equal(
+			(result.data.decisionEnvelope as DecisionEnvelope).authority,
+			"advisory",
+		);
+		assert.equal(
+			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+			false,
+		);
+		const serialized = JSON.stringify(result);
+		assert.equal(
+			serialized.includes("Raw task prompt that must not be copied"),
+			false,
+		);
+		assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
+		assert.match(result.safeNotes.join("\n"), /No promoví contratos/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("idu_queue_detail returns complete ids and guard status", async () => {

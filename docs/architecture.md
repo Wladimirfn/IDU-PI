@@ -287,6 +287,7 @@ src/semantic-audit.ts
 src/semantic-audit-command.ts
 src/semantic-compaction.ts
 src/semantic-agent-tasks.ts
+src/context-pruning-advisory.ts
 ```
 
 Flujo:
@@ -296,6 +297,8 @@ eventos → semantic audit → compaction draft → review → candidates/tasks/
 ```
 
 La compactación reduce ruido y prepara decisiones. No borra memoria ni aplica reglas sola.
+
+`context-pruning-advisory` agrega una vista read-only de deuda semántica: context bloat desde `context-quality-events.jsonl`, evidencia stale/missing de Source Library, digests faltantes/lectores bibliotecarios requeridos, planes/specs históricos y ruido de artefactos. Devuelve sólo señales, conteos, ids, rutas y metadata; no borra, no archiva fuentes, no refactoriza, no ejecuta AgentLabs y no promueve/degrada contratos.
 
 ## Improvement proposals
 
@@ -356,6 +359,7 @@ Garantías:
 - requests bibliotecario `external-source-intelligence` alimentados por refs locales de Source Library/digests (`sourceId`, `chunkIds`, limitaciones) sin web/live fetch automático ni documentos/chunks crudos;
 - eventos locales de efectividad en `reports/agentlab-effectiveness-events.jsonl` para contar requests, runs, status, estados (`completed`, `partial`, `timed_out`, `stale`, `failed`, `security_violation`), hallazgos por severidad y completitud de evidencia sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota;
 - eventos locales de calidad de contexto en `reports/context-quality-events.jsonl` derivados de `idu_supervisor_context_pack`, con ratings de compacto/relevante/ruido/completo y omisiones agregadas por razón, sin guardar prompts/docs crudos ni medir tokens/costo/% contexto;
+- reporte MCP read-only `idu_context_pruning_advisory` para deuda semántica/context pruning, sin guardar prompts/docs crudos, sin analytics remota, sin auto-delete y sin promoción/democión de contratos;
 - consolidación read-only.
 
 ## AgentRouter y Pi RPC

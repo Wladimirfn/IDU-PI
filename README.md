@@ -111,7 +111,7 @@ Roles:
 | --- | --- |
 | Humano | Define intención, aprueba decisiones críticas, commits, pushes y cambios de verdad. |
 | Orquestador | Ejecuta trabajo, coordina subagentes, aplica decisiones aprobadas. |
-| Idu-pi | Supervisa plan, riesgo, contexto, memoria, reportes, propuestas, gates, costo, calidad, seguridad, emoción y aprendizaje; mide calidad de contexto local sin guardar prompts/docs crudos. |
+| Idu-pi | Supervisa plan, riesgo, contexto, memoria, reportes, propuestas, gates, costo, calidad, seguridad, emoción y aprendizaje; mide calidad de contexto local y reporta deuda semántica/context pruning sin guardar prompts/docs crudos ni borrar automáticamente. |
 | AgentLabs | Inspeccionan en sandbox como especialistas y reportan evidencia. |
 | Subagentes | Ejecutan tareas acotadas bajo coordinación del orquestador. |
 
