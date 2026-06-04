@@ -2761,5 +2761,6 @@ test("cli help no requiere runtime ni configuración", async () => {
 
 	assert.equal(result.exitCode, 0);
 	assert.match(result.stdout, /Uso: idu-pi/u);
+	assert.match(result.stdout, /idu-pi idu start/u);
 	assert.equal(result.stderr, "");
 });

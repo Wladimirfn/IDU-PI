@@ -277,7 +277,7 @@ idu-pi idu-status
 idu-pi idu-off
 ```
 
-En CLI y Pi slash, `idu-pi idu` / `/idu` es el flujo cómodo de bootstrap/start: puede enrolar un proyecto permitido, crear estado aislado y drafts de Project Core/Constitution si faltan, activar guardrails y mostrar el dashboard. En Telegram, `/idu` es activación remota sobre el proyecto activo ya configurado; no crea un segundo core ni auto-enrola proyectos.
+En CLI y Pi slash, `idu-pi idu` / `idu-pi idu start` / `/idu` es el flujo cómodo de bootstrap/start: puede enrolar un proyecto permitido, crear estado aislado y drafts de Project Core/Constitution si faltan, activar guardrails, mostrar el arranque supervisor y mostrar el dashboard/reporte. En Telegram, `/idu` es activación remota sobre el proyecto activo ya configurado; no crea un segundo core ni auto-enrola proyectos.
 
 `/idu_off` apaga esos guardrails automáticos. Los comandos manuales siguen disponibles.
 

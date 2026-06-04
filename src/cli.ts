@@ -2705,6 +2705,7 @@ export function helpText(): string {
 		"Comandos:",
 		"  idu-pi status",
 		"  idu-pi idu                 (Telegram: /idu)",
+		"  idu-pi idu start           (alias explícito de arranque autónomo)",
 		"  idu-pi idu-off             (Telegram: /idu_off)",
 		"  idu-pi idu-status          (Telegram: /idu_status)",
 		"  idu-pi idu-prepare         (Telegram: /idu_prepare)",
