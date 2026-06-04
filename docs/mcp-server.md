@@ -157,9 +157,9 @@ Herramientas mínimas:
 | `idu_project_enroll` | Registra explícitamente un proyecto y crea estado aislado; no crea drafts ni activa guardrails. |
 | `idu_project_reset_state` | Borra el contenido del `stateRoot` del proyecto registrado con `confirm=true`; no desregistra ni toca el repo real. |
 | `idu_bootstrap_project` | Bootstrap explícito: enrola, crea estado y, con `allowCreateDrafts=true`, crea Project Core/Constitution/blueprint/flows draft. |
-| `idu_start` | Entrada cómoda para proyectos registrados: activa guardrails y muestra estado; no enrola ni crea drafts. |
+| `idu_start` | Entrada cómoda para proyectos registrados: activa guardrails, ejecuta el hook seguro de arranque supervisor y muestra estado con `data.supervisorStartup`; no enrola ni crea drafts. |
 | `idu_status` | Estado de conexión, sesión, config/alignment y próximo paso. |
-| `idu_activate` | Sólo activa guardrails automáticos sin enrolar, bootstrap, scan pesado ni AgentLabs. |
+| `idu_activate` | Sólo activa guardrails automáticos sin enrolar, bootstrap, hook de arranque, scan pesado ni AgentLabs. |
 | `idu_deactivate` | Apaga guardrails automáticos. |
 | `idu_prepare` | Ejecuta prepare seguro. |
 | `idu_master_plan_status` | Lee estado/rutas del Plan Maestro sin regenerar. |
@@ -221,6 +221,7 @@ El MCP adapter:
 - no ejecuta AgentLabs salvo la herramienta explícita `idu_agentlab_review_run`;
 - `workloadEnvelope` es metadata advisory-only: no permite auto-run, escritura de repo real ni promoción de contratos;
 - no escribe registry desde `idu_status`, `idu_activate` ni `idu_start`;
+- `idu_start` corre el hook seguro `on_idu_activation` y compacta su resultado en `data.supervisorStartup`; `idu_activate` queda reservado para activación pura sin hook;
 - no crea `config/project-*.json` salvo `idu_bootstrap_project` con `allowCreateDrafts=true`.
 
 Telegram es un adapter, no el núcleo. El núcleo sigue siendo Idu-pi Core.
