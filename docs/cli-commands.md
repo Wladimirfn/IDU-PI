@@ -81,7 +81,7 @@ AgentLabs son opcionales/explícitos y audit-only: `idu_agentlab_request_create`
 | Comando | Uso |
 | --- | --- |
 | `idu-pi status` | Muestra estado operativo del proyecto/agente. |
-| `idu-pi idu` | Bootstrap/start cómodo: enrola si falta y el path está permitido, crea estado/config/Core/Constitution draft, activa guardrails y prepara análisis seguro. Pi slash `/idu` usa este mismo flujo CLI; Telegram `/idu` es activación remota sobre un proyecto ya configurado. |
+| `idu-pi idu` / `idu-pi idu start` | Bootstrap/start cómodo: enrola si falta y el path está permitido, crea estado/config/Core/Constitution draft, activa guardrails, muestra el arranque supervisor y prepara análisis seguro. Pi slash `/idu` usa este mismo flujo CLI; Telegram `/idu` es activación remota sobre un proyecto ya configurado. |
 | `idu-pi idu-off` | Desactiva guardrails automáticos. |
 | `idu-pi idu-status` | Muestra estado de sesión Idu-pi. |
 

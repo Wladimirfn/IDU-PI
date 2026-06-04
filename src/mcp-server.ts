@@ -5,6 +5,7 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
+import type { SkillDraftFromLessonsMode } from "./skill-draft-from-lessons.js";
 import { applyPackageEnvDefaults, resolveIduRegistryPath } from "./cli-home.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
 import {
@@ -143,6 +144,7 @@ export type IduMcpToolName =
 	| "idu_source_required_actions"
 	| "idu_source_skill_candidates_create"
 	| "idu_source_skill_candidates_review"
+	| "idu_skill_draft_from_lessons"
 	| "idu_source_refresh"
 	| "idu_agentlab_request_create"
 	| "idu_agentlab_review_run"
@@ -641,6 +643,20 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Revisa un reporte de candidatas de skill derivadas de Source Library; latest por defecto.",
 		{
 			pathOrLatest: optionalString("Ruta de reporte o latest."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_skill_draft_from_lessons",
+		"Genera propuestas o drafts de skill desde fallos/lecciones registradas; reports-only, requiere aprobación humana y no instala skills.",
+		{
+			mode: optionalEnum("Modo: proposal-only o approved-only.", [
+				"proposal-only",
+				"approved-only",
+			]),
+			selector: optionalString(
+				"Selector de compaction/proposals; si se omite en proposal-only crea compaction nueva.",
+			),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -1250,6 +1266,7 @@ async function handleProjectLifecycleTool(
 					resolution.projectPath,
 				);
 				activateIduSession(runtime.projectId);
+				const supervisorStartup = runtime.supervisorOnIduActivation();
 				const connection = runtime.inspectConnection();
 				return envelope({
 					ok: true,
@@ -1263,11 +1280,13 @@ async function handleProjectLifecycleTool(
 						configStatus: connection.configStatus,
 						alignmentStatus: connection.alignmentStatus,
 						recommendedNext: connection.recommendedNext,
+						supervisorStartup: compactSupervisorStartup(supervisorStartup),
 						connection,
 					},
 					safeNotes: [
 						...resolution.safeNotes,
 						"idu_start no enrola proyectos ni crea drafts.",
+						"Arranque supervisor ejecutado con límites seguros; no ejecuta AgentLabs ni aplica reglas por sí solo.",
 					],
 				});
 			}
@@ -1283,6 +1302,27 @@ async function handleProjectLifecycleTool(
 			errors: [redactSecrets(errorMessage(error))],
 		});
 	}
+}
+
+function compactSupervisorStartup(
+	startup:
+		| {
+				status: string;
+				trigger: string;
+				reason?: string;
+				summary: string;
+				safety: JsonObject;
+		  }
+		| undefined,
+): JsonObject | null {
+	if (!startup) return null;
+	return {
+		status: startup.status,
+		trigger: startup.trigger,
+		reason: startup.reason,
+		summary: startup.summary,
+		safety: startup.safety,
+	};
 }
 
 function governanceConfigData(): JsonObject {
@@ -3147,6 +3187,78 @@ async function dispatchTool(
 				errors: review.ok ? [] : review.errors,
 			});
 		}
+		case "idu_skill_draft_from_lessons": {
+			const rawMode = stringArg(args, "mode") ?? "proposal-only";
+			const mode = rawMode as SkillDraftFromLessonsMode;
+			if (mode !== "proposal-only" && mode !== "approved-only") {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Modo inválido para skill draft from lessons.",
+					data: { mode: rawMode },
+					safeNotes: [
+						...resolution.safeNotes,
+						"No generé propuestas ni drafts de skill.",
+					],
+					errors: ["mode must be proposal-only or approved-only"],
+				});
+			}
+			const result = runtime.skillDraftFromLessons({
+				mode,
+				selector: stringArg(args, "selector"),
+			});
+			const createdCount =
+				result.mode === "proposal-only"
+					? result.createdProposals.length
+					: result.createdDrafts.length;
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: createdCount ? "needs_approval" : "needs_evidence",
+				severity: createdCount ? "warning" : "info",
+				confidence: 0.78,
+				summary:
+					result.mode === "proposal-only"
+						? `Skill proposals from lessons: ${createdCount}`
+						: `Skill drafts from approved proposals: ${createdCount}`,
+				requiresHuman: true,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: [
+					...(result.semanticDraftPath
+						? [`semantic-draft:${result.semanticDraftPath}`]
+						: []),
+					...(result.proposalsPath
+						? [`skill-proposals:${result.proposalsPath}`]
+						: []),
+					...(result.skillDraftPath
+						? [`skill-draft:${result.skillDraftPath}`]
+						: []),
+				],
+				requiredActions: result.requiredActions.map((action, index) => ({
+					id: `skill-draft-from-lessons-${index + 1}`,
+					owner: "orchestrator",
+					action,
+					reason:
+						"Skill learning artifacts require explicit human/orchestrator approval.",
+					blocking: false,
+				})),
+				nextActions: result.nextActions,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary:
+					result.mode === "proposal-only"
+						? `Skill proposals from lessons: ${createdCount}`
+						: `Skill drafts from approved proposals: ${createdCount}`,
+				data: { result, decisionEnvelope },
+				safeNotes: [...resolution.safeNotes, ...result.safeNotes],
+			});
+		}
 		case "idu_source_refresh": {
 			const status = runtime.sourceLibraryRefresh();
 			return envelope({
@@ -4349,12 +4461,12 @@ function selectContinuationCandidate(
 	tasks: StructuredTask[],
 	request: string,
 ): { origin: string; text: string; task?: StructuredTask } | undefined {
-	if (request.trim()) return { origin: "request", text: request.trim() };
 	const pending = tasks
 		.filter((task) => task.status === "pending")
 		.sort((a, b) => b.priority - a.priority);
 	const nextTask = pending[0];
 	if (nextTask) return { origin: "queue", text: nextTask.text, task: nextTask };
+	if (request.trim()) return { origin: "request", text: request.trim() };
 	const milestone = firstMilestoneAction(snapshot);
 	if (milestone) return { origin: "master_plan_milestone", text: milestone };
 	const recommendedNext = arrayField(snapshot, "recommendedNext").find(
@@ -4610,6 +4722,10 @@ function optionalBoolean(description: string): JsonObject {
 
 function optionalStringArray(description: string): JsonObject {
 	return { type: "array", items: { type: "string" }, description };
+}
+
+function optionalEnum(description: string, values: string[]): JsonObject {
+	return { type: "string", enum: values, description };
 }
 
 function requiredEnum(description: string, values: string[]): JsonObject {

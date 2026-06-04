@@ -228,6 +228,7 @@ import {
 	maybeRunSupervisorAfterSemanticTrigger,
 	maybeRunSupervisorAfterTask,
 	maybeRunSupervisorOnIduActivation,
+	type IduSupervisorHookResult,
 } from "./idu-supervisor-hooks.js";
 import {
 	buildSupervisorImprovementPlan,
@@ -298,6 +299,11 @@ import {
 	type SkillDraftCreationResult,
 	type SkillDraftReview,
 } from "./skill-drafts.js";
+import {
+	createSkillDraftFromLessons,
+	type SkillDraftFromLessonsMode,
+	type SkillDraftFromLessonsResult,
+} from "./skill-draft-from-lessons.js";
 import {
 	applySupervisorLearningRules,
 	disableSupervisorLearningRule,
@@ -487,7 +493,7 @@ export type CliRuntime = {
 	}) => IduSupervisorLoopResult;
 	supervisorCronPlan: () => IduSupervisorCronPlanResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
-	supervisorOnIduActivation: () => void;
+	supervisorOnIduActivation: () => IduSupervisorHookResult | undefined;
 	supervisorImprovementPlan: (
 		pathOrLatest: string,
 	) => SupervisorImprovementPlan;
@@ -587,6 +593,10 @@ export type CliRuntime = {
 	) => string;
 	skillDraftsCreate: (pathOrLatest: string) => SkillDraftCreationResult;
 	formatSkillDraftCreationResult: (result: SkillDraftCreationResult) => string;
+	skillDraftFromLessons: (options?: {
+		mode?: SkillDraftFromLessonsMode;
+		selector?: string;
+	}) => SkillDraftFromLessonsResult;
 	skillDraftReview: (pathOrLatest: string) => SkillDraftReview;
 	formatSkillDraftReview: (review: SkillDraftReview) => string;
 	agentLabRequestCreate: (
@@ -1035,7 +1045,7 @@ export function createCliRuntime(
 			}),
 		formatSupervisorTick: formatIduSupervisorLoopResult,
 		supervisorOnIduActivation: () => {
-			maybeRunSupervisorOnIduActivation({
+			return maybeRunSupervisorOnIduActivation({
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
@@ -1131,6 +1141,26 @@ export function createCliRuntime(
 		skillDraftsCreate: (pathOrLatest) =>
 			createSkillDraftsFromApprovedProposals(pathOrLatest, reportsPath),
 		formatSkillDraftCreationResult,
+		skillDraftFromLessons: (options = {}) =>
+			createSkillDraftFromLessons({
+				mode: options.mode,
+				selector: options.selector,
+				reportsPath,
+				semanticCompactionInput: {
+					projectId: activeProject.id,
+					dbPath: labDbPath,
+					reportsPath,
+					workspaceRoot: runtimeWorkspaceRoot,
+					...semanticCompactionProjectContext(activeProject.path),
+				},
+				createSkillImprovementProposals: (pathOrLatest) =>
+					createSkillImprovementProposals(pathOrLatest, reportsPath, {
+						workspaceRoot: activeProject.path,
+						dbPath: labDbPath,
+					}),
+				createSkillDraftsFromApprovedProposals: (pathOrLatest) =>
+					createSkillDraftsFromApprovedProposals(pathOrLatest, reportsPath),
+			}),
 		skillDraftReview: (pathOrLatest) =>
 			reviewSkillDraft(pathOrLatest, reportsPath),
 		formatSkillDraftReview,
@@ -1354,11 +1384,12 @@ export async function runCliCommand(
 				);
 			case "idu": {
 				activateIduSession(activeRuntime.projectId);
-				activeRuntime.supervisorOnIduActivation();
+				const supervisorStartup = activeRuntime.supervisorOnIduActivation();
 				recordCliUsage(activeRuntime, command, { ok: true });
 				return ok(
 					[
 						"Guardrails automáticos activados para el proyecto activo.",
+						...formatCliSupervisorStartupSection(supervisorStartup),
 						"",
 						activeRuntime.formatDashboard(activeRuntime.inspectConnection()),
 					].join("\n"),
@@ -2005,7 +2036,7 @@ async function runBootstrapIduCommand(): Promise<string> {
 		projectPath: bootstrap.project.path,
 		requireTelegramConfig: false,
 	});
-	activeRuntime.supervisorOnIduActivation();
+	const supervisorStartup = activeRuntime.supervisorOnIduActivation();
 	let sawPlanProgress = false;
 	const onProgress = (event: MasterPlanProgressEvent) => {
 		sawPlanProgress = true;
@@ -2085,7 +2116,9 @@ async function runBootstrapIduCommand(): Promise<string> {
 		requiresHuman: finalBlocked,
 		ok: !finalBlocked,
 	});
-	return finalReport;
+	return [...formatCliSupervisorStartupSection(supervisorStartup), finalReport]
+		.filter((line) => line.length > 0)
+		.join("\n");
 }
 
 function handleSetupCommand(rest: string[]): string {
@@ -2205,6 +2238,14 @@ function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
 		workspaceRoot: context.runtimeWorkspaceRoot,
 		projectId: context.activeProject.id,
 	});
+}
+
+function formatCliSupervisorStartupSection(
+	startup: IduSupervisorHookResult | undefined,
+): string[] {
+	if (!startup) return [""];
+	const reason = startup.reason ? ` (${startup.reason})` : "";
+	return ["", "Arranque supervisor:", `${startup.status}${reason} — ${startup.summary}`];
 }
 
 function formatDashboard(report: ProjectConnectionReport): string {
@@ -2664,6 +2705,7 @@ export function helpText(): string {
 		"Comandos:",
 		"  idu-pi status",
 		"  idu-pi idu                 (Telegram: /idu)",
+		"  idu-pi idu start           (alias explícito de arranque autónomo)",
 		"  idu-pi idu-off             (Telegram: /idu_off)",
 		"  idu-pi idu-status          (Telegram: /idu_status)",
 		"  idu-pi idu-prepare         (Telegram: /idu_prepare)",

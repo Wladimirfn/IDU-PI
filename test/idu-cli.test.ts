@@ -1411,6 +1411,20 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"Sólo registré decisión humana. No modifiqué skills.",
 			].join("\n"),
 		skillDraftsCreate: fakeSkillDraftCreation,
+		skillDraftFromLessons: () => ({
+			mode: "proposal-only",
+			selector: "latest",
+			semanticDraftPath: "semantic-compaction-draft.json",
+			proposalsPath: "skill-improvement-proposals.json",
+			createdProposals: [],
+			createdDrafts: [],
+			omittedProposals: [],
+			nextActions: ["approve proposals"],
+			requiredActions: ["Review skill improvement proposals."],
+			allowedToProceed: false,
+			advisoryOnly: true,
+			safeNotes: ["No modifiqué skills reales, .agents ni .atl."],
+		}),
 		formatSkillDraftCreationResult: (result) =>
 			[
 				"Skill Drafts Created",
@@ -1726,11 +1740,29 @@ test("cli natural approval only acts with pending Master Plan action", async () 
 
 test("cli idu activa sesión persistente", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
+		runtime.supervisorOnIduActivation = () => ({
+			status: "completed",
+			trigger: "on_idu_activation",
+			projectId: runtime.projectId,
+			bypassedThrottle: false,
+			throttleStatePath: "reports/idu-supervisor-hook-state.json",
+			summary: "Supervisor startup check completed.",
+			safety: {
+				agentLabsExecuted: false,
+				rulesApplied: false,
+				memoryDeleted: false,
+				projectCoreModified: false,
+			},
+		});
 		const result = await runCliCommand(["idu"], runtime);
 		await flushIduUsageEvents();
 
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /Guardrails automáticos activados/u);
+		assert.match(
+			result.stdout,
+			/Arranque supervisor:\ncompleted — Supervisor startup check completed\./u,
+		);
 		assert.equal(
 			existsSync(join(workspaceRoot, "reports", "idu-session-state.json")),
 			true,
@@ -2692,10 +2724,7 @@ test("CLI queue helpers aceptan prefijo de ID", async () => {
 		assert.equal(completed?.completionEvidence, "commit abc; tests green");
 		assert.equal(completed?.guardStatus, undefined);
 		assert.equal(queue.getTask(task.id)?.status, "done");
-		assert.equal(
-			rejectStructuredTaskById(queue, "missing-prefix"),
-			undefined,
-		);
+		assert.equal(rejectStructuredTaskById(queue, "missing-prefix"), undefined);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -2732,5 +2761,6 @@ test("cli help no requiere runtime ni configuración", async () => {
 
 	assert.equal(result.exitCode, 0);
 	assert.match(result.stdout, /Uso: idu-pi/u);
+	assert.match(result.stdout, /idu-pi idu start/u);
 	assert.equal(result.stderr, "");
 });

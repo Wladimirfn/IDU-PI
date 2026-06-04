@@ -593,6 +593,7 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		formatSupervisorTick: () => "tick",
 		supervisorOnIduActivation: () => {
 			active = true;
+			return undefined;
 		},
 		supervisorImprovementPlan: () => {
 			throw new Error(UNUSED);
@@ -665,6 +666,20 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			throw new Error(UNUSED);
 		},
 		formatSkillDraftCreationResult: () => UNUSED,
+		skillDraftFromLessons: () => ({
+			mode: "proposal-only",
+			selector: "latest",
+			semanticDraftPath: "semantic-compaction-draft.json",
+			proposalsPath: "skill-improvement-proposals.json",
+			createdProposals: [],
+			createdDrafts: [],
+			omittedProposals: [],
+			nextActions: ["approve proposals"],
+			requiredActions: ["Review skill improvement proposals."],
+			allowedToProceed: false,
+			advisoryOnly: true,
+			safeNotes: ["No modifiqué skills reales, .agents ni .atl."],
+		}),
 		skillDraftReview: () => {
 			throw new Error(UNUSED);
 		},
@@ -998,6 +1013,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_source_skill_candidates_review"),
 	);
+	assert.ok(tools.some((tool) => tool.name === "idu_skill_draft_from_lessons"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
@@ -1014,7 +1030,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 53);
+	assert.equal(tools.length, 54);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -1958,6 +1974,63 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		(continuation.data.agentLabPolicy as { execution: string }).execution,
 		"orchestrator_explicit_call_only",
 	);
+
+	const continuationWithRequestRuntime = fakeRuntime();
+	continuationWithRequestRuntime.createTask(
+		"bug",
+		"mejorar arranque autónomo con siguiente tarea segura",
+	);
+	const continuationWithRequest = await callIduMcpTool(
+		"idu_continuation_proposal",
+		{
+			request: "seguir tarea aprobada de arranque autónomo",
+			autonomyWindowMinutes: 120,
+			maxScope: "medium",
+		},
+		{
+			runtimeFactory: () => continuationWithRequestRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(continuationWithRequest.ok, true);
+	assert.equal(continuationWithRequest.data.decision, "continue_autonomously");
+	assert.equal(continuationWithRequest.data.allowedToProceed, true);
+	assert.equal(
+		(continuationWithRequest.data.candidateAction as { origin: string }).origin,
+		"queue",
+	);
+	assert.match(
+		String(
+			(continuationWithRequest.data.candidateAction as { title: string }).title,
+		),
+		/arranque autónomo/u,
+	);
+	assert.equal(
+		(
+			continuationWithRequest.data.queueProgress as {
+				selectedTaskGuardStatus: string;
+			}
+		).selectedTaskGuardStatus,
+		"clear",
+	);
+	assert.equal(
+		(
+			continuationWithRequest.data.planAlignment as { withinObjective: boolean }
+		).withinObjective,
+		true,
+	);
+	assert.doesNotMatch(
+		(
+			continuationWithRequest.data.planAlignment as { blockers: string[] }
+		).blockers.join("\n"),
+		/tarea de cola aprobada/iu,
+	);
+	assert.equal(
+		(
+			continuationWithRequest.data.decisionEnvelope as DecisionEnvelope
+		).allowedToProceed,
+		true,
+	);
 	assert.equal(
 		(continuation.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
 		true,
@@ -2622,6 +2695,68 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 	assert.doesNotMatch(serialized, /draftTargetPath/u);
 });
 
+test("idu_skill_draft_from_lessons creates advisory learning artifacts", async () => {
+	const runtime = fakeRuntime();
+	runtime.skillDraftFromLessons = (options = {}) => ({
+		mode: options.mode ?? "proposal-only",
+		selector: options.selector ?? "semantic-compaction-draft.json",
+		semanticDraftPath: "semantic-compaction-draft.json",
+		proposalsPath: "skill-improvement-proposals.json",
+		createdProposals: [
+			{
+				id: "skill-improvement-001",
+				type: "create_skill",
+				skillName: "ci-hermetic-testing",
+				title: "Create CI hermetic testing skill",
+				description: "Capture failure lessons.",
+				evidence: ["CI failed without local .env"],
+				sourceDraftPath: "semantic-compaction-draft.json",
+				riskLevel: "medium",
+				expectedBenefit: ["quality", "safety"],
+				requiresHumanApproval: true,
+				suggestedAction: "approve_for_agent_review",
+				status: "proposed",
+				createdAt: "2026-06-04T12:00:00.000Z",
+			},
+		],
+		createdDrafts: [],
+		omittedProposals: [],
+		nextActions: ["Approve a proposal before draft generation."],
+		requiredActions: ["Review skill improvement proposals."],
+		allowedToProceed: false,
+		advisoryOnly: true,
+		safeNotes: [
+			"No modifiqué skills reales, .agents ni .atl.",
+			"No ejecuté AgentLabs automáticamente.",
+		],
+	});
+	const result = await callIduMcpTool(
+		"idu_skill_draft_from_lessons",
+		{ mode: "proposal-only" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => registered(),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const data = result.data as {
+		result: {
+			mode: string;
+			createdProposals: unknown[];
+			createdDrafts: unknown[];
+		};
+		decisionEnvelope: { allowedToProceed: boolean; requiresHuman: boolean };
+	};
+	assert.equal(data.result.mode, "proposal-only");
+	assert.equal(data.result.createdProposals.length, 1);
+	assert.equal(data.result.createdDrafts.length, 0);
+	assert.equal(data.decisionEnvelope.allowedToProceed, false);
+	assert.equal(data.decisionEnvelope.requiresHuman, true);
+	assert.match(result.safeNotes.join("\n"), /No modifiqué skills reales/u);
+	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/u);
+});
+
 test("idu_context_pruning_advisory is read-only and advisory-only", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-context-pruning-mcp-"));
 	try {
@@ -3182,13 +3317,44 @@ test("idu_start does not enroll unregistered projects and activates registered p
 		/idu_project_enroll/u,
 	);
 
+	let startupHookCalls = 0;
+	const runtime = fakeRuntime();
+	runtime.supervisorOnIduActivation = () => {
+		startupHookCalls += 1;
+		return {
+			status: "completed",
+			trigger: "on_idu_activation",
+			projectId: runtime.projectId,
+			bypassedThrottle: false,
+			throttleStatePath: "reports/idu-supervisor-hook-state.json",
+			summary: "Supervisor startup check completed.",
+			safety: {
+				agentLabsExecuted: false,
+				rulesApplied: false,
+				memoryDeleted: false,
+				projectCoreModified: false,
+			},
+		};
+	};
 	const registeredStart = await callIduMcpTool(
 		"idu_start",
 		{ projectPath: "C:/projects/sistema" },
-		{ projectResolver: () => registered(), runtimeFactory: factory() },
+		{ projectResolver: () => registered(), runtimeFactory: () => runtime },
 	);
 	assert.equal(registeredStart.ok, true);
 	assert.equal(registeredStart.data.active, true);
+	assert.equal(startupHookCalls, 1);
+	assert.deepEqual(registeredStart.data.supervisorStartup, {
+		status: "completed",
+		trigger: "on_idu_activation",
+		summary: "Supervisor startup check completed.",
+		safety: {
+			agentLabsExecuted: false,
+			rulesApplied: false,
+			memoryDeleted: false,
+			projectCoreModified: false,
+		},
+	});
 });
 
 test("idu_activate remains activate-only and does not bootstrap unregistered projects", async () => {
