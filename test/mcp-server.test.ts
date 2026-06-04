@@ -57,6 +57,7 @@ import type {
 	SourceLibraryMutationResult,
 	SourceLibraryStatus,
 } from "../src/source-library.js";
+import type { ExternalIntelligenceReport } from "../src/external-intelligence.js";
 import type {
 	SourceSkillCandidateCreationResult,
 	SourceSkillCandidateReview,
@@ -936,7 +937,10 @@ test("mcp server lists Idu-pi tools", async () => {
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_context_pruning_advisory"));
-	assert.equal(tools.length, 48);
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_external_intelligence_report"),
+	);
+	assert.equal(tools.length, 49);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -1982,6 +1986,87 @@ test("idu_context_pruning_advisory is read-only and advisory-only", async () => 
 		);
 		assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
 		assert.match(result.safeNotes.join("\n"), /No promoví contratos/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_external_intelligence_report is allowlisted and advisory-only", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-external-intelligence-mcp-"));
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		mkdirSync(projectPath, { recursive: true });
+		const runtime = fakeRuntime(projectPath);
+		runtime.workspaceRoot = stateRoot;
+		const result = await callIduMcpTool(
+			"idu_external_intelligence_report",
+			{ sourceIds: ["npm-advisories"] },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered(projectPath),
+					stateRoot,
+				}),
+			},
+		);
+
+		assert.equal(result.ok, true);
+		const report = result.data.report as ExternalIntelligenceReport;
+		assert.equal(report.mode, "advisory_only");
+		assert.equal(report.stateRootOnly, true);
+		assert.equal(report.rawContentStored, false);
+		assert.equal(report.autoDependencyUpdatesAllowed, false);
+		assert.equal(report.agentLabAutoRunAllowed, false);
+		assert.equal(report.remoteAnalyticsAllowed, false);
+		assert.equal(report.contractPromotionAllowed, false);
+		assert.equal(report.sourcesQueried[0]?.status, "skipped");
+		assert.equal(
+			(result.data.decisionEnvelope as DecisionEnvelope).authority,
+			"advisory",
+		);
+		assert.equal(
+			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+			false,
+		);
+		const paths = result.data.paths as {
+			currentPath: string;
+			historyPath: string;
+		};
+		assert.ok(paths.currentPath.startsWith(stateRoot));
+		assert.ok(paths.historyPath.startsWith(stateRoot));
+		assert.equal(existsSync(paths.currentPath), true);
+		const serialized = JSON.stringify(result);
+		assert.equal(serialized.includes("RAW"), false);
+		assert.match(result.safeNotes.join("\n"), /allowlist/u);
+		assert.match(result.safeNotes.join("\n"), /No actualicé dependencias/u);
+		assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_external_intelligence_report refuses workspace fallback without stateRoot", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-external-intelligence-no-state-"));
+	try {
+		const projectPath = join(root, "project");
+		mkdirSync(projectPath, { recursive: true });
+		const runtime = fakeRuntime(projectPath);
+		const result = await callIduMcpTool(
+			"idu_external_intelligence_report",
+			{ sourceIds: ["npm-advisories"] },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => registered(projectPath),
+			},
+		);
+
+		assert.equal(result.ok, false);
+		assert.equal(result.errors.includes("missing_state_root"), true);
+		assert.equal(result.data.stateRootRequired, true);
+		assert.equal(result.data.workspaceFallbackAllowed, false);
+		assert.equal(existsSync(join(projectPath, "reports")), false);
+		assert.match(result.safeNotes.join("\n"), /no usa workspaceRoot como fallback/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

@@ -300,6 +300,8 @@ La compactación reduce ruido y prepara decisiones. No borra memoria ni aplica r
 
 `context-pruning-advisory` agrega una vista read-only de deuda semántica: context bloat desde `context-quality-events.jsonl`, evidencia stale/missing de Source Library, digests faltantes/lectores bibliotecarios requeridos, planes/specs históricos y ruido de artefactos. Devuelve sólo señales, conteos, ids, rutas y metadata; no borra, no archiva fuentes, no refactoriza, no ejecuta AgentLabs y no promueve/degrada contratos.
 
+`external-intelligence` agrega el primer loop controlado del Bibliotecario externo. Consulta sólo source IDs exactos/allowlist (`nodejs-releases`, `nextjs-releases`, `npm-advisories`), normaliza señales de ecosistema/seguridad/releases y escribe reportes bajo `stateRoot/reports/external-intelligence`. No acepta URLs arbitrarias, no guarda cuerpos crudos/headers/env/prompts/docs, no actualiza dependencias, no ejecuta AgentLabs, no promueve contratos y marca fuentes sin endpoint estable como `skipped` con limitación explícita.
+
 ## Improvement proposals
 
 Módulos:
@@ -360,6 +362,7 @@ Garantías:
 - eventos locales de efectividad en `reports/agentlab-effectiveness-events.jsonl` para contar requests, runs, status, estados (`completed`, `partial`, `timed_out`, `stale`, `failed`, `security_violation`), hallazgos por severidad y completitud de evidencia sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota;
 - eventos locales de calidad de contexto en `reports/context-quality-events.jsonl` derivados de `idu_supervisor_context_pack`, con ratings de compacto/relevante/ruido/completo y omisiones agregadas por razón, sin guardar prompts/docs crudos ni medir tokens/costo/% contexto;
 - reporte MCP read-only `idu_context_pruning_advisory` para deuda semántica/context pruning, sin guardar prompts/docs crudos, sin analytics remota, sin auto-delete y sin promoción/democión de contratos;
+- reporte MCP `idu_external_intelligence_report` para inteligencia externa allowlist/stateRoot-only, sin web libre, sin raw bodies/docs, sin updates automáticos, sin AgentLab auto-run y sin promoción de contratos;
 - consolidación read-only.
 
 ## AgentRouter y Pi RPC

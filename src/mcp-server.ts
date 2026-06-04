@@ -41,6 +41,10 @@ import {
 } from "./context-budget.js";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
+import {
+	buildExternalIntelligenceReport,
+	writeExternalIntelligenceReport,
+} from "./external-intelligence.js";
 import { inferTaskTemplateKind } from "./task-templates.js";
 import {
 	activateIduSession,
@@ -110,6 +114,7 @@ export type IduMcpToolName =
 	| "idu_supervisor_cron_plan"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
+	| "idu_external_intelligence_report"
 	| "idu_task"
 	| "idu_queue_detail"
 	| "idu_semantic_audit_status"
@@ -424,6 +429,16 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"idu_context_pruning_advisory",
 		"Devuelve reporte advisory-only de deuda semántica/context pruning; no borra, no archiva y no promueve contratos.",
 		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_external_intelligence_report",
+		"Consulta fuentes externas exactas/allowlist para inteligencia de ecosistema; guarda reporte stateRoot-only, advisory-only, sin updates ni AgentLabs.",
+		{
+			sourceIds: optionalStringArray(
+				"IDs exactos allowlist: nodejs-releases, nextjs-releases, npm-advisories. Default: todos.",
+			),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
@@ -2199,6 +2214,89 @@ async function dispatchTool(
 					"Reporte de deuda semántica advisory-only: no borré archivos, no archivé fuentes y no apliqué refactors.",
 					"No promoví contratos, no degradé contratos, no ejecuté AgentLabs y no escribí analytics remota.",
 					"No guardé prompts ni documentos crudos; sólo devolví conteos, ids, rutas y metadatos derivados.",
+				],
+			});
+		}
+		case "idu_external_intelligence_report": {
+			if (!resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary:
+						"External intelligence requires registered Idu-pi stateRoot; refusing workspace fallback.",
+					data: {
+						stateRootRequired: true,
+						workspaceFallbackAllowed: false,
+					},
+					safeNotes: [
+						...resolution.safeNotes,
+						"No escribí reporte externo porque falta stateRoot registrado.",
+						"External intelligence escribe sólo bajo stateRoot/reports; no usa workspaceRoot como fallback.",
+					],
+					errors: ["missing_state_root"],
+				});
+			}
+			const report = await buildExternalIntelligenceReport({
+				projectId: runtime.projectId,
+				sourceIds: stringListArg(args, "sourceIds"),
+			});
+			const paths = writeExternalIntelligenceReport({
+				stateRoot: resolution.stateRoot,
+				report,
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: report.signals.length ? "warn" : "allow",
+				severity: report.signals.some(
+					(signal) =>
+						signal.severity === "critical" || signal.severity === "high",
+				)
+					? "warning"
+					: "info",
+				confidence: 0.78,
+				summary: `External intelligence signals: ${report.signals.length}`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: report.signals.map((signal) => signal.evidenceRef),
+				nextActions: [
+					"Review external signals before feasibility, dependency, security, or update decisions.",
+					"Do not update dependencies, promote contracts, or run AgentLabs from this report alone.",
+				],
+				requiredActions: report.signals.length
+					? [
+							{
+								id: "external-intelligence-orchestrator-review",
+								owner: "orchestrator",
+								action: "review_external_intelligence_before_plan_decision",
+								reason:
+									"External ecosystem signals are advisory and require orchestrator review before any plan/dependency decision.",
+								blocking: true,
+							},
+						]
+					: [],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `External intelligence signals: ${report.signals.length}`,
+				data: {
+					decisionEnvelope,
+					report,
+					paths,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"External intelligence allowlist-only: no acepté URLs arbitrarias ni hice búsqueda web libre.",
+					"Guardé sólo reporte normalizado bajo stateRoot/reports; no guardé cuerpos crudos, prompts, docs, headers ni env.",
+					"No actualicé dependencias, no promoví contratos y no aprobé cambios por esta señal.",
+					"No ejecuté AgentLabs ni analytics remota.",
 				],
 			});
 		}
