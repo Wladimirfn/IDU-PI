@@ -145,6 +145,8 @@ Para proyectos con persistencia, el Plan Maestro debe expresar gobernanza de dat
 
 `idu_bibliotecario_proactive_advisory` compone cuatro superficies coordinadas sin implementar ni escribir: Plan Librarian, Source/Ecosystem, Skill Optimization y Failure/Semantic Debt. Devuelve refs compactas, límites y un `resourceContextCheck` para decidir si falta evidencia, si conviene pedir humano/AgentLab audit-only o si hay bloat antes de cargar más contexto. No lee chunks/documentos crudos, no consulta web/live, no crea reportes, no promueve contratos ni skills y no ejecuta AgentLabs.
 
+`idu_skill_draft_from_lessons` implementa el loop seguro de aprendizaje de skills desde fallos/lecciones. En `proposal-only` crea o consume un semantic compaction draft y genera propuestas de mejora de skills; en `approved-only` consume propuestas ya aprobadas y genera drafts revisables. Siempre es reports-only: no instala skills, no escribe `.agents`/`.atl`, no ejecuta AgentLabs automáticamente y devuelve `allowedToProceed:false` con acciones requeridas para revisión humana/orquestador.
+
 `idu_postflight` separa cambios funcionales de ruido operativo: ignora artefactos locales de subagentes, informa `ignoredFiles`, clasifica `observedChangeMode` y normaliza contratos observados (`data`, `security`, `frontend`, `agent`, `docs`, `tests`). Esto reduce falsos positivos en loops no-op/docs/stateRoot sin degradar blockers reales como `.env` o runtime DB/JSONL trackeado.
 
 Herramientas mínimas:
@@ -198,6 +200,7 @@ Herramientas mínimas:
 | `idu_source_required_actions` | Lista fuentes no leídas que obligan al orquestador a despachar un lector bibliotecario/document-reader. |
 | `idu_source_skill_candidates_create` | Genera reporte JSON de candidatas de skill desde digests; reports-only, no instala skills, no escribe `.agents`/`.atl`, tokens/cost `no medido`. |
 | `idu_source_skill_candidates_review` | Revisa un reporte de candidatas de skill y valida superficie advisory/reports-only. |
+| `idu_skill_draft_from_lessons` | Loop seguro de aprendizaje desde fallos/lecciones: `proposal-only` crea propuestas y `approved-only` genera drafts revisables desde propuestas aprobadas; no instala skills, no toca `.agents`/`.atl`, no ejecuta AgentLabs y exige aprobación humana/orquestador. |
 | `idu_source_refresh` | Recalcula hashes/estado de fuentes; no cambia contratos, Project Core, Constitution, flows, skills ni AgentLabs. |
 | `idu_agentlab_request_create` | Crea solicitud formal AgentLab; no ejecuta labs automáticamente. `source` acepta `postflight`, `master-plan`, `skill-draft`, `external-source-intelligence` y `specialist-audit-plan`; devuelve `data.workloadEnvelope` advisory-only con carga/presupuesto estimados. Para `external-source-intelligence`, usa refs locales de Source Library/digests cuando existen y no hace web/live fetch. Para `specialist-audit-plan`, el orquestador pasa `specialties` explícitas y recibe `plan.specialtyWorkloadEnvelopes` más `explicitRunRequirement`; la ejecución sigue siendo sólo `idu_agentlab_review_run`. |
 | `idu_agentlab_review_run` | Ejecuta revisión AgentLab explícita con sandbox/clone guard; devuelve `data.workloadEnvelope` con estado agregado (`completed`, `partial`, `timed_out`, `failed`, etc.). |

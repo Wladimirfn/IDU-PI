@@ -1411,6 +1411,20 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"Sólo registré decisión humana. No modifiqué skills.",
 			].join("\n"),
 		skillDraftsCreate: fakeSkillDraftCreation,
+		skillDraftFromLessons: () => ({
+			mode: "proposal-only",
+			selector: "latest",
+			semanticDraftPath: "semantic-compaction-draft.json",
+			proposalsPath: "skill-improvement-proposals.json",
+			createdProposals: [],
+			createdDrafts: [],
+			omittedProposals: [],
+			nextActions: ["approve proposals"],
+			requiredActions: ["Review skill improvement proposals."],
+			allowedToProceed: false,
+			advisoryOnly: true,
+			safeNotes: ["No modifiqué skills reales, .agents ni .atl."],
+		}),
 		formatSkillDraftCreationResult: (result) =>
 			[
 				"Skill Drafts Created",
@@ -2692,10 +2706,7 @@ test("CLI queue helpers aceptan prefijo de ID", async () => {
 		assert.equal(completed?.completionEvidence, "commit abc; tests green");
 		assert.equal(completed?.guardStatus, undefined);
 		assert.equal(queue.getTask(task.id)?.status, "done");
-		assert.equal(
-			rejectStructuredTaskById(queue, "missing-prefix"),
-			undefined,
-		);
+		assert.equal(rejectStructuredTaskById(queue, "missing-prefix"), undefined);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

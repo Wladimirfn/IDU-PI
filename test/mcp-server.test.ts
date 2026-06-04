@@ -665,6 +665,20 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			throw new Error(UNUSED);
 		},
 		formatSkillDraftCreationResult: () => UNUSED,
+		skillDraftFromLessons: () => ({
+			mode: "proposal-only",
+			selector: "latest",
+			semanticDraftPath: "semantic-compaction-draft.json",
+			proposalsPath: "skill-improvement-proposals.json",
+			createdProposals: [],
+			createdDrafts: [],
+			omittedProposals: [],
+			nextActions: ["approve proposals"],
+			requiredActions: ["Review skill improvement proposals."],
+			allowedToProceed: false,
+			advisoryOnly: true,
+			safeNotes: ["No modifiqué skills reales, .agents ni .atl."],
+		}),
 		skillDraftReview: () => {
 			throw new Error(UNUSED);
 		},
@@ -998,6 +1012,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_source_skill_candidates_review"),
 	);
+	assert.ok(tools.some((tool) => tool.name === "idu_skill_draft_from_lessons"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
@@ -1014,7 +1029,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 53);
+	assert.equal(tools.length, 54);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2620,6 +2635,68 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 	assert.doesNotMatch(serialized, /RAW DRAFT PREVIEW/u);
 	assert.doesNotMatch(serialized, /draftPreview/u);
 	assert.doesNotMatch(serialized, /draftTargetPath/u);
+});
+
+test("idu_skill_draft_from_lessons creates advisory learning artifacts", async () => {
+	const runtime = fakeRuntime();
+	runtime.skillDraftFromLessons = (options = {}) => ({
+		mode: options.mode ?? "proposal-only",
+		selector: options.selector ?? "semantic-compaction-draft.json",
+		semanticDraftPath: "semantic-compaction-draft.json",
+		proposalsPath: "skill-improvement-proposals.json",
+		createdProposals: [
+			{
+				id: "skill-improvement-001",
+				type: "create_skill",
+				skillName: "ci-hermetic-testing",
+				title: "Create CI hermetic testing skill",
+				description: "Capture failure lessons.",
+				evidence: ["CI failed without local .env"],
+				sourceDraftPath: "semantic-compaction-draft.json",
+				riskLevel: "medium",
+				expectedBenefit: ["quality", "safety"],
+				requiresHumanApproval: true,
+				suggestedAction: "approve_for_agent_review",
+				status: "proposed",
+				createdAt: "2026-06-04T12:00:00.000Z",
+			},
+		],
+		createdDrafts: [],
+		omittedProposals: [],
+		nextActions: ["Approve a proposal before draft generation."],
+		requiredActions: ["Review skill improvement proposals."],
+		allowedToProceed: false,
+		advisoryOnly: true,
+		safeNotes: [
+			"No modifiqué skills reales, .agents ni .atl.",
+			"No ejecuté AgentLabs automáticamente.",
+		],
+	});
+	const result = await callIduMcpTool(
+		"idu_skill_draft_from_lessons",
+		{ mode: "proposal-only" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => registered(),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const data = result.data as {
+		result: {
+			mode: string;
+			createdProposals: unknown[];
+			createdDrafts: unknown[];
+		};
+		decisionEnvelope: { allowedToProceed: boolean; requiresHuman: boolean };
+	};
+	assert.equal(data.result.mode, "proposal-only");
+	assert.equal(data.result.createdProposals.length, 1);
+	assert.equal(data.result.createdDrafts.length, 0);
+	assert.equal(data.decisionEnvelope.allowedToProceed, false);
+	assert.equal(data.decisionEnvelope.requiresHuman, true);
+	assert.match(result.safeNotes.join("\n"), /No modifiqué skills reales/u);
+	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/u);
 });
 
 test("idu_context_pruning_advisory is read-only and advisory-only", async () => {

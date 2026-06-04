@@ -299,6 +299,11 @@ import {
 	type SkillDraftReview,
 } from "./skill-drafts.js";
 import {
+	createSkillDraftFromLessons,
+	type SkillDraftFromLessonsMode,
+	type SkillDraftFromLessonsResult,
+} from "./skill-draft-from-lessons.js";
+import {
 	applySupervisorLearningRules,
 	disableSupervisorLearningRule,
 	enableSupervisorLearningRule,
@@ -587,6 +592,10 @@ export type CliRuntime = {
 	) => string;
 	skillDraftsCreate: (pathOrLatest: string) => SkillDraftCreationResult;
 	formatSkillDraftCreationResult: (result: SkillDraftCreationResult) => string;
+	skillDraftFromLessons: (options?: {
+		mode?: SkillDraftFromLessonsMode;
+		selector?: string;
+	}) => SkillDraftFromLessonsResult;
 	skillDraftReview: (pathOrLatest: string) => SkillDraftReview;
 	formatSkillDraftReview: (review: SkillDraftReview) => string;
 	agentLabRequestCreate: (
@@ -1131,6 +1140,26 @@ export function createCliRuntime(
 		skillDraftsCreate: (pathOrLatest) =>
 			createSkillDraftsFromApprovedProposals(pathOrLatest, reportsPath),
 		formatSkillDraftCreationResult,
+		skillDraftFromLessons: (options = {}) =>
+			createSkillDraftFromLessons({
+				mode: options.mode,
+				selector: options.selector,
+				reportsPath,
+				semanticCompactionInput: {
+					projectId: activeProject.id,
+					dbPath: labDbPath,
+					reportsPath,
+					workspaceRoot: runtimeWorkspaceRoot,
+					...semanticCompactionProjectContext(activeProject.path),
+				},
+				createSkillImprovementProposals: (pathOrLatest) =>
+					createSkillImprovementProposals(pathOrLatest, reportsPath, {
+						workspaceRoot: activeProject.path,
+						dbPath: labDbPath,
+					}),
+				createSkillDraftsFromApprovedProposals: (pathOrLatest) =>
+					createSkillDraftsFromApprovedProposals(pathOrLatest, reportsPath),
+			}),
 		skillDraftReview: (pathOrLatest) =>
 			reviewSkillDraft(pathOrLatest, reportsPath),
 		formatSkillDraftReview,
