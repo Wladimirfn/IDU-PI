@@ -1213,6 +1213,36 @@ test("idu_status works with mocked active project", async () => {
 	assert.equal(result.projectPath, "C:/projects/active");
 });
 
+test("MCP usage recording is visible when tool call resolves", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-mcp-usage-visible-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		const runtime = fakeRuntime("C:/projects/sistema");
+		await callIduMcpTool(
+			"idu_status",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({
+					...registered("C:/projects/sistema"),
+					stateRoot,
+				}),
+			},
+		);
+
+		const usagePath = join(stateRoot, "reports", "idu-usage-events.jsonl");
+		assert.equal(existsSync(usagePath), true);
+		const event = JSON.parse(readFileSync(usagePath, "utf8").trim()) as {
+			surface?: string;
+			action?: string;
+		};
+		assert.equal(event.surface, "mcp");
+		assert.equal(event.action, "idu_status");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("MCP usage recording does not write outside stateRoot", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-mcp-usage-"));
 	try {

@@ -3040,6 +3040,7 @@ type SelectSearchableMenuInput = {
 
 type SelectSearchableMenuOutput = {
 	write: (value: string) => unknown;
+	rows?: number;
 };
 
 type SelectSearchableMenuDeps = {
@@ -3058,6 +3059,7 @@ async function selectSearchableMenu(
 	let selected = 0;
 	let query = "";
 	let refreshTimer: unknown;
+	let contentOffset = 0;
 	const input = deps.input ?? process.stdin;
 	const output = deps.output ?? process.stdout;
 	const startInterval: (callback: () => void, intervalMs: number) => unknown =
@@ -3082,12 +3084,33 @@ async function selectSearchableMenu(
 		const visible = filteredOptions();
 		selected = Math.min(selected, Math.max(0, visible.length - 1));
 		const pageTitle = title || "Menú principal";
+		const allContentLines = settings.content
+			? contentLines(settings.content, width)
+			: [];
+		const terminalRows = Math.max(10, output.rows ?? process.stdout.rows ?? 30);
+		const statusRows = settings.status ? 10 : 0;
+		const searchRowsCount = settings.search ? 1 : 0;
+		const fixedRows = statusRows + searchRowsCount + visible.length + 6;
+		const maxContentRows = Math.max(3, terminalRows - fixedRows);
+		const maxContentOffset = Math.max(0, allContentLines.length - maxContentRows);
+		contentOffset = Math.min(contentOffset, maxContentOffset);
+		const visibleContentLines = allContentLines.slice(
+			contentOffset,
+			contentOffset + maxContentRows,
+		);
 		const contentRows = settings.content
 			? [
 					midBorder(width),
-					...contentLines(settings.content, width).map((line) =>
-						panelLine(line, width),
-					),
+					...(allContentLines.length > maxContentRows
+						? [
+								panelLine(
+									`contenido ${contentOffset + 1}-${contentOffset + visibleContentLines.length}/${allContentLines.length} · PgUp/PgDn desplazar`,
+									width,
+									ANSI_DIM,
+								),
+							]
+						: []),
+					...visibleContentLines.map((line) => panelLine(line, width)),
 				]
 			: [];
 		const searchRows = settings.search
@@ -3108,7 +3131,9 @@ async function selectSearchableMenu(
 				settings.help ??
 					(settings.search
 						? "↑/↓ navegar · escribir filtra · Enter elegir · Esc volver/salir"
-						: "↑/↓ navegar · Enter elegir · Esc/q salir"),
+						: settings.content
+							? "↑/↓ opciones · PgUp/PgDn contenido · Enter elegir · Esc/q salir"
+							: "↑/↓ navegar · Enter elegir · Esc/q salir"),
 				width,
 				ANSI_DIM,
 			),
@@ -3148,6 +3173,35 @@ async function selectSearchableMenu(
 		return await new Promise<string>((resolve) => {
 			const onKeypress = (chunk: string, key: { name?: string }) => {
 				const visible = filteredOptions();
+				const scrollContent = (direction: 1 | -1) => {
+					if (!settings.content) return false;
+					const totalLines = contentLines(settings.content, ANSI_PANEL_WIDTH).length;
+					const terminalRows = Math.max(
+						10,
+						output.rows ?? process.stdout.rows ?? 30,
+					);
+					const statusRows = settings.status ? 10 : 0;
+					const searchRowsCount = settings.search ? 1 : 0;
+					const fixedRows = statusRows + searchRowsCount + visible.length + 6;
+					const maxContentRows = Math.max(3, terminalRows - fixedRows);
+					const maxContentOffset = Math.max(0, totalLines - maxContentRows);
+					if (maxContentOffset === 0) return false;
+					contentOffset = Math.max(
+						0,
+						Math.min(
+							maxContentOffset,
+							contentOffset + direction * maxContentRows,
+						),
+					);
+					render();
+					return true;
+				};
+				if (key.name === "pagedown") {
+					if (scrollContent(1)) return;
+				}
+				if (key.name === "pageup") {
+					if (scrollContent(-1)) return;
+				}
 				if (key.name === "up") {
 					if (visible.length)
 						selected = (selected - 1 + visible.length) % visible.length;

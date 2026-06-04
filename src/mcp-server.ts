@@ -62,7 +62,7 @@ import {
 	slugifyProjectId,
 } from "./projects.js";
 import type { StructuredTask } from "./structured-task-queue.js";
-import { recordIduUsageEventDeferred } from "./usage-events.js";
+import { recordIduUsageEvent } from "./usage-events.js";
 import {
 	agentLabEffectivenessEventFromRequestPlan,
 	agentLabEffectivenessEventFromRunResult,
@@ -773,17 +773,17 @@ function booleanValue(value: unknown): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined;
 }
 
-function recordMcpUsage(
+async function recordMcpUsage(
 	runtime: CliRuntime,
 	result: IduMcpToolResult,
 	durationMs: number,
 	stateRoot?: string,
-): void {
+): Promise<void> {
 	if (!stateRoot) return;
 	const decisionEnvelope = isRecord(result.data.decisionEnvelope)
 		? result.data.decisionEnvelope
 		: undefined;
-	recordIduUsageEventDeferred(stateRoot, {
+	await recordIduUsageEvent(stateRoot, {
 		projectId: runtime.projectId,
 		surface: "mcp",
 		action: result.tool,
@@ -923,7 +923,7 @@ export async function callIduMcpTool(
 		);
 		const startedAt = Date.now();
 		const result = await dispatchTool(name, args, runtime, resolution);
-		recordMcpUsage(
+		await recordMcpUsage(
 			runtime,
 			result,
 			Date.now() - startedAt,

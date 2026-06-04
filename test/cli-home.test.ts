@@ -1173,6 +1173,50 @@ test("project panel auto-refresh is scoped and cleaned up", () => {
 	assert.doesNotMatch(menuBlock, /watchFile|fs\.watch/u);
 });
 
+test("interactive project panel content scrolls independently from actions", async () => {
+	const input = new EventEmitter() as EventEmitter & {
+		isTTY?: boolean;
+		resume: () => void;
+		setRawMode: (enabled: boolean) => void;
+	};
+	input.isTTY = false;
+	input.resume = () => undefined;
+	input.setRawMode = () => undefined;
+	const writes: string[] = [];
+	const output = {
+		rows: 14,
+		write: (value: string) => {
+			writes.push(value);
+		},
+	};
+	const content = Array.from({ length: 30 }, (_, index) => `line-${index + 1}`).join(
+		"\n",
+	);
+	const menuPromise = __testSelectSearchableMenu(
+		"Proyecto actual",
+		[
+			{ label: "↻ Actualizar métricas", value: "refresh" },
+			{ label: "← Volver", value: "back" },
+			{ label: "Exit", value: "exit" },
+		],
+		{ content },
+		{ input, output },
+	);
+
+	assert.equal(writes.some((entry) => entry.includes("line-1")), true);
+	assert.equal(writes.some((entry) => entry.includes("line-30")), false);
+	for (let index = 0; index < 10; index += 1) {
+		input.emit("keypress", "", { name: "pagedown" });
+	}
+	assert.equal(writes.some((entry) => entry.includes("line-30")), true);
+	assert.equal(
+		writes.some((entry) => entry.includes("contenido ") && entry.includes("/30")),
+		true,
+	);
+	input.emit("keypress", "q", { name: "q" });
+	assert.equal(await menuPromise, "exit");
+});
+
 test("interactive project panel auto-refresh re-renders changed content and clears timer on exit", async () => {
 	const input = new EventEmitter() as EventEmitter & {
 		isTTY?: boolean;
