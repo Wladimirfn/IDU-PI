@@ -22,6 +22,22 @@ import {
 	type IduMcpProjectResolution,
 	type IduMcpRuntimeFactory,
 } from "../src/mcp-server.js";
+
+const hermeticMcpRoot = mkdtempSync(join(tmpdir(), "idu-mcp-hermetic-"));
+const hermeticProjectPath = join(hermeticMcpRoot, "project");
+const hermeticWorkspaceRoot = join(hermeticMcpRoot, "workspace");
+mkdirSync(hermeticProjectPath, { recursive: true });
+mkdirSync(hermeticWorkspaceRoot, { recursive: true });
+process.env.DEFAULT_CWD = hermeticProjectPath;
+process.env.ALLOWED_ROOTS = hermeticMcpRoot;
+process.env.AGENT_WORKSPACE_ROOT = hermeticWorkspaceRoot;
+process.env.IDU_PI_REGISTRY_PATH = join(
+	hermeticMcpRoot,
+	"registry",
+	"projects.json",
+);
+delete process.env.TELEGRAM_BOT_TOKEN;
+delete process.env.ALLOWED_USER_ID;
 import type { CliRuntime } from "../src/cli.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
@@ -80,7 +96,26 @@ function fakeSourceSkillCandidateCreation(): SourceSkillCandidateCreationResult 
 			requiresHumanApproval: true,
 			tokensCostMeasured: false,
 			efficiencyEvidence: "no medido",
-			candidates: [],
+			candidates: [
+				{
+					candidateId: "skill-candidate-001",
+					title: "Robust manual reader",
+					suggestedSkillName: "robust-manual-reader",
+					purpose: "Use source evidence without leaking raw manual text.",
+					triggers: ["manual robusto"],
+					sourceIds: ["source-demo-manual-abc123"],
+					chunkIds: ["source-demo-manual-abc123-chunk-001"],
+					evidenceRefs: ["source:source-demo-manual-abc123"],
+					draftTargetPath: ".agents/skills/robust-manual-reader/SKILL.md",
+					draftPreview: "RAW DRAFT PREVIEW manual robusto should not leak",
+					limitations: ["proposal only"],
+					duplicateHints: [],
+					requiresHumanApproval: true,
+					contractPromotionAllowed: false,
+					tokensCostMeasured: false,
+					efficiencyEvidence: "no medido",
+				},
+			],
 			limitations: [],
 			requiredActions: [],
 		},
@@ -871,11 +906,40 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		queueDetail: () => JSON.stringify(tasks),
 		listTasks: () => tasks,
 		queueClearStructured: () => 0,
-		queueApprove: () => undefined,
+		queueApprove: (idOrPrefix: string) => {
+			const matches = tasks.filter((candidate) =>
+				candidate.id.startsWith(idOrPrefix),
+			);
+			if (matches.length !== 1) return undefined;
+			const task = matches[0];
+			task.guardStatus = "approved";
+			return task;
+		},
 		queueReject: () => undefined,
-	} satisfies CliRuntime & { listTasks: () => StructuredTask[] };
+		queueComplete: (idOrPrefix: string, evidence: string) => {
+			const matches = tasks.filter((candidate) =>
+				candidate.id.startsWith(idOrPrefix),
+			);
+			if (matches.length !== 1) return undefined;
+			const task = matches[0];
+			task.status = "done";
+			task.completionEvidence = evidence;
+			delete task.guardStatus;
+			delete task.guardRisk;
+			delete task.guardReason;
+			return task;
+		},
+	} satisfies CliRuntime & {
+		listTasks: () => StructuredTask[];
+		queueComplete: (
+			idOrPrefix: string,
+			evidence: string,
+		) => StructuredTask | undefined;
+	};
 	return runtime;
 }
+
+const fakeStateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-fake-state-"));
 
 function registered(
 	projectPath = "C:/projects/sistema",
@@ -884,6 +948,7 @@ function registered(
 		status: "registered_project",
 		projectId: "sistema_de_mantencion",
 		projectPath,
+		stateRoot: fakeStateRoot,
 		safeNotes: [],
 		errors: [],
 	};
@@ -934,6 +999,7 @@ test("mcp server lists Idu-pi tools", async () => {
 		tools.some((tool) => tool.name === "idu_source_skill_candidates_review"),
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
+	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
@@ -945,7 +1011,10 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_source_recommend"),
 	);
-	assert.equal(tools.length, 51);
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
+	);
+	assert.equal(tools.length, 53);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -1212,7 +1281,9 @@ test("idu_supervisor_context_pack records context quality without raw prompt tex
 });
 
 test("idu_supervisor_context_pack compacts README human vision before budgeting", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-readme-diet-"));
+	const projectPath = mkdtempSync(
+		join(tmpdir(), "idu-context-pack-readme-diet-"),
+	);
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1251,7 +1322,9 @@ test("idu_supervisor_context_pack compacts README human vision before budgeting"
 });
 
 test("idu_supervisor_context_pack preserves all priority README section hints", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-readme-priority-"));
+	const projectPath = mkdtempSync(
+		join(tmpdir(), "idu-context-pack-readme-priority-"),
+	);
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1590,9 +1663,10 @@ test("MCP AgentLab tools record local effectiveness events without raw text", as
 });
 
 test("idu_activate and idu_deactivate change session state", async () => {
+	const sessionRoot = mkdtempSync(join(tmpdir(), "idu-mcp-session-"));
 	configureIduSessionStore({
-		workspaceRoot: "C:/idu/workspace",
-		filePath: join(process.cwd(), "dist", "test-session-state.json"),
+		workspaceRoot: sessionRoot,
+		filePath: join(sessionRoot, "test-session-state.json"),
 	});
 	deactivateIduSession("sistema_de_mantencion");
 	const activate = await callIduMcpTool(
@@ -1845,7 +1919,10 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	);
 
 	const continuationRuntime = fakeRuntime();
-	continuationRuntime.createTask("bug", "mejorar MCP con siguiente tarea segura");
+	continuationRuntime.createTask(
+		"bug",
+		"mejorar MCP con siguiente tarea segura",
+	);
 	const continuation = await callIduMcpTool(
 		"idu_continuation_proposal",
 		{ autonomyWindowMinutes: 240, maxScope: "medium" },
@@ -1888,7 +1965,10 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.match(continuation.safeNotes.join("\n"), /no implementa/iu);
 
 	const riskyContinuationRuntime = fakeRuntime();
-	riskyContinuationRuntime.createTask("bug", "arreglar login auth con cambio sensible");
+	riskyContinuationRuntime.createTask(
+		"bug",
+		"arreglar login auth con cambio sensible",
+	);
 	const riskyContinuation = await callIduMcpTool(
 		"idu_continuation_proposal",
 		{ autonomyWindowMinutes: 240, maxScope: "medium" },
@@ -2008,6 +2088,130 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		(taskPackage.data.stopConditions as string[]).some((condition) =>
 			/AgentLab/u.test(condition),
 		),
+	);
+});
+
+test("idu_supervisor_context_pack budgets only embedded compact plan snapshot", async () => {
+	const runtime = fakeRuntime();
+	runtime.masterPlanReview = () =>
+		({
+			current: {},
+			jsonPath: "C:/idu/workspace/projects/sistema/master-plan.json",
+			markdown: "# Plan Maestro approved",
+			revisionAntesDeZarpar: { recommendedAgentLabs: [] },
+			plan: {
+				status: "approved",
+				executiveSummary: "Resumen compacto.",
+				inferredObjective: "Objetivo compacto.",
+				criticalRisks: [],
+				operationalContracts: Array.from({ length: 20 }, (_, index) => ({
+					area: "agent",
+					title: `Contrato ${index}`,
+					rules: [`Regla extensa ${index} ${"x".repeat(900)}`],
+				})),
+				projectFlows: Array.from({ length: 20 }, (_, index) => ({
+					name: `Flujo ${index}`,
+					rules: [`Regla de flujo ${"y".repeat(900)}`],
+				})),
+			},
+		}) as never;
+	const options = {
+		runtimeFactory: () => runtime,
+		projectResolver: () => registered(),
+	};
+
+	const snapshot = await callIduMcpTool("idu_plan_snapshot", {}, options);
+	const snapshotBudget = snapshot.data.contextBudget as ContextBudgetUsage;
+	assert.equal(snapshotBudget.profile, "plan_snapshot");
+	assert.equal(snapshotBudget.truncated, true);
+	assert.ok(
+		snapshotBudget.omitted.some((omission) =>
+			omission.path.startsWith("operationalContracts"),
+		),
+	);
+	assert.ok(
+		snapshotBudget.omitted.some((omission) =>
+			omission.path.startsWith("flows"),
+		),
+	);
+
+	const pack = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "measure compact embedded snapshot", includePlanSnapshot: true },
+		options,
+	);
+	assert.equal(pack.ok, true);
+	assert.equal(
+		(pack.data.planSnapshot as Record<string, unknown>).operationalContracts,
+		undefined,
+	);
+	assert.equal(
+		(pack.data.planSnapshot as Record<string, unknown>).flows,
+		undefined,
+	);
+	const packBudget = pack.data.contextBudget as ContextBudgetUsage;
+	assert.equal(packBudget.profile, "supervisor_context_pack");
+	assert.equal(
+		packBudget.omitted.some((omission) =>
+			omission.path.startsWith("operationalContracts"),
+		),
+		false,
+	);
+	assert.equal(
+		packBudget.omitted.some((omission) => omission.path.startsWith("flows")),
+		false,
+	);
+	assert.equal(
+		packBudget.omitted.some(
+			(omission) => omission.path === "contextBudget.total",
+		),
+		false,
+	);
+});
+
+test("idu_supervisor_context_pack budgets actual embedded plan snapshot size", async () => {
+	const runtime = fakeRuntime();
+	runtime.masterPlanReview = () =>
+		({
+			current: {},
+			jsonPath: "C:/idu/workspace/projects/sistema/master-plan.json",
+			markdown: "# Plan Maestro approved",
+			revisionAntesDeZarpar: { recommendedAgentLabs: [] },
+			plan: {
+				status: "approved",
+				executiveSummary: "Resumen compacto ".repeat(80),
+				inferredObjective: "Objetivo compacto ".repeat(80),
+				criticalRisks: Array.from(
+					{ length: 8 },
+					(_, index) => `Blocker ${index} ${"z".repeat(180)}`,
+				),
+				recommendedNext: Array.from(
+					{ length: 8 },
+					(_, index) => `Next ${index} ${"n".repeat(180)}`,
+				),
+				operationalContracts: [],
+				projectFlows: [],
+			},
+		}) as never;
+	const pack = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{
+			request: "measure huge compact embedded snapshot",
+			includePlanSnapshot: true,
+		},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+
+	assert.equal(pack.ok, true);
+	const serializedPlanSnapshotLength = JSON.stringify(
+		pack.data.planSnapshot,
+	).length;
+	const packBudget = pack.data.contextBudget as ContextBudgetUsage;
+	assert.ok(serializedPlanSnapshotLength > 2_200);
+	assert.ok(packBudget.usedChars >= serializedPlanSnapshotLength);
+	assert.equal(
+		packBudget.omitted.some((omission) => omission.path === "planSnapshot"),
+		false,
 	);
 });
 
@@ -2367,6 +2571,57 @@ test("idu_architectural_pruning_plan is advisory-only", async () => {
 	assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
 });
 
+test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", async () => {
+	const result = await callIduMcpTool(
+		"idu_bibliotecario_proactive_advisory",
+		{
+			request:
+				"plan contracts npm TypeScript repeated failures and skill optimization",
+			domains: ["security", "web"],
+			language: "typescript",
+			framework: "node",
+		},
+		{ runtimeFactory: factory(), projectResolver: () => registered() },
+	);
+
+	assert.equal(result.ok, true);
+	const data = result.data as {
+		decisionEnvelope: DecisionEnvelope;
+		planLibrarian: unknown;
+		sourceEcosystem: unknown;
+		skillOptimization: { skillPromotionAllowed: boolean };
+		failureSemanticDebt: unknown;
+		resourceContextCheck: {
+			rawContentIncluded: boolean;
+			webFetchAllowed: boolean;
+			writesAllowed: boolean;
+			agentLabAutoRunAllowed: boolean;
+			contractPromotionAllowed: boolean;
+			skillPromotionAllowed: boolean;
+		};
+	};
+	assert.equal(data.decisionEnvelope.authority, "advisory");
+	assert.equal(data.decisionEnvelope.allowedToProceed, false);
+	assert.ok(data.planLibrarian);
+	assert.ok(data.sourceEcosystem);
+	assert.ok(data.skillOptimization);
+	assert.ok(data.failureSemanticDebt);
+	assert.ok(data.resourceContextCheck);
+	assert.equal(data.resourceContextCheck.rawContentIncluded, false);
+	assert.equal(data.resourceContextCheck.webFetchAllowed, false);
+	assert.equal(data.resourceContextCheck.writesAllowed, false);
+	assert.equal(data.resourceContextCheck.agentLabAutoRunAllowed, false);
+	assert.equal(data.resourceContextCheck.contractPromotionAllowed, false);
+	assert.equal(data.resourceContextCheck.skillPromotionAllowed, false);
+	assert.equal(data.skillOptimization.skillPromotionAllowed, false);
+	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/iu);
+	const serialized = JSON.stringify(result.data);
+	assert.doesNotMatch(serialized, /manual robusto/u);
+	assert.doesNotMatch(serialized, /RAW DRAFT PREVIEW/u);
+	assert.doesNotMatch(serialized, /draftPreview/u);
+	assert.doesNotMatch(serialized, /draftTargetPath/u);
+});
+
 test("idu_context_pruning_advisory is read-only and advisory-only", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-context-pruning-mcp-"));
 	try {
@@ -2502,7 +2757,13 @@ test("idu_external_intelligence_report refuses workspace fallback without stateR
 			{ sourceIds: ["npm-advisories"] },
 			{
 				runtimeFactory: () => runtime,
-				projectResolver: () => registered(projectPath),
+				projectResolver: () => ({
+					status: "registered_project",
+					projectId: "sistema_de_mantencion",
+					projectPath,
+					safeNotes: [],
+					errors: [],
+				}),
 			},
 		);
 
@@ -2570,6 +2831,46 @@ test("idu_external_source_recommend is registry-only and advisory", async () => 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("idu_queue_complete marks a task done with evidence", async () => {
+	const runtime = fakeRuntime();
+	const task = runtime.createTask(
+		"feature",
+		"compactar contexto con evidencia",
+	);
+	const completed = await callIduMcpTool(
+		"idu_queue_complete",
+		{
+			taskId: task.id.slice(0, 14),
+			evidence: "commit abc123; build/test/postflight passed",
+		},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+
+	assert.equal(completed.ok, true);
+	assert.equal(completed.data.taskId, task.id);
+	assert.equal(completed.data.status, "done");
+	assert.equal(
+		(completed.data.task as StructuredTask).completionEvidence,
+		"commit abc123; build/test/postflight passed",
+	);
+	assert.match(completed.safeNotes.join("\n"), /no ejecuté IA ni AgentLabs/iu);
+
+	const detail = await callIduMcpTool(
+		"idu_queue_detail",
+		{},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	assert.equal(
+		((detail.data.tasks as StructuredTask[])[0] as StructuredTask).status,
+		"done",
+	);
+	assert.equal(
+		((detail.data.tasks as StructuredTask[])[0] as StructuredTask).guardStatus,
+		"clear",
+	);
+	assert.equal(detail.data.guardStatus, "clear");
 });
 
 test("idu_queue_detail returns complete ids and guard status", async () => {

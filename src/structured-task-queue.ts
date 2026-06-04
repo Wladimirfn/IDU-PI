@@ -37,6 +37,7 @@ export type StructuredTask = {
 	source?: string;
 	projectId?: string;
 	failureReason?: string;
+	completionEvidence?: string;
 	guardRisk?: ProjectPreflightRisk;
 	guardStatus?: StructuredTaskGuardStatus;
 	guardReason?: string;
@@ -154,8 +155,8 @@ export class StructuredTaskQueue {
 		return this.updateStatus(id, "running");
 	}
 
-	markDone(id: string): StructuredTask | undefined {
-		return this.updateStatus(id, "done");
+	markDone(id: string, evidence?: string): StructuredTask | undefined {
+		return this.updateStatus(id, "done", undefined, evidence);
 	}
 
 	markFailed(id: string, reason: string): StructuredTask | undefined {
@@ -175,10 +176,16 @@ export class StructuredTaskQueue {
 	}
 
 	findByIdPrefix(idOrPrefix: string): StructuredTask | undefined {
-		const task = this.tasks.find((candidate) =>
-			candidate.id.startsWith(idOrPrefix),
+		return this.findUniqueByIdPrefix(idOrPrefix);
+	}
+
+	findUniqueByIdPrefix(idOrPrefix: string): StructuredTask | undefined {
+		const prefix = idOrPrefix.trim();
+		if (!prefix) return undefined;
+		const matches = this.tasks.filter((candidate) =>
+			candidate.id.startsWith(prefix),
 		);
-		return task ? { ...task } : undefined;
+		return matches.length === 1 ? { ...matches[0] } : undefined;
 	}
 
 	markGuardClear(
@@ -224,6 +231,7 @@ export class StructuredTaskQueue {
 		id: string,
 		status: StructuredTaskStatus,
 		failureReason?: string,
+		completionEvidence?: string,
 	): StructuredTask | undefined {
 		const task = this.findTaskById(id);
 		if (!task) return undefined;
@@ -231,8 +239,17 @@ export class StructuredTaskQueue {
 		task.updatedAt = this.now().toISOString();
 		if (status === "failed") {
 			task.failureReason = failureReason?.trim() || "failed";
+			delete task.completionEvidence;
 		} else {
 			delete task.failureReason;
+		}
+		if (status === "done" && completionEvidence?.trim()) {
+			task.completionEvidence = completionEvidence.trim();
+			delete task.guardStatus;
+			delete task.guardRisk;
+			delete task.guardReason;
+		} else if (status !== "done") {
+			delete task.completionEvidence;
 		}
 		this.persist();
 		return { ...task };

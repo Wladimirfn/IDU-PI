@@ -192,6 +192,7 @@ Artefactos por proyecto:
 | `idu-pi idu-queue-detail` | Muestra cola estructurada. |
 | `idu-pi idu-queue-approve <id>` | Aprueba tarea bloqueada. |
 | `idu-pi idu-queue-reject <id>` | Rechaza tarea bloqueada. |
+| `idu-pi idu-queue-complete <id> <evidencia>` | Marca tarea como completada con evidencia explícita; no ejecuta IA ni AgentLabs. |
 | `idu-pi idu-queue-clear-structured` | Limpia cola estructurada persistida. |
 
 Ejemplos:
@@ -200,6 +201,7 @@ Ejemplos:
 idu-pi idu-task bug "falla login con token vencido"
 idu-pi idu-queue-detail
 idu-pi idu-queue-approve task-001
+idu-pi idu-queue-complete task-001 "commit abc123; tests green; postflight allowed"
 ```
 
 ## Project Core

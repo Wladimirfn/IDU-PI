@@ -516,6 +516,7 @@ const COMMAND_TERMS = [
 	"queue-detail",
 	"queue_approve",
 	"queue_reject",
+	"queue_complete",
 ];
 const REFACTOR_TERMS = ["refactor", "refactorizar", "reestructurar", "limpiar"];
 const APPROVAL_TERMS = [

@@ -583,7 +583,7 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 		}
 		assert.doesNotMatch(first.stdout, /idu-pi idu-prepare/u);
 		assert.doesNotMatch(first.stdout, /Advertencias breves:/u);
-		const approve = await runCliCommand(["master-plan-approve", "latest"]);
+		const approve = await runCliCommand(["idu-master-plan-approve", "latest"]);
 		assert.equal(approve.exitCode, 0);
 		const second = await runCliCommand(["idu"]);
 		assert.equal(second.exitCode, 0);
@@ -674,8 +674,8 @@ function setCliEnv(input: {
 	process.env.AGENT_WORKSPACE_ROOT = input.workspaceRoot;
 	process.env.PI_CODING_AGENT_DIR = input.agentDir;
 	process.env.IDU_PI_REGISTRY_PATH = join(input.workspaceRoot, "projects.json");
-	delete process.env.TELEGRAM_BOT_TOKEN;
-	delete process.env.ALLOWED_USER_ID;
+	process.env.TELEGRAM_BOT_TOKEN = "test-token";
+	process.env.ALLOWED_USER_ID = "12345";
 }
 
 test("setup mcp-print does not require project env", async () => {

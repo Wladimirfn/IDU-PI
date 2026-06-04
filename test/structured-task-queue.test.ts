@@ -94,11 +94,39 @@ test("StructuredTaskQueue status transitions work", async () => {
 		});
 
 		assert.equal(queue.markRunning(first.id)?.status, "running");
-		assert.equal(queue.markDone(second.id)?.status, "done");
+		queue.markNeedsConfirmation(second.id, {
+			guardRisk: "high",
+			guardReason: "preflight high",
+		});
+		const done = queue.markDone(second.id, "build/test/postflight passed");
+		assert.equal(done?.status, "done");
+		assert.equal(done?.completionEvidence, "build/test/postflight passed");
+		assert.equal(done?.guardStatus, undefined);
+		assert.equal(done?.guardRisk, undefined);
+		assert.equal(done?.guardReason, undefined);
 		const failed = queue.markFailed(third.id, "Command failed");
 
 		assert.equal(failed?.status, "failed");
 		assert.equal(failed?.failureReason, "Command failed");
+	});
+});
+
+test("StructuredTaskQueue rejects ambiguous id prefixes", async () => {
+	await withTempQueue((queue) => {
+		const first = queue.enqueueTask({
+			text: "First",
+			category: "general",
+			priority: 1,
+		});
+		const second = queue.enqueueTask({
+			text: "Second",
+			category: "general",
+			priority: 1,
+		});
+
+		assert.equal(queue.findByIdPrefix("task-"), undefined);
+		assert.equal(queue.findByIdPrefix(first.id)?.id, first.id);
+		assert.equal(queue.findByIdPrefix(second.id)?.id, second.id);
 	});
 });
 

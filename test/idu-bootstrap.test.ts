@@ -4,6 +4,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
 	rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -125,8 +126,14 @@ test("idu bootstrap allocates unique id instead of hijacking same-basename proje
 			projects: Array<{ id: string; path: string }>;
 		};
 		assert.equal(registry.projects.length, 2);
-		assert.equal(registry.projects[0]?.path, firstPath);
-		assert.equal(registry.projects[1]?.path, secondPath);
+		assert.equal(
+			realpathSync.native(registry.projects[0]?.path ?? ""),
+			realpathSync.native(firstPath),
+		);
+		assert.equal(
+			realpathSync.native(registry.projects[1]?.path ?? ""),
+			realpathSync.native(secondPath),
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

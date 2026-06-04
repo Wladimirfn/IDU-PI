@@ -92,6 +92,62 @@ reports/test.json                  -> ignored
 .env                               -> ignored
 ```
 
+## GitHub PR governance
+
+All changes for `main` must go through a policy-compliant PR:
+
+1. Create or select a GitHub issue for the work.
+2. Add `status:approved` to the issue before opening the PR.
+3. Use a branch name matching:
+
+   ```text
+   ^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)/[a-z0-9._-]+$
+   ```
+
+4. Open the PR with `Closes #N`, `Fixes #N`, or `Resolves #N` in the body.
+5. Apply exactly one `type:*` label to the PR.
+6. Wait for required checks:
+   - `Validate PR policy`
+   - `Build and diff check`
+
+`main` is protected against force-push and deletion. Required checks run with strict branch status checks enabled.
+
+### CI test gate
+
+`Build and diff check` runs on GitHub Actions and must include:
+
+```bash
+corepack pnpm install --frozen-lockfile
+# GitHub Windows runner: choco install sqlite -y --no-progress
+corepack pnpm build
+corepack pnpm test
+git diff --check
+```
+
+The test suite must be hermetic: it cannot depend on a developer-local `.env`, `data/projects.json`, Windows-only paths, or repo-local mutable state. Tests that need project config must create temporary project/workspace/state roots and inject explicit test env values. SQLite-backed tests require the `sqlite3` CLI on `PATH`; CI installs it explicitly before running tests.
+
+A useful local reproduction for CI portability is:
+
+```bash
+env -u DEFAULT_CWD \
+  -u ALLOWED_ROOTS \
+  -u AGENT_WORKSPACE_ROOT \
+  -u IDU_PI_REGISTRY_PATH \
+  -u TELEGRAM_BOT_TOKEN \
+  -u ALLOWED_USER_ID \
+  corepack pnpm test
+```
+
+If this fails while normal local tests pass, the likely cause is hidden dependence on local `.env`, project registry, stateRoot, absolute user paths, or shared generated files under the repo.
+
+### Failure recovery
+
+- Missing or wrong PR issue: update the PR body with `Closes #N` and approve the issue with `status:approved`.
+- Wrong branch name: create a compliant branch and push the same commits; do not force-push protected branches.
+- Missing or multiple `type:*` labels: keep exactly one PR `type:*` label.
+- CI-only test failures: reproduce with the env-unset command above, fix the test fixture or code path, then restore `corepack pnpm test` in CI. Do not hide non-hermetic tests by weakening the required check.
+- Whitespace failures: run `git diff --check`, fix trailing whitespace/conflict markers, and restage explicit paths.
+
 ## Staging rule
 
 Do not use `git add .`. Stage explicit paths, for example:

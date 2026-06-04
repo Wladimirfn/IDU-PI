@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -119,7 +120,10 @@ test("home detects cwd project candidate from git root", () => {
 		runner: () => undefined,
 		stdinInteractive: false,
 	});
-	assert.equal(status.project.candidatePath, projectPath);
+	assert.equal(
+		realpathSync.native(status.project.candidatePath),
+		realpathSync.native(projectPath),
+	);
 	assert.equal(status.project.isGitRepository, true);
 	rmSync(root, { recursive: true, force: true });
 });
@@ -1033,14 +1037,29 @@ test("setup wizard in non-interactive mode does not wait", async () => {
 
 test("package env defaults fill core config without external cwd", () => {
 	const previous = snapshotEnv();
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	const envPath = join(root, "package.env");
+	mkdirSync(projectPath, { recursive: true });
 	try {
+		writeFileSync(
+			envPath,
+			[
+				`DEFAULT_CWD=${projectPath}`,
+				`ALLOWED_ROOTS=${root}`,
+				`AGENT_WORKSPACE_ROOT=${join(root, "workspace")}`,
+			].join("\n"),
+			"utf8",
+		);
 		delete process.env.DEFAULT_CWD;
 		delete process.env.ALLOWED_ROOTS;
-		applyPackageEnvDefaults();
-		assert.ok(process.env.DEFAULT_CWD);
-		assert.ok(process.env.ALLOWED_ROOTS);
+		delete process.env.AGENT_WORKSPACE_ROOT;
+		applyPackageEnvDefaults({ envPath });
+		assert.equal(process.env.DEFAULT_CWD, projectPath);
+		assert.equal(process.env.ALLOWED_ROOTS, root);
 	} finally {
 		restoreEnv(previous);
+		rmSync(root, { recursive: true, force: true });
 	}
 });
 
@@ -1189,9 +1208,10 @@ test("interactive project panel content scrolls independently from actions", asy
 			writes.push(value);
 		},
 	};
-	const content = Array.from({ length: 30 }, (_, index) => `line-${index + 1}`).join(
-		"\n",
-	);
+	const content = Array.from(
+		{ length: 30 },
+		(_, index) => `line-${index + 1}`,
+	).join("\n");
 	const menuPromise = __testSelectSearchableMenu(
 		"Proyecto actual",
 		[
@@ -1203,14 +1223,25 @@ test("interactive project panel content scrolls independently from actions", asy
 		{ input, output },
 	);
 
-	assert.equal(writes.some((entry) => entry.includes("line-1")), true);
-	assert.equal(writes.some((entry) => entry.includes("line-30")), false);
+	assert.equal(
+		writes.some((entry) => entry.includes("line-1")),
+		true,
+	);
+	assert.equal(
+		writes.some((entry) => entry.includes("line-30")),
+		false,
+	);
 	for (let index = 0; index < 10; index += 1) {
 		input.emit("keypress", "", { name: "pagedown" });
 	}
-	assert.equal(writes.some((entry) => entry.includes("line-30")), true);
 	assert.equal(
-		writes.some((entry) => entry.includes("contenido ") && entry.includes("/30")),
+		writes.some((entry) => entry.includes("line-30")),
+		true,
+	);
+	assert.equal(
+		writes.some(
+			(entry) => entry.includes("contenido ") && entry.includes("/30"),
+		),
 		true,
 	);
 	input.emit("keypress", "q", { name: "q" });

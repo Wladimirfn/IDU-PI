@@ -622,6 +622,10 @@ export type CliRuntime = {
 	queueClearStructured: () => number;
 	queueApprove: (idOrPrefix: string) => StructuredTask | undefined;
 	queueReject: (idOrPrefix: string) => StructuredTask | undefined;
+	queueComplete?: (
+		idOrPrefix: string,
+		evidence: string,
+	) => StructuredTask | undefined;
 	projectStateReset: (confirmed: boolean) => ProjectStateResetResult;
 	formatProjectStateResetResult: (result: ProjectStateResetResult) => string;
 	activeProfileId?: () => string;
@@ -1251,6 +1255,8 @@ export function createCliRuntime(
 		queueClearStructured: () => structuredTaskQueue.clearPersisted(),
 		queueApprove: (id) => approveStructuredTaskById(structuredTaskQueue, id),
 		queueReject: (id) => rejectStructuredTaskById(structuredTaskQueue, id),
+		queueComplete: (id, evidence) =>
+			completeStructuredTaskById(structuredTaskQueue, id, evidence),
 		activeProfileId: () => agentRouter.activeProfile().id,
 	};
 }
@@ -1961,6 +1967,15 @@ export async function runCliCommand(
 				if (!task) return fail("Uso: idu-pi queue-reject <id>");
 				return ok(`Tarea rechazada: ${task.id}.`);
 			}
+			case "idu-queue-complete":
+			case "queue-complete":
+			case "queue_complete": {
+				const id = requiredText(rest.slice(0, 1));
+				const evidence = requiredText(rest.slice(1));
+				const task = activeRuntime.queueComplete?.(id, evidence);
+				if (!task) return fail("Uso: idu-pi queue-complete <id> <evidence>");
+				return ok(`Tarea completada: ${task.id}. Evidencia registrada.`);
+			}
 			default:
 				return {
 					exitCode: 1,
@@ -2447,7 +2462,7 @@ export function approveStructuredTaskById(
 	queue: StructuredTaskQueue,
 	id: string,
 ): StructuredTask | undefined {
-	const task = queue.getTask(id);
+	const task = queue.findByIdPrefix(id);
 	return task ? queue.markGuardApproved(task.id) : undefined;
 }
 
@@ -2455,10 +2470,19 @@ export function rejectStructuredTaskById(
 	queue: StructuredTaskQueue,
 	id: string,
 ): StructuredTask | undefined {
-	const task = queue.getTask(id);
+	const task = queue.findByIdPrefix(id);
 	return task
 		? queue.markGuardRejected(task.id, "Rechazada por confirmación humana.")
 		: undefined;
+}
+
+export function completeStructuredTaskById(
+	queue: StructuredTaskQueue,
+	id: string,
+	evidence: string,
+): StructuredTask | undefined {
+	const task = queue.findByIdPrefix(id);
+	return task ? queue.markDone(task.id, evidence) : undefined;
 }
 
 export function formatCliTaskResult(task: StructuredTask): string {
@@ -2708,6 +2732,7 @@ export function helpText(): string {
 		"  idu-pi idu-queue-clear-structured (Telegram: /queue_clear_structured)",
 		"  idu-pi idu-queue-approve <id>    (Telegram: /queue_approve <id>)",
 		"  idu-pi idu-queue-reject <id>     (Telegram: /queue_reject <id>)",
+		"  idu-pi idu-queue-complete <id> <evidencia>",
 		"",
 		"Notas:",
 		"- Usa AGENT_WORKSPACE_ROOT y el registro de proyectos del bridge.",
@@ -3092,7 +3117,10 @@ async function selectSearchableMenu(
 		const searchRowsCount = settings.search ? 1 : 0;
 		const fixedRows = statusRows + searchRowsCount + visible.length + 6;
 		const maxContentRows = Math.max(3, terminalRows - fixedRows);
-		const maxContentOffset = Math.max(0, allContentLines.length - maxContentRows);
+		const maxContentOffset = Math.max(
+			0,
+			allContentLines.length - maxContentRows,
+		);
 		contentOffset = Math.min(contentOffset, maxContentOffset);
 		const visibleContentLines = allContentLines.slice(
 			contentOffset,
@@ -3175,7 +3203,10 @@ async function selectSearchableMenu(
 				const visible = filteredOptions();
 				const scrollContent = (direction: 1 | -1) => {
 					if (!settings.content) return false;
-					const totalLines = contentLines(settings.content, ANSI_PANEL_WIDTH).length;
+					const totalLines = contentLines(
+						settings.content,
+						ANSI_PANEL_WIDTH,
+					).length;
 					const terminalRows = Math.max(
 						10,
 						output.rows ?? process.stdout.rows ?? 30,
