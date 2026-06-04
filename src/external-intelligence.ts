@@ -97,7 +97,7 @@ const SOURCES: Record<
 		url: "https://nodejs.org/dist/index.json",
 		host: "nodejs.org",
 		pathPrefix: "/dist/index.json",
-		maxBytes: 256_000,
+		maxBytes: 2_000_000,
 		ecosystem: "node",
 		packageName: "node",
 		supported: true,
@@ -165,8 +165,8 @@ export async function buildExternalIntelligenceReport(input: {
 			if (!response.ok) {
 				throw new Error(`HTTP ${response.status}`);
 			}
-			const body = await readCappedText(response, source.maxBytes);
-			const parsed = parseJsonArray(body);
+			const body = await readBoundedText(response, source.maxBytes, source.id);
+			const parsed = parseJsonArray(body, source.id);
 			const sourceSignals = normalizeSignals({
 				source,
 				items: parsed,
@@ -264,25 +264,35 @@ function assertAllowlistedUrl(
 	if (parsed.protocol !== "https:") {
 		throw new Error(`non-allowlisted protocol for ${source.id}`);
 	}
-	if (
-		parsed.host !== source.host ||
-		!parsed.pathname.startsWith(source.pathPrefix)
-	) {
+	if (parsed.host !== source.host || parsed.pathname !== source.pathPrefix) {
 		throw new Error(`non-allowlisted redirect for ${source.id}`);
 	}
 }
 
-async function readCappedText(
+async function readBoundedText(
 	response: ExternalIntelligenceFetchResponse,
 	maxBytes: number,
+	sourceId: ExternalIntelligenceSourceId,
 ): Promise<string> {
 	const text = await response.text();
-	return text.length > maxBytes ? text.slice(0, maxBytes) : text;
+	if (text.length > maxBytes) {
+		throw new Error(
+			`response from ${sourceId} exceeded safe normalized parse limit (${maxBytes} chars)`,
+		);
+	}
+	return text;
 }
 
-function parseJsonArray(body: string): unknown[] {
-	const parsed: unknown = JSON.parse(body);
-	return Array.isArray(parsed) ? parsed : [];
+function parseJsonArray(
+	body: string,
+	sourceId: ExternalIntelligenceSourceId,
+): unknown[] {
+	try {
+		const parsed: unknown = JSON.parse(body);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch (error) {
+		throw new Error(`invalid JSON from ${sourceId}: ${safeError(error)}`);
+	}
 }
 
 function normalizeSignals(input: {

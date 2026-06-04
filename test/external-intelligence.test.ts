@@ -104,6 +104,82 @@ test("external intelligence rejects arbitrary source ids and unsafe redirects", 
 	);
 });
 
+test("nodejs releases parses large allowlisted JSON without storing raw body", async () => {
+	const largeNoise = "x".repeat(300_000);
+	const report = await buildExternalIntelligenceReport({
+		projectId: "Demo",
+		sourceIds: ["nodejs-releases"],
+		fetcher: async (url) => ({
+			ok: true,
+			status: 200,
+			url,
+			text: async () =>
+				JSON.stringify([
+					{
+						version: "v24.1.0",
+						date: "2026-06-01",
+						notes: largeNoise,
+					},
+				]),
+		}),
+		now,
+	});
+
+	assert.equal(
+		report.sourcesQueried.find((source) => source.id === "nodejs-releases")
+			?.status,
+		"ok",
+	);
+	assert.equal(report.signals.length, 1);
+	assert.equal(report.signals[0]?.title, "v24.1.0");
+	assert.equal(JSON.stringify(report).includes(largeNoise), false);
+});
+
+test("nodejs releases reports truncated JSON safely", async () => {
+	const report = await buildExternalIntelligenceReport({
+		projectId: "Demo",
+		sourceIds: ["nodejs-releases"],
+		fetcher: async (url) => ({
+			ok: true,
+			status: 200,
+			url,
+			text: async () => '[{"version":"v24.1.0"',
+		}),
+		now,
+	});
+
+	const nodeSource = report.sourcesQueried.find(
+		(source) => source.id === "nodejs-releases",
+	);
+	assert.equal(nodeSource?.status, "failed");
+	assert.match(nodeSource?.error ?? "", /invalid JSON from nodejs-releases/u);
+	assert.equal(report.signals.length, 0);
+	assert.equal(JSON.stringify(report).includes("v24.1.0"), false);
+});
+
+test("external intelligence rejects same-host prefixed redirects", async () => {
+	const report = await buildExternalIntelligenceReport({
+		projectId: "Demo",
+		sourceIds: ["nextjs-releases"],
+		fetcher: async () => ({
+			ok: true,
+			status: 200,
+			url: "https://api.github.com/repos/vercel/next.js/releases-malicious",
+			text: async () => '[{"tag_name":"v16.0.0"}]',
+		}),
+		now,
+	});
+
+	assert.equal(report.signals.length, 0);
+	assert.ok(
+		report.sourcesQueried.some(
+			(source) =>
+				source.status === "failed" &&
+				/non-allowlisted redirect/u.test(source.error ?? ""),
+		),
+	);
+});
+
 test("external intelligence writes normalized reports only under stateRoot", async () => {
 	const root = tempRoot();
 	try {
