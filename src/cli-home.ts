@@ -740,8 +740,8 @@ function readPackageVersion(): string {
 	}
 }
 
-export function applyPackageEnvDefaults(): void {
-	for (const [key, value] of Object.entries(readPackageEnv())) {
+export function applyPackageEnvDefaults(options: { envPath?: string } = {}): void {
+	for (const [key, value] of Object.entries(readPackageEnv(options.envPath))) {
 		if (value !== undefined && process.env[key] === undefined) {
 			process.env[key] = value;
 		}
@@ -765,8 +765,7 @@ function mergedPackageEnv(): Record<string, string | undefined> {
 	return { ...readPackageEnv(), ...process.env };
 }
 
-function readPackageEnv(): Record<string, string | undefined> {
-	const envPath = join(resolveCliPackageRoot(), ".env");
+function readPackageEnv(envPath = join(resolveCliPackageRoot(), ".env")): Record<string, string | undefined> {
 	if (!existsSync(envPath)) return {};
 	const values: Record<string, string | undefined> = {};
 	try {

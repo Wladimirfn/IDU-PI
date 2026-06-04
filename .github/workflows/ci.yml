@@ -31,5 +31,8 @@ jobs:
       - name: Build
         run: corepack pnpm build
 
+      - name: Test
+        run: corepack pnpm test
+
       - name: Check diff whitespace
         run: git diff --check

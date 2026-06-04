@@ -22,6 +22,22 @@ import {
 	type IduMcpProjectResolution,
 	type IduMcpRuntimeFactory,
 } from "../src/mcp-server.js";
+
+const hermeticMcpRoot = mkdtempSync(join(tmpdir(), "idu-mcp-hermetic-"));
+const hermeticProjectPath = join(hermeticMcpRoot, "project");
+const hermeticWorkspaceRoot = join(hermeticMcpRoot, "workspace");
+mkdirSync(hermeticProjectPath, { recursive: true });
+mkdirSync(hermeticWorkspaceRoot, { recursive: true });
+process.env.DEFAULT_CWD = hermeticProjectPath;
+process.env.ALLOWED_ROOTS = hermeticMcpRoot;
+process.env.AGENT_WORKSPACE_ROOT = hermeticWorkspaceRoot;
+process.env.IDU_PI_REGISTRY_PATH = join(
+	hermeticMcpRoot,
+	"registry",
+	"projects.json",
+);
+delete process.env.TELEGRAM_BOT_TOKEN;
+delete process.env.ALLOWED_USER_ID;
 import type { CliRuntime } from "../src/cli.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
@@ -923,6 +939,8 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 	return runtime;
 }
 
+const fakeStateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-fake-state-"));
+
 function registered(
 	projectPath = "C:/projects/sistema",
 ): IduMcpProjectResolution {
@@ -930,6 +948,7 @@ function registered(
 		status: "registered_project",
 		projectId: "sistema_de_mantencion",
 		projectPath,
+		stateRoot: fakeStateRoot,
 		safeNotes: [],
 		errors: [],
 	};
@@ -1644,9 +1663,10 @@ test("MCP AgentLab tools record local effectiveness events without raw text", as
 });
 
 test("idu_activate and idu_deactivate change session state", async () => {
+	const sessionRoot = mkdtempSync(join(tmpdir(), "idu-mcp-session-"));
 	configureIduSessionStore({
-		workspaceRoot: "C:/idu/workspace",
-		filePath: join(process.cwd(), "dist", "test-session-state.json"),
+		workspaceRoot: sessionRoot,
+		filePath: join(sessionRoot, "test-session-state.json"),
 	});
 	deactivateIduSession("sistema_de_mantencion");
 	const activate = await callIduMcpTool(
@@ -2737,7 +2757,13 @@ test("idu_external_intelligence_report refuses workspace fallback without stateR
 			{ sourceIds: ["npm-advisories"] },
 			{
 				runtimeFactory: () => runtime,
-				projectResolver: () => registered(projectPath),
+				projectResolver: () => ({
+					status: "registered_project",
+					projectId: "sistema_de_mantencion",
+					projectPath,
+					safeNotes: [],
+					errors: [],
+				}),
 			},
 		);
 
