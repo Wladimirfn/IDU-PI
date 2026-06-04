@@ -3391,13 +3391,18 @@ function buildSupervisorContextPack(
 }
 
 function compactPlanSnapshotForContextPack(snapshot: PlanSnapshot): JsonObject {
-	const {
-		governanceConfig: _governanceConfig,
-		workerBoundary: _workerBoundary,
-		contextBudget: _contextBudget,
-		...compactSnapshot
-	} = snapshot;
-	return compactSnapshot;
+	return {
+		authority: snapshot.authority,
+		planStatus: snapshot.planStatus,
+		planApproved: snapshot.planApproved,
+		projectId: snapshot.projectId,
+		projectPath: snapshot.projectPath,
+		objective: snapshot.objective,
+		summary: snapshot.summary,
+		flowArtifact: snapshot.flowArtifact,
+		blockers: snapshot.blockers,
+		recommendedNext: snapshot.recommendedNext,
+	};
 }
 
 function buildSupervisorSourceEvidence(

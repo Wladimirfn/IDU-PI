@@ -1008,6 +1008,22 @@ test("idu_supervisor_context_pack compone visión plan y gates compactos", async
 		(result.data.planSnapshot as Record<string, unknown>).contextBudget,
 		undefined,
 	);
+	assert.equal(
+		(result.data.planSnapshot as Record<string, unknown>).operationalContracts,
+		undefined,
+	);
+	assert.equal(
+		(result.data.planSnapshot as Record<string, unknown>).flows,
+		undefined,
+	);
+	assert.equal(
+		(result.data.planSnapshot as Record<string, unknown>).recommendedAgentLabs,
+		undefined,
+	);
+	assert.match(
+		String((result.data.planSnapshot as Record<string, unknown>).objective),
+		/gobernanza preventiva/u,
+	);
 	const consultation = result.data.supervisorConsultation as {
 		version: number;
 		authority: string;
