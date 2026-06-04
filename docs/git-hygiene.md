@@ -118,12 +118,13 @@ All changes for `main` must go through a policy-compliant PR:
 
 ```bash
 corepack pnpm install --frozen-lockfile
+# GitHub Windows runner: choco install sqlite -y --no-progress
 corepack pnpm build
 corepack pnpm test
 git diff --check
 ```
 
-The test suite must be hermetic: it cannot depend on a developer-local `.env`, `data/projects.json`, Windows-only paths, or repo-local mutable state. Tests that need project config must create temporary project/workspace/state roots and inject explicit test env values.
+The test suite must be hermetic: it cannot depend on a developer-local `.env`, `data/projects.json`, Windows-only paths, or repo-local mutable state. Tests that need project config must create temporary project/workspace/state roots and inject explicit test env values. SQLite-backed tests require the `sqlite3` CLI on `PATH`; CI installs it explicitly before running tests.
 
 A useful local reproduction for CI portability is:
 

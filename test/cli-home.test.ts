@@ -5,6 +5,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readdirSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -119,7 +120,10 @@ test("home detects cwd project candidate from git root", () => {
 		runner: () => undefined,
 		stdinInteractive: false,
 	});
-	assert.equal(status.project.candidatePath, projectPath);
+	assert.equal(
+		realpathSync.native(status.project.candidatePath),
+		realpathSync.native(projectPath),
+	);
 	assert.equal(status.project.isGitRepository, true);
 	rmSync(root, { recursive: true, force: true });
 });

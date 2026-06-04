@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
 
+      - name: Install SQLite CLI
+        run: choco install sqlite -y --no-progress
+
       - name: Build
         run: corepack pnpm build
 
