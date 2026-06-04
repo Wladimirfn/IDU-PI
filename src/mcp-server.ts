@@ -110,6 +110,7 @@ export type IduMcpToolName =
 	| "idu_master_plan_reject"
 	| "idu_plan_snapshot"
 	| "idu_next_advisory_action"
+	| "idu_continuation_proposal"
 	| "idu_task_package_create"
 	| "idu_supervisor_context_pack"
 	| "idu_orchestrator_procedure"
@@ -326,6 +327,18 @@ const TOOLS: IduMcpToolDefinition[] = [
 				"Solicitud humana opcional para orientar la acción.",
 			),
 			mode: optionalString("Modo: from_plan o from_request."),
+			maxScope: optionalString("Alcance máximo sugerido: small o medium."),
+		},
+	),
+	tool(
+		"idu_continuation_proposal",
+		"Propone el próximo avance autónomo alineado al Plan Maestro y cola actual; advisory-only, no implementa ni ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: optionalString("Solicitud opcional para orientar continuidad."),
+			autonomyWindowMinutes: optionalString(
+				"Ventana de autonomía solicitada en minutos.",
+			),
 			maxScope: optionalString("Alcance máximo sugerido: small o medium."),
 		},
 	),
@@ -1745,6 +1758,42 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Acción candidata solamente: Idu-pi no implementa.",
 					"No ejecuté AgentLabs; el orquestador decide llamadas explícitas.",
+				],
+			});
+		}
+		case "idu_continuation_proposal": {
+			if (!runtime.masterPlanReview) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Master Plan no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Master Plan no disponible en este runtime."],
+				});
+			}
+			const review = runtime.masterPlanReview("latest");
+			const proposal = buildContinuationProposal(
+				runtime,
+				buildPlanSnapshot(review, runtime),
+				stringArg(args, "request") ?? "",
+				positiveIntegerArg(args, "autonomyWindowMinutes"),
+				stringArg(args, "maxScope") ?? "small",
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: String(proposal.summary),
+				data: proposal,
+				safeNotes: [
+					...resolution.safeNotes,
+					"Propuesta de continuidad solamente: Idu-pi no implementa.",
+					"No ejecuté AgentLabs; el orquestador decide llamadas explícitas.",
+					"Ejecutar idu_postflight antes de cerrar la próxima tarea.",
 				],
 			});
 		}
@@ -3871,6 +3920,233 @@ function buildNextAdvisoryAction(
 			"Usar idu_postflight con actionId/taskPackageId después del diff.",
 		],
 	};
+}
+
+function buildContinuationProposal(
+	runtime: CliRuntime,
+	snapshot: PlanSnapshot,
+	request: string,
+	autonomyWindowMinutes: number | undefined,
+	maxScope: string,
+): JsonObject {
+	const tasks = continuationTasks(runtime);
+	const blockingPendingTask = findBlockingPendingContinuationTask(tasks);
+	const selected = selectContinuationCandidate(snapshot, tasks, request);
+	const selectedText = selected?.text ?? "";
+	const preflight = selectedText ? runtime.preflight(selectedText) : undefined;
+	const advisoryAction = buildNextAdvisoryAction(
+		snapshot,
+		selectedText,
+		"continuation",
+		maxScope,
+	);
+	const candidate = advisoryAction.candidateAction as JsonObject;
+	candidate.origin = selected?.origin ?? "none";
+	if (selected?.task) {
+		candidate.queueTaskId = selected.task.id;
+		candidate.title = selected.task.text;
+	}
+	const blockers = arrayField(snapshot, "blockers").map(String);
+	const planApproved = snapshot.planStatus === "approved";
+	const guardStatus = selected?.task?.guardStatus ?? null;
+	const guardRisk = selected?.task?.guardRisk ?? null;
+	const preflightRisk = preflight?.risk ?? null;
+	const riskRequiresHuman = isHighContinuationRisk(preflightRisk);
+	const guardRequiresHuman =
+		guardStatus === "needs_confirmation" ||
+		guardStatus === "rejected" ||
+		isHighContinuationRisk(guardRisk);
+	const scopeAllowed = maxScope === "small" || maxScope === "medium";
+	const withinObjective = Boolean(
+		selected?.origin === "queue" && planApproved && blockers.length === 0,
+	);
+	const allowedToProceed = Boolean(
+		selected &&
+			withinObjective &&
+			scopeAllowed &&
+			!blockingPendingTask &&
+			!riskRequiresHuman &&
+			!guardRequiresHuman,
+	);
+	const decision = selected
+		? allowedToProceed
+			? "continue_autonomously"
+			: "ask_user"
+		: "stop_no_safe_action";
+	const requiresHuman = decision !== "continue_autonomously";
+	const queueProgress = continuationQueueProgress(
+		tasks,
+		selected?.task,
+		blockingPendingTask,
+	);
+	const taskPackage = selected
+		? buildTaskPackage(
+				snapshot,
+				advisoryAction,
+				selectedText,
+				selected.task?.id,
+				false,
+			)
+		: null;
+	if (taskPackage && requiresHuman) {
+		blockContinuationTaskPackage(taskPackage, decision);
+	}
+	const evidenceRefs = dedupe([
+		"plan:snapshot",
+		...(selected?.task ? [`queue:${selected.task.id}`] : []),
+		...(preflight ? [`preflight:${preflight.risk}`] : []),
+	]);
+	return {
+		proposalVersion: 1,
+		authority: "advisory",
+		source: "idu_continuation_proposal",
+		summary: selected
+			? `Continuidad propuesta: ${String(candidate.title)}`
+			: "No hay acción segura de continuidad.",
+		autonomy: {
+			requested: Boolean(autonomyWindowMinutes),
+			windowMinutes: autonomyWindowMinutes ?? null,
+			maxScope,
+		},
+		decision,
+		allowedToProceed,
+		requiresHuman,
+		orchestratorDecisionRequired: true,
+		planAlignment: {
+			planStatus: snapshot.planStatus,
+			objective: snapshot.objective,
+			withinObjective,
+			blockers: [
+				...blockers,
+				...(blockingPendingTask
+					? [`Tarea pendiente requiere decisión: ${blockingPendingTask.id}`]
+					: []),
+				...(selected && selected.origin !== "queue"
+					? ["Continuidad autónoma requiere tarea de cola aprobada/limpia."]
+					: []),
+			],
+			contractsAffected: arrayField(candidate, "contractsAffected"),
+			evidenceRefs,
+		},
+		queueProgress,
+		candidateAction: candidate,
+		taskPackage,
+		agentLabPolicy: {
+			...(advisoryAction.agentLabPolicy as JsonObject),
+			autoRun: false,
+			role: "audit_only",
+		},
+		decisionEnvelope: buildDecisionEnvelope({
+			tool: "idu_continuation_proposal",
+			recommendation: allowedToProceed ? "allow" : "ask_human",
+			severity: allowedToProceed ? "info" : "needs_approval",
+			confidence: allowedToProceed ? 0.78 : 0.72,
+			summary: selected
+				? `Continuidad: ${String(candidate.title)}`
+				: "No hay acción segura de continuidad.",
+			requiresHuman,
+			orchestratorDecisionRequired: true,
+			allowedToProceed,
+			evidenceRefs,
+			nextActions: allowedToProceed
+				? [
+						"Crear paquete de tarea y ejecutar governance-review antes del worker.",
+						"Delegar implementación a subagentes normales dentro del alcance aprobado.",
+					]
+				: ["Pedir decisión humana antes de continuar."],
+		}),
+		stopConditions: [
+			...arrayField(candidate, "stopConditions"),
+			"La próxima acción queda fuera del Plan Maestro aprobado.",
+			"El preflight sube a high/blocker o el guard queda needs_confirmation.",
+		],
+	};
+}
+
+function continuationTasks(runtime: CliRuntime): StructuredTask[] {
+	const runtimeWithList = runtime as CliRuntime & {
+		listTasks?: () => StructuredTask[];
+	};
+	return runtimeWithList.listTasks
+		? runtimeWithList.listTasks()
+		: parseTaskList(runtime.queueDetail());
+}
+
+function selectContinuationCandidate(
+	snapshot: PlanSnapshot,
+	tasks: StructuredTask[],
+	request: string,
+): { origin: string; text: string; task?: StructuredTask } | undefined {
+	if (request.trim()) return { origin: "request", text: request.trim() };
+	const pending = tasks
+		.filter((task) => task.status === "pending")
+		.sort((a, b) => b.priority - a.priority);
+	const nextTask = pending[0];
+	if (nextTask) return { origin: "queue", text: nextTask.text, task: nextTask };
+	const milestone = firstMilestoneAction(snapshot);
+	if (milestone) return { origin: "master_plan_milestone", text: milestone };
+	const recommendedNext = arrayField(snapshot, "recommendedNext").find(
+		(item): item is string => typeof item === "string" && item.trim().length > 0,
+	);
+	if (recommendedNext) {
+		return { origin: "recommended_next", text: recommendedNext.trim() };
+	}
+	return undefined;
+}
+
+function continuationQueueProgress(
+	tasks: StructuredTask[],
+	selectedTask: StructuredTask | undefined,
+	blockingPendingTask: StructuredTask | undefined,
+): JsonObject {
+	const count = (status: StructuredTask["status"]) =>
+		tasks.filter((task) => task.status === status).length;
+	return {
+		pending: count("pending"),
+		running: count("running"),
+		done: count("done"),
+		failed: count("failed"),
+		selectedTaskId: selectedTask?.id ?? null,
+		selectedTaskGuardStatus: selectedTask?.guardStatus ?? null,
+		selectedTaskGuardRisk: selectedTask?.guardRisk ?? null,
+		blockingPendingTaskId: blockingPendingTask?.id ?? null,
+		blockingPendingTaskGuardStatus: blockingPendingTask?.guardStatus ?? null,
+		blockingPendingTaskGuardRisk: blockingPendingTask?.guardRisk ?? null,
+	};
+}
+
+function findBlockingPendingContinuationTask(
+	tasks: StructuredTask[],
+): StructuredTask | undefined {
+	return tasks
+		.filter((task) => task.status === "pending")
+		.sort((a, b) => b.priority - a.priority)
+		.find(
+			(task) =>
+				task.guardStatus === "needs_confirmation" ||
+				task.guardStatus === "rejected" ||
+				isHighContinuationRisk(task.guardRisk),
+		);
+}
+
+function blockContinuationTaskPackage(
+	taskPackage: JsonObject,
+	decision: string,
+): void {
+	taskPackage.humanApprovalRequired = true;
+	taskPackage.recommendation = "ask_human";
+	const preconditions = asRecord(taskPackage.preconditions);
+	preconditions.blocked = true;
+	preconditions.recommendation = "ask_human";
+	preconditions.blockers = dedupe([
+		...arrayField(preconditions, "blockers").map(String),
+		`Continuation decision requires human review: ${decision}`,
+	]);
+	taskPackage.preconditions = preconditions;
+}
+
+function isHighContinuationRisk(risk: unknown): boolean {
+	return risk === "high" || risk === "blocker";
 }
 
 function buildTaskPackage(

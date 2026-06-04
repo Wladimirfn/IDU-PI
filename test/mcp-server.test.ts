@@ -910,6 +910,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_master_plan_reject"));
 	assert.ok(tools.some((tool) => tool.name === "idu_plan_snapshot"));
 	assert.ok(tools.some((tool) => tool.name === "idu_next_advisory_action"));
+	assert.ok(tools.some((tool) => tool.name === "idu_continuation_proposal"));
 	assert.ok(tools.some((tool) => tool.name === "idu_task_package_create"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_context_pack"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_status"));
@@ -944,7 +945,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_source_recommend"),
 	);
-	assert.equal(tools.length, 50);
+	assert.equal(tools.length, 51);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -1841,6 +1842,126 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	assert.equal(
 		(next.data.agentLabPolicy as { execution: string }).execution,
 		"orchestrator_explicit_call_only",
+	);
+
+	const continuationRuntime = fakeRuntime();
+	continuationRuntime.createTask("bug", "mejorar MCP con siguiente tarea segura");
+	const continuation = await callIduMcpTool(
+		"idu_continuation_proposal",
+		{ autonomyWindowMinutes: 240, maxScope: "medium" },
+		{
+			runtimeFactory: () => continuationRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(continuation.ok, true);
+	assert.equal(continuation.data.authority, "advisory");
+	assert.equal(continuation.data.decision, "continue_autonomously");
+	assert.equal(continuation.data.allowedToProceed, true);
+	assert.equal(continuation.data.requiresHuman, false);
+	assert.equal(continuation.data.orchestratorDecisionRequired, true);
+	assert.equal(
+		(continuation.data.planAlignment as { planStatus: string }).planStatus,
+		"approved",
+	);
+	assert.equal(
+		(continuation.data.queueProgress as { selectedTaskGuardStatus: string })
+			.selectedTaskGuardStatus,
+		"clear",
+	);
+	assert.equal(
+		(continuation.data.candidateAction as { origin: string }).origin,
+		"queue",
+	);
+	assert.match(
+		String((continuation.data.candidateAction as { title: string }).title),
+		/mejorar MCP/u,
+	);
+	assert.equal(
+		(continuation.data.agentLabPolicy as { execution: string }).execution,
+		"orchestrator_explicit_call_only",
+	);
+	assert.equal(
+		(continuation.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		true,
+	);
+	assert.match(continuation.safeNotes.join("\n"), /no implementa/iu);
+
+	const riskyContinuationRuntime = fakeRuntime();
+	riskyContinuationRuntime.createTask("bug", "arreglar login auth con cambio sensible");
+	const riskyContinuation = await callIduMcpTool(
+		"idu_continuation_proposal",
+		{ autonomyWindowMinutes: 240, maxScope: "medium" },
+		{
+			runtimeFactory: () => riskyContinuationRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(riskyContinuation.ok, true);
+	assert.equal(riskyContinuation.data.decision, "ask_user");
+	assert.equal(riskyContinuation.data.allowedToProceed, false);
+	assert.equal(riskyContinuation.data.requiresHuman, true);
+	assert.equal(
+		(riskyContinuation.data.queueProgress as { selectedTaskGuardRisk: string })
+			.selectedTaskGuardRisk,
+		"high",
+	);
+	assert.equal(
+		(riskyContinuation.data.taskPackage as { humanApprovalRequired: boolean })
+			.humanApprovalRequired,
+		true,
+	);
+	assert.equal(
+		(
+			riskyContinuation.data.taskPackage as {
+				preconditions: { blocked: boolean };
+			}
+		).preconditions.blocked,
+		true,
+	);
+
+	const blockedQueueRuntime = fakeRuntime();
+	blockedQueueRuntime.createTask("bug", "arreglar login auth pendiente");
+	const bypassAttempt = await callIduMcpTool(
+		"idu_continuation_proposal",
+		{
+			request: "mejorar documentación menor",
+			autonomyWindowMinutes: 240,
+			maxScope: "small",
+		},
+		{
+			runtimeFactory: () => blockedQueueRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(bypassAttempt.ok, true);
+	assert.equal(bypassAttempt.data.decision, "ask_user");
+	assert.equal(bypassAttempt.data.allowedToProceed, false);
+	assert.equal(
+		(bypassAttempt.data.queueProgress as { blockingPendingTaskId: string })
+			.blockingPendingTaskId,
+		"task-20260525-000002",
+	);
+
+	const arbitraryRequest = await callIduMcpTool(
+		"idu_continuation_proposal",
+		{
+			request: "crear módulo de pagos fuera del plan",
+			autonomyWindowMinutes: 240,
+			maxScope: "small",
+		},
+		{
+			runtimeFactory: () => fakeRuntime(),
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(arbitraryRequest.ok, true);
+	assert.equal(arbitraryRequest.data.decision, "ask_user");
+	assert.equal(arbitraryRequest.data.allowedToProceed, false);
+	assert.equal(
+		(arbitraryRequest.data.planAlignment as { withinObjective: boolean })
+			.withinObjective,
+		false,
 	);
 
 	const taskPackage = await callIduMcpTool(
