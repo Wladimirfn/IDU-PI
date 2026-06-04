@@ -3367,6 +3367,12 @@ function buildSupervisorContextPack(
 		runtime,
 		compactRequest,
 	);
+	const embeddedPlanSnapshot = includePlanSnapshot
+		? compactPlanSnapshotForContextPack(snapshot)
+		: undefined;
+	const embeddedPlanSnapshotUsage = embeddedPlanSnapshot
+		? budgetEmbeddedPlanSnapshotForContextPack(embeddedPlanSnapshot)
+		: undefined;
 	const supervisorConsultation = buildSupervisorConsultation({
 		source: "idu_supervisor_context_pack",
 		planObjective: snapshot.objective,
@@ -3424,15 +3430,13 @@ function buildSupervisorContextPack(
 			requiresHuman: alignmentAdvisory.requiresHuman,
 			evidenceRefs: alignmentAdvisory.evidenceRefs,
 		},
-		...(includePlanSnapshot
-			? { planSnapshot: compactPlanSnapshotForContextPack(snapshot) }
-			: {}),
+		...(embeddedPlanSnapshot ? { planSnapshot: embeddedPlanSnapshot } : {}),
 		contextBudget: mergeContextBudgetUsage("supervisor_context_pack", [
 			humanVision.usage,
 			taskGoal.usage,
 			safeRisks.usage,
 			safeReads.usage,
-			...(includePlanSnapshot ? [snapshot.contextBudget] : []),
+			...(embeddedPlanSnapshotUsage ? [embeddedPlanSnapshotUsage] : []),
 		]),
 		governanceConfig: governanceConfigData(),
 		workerBoundary: workerBoundaryData(),
@@ -3452,6 +3456,15 @@ function compactPlanSnapshotForContextPack(snapshot: PlanSnapshot): JsonObject {
 		blockers: snapshot.blockers,
 		recommendedNext: snapshot.recommendedNext,
 	};
+}
+
+function budgetEmbeddedPlanSnapshotForContextPack(
+	snapshot: JsonObject,
+): ContextBudgetUsage {
+	const serialized = JSON.stringify(snapshot);
+	return createContextBudgetUsage("supervisor_context_pack", {
+		usedChars: serialized.length,
+	});
 }
 
 function buildSupervisorSourceEvidence(

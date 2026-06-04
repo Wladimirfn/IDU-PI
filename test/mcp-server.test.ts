@@ -2011,6 +2011,124 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 	);
 });
 
+test("idu_supervisor_context_pack budgets only embedded compact plan snapshot", async () => {
+	const runtime = fakeRuntime();
+	runtime.masterPlanReview = () =>
+		({
+			current: {},
+			jsonPath: "C:/idu/workspace/projects/sistema/master-plan.json",
+			markdown: "# Plan Maestro approved",
+			revisionAntesDeZarpar: { recommendedAgentLabs: [] },
+			plan: {
+				status: "approved",
+				executiveSummary: "Resumen compacto.",
+				inferredObjective: "Objetivo compacto.",
+				criticalRisks: [],
+				operationalContracts: Array.from({ length: 20 }, (_, index) => ({
+					area: "agent",
+					title: `Contrato ${index}`,
+					rules: [`Regla extensa ${index} ${"x".repeat(900)}`],
+				})),
+				projectFlows: Array.from({ length: 20 }, (_, index) => ({
+					name: `Flujo ${index}`,
+					rules: [`Regla de flujo ${"y".repeat(900)}`],
+				})),
+			},
+		}) as never;
+	const options = {
+		runtimeFactory: () => runtime,
+		projectResolver: () => registered(),
+	};
+
+	const snapshot = await callIduMcpTool("idu_plan_snapshot", {}, options);
+	const snapshotBudget = snapshot.data.contextBudget as ContextBudgetUsage;
+	assert.equal(snapshotBudget.profile, "plan_snapshot");
+	assert.equal(snapshotBudget.truncated, true);
+	assert.ok(
+		snapshotBudget.omitted.some((omission) =>
+			omission.path.startsWith("operationalContracts"),
+		),
+	);
+	assert.ok(
+		snapshotBudget.omitted.some((omission) =>
+			omission.path.startsWith("flows"),
+		),
+	);
+
+	const pack = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "measure compact embedded snapshot", includePlanSnapshot: true },
+		options,
+	);
+	assert.equal(pack.ok, true);
+	assert.equal(
+		(pack.data.planSnapshot as Record<string, unknown>).operationalContracts,
+		undefined,
+	);
+	assert.equal((pack.data.planSnapshot as Record<string, unknown>).flows, undefined);
+	const packBudget = pack.data.contextBudget as ContextBudgetUsage;
+	assert.equal(packBudget.profile, "supervisor_context_pack");
+	assert.equal(
+		packBudget.omitted.some((omission) =>
+			omission.path.startsWith("operationalContracts"),
+		),
+		false,
+	);
+	assert.equal(
+		packBudget.omitted.some((omission) => omission.path.startsWith("flows")),
+		false,
+	);
+	assert.equal(
+		packBudget.omitted.some(
+			(omission) => omission.path === "contextBudget.total",
+		),
+		false,
+	);
+});
+
+test("idu_supervisor_context_pack budgets actual embedded plan snapshot size", async () => {
+	const runtime = fakeRuntime();
+	runtime.masterPlanReview = () =>
+		({
+			current: {},
+			jsonPath: "C:/idu/workspace/projects/sistema/master-plan.json",
+			markdown: "# Plan Maestro approved",
+			revisionAntesDeZarpar: { recommendedAgentLabs: [] },
+			plan: {
+				status: "approved",
+				executiveSummary: "Resumen compacto ".repeat(80),
+				inferredObjective: "Objetivo compacto ".repeat(80),
+				criticalRisks: Array.from(
+					{ length: 8 },
+					(_, index) => `Blocker ${index} ${"z".repeat(180)}`,
+				),
+				recommendedNext: Array.from(
+					{ length: 8 },
+					(_, index) => `Next ${index} ${"n".repeat(180)}`,
+				),
+				operationalContracts: [],
+				projectFlows: [],
+			},
+		}) as never;
+	const pack = await callIduMcpTool(
+		"idu_supervisor_context_pack",
+		{ request: "measure huge compact embedded snapshot", includePlanSnapshot: true },
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+
+	assert.equal(pack.ok, true);
+	const serializedPlanSnapshotLength = JSON.stringify(pack.data.planSnapshot).length;
+	const packBudget = pack.data.contextBudget as ContextBudgetUsage;
+	assert.ok(serializedPlanSnapshotLength > 2_200);
+	assert.ok(packBudget.usedChars >= serializedPlanSnapshotLength);
+	assert.equal(
+		packBudget.omitted.some(
+			(omission) => omission.path === "planSnapshot",
+		),
+		false,
+	);
+});
+
 test("MCP context budgets report plan and source truncation explicitly", async () => {
 	const runtime = fakeRuntime();
 	runtime.masterPlanReview = () =>
