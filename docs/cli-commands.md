@@ -74,7 +74,7 @@ idu_plan_snapshot → idu_supervisor_context_pack → idu_next_advisory_action
 → idu_task_package_create → governance-review → worker normal → idu_postflight
 ```
 
-AgentLabs son opcionales/explícitos y audit-only: `idu_agentlab_request_create` crea solicitud; `idu_agentlab_review_run` ejecuta revisión; ninguno implementa código. Las salidas AgentLab incluyen `workloadEnvelope` como metadata advisory-only para carga/presupuesto/estado honesto; no autoriza auto-run ni escritura del repo real. Para auditorías grandes, el MCP puede crear un plan `specialist-audit-plan` con especialidades explícitas y envelopes por especialidad; sigue sin ejecutar labs.
+AgentLabs son opcionales/explícitos y audit-only: `idu_agentlab_request_create` crea solicitud; `idu_agentlab_review_run` ejecuta revisión; ninguno implementa código. Las salidas AgentLab incluyen `workloadEnvelope` como metadata advisory-only para carga/presupuesto/estado honesto; no autoriza auto-run ni escritura del repo real. Para bibliotecario, `external-source-intelligence` usa primero refs locales de Source Library/digests y no hace web/live fetch automático. Para auditorías grandes, el MCP puede crear un plan `specialist-audit-plan` con especialidades explícitas y envelopes por especialidad; sigue sin ejecutar labs.
 
 ## Estado y activación
 
@@ -281,7 +281,7 @@ Los comandos de skills no modifican skills reales automáticamente.
 | `idu-pi idu-agentlab-request-create postflight` | Crea solicitudes formales desde postflight. |
 | `idu-pi idu-agentlab-request-create master-plan latest` | Comando avanzado para Plan Maestro: crea solicitud audit-only; no ejecuta labs automáticamente. |
 | `idu-pi idu-agentlab-request-create skill-draft latest` | Crea solicitud para revisar draft de skill. |
-| `idu-pi idu-agentlab-request-create external-source-intelligence` | Crea solicitud para AgentLab bibliotecario audit-only: docs oficiales, changelogs, advisories, CVE/NVD, GitHub/npm advisories y señales comunitarias; no promueve contratos automáticamente. |
+| `idu-pi idu-agentlab-request-create external-source-intelligence` | Crea solicitud para AgentLab bibliotecario audit-only usando refs locales de Source Library/digests cuando existen (`sourceId`/`chunkIds`/limitaciones); no hace web/live fetch automático ni promueve contratos. |
 | MCP `idu_agentlab_request_create` con `source: specialist-audit-plan` | Crea plan de auditoría especializada con `specialties` explícitas y `specialtyWorkloadEnvelopes`; no ejecuta labs. |
 | `idu-pi idu-agentlab-request-review latest` | Valida solicitud sin ejecutar AgentLab. |
 | `idu-pi idu-agentlab-review-run latest` | Ejecuta revisión review-only en workspace clone. |

@@ -59,6 +59,8 @@ import {
 	type AgentLabSpecialty,
 	type AgentLabWorkloadEnvelope,
 } from "./agentlab-supervisor-contract.js";
+import type { AgentLabSourceLibraryEvidence } from "./agentlab-review-requests.js";
+import type { SourceRecommendationReport } from "./source-digest.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -2428,10 +2430,19 @@ async function dispatchTool(
 					errors: specialties.errors,
 				});
 			}
+			const objective = stringArg(args, "objective");
+			const context = stringArg(args, "context");
+			const sourceLibraryEvidence =
+				source === "external-source-intelligence"
+					? compactSourceLibraryEvidence(
+							runtime.sourceRecommend(context ?? objective ?? selector),
+						)
+					: undefined;
 			const plan = runtime.agentLabRequestCreate(source, selector, {
-				objective: stringArg(args, "objective"),
-				context: stringArg(args, "context"),
+				objective,
+				context,
 				specialties: specialties.values,
+				externalSourceLibraryEvidence: sourceLibraryEvidence,
 			});
 			const workloadEnvelope =
 				plan.workloadEnvelope ??
@@ -2481,6 +2492,11 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"No ejecuté AgentLabs.",
 					"Solicitud formal solamente.",
+					...(source === "external-source-intelligence"
+						? [
+								"Usé sólo Source Library/digests locales cuando estuvieron disponibles; no hice web/live fetch.",
+							]
+						: []),
 				],
 				errors: plan.errors,
 			});
@@ -3394,6 +3410,25 @@ const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([
 	"librarian",
 	"general",
 ]);
+
+function compactSourceLibraryEvidence(
+	report: SourceRecommendationReport,
+): AgentLabSourceLibraryEvidence {
+	return {
+		request: report.request,
+		generatedAt: report.generatedAt,
+		matches: report.matches.map((match) => ({
+			sourceId: match.sourceId,
+			title: match.title,
+			chunkIds: match.chunkIds,
+			whyRelevant: match.whyRelevant,
+			confidence: match.confidence,
+		})),
+		missingKnowledge: report.missingKnowledge,
+		limitations: report.limitations,
+		contractPromotionAllowed: false,
+	};
+}
 
 function agentLabSpecialtiesArg(
 	args: JsonObject,

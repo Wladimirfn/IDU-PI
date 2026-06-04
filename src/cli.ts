@@ -1159,11 +1159,38 @@ export function createCliRuntime(
 				});
 			}
 			if (source === "external-source-intelligence") {
+				const sourceRequest =
+					options?.context ??
+					options?.objective ??
+					(pathOrLatest && pathOrLatest !== "latest"
+						? pathOrLatest
+						: "external-source-intelligence librarian audit");
+				const sourceEvidence = recommendSourcesForTask({
+					stateRoot: masterPlanStateRoot,
+					projectId: activeProject.id,
+					request: sourceRequest,
+				});
 				return createAgentLabReviewRequests({
 					source: "external_source_intelligence",
 					reportsPath: reportsPath,
 					projectId: activeProject.id,
 					projectPath: activeProject.path,
+					manualObjective: options?.objective,
+					manualContext: options?.context,
+					externalSourceLibraryEvidence: {
+						request: sourceEvidence.request,
+						generatedAt: sourceEvidence.generatedAt,
+						matches: sourceEvidence.matches.map((match) => ({
+							sourceId: match.sourceId,
+							title: match.title,
+							chunkIds: match.chunkIds,
+							whyRelevant: match.whyRelevant,
+							confidence: match.confidence,
+						})),
+						missingKnowledge: sourceEvidence.missingKnowledge,
+						limitations: sourceEvidence.limitations,
+						contractPromotionAllowed: false,
+					},
 				});
 			}
 			if (source === "specialist-audit-plan") {

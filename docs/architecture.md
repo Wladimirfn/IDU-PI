@@ -352,6 +352,7 @@ Garantías:
 - parsing limpio;
 - `workloadEnvelope` advisory-only en requests/runs/status para reportar carga, presupuesto y estados honestos (`requested`, `completed`, `partial`, `timed_out`, `stale`, `failed`) sin autorizar auto-run, escritura de repo real ni promoción de contratos;
 - planes `specialist-audit-plan` que dividen auditorías grandes en requests por especialidad con `specialtyWorkloadEnvelopes` y `explicitRunRequirement`, siempre sin ejecutar labs automáticamente;
+- requests bibliotecario `external-source-intelligence` alimentados por refs locales de Source Library/digests (`sourceId`, `chunkIds`, limitaciones) sin web/live fetch automático ni documentos/chunks crudos;
 - consolidación read-only.
 
 ## AgentRouter y Pi RPC

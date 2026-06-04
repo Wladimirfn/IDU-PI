@@ -536,6 +536,50 @@ test("external source intelligence crea request librarian audit-only", () => {
 	assert.equal(reviewed.valid, true);
 });
 
+test("external source intelligence usa evidencia compacta de Source Library", () => {
+	const temp = root();
+	const rawChunk = "RAW CHUNK TEXT THAT MUST NOT BE REDISTRIBUTED";
+	const plan = createAgentLabReviewRequests({
+		source: "external_source_intelligence",
+		reportsPath: join(temp, "reports"),
+		projectId: "pi-telegram-bridge",
+		projectPath: temp,
+		manualObjective: "Audit local dependency evidence",
+		externalSourceLibraryEvidence: {
+			request: "audit current dependencies",
+			generatedAt: "2026-06-03T00:00:00.000Z",
+			matches: [
+				{
+					sourceId: "source-doc-1",
+					title: "Dependency advisory digest",
+					chunkIds: ["chunk-001", "chunk-002"],
+					whyRelevant: "Mentions dependency security and upgrade notes.",
+					confidence: "high",
+				},
+			],
+			missingKnowledge: [],
+			limitations: ["Local digest only; no web fetch."],
+			contractPromotionAllowed: false,
+		},
+		now,
+	});
+	const request = plan.requests[0]!;
+	const serialized = JSON.stringify(request);
+	assert.match(serialized, /source-doc-1/u);
+	assert.match(serialized, /chunk-001/u);
+	assert.match(serialized, /Mentions dependency security/u);
+	assert.match(serialized, /Local digest only; no web fetch/u);
+	assert.doesNotMatch(serialized, new RegExp(rawChunk, "u"));
+	assert.equal(
+		request.externalSourceIntelligence?.contractPromotionAllowed,
+		false,
+	);
+	assert.match(
+		request.constraints.join("\n"),
+		/no web\/live fetch automático/u,
+	);
+});
+
 test("format plan confirma que no ejecuta AgentLabs", () => {
 	const plan = createAgentLabReviewRequests({
 		source: "manual",

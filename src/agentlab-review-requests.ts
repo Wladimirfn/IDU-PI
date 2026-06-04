@@ -71,10 +71,26 @@ export type AgentLabReviewRequestReview = {
 	plan?: AgentLabReviewRequestPlan;
 };
 
+export type AgentLabSourceLibraryEvidence = {
+	request: string;
+	generatedAt: string;
+	matches: Array<{
+		sourceId: string;
+		title: string;
+		chunkIds: string[];
+		whyRelevant: string;
+		confidence: "low" | "medium" | "high";
+	}>;
+	missingKnowledge: string[];
+	limitations: string[];
+	contractPromotionAllowed: false;
+};
+
 export type AgentLabSpecialistAuditPlanOptions = {
 	objective?: string;
 	context?: string;
 	specialties?: AgentLabSpecialty[];
+	externalSourceLibraryEvidence?: AgentLabSourceLibraryEvidence;
 };
 
 export type CreateAgentLabReviewRequestsInput = {
@@ -92,6 +108,7 @@ export type CreateAgentLabReviewRequestsInput = {
 	externalSourceQueries?: string[];
 	externalSourceRelatedContracts?: string[];
 	externalSourceFreshness?: string;
+	externalSourceLibraryEvidence?: AgentLabSourceLibraryEvidence;
 	specialties?: AgentLabSpecialty[];
 	now?: () => Date;
 };
@@ -508,24 +525,46 @@ function requestsFromSemanticTasks(
 	);
 }
 
+function sourceLibraryEvidenceLines(
+	evidence: AgentLabSourceLibraryEvidence | undefined,
+): string[] {
+	if (!evidence) return [];
+	return evidence.matches.flatMap((match) => [
+		`source:${match.sourceId} title:${match.title} confidence:${match.confidence}`,
+		`chunks:${match.chunkIds.join(",")}`,
+		`why:${match.whyRelevant}`,
+	]);
+}
+
 function requestsFromExternalSourceIntelligence(
 	input: CreateAgentLabReviewRequestsInput,
 	createdAt: string,
 ): AgentLabReviewRequest[] {
+	const sourceEvidence = input.externalSourceLibraryEvidence;
+	const hasLocalEvidence = Boolean(sourceEvidence);
 	const objective =
 		input.manualObjective ??
-		"Auditar fuentes externas vivas sin promover contratos automáticamente";
+		(hasLocalEvidence
+			? "Auditar evidencia local de Source Library sin promover contratos automáticamente"
+			: "Auditar fuentes externas vivas sin promover contratos automáticamente");
 	const relatedContracts = input.externalSourceRelatedContracts ?? [
 		"security",
 		"data",
 		"agent",
 	];
 	const queries = input.externalSourceQueries ?? [
-		"official documentation breaking changes",
-		"security advisories CVE NVD",
-		"GitHub npm advisories changelog releases",
-		"community signals ecosystem reports",
+		sourceEvidence?.request ?? "official documentation breaking changes",
+		...(sourceEvidence
+			? []
+			: [
+					"security advisories CVE NVD",
+					"GitHub npm advisories changelog releases",
+					"community signals ecosystem reports",
+				]),
 	];
+	const localEvidenceLines = sourceLibraryEvidenceLines(sourceEvidence);
+	const localLimitations = sourceEvidence?.limitations ?? [];
+	const missingKnowledge = sourceEvidence?.missingKnowledge ?? [];
 	return [
 		buildAgentLabReviewRequest({
 			id: requestId(input.projectId, "external-source", "librarian", 1),
@@ -536,11 +575,35 @@ function requestsFromExternalSourceIntelligence(
 			objective,
 			contextSummary:
 				input.manualContext ??
-				"AgentLab bibliotecario audit-only: recopilar señales externas, clasificarlas por fuente/confianza y recomendar revisión humana sin modificar contratos.",
+				(hasLocalEvidence
+					? [
+							"AgentLab bibliotecario audit-only: auditar sólo refs compactas de Source Library/digests locales.",
+							"No hacer web/live fetch automático; pedir chunks concretos al orquestador si falta evidencia.",
+							...localLimitations.map(
+								(limitation) => `Limitación: ${limitation}`,
+							),
+							...missingKnowledge.map(
+								(item) => `Conocimiento faltante: ${item}`,
+							),
+						].join("\n")
+					: "AgentLab bibliotecario audit-only: recopilar señales externas, clasificarlas por fuente/confianza y recomendar revisión humana sin modificar contratos."),
 			evidence: [
 				"external_source_intelligence request",
-				`queries: ${queries.join("; ")}`,
-				`relatedContracts: ${relatedContracts.join(", ")}`,
+				...(hasLocalEvidence
+					? [
+							"source-library evidence mode: local digest/chunk refs only",
+							`source-library request: ${sourceEvidence?.request ?? "unknown"}`,
+							...localEvidenceLines,
+							...localLimitations.map(
+								(limitation) => `limitation: ${limitation}`,
+							),
+							...missingKnowledge.map((item) => `missingKnowledge: ${item}`),
+							"contractPromotionAllowed: false",
+						]
+					: [
+							`queries: ${queries.join("; ")}`,
+							`relatedContracts: ${relatedContracts.join(", ")}`,
+						]),
 			],
 			filesToInspect: [],
 			flowsToCheck: ["AgentLab audit-only", "Plan Maestro governance"],
@@ -561,34 +624,60 @@ function requestsFromExternalSourceIntelligence(
 					"community_signal",
 				],
 				freshness:
-					input.externalSourceFreshness ?? "latest available at review time",
+					input.externalSourceFreshness ??
+					(sourceEvidence
+						? `local Source Library digest generated at ${sourceEvidence.generatedAt}`
+						: "latest available at review time"),
 				queries,
 				relatedContracts,
 				contractPromotionAllowed: false,
 			},
-			constraints: [
-				"Audit-only: no scraping side effects, repo writes, contracts, skills, commits or push.",
-				"URLs and claims must be reported with source kind, confidence and freshness.",
-				"Signals can only recommend human/orchestrator review; they never become contracts automatically.",
-			],
-			allowedActions: [
-				"leer fuentes externas permitidas",
-				"reportar señales con URL, severidad, confianza y frescura",
-				"recomendar revisión humana de contratos sin aplicarlos",
-			],
+			constraints: hasLocalEvidence
+				? [
+						"Audit-only: use only local Source Library digest/chunk refs provided by the orchestrator.",
+						"no web/live fetch automático; request creation must not scrape, browse, or fetch network sources.",
+						"Do not request raw huge docs or redistribute full chunks; ask the orchestrator for bounded chunk reads if needed.",
+						"Signals can only recommend human/orchestrator review; they never become contracts automatically.",
+					]
+				: [
+						"Audit-only: no scraping side effects, repo writes, contracts, skills, commits or push.",
+						"URLs and claims must be reported with source kind, confidence and freshness.",
+						"Signals can only recommend human/orchestrator review; they never become contracts automatically.",
+					],
+			allowedActions: hasLocalEvidence
+				? [
+						"auditar refs locales de Source Library/digests",
+						"reportar señales con sourceId, chunkIds, confianza y limitaciones",
+						"recomendar revisión humana de contratos sin aplicarlos",
+					]
+				: [
+						"leer fuentes externas permitidas",
+						"reportar señales con URL, severidad, confianza y frescura",
+						"recomendar revisión humana de contratos sin aplicarlos",
+					],
 			forbiddenActions: [
 				"no aplicar contratos",
 				"no editar código",
 				"no ejecutar cambios del Plan Maestro",
+				"no web/live fetch automático",
+				"no redistribuir docs/chunks crudos completos",
 			],
 			maxCommands: 4,
 			maxMinutes: 12,
-			tokenBudgetHint: "bounded-source-intelligence",
-			expectedOutputs: [
-				"señales externas con URL/evidencia",
-				"clasificación por fuente, severidad, confianza y frescura",
-				"recomendaciones que requieran revisión humana antes de tocar contratos",
-			],
+			tokenBudgetHint: hasLocalEvidence
+				? "bounded-local-source-library-evidence"
+				: "bounded-source-intelligence",
+			expectedOutputs: hasLocalEvidence
+				? [
+						"señales basadas en sourceId/chunkIds locales",
+						"omisiones y limitaciones de Source Library/digests",
+						"recomendaciones que requieran revisión humana antes de tocar contratos",
+					]
+				: [
+						"señales externas con URL/evidencia",
+						"clasificación por fuente, severidad, confianza y frescura",
+						"recomendaciones que requieran revisión humana antes de tocar contratos",
+					],
 			createdAt,
 			requiresHumanApproval: true,
 		}),

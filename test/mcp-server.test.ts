@@ -2361,17 +2361,62 @@ test("postflight request create remains request-only and review-run reports sand
 		masterPlan.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
 	);
 
+	const externalRuntime = fakeRuntime();
+	externalRuntime.sourceRecommend = (request) => ({
+		projectId: "sistema_de_mantencion",
+		request,
+		generatedAt: "2026-06-01T00:00:00.000Z",
+		matches: [
+			{
+				sourceId: "source-doc-1",
+				title: "Dependency advisory digest",
+				chunkIds: ["chunk-001"],
+				whyRelevant: "Local digest mentions dependency governance.",
+				confidence: "high",
+				orchestratorInstruction: "Read chunk-001 if needed.",
+				contractPromotionAllowed: false,
+			},
+		],
+		missingKnowledge: [],
+		limitations: ["Local Source Library digest only; no web fetch."],
+		contractPromotionAllowed: false,
+	});
+	externalRuntime.agentLabRequestCreate = (_source, _selector, options) =>
+		createAgentLabReviewRequests({
+			source: "external_source_intelligence",
+			reportsPath: join(
+				mkdtempSync(join(tmpdir(), "idu-mcp-source-evidence-")),
+				"reports",
+			),
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			manualObjective: options?.objective,
+			manualContext: options?.context,
+			externalSourceLibraryEvidence: options?.externalSourceLibraryEvidence,
+		});
 	const external = await callIduMcpTool(
 		"idu_agentlab_request_create",
-		{ source: "external-source-intelligence", selector: "latest" },
-		{ runtimeFactory: factory(), projectResolver: () => registered() },
+		{
+			source: "external-source-intelligence",
+			selector: "latest",
+			context: "audit dependency governance",
+		},
+		{
+			runtimeFactory: () => externalRuntime,
+			projectResolver: () => registered(),
+		},
 	);
 	assert.equal(external.ok, true);
 	const externalPlan = external.data.plan as AgentLabReviewRequestPlan;
 	assert.equal(externalPlan.source, "external_source_intelligence");
+	assert.match(JSON.stringify(externalPlan), /source-doc-1/u);
+	assert.match(JSON.stringify(externalPlan), /chunk-001/u);
 	assert.ok(!external.data.run);
 	assert.ok(
 		external.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),
+	);
+	assert.ok(
+		external.safeNotes.some((note) => /Source Library|local|web/u.test(note)),
 	);
 
 	const specialistRuntime = fakeRuntime();
