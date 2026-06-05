@@ -131,6 +131,17 @@ function writeRun(
 	return path;
 }
 
+test("consolidate latest rechaza run current.json directorio sin EISDIR crudo", () => {
+	const reports = reportsRoot();
+	mkdirSync(join(reports, "..", "agentlabs", "runs", "current.json"), {
+		recursive: true,
+	});
+	const result = consolidateAgentLabReviewRun("latest", reports);
+	assert.equal(result.valid, false);
+	assert.match(result.errors.join("\n"), /archivo|file|directorio|directory/iu);
+	assert.doesNotMatch(result.errors.join("\n"), /EISDIR/u);
+});
+
 test("lee latest agentlab-review-run válido y guarda consolidación", () => {
 	const reports = reportsRoot();
 	const source = writeRun(reports);

@@ -414,6 +414,42 @@ test("run latest con request master_plan no queda en cero requests", async () =>
 	assert.equal(result.runs[0]?.requestId, request.id);
 });
 
+test("run latest maneja request current.json directorio sin lanzar", async () => {
+	const { router, projectPath, workspaceRoot } = routerWith("legacy summary");
+	const reportsPath = join(workspaceRoot, "reports");
+	mkdirSync(join(reportsPath, "..", "agentlabs", "requests", "current.json"), {
+		recursive: true,
+	});
+	const result = await runAgentLabReviewRequestFile({
+		pathOrLatest: "latest",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		router,
+		now: () => new Date("2026-05-25T10:01:00.000Z"),
+	});
+
+	assert.equal(result.runs.length, 1);
+	assert.equal(result.runs[0]?.status, "failed");
+	assert.match(
+		result.runs[0]?.rawSummary ?? "",
+		/archivo|file|directorio|directory/iu,
+	);
+	assert.doesNotMatch(result.runs[0]?.rawSummary ?? "", /EISDIR/u);
+});
+
+test("status latest rechaza run current.json directorio", () => {
+	const { workspaceRoot } = routerWith(validReport());
+	const reportsPath = join(workspaceRoot, "reports");
+	mkdirSync(join(reportsPath, "..", "agentlabs", "runs", "current.json"), {
+		recursive: true,
+	});
+	const status = getAgentLabReviewStatus("latest", reportsPath);
+	assert.equal(status.valid, false);
+	assert.match(status.errors.join("\n"), /archivo|file|directorio|directory/iu);
+	assert.doesNotMatch(status.errors.join("\n"), /EISDIR/u);
+});
+
 test("run latest con 5 requests master_plan no falla por directorios", async () => {
 	const { router, projectPath, workspaceRoot } = routerWith("legacy summary");
 	mkdirSync(join(projectPath, "untracked-dir"));

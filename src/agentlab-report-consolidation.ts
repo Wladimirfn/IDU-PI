@@ -1,5 +1,6 @@
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -855,9 +856,10 @@ function resolveReportPath(
 			],
 		};
 	}
-	if (!existsSync(path))
-		return { valid: false, path, errors: ["El archivo no existe."] };
-	return { valid: true, path, errors: [] };
+	const fileCheck = validateAgentLabArtifactFile(path);
+	return fileCheck.valid
+		? { valid: true, path, errors: [] }
+		: { valid: false, path, errors: fileCheck.errors };
 }
 
 function resolveCandidate(
@@ -886,14 +888,14 @@ function latestFile(
 	const current = join(artifactDir, currentName);
 	if (existsSync(current)) return current;
 	if (existsSync(artifactDir)) {
-		const latest = readdirSync(artifactDir)
+		const latest = safeReadDirNames(artifactDir)
 			.filter((file) => fileRe.test(file))
 			.sort()
 			.at(-1);
 		if (latest) return join(artifactDir, latest);
 	}
 	if (!existsSync(reports)) return undefined;
-	const legacy = readdirSync(reports)
+	const legacy = safeReadDirNames(reports)
 		.filter((file) => fileRe.test(file))
 		.sort()
 		.at(-1);
@@ -903,6 +905,69 @@ function latestFile(
 function agentLabArtifactDir(reportsPath: string, label: string): string {
 	const bucket = label === "agentlab-review-run" ? "runs" : "reports";
 	return join(resolve(reportsPath), "..", "agentlabs", bucket);
+}
+
+function validateAgentLabArtifactFile(
+	path: string,
+): { valid: true } | { valid: false; errors: string[] } {
+	try {
+		const stat = lstatSync(path);
+		if (stat.isSymbolicLink()) {
+			return {
+				valid: false,
+				errors: [
+					"El artifact AgentLab debe ser un archivo regular; symlinks/junctions no están permitidos.",
+				],
+			};
+		}
+		if (!stat.isFile()) {
+			return {
+				valid: false,
+				errors: [
+					"El artifact AgentLab debe ser un archivo regular; directorios u otros tipos no están permitidos.",
+				],
+			};
+		}
+		return { valid: true };
+	} catch (error) {
+		const code = fsErrorCode(error);
+		if (code === "ENOENT")
+			return { valid: false, errors: ["El archivo no existe."] };
+		if (isToleratedArtifactFsCode(code)) {
+			return {
+				valid: false,
+				errors: [`No puedo acceder al artifact AgentLab (${code}).`],
+			};
+		}
+		return {
+			valid: false,
+			errors: [
+				`No puedo validar el artifact AgentLab: ${error instanceof Error ? error.message : String(error)}`,
+			],
+		};
+	}
+}
+
+function safeReadDirNames(dirPath: string): string[] {
+	try {
+		return readdirSync(dirPath);
+	} catch (error) {
+		const code = fsErrorCode(error);
+		if (isToleratedArtifactFsCode(code)) return [];
+		throw error;
+	}
+}
+
+function fsErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? String((error as { code?: unknown }).code)
+		: undefined;
+}
+
+function isToleratedArtifactFsCode(code: string | undefined): boolean {
+	return Boolean(
+		code && ["EACCES", "EPERM", "ENOENT", "EISDIR", "ENOTDIR"].includes(code),
+	);
 }
 
 function isInsideDirectory(path: string, directory: string): boolean {
