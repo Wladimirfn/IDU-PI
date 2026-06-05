@@ -236,6 +236,36 @@ test("self-maintenance advisory detects missing supervisor activity during press
 	);
 });
 
+test("self-maintenance advisory separates skipped and throttled supervisor pressure", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: [],
+		supervisorEvents: 4,
+		usageFailures: 1,
+		supervisorActivitySkipped: 0,
+		supervisorActivityThrottled: 4,
+	});
+
+	assertTopLevelContract(report);
+	const activity = report.signals.find(
+		(signal) => signal.category === "supervisor_activity_pressure",
+	);
+	assert.ok(activity);
+	assertSignalContract(activity);
+	assert.equal(activity.severity, "warning");
+	assert.match(activity.summary, /throttled/u);
+	assert.doesNotMatch(activity.summary, /absent or throttled/u);
+	assert.ok(
+		activity.evidenceRefs.some((ref) => ref === "supervisor-activity:skipped=0"),
+	);
+	assert.ok(
+		activity.evidenceRefs.some(
+			(ref) => ref === "supervisor-activity:throttled=4",
+		),
+	);
+});
+
 test("self-maintenance advisory emits richer domain signals conservatively", () => {
 	const tasks = [
 		{

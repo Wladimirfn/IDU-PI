@@ -1635,7 +1635,6 @@ function buildRuntimeSelfMaintenanceReport(
 			tasks: taskRead.tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:
-				(supervisorActivity.byReason.throttled ?? 0) +
 				(supervisorActivity.byReason.idu_inactive ?? 0) +
 				(supervisorActivity.byReason.no_new_events ?? 0) +
 				(supervisorActivity.byReason.not_enough_data ?? 0),

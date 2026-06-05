@@ -437,13 +437,26 @@ function buildSupervisorActivityPressureSignal(input: {
 			`supervisor-activity:skipped=${input.supervisorActivitySkipped}`,
 			`supervisor-activity:throttled=${input.supervisorActivityThrottled}`,
 		],
-		summary:
-			"Supervisor activity is absent or throttled while maintenance pressure exists",
+		summary: supervisorActivityPressureSummary(input),
 		recommendedActions: [
 			"Review why supervisor activity is absent, skipped, or throttled before increasing automation scope.",
 			"Resolve stale/backlog signals or record bounded supervisor activity evidence for the next advisory run.",
 		],
 	};
+}
+
+function supervisorActivityPressureSummary(input: {
+	supervisorEvents: number;
+	supervisorActivitySkipped: number;
+	supervisorActivityThrottled: number;
+}): string {
+	if (input.supervisorEvents === 0) {
+		return "Supervisor activity events are absent while maintenance pressure exists";
+	}
+	if (input.supervisorActivityThrottled > 0) {
+		return "Supervisor activity is throttled while maintenance pressure exists";
+	}
+	return "Supervisor activity is being skipped while maintenance pressure exists";
 }
 
 function buildLearningLoopSignal(
