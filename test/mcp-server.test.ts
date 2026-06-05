@@ -2983,6 +2983,78 @@ test("autonomous alert control writes only alert control state", async () => {
 	}
 });
 
+test("idu_autonomous_alerts_tick creates one routine repeated bug task", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `telegram bug repeated ${index}`);
+		}
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{ allowTaskCreation: true },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			tasksCreated: Array<{ taskId: string; alertId: string }>;
+		};
+		assert.equal(report.tasksCreated.length, 1);
+		assert.equal(
+			(runtime.listTasks?.() ?? []).some((task) =>
+				/regression test/u.test(task.text),
+			),
+			true,
+		);
+		const ledger = readFileSync(
+			join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
+			"utf8",
+		);
+		assert.match(ledger, /alert-repeated_bug:telegram/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_autonomous_alerts_tick escalates high-risk repeated bug without task", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-high-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `security db auth bug repeated ${index}`);
+		}
+		const before = runtime.listTasks?.().length ?? 0;
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{ allowTaskCreation: true },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			humanEscalations: unknown[];
+			tasksCreated: unknown[];
+		};
+		assert.equal(report.humanEscalations.length, 1);
+		assert.equal(report.tasksCreated.length, 0);
+		assert.equal(runtime.listTasks?.().length ?? 0, before);
+		const ledger = readFileSync(
+			join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
+			"utf8",
+		);
+		assert.match(ledger, /alert-repeated_bug:/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");

@@ -44,6 +44,7 @@ import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
 import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
 import {
+	appendAutonomousAlertDecision,
 	readAutonomousAlertEngineState,
 	updateAutonomousAlertControlState,
 } from "./autonomous-alert-engine-state.js";
@@ -510,7 +511,7 @@ const TOOLS: IduMcpToolDefinition[] = [
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 			action: requiredString(
-				'enable, disable, pause, resume, disable_domain o enable_domain.',
+				"enable, disable, pause, resume, disable_domain o enable_domain.",
 			),
 			domain: optionalString("Dominio a activar/desactivar."),
 			pauseMinutes: optionalString("Minutos de pausa, default 60."),
@@ -2573,30 +2574,59 @@ async function dispatchTool(
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const state = readAutonomousAlertEngineState(stateRoot);
 			const taskRead = readRuntimeStructuredTasks(runtime);
-			const requestedTaskCreation = booleanArg(args, "allowTaskCreation", false);
+			const allowTaskCreation = booleanArg(
+				args,
+				"allowTaskCreation",
+				false,
+			);
 			const report = buildAutonomousAlertEngineReport({
 				projectId: runtime.projectId,
 				control: state.control,
 				tasks: taskRead.tasks,
 				selfMaintenanceSignals: [],
-				allowTaskCreation: false,
+				allowTaskCreation,
 				cooldowns: state.cooldowns,
 			});
+			const tasksCreated: Array<{
+				taskId: string;
+				alertId: string;
+				evidenceRefs: string[];
+			}> = [];
+			for (const decision of report.decisions) {
+				if (
+					decision.recommendedAction === "create_task" &&
+					decision.taskDraft &&
+					allowTaskCreation &&
+					tasksCreated.length < 3
+				) {
+					const taskKind = inferTaskTemplateKind(decision.taskDraft.text);
+					const task = runtime.createTask(taskKind, decision.taskDraft.text);
+					tasksCreated.push({
+						taskId: task.id,
+						alertId: decision.id,
+						evidenceRefs: decision.evidenceRefs,
+					});
+					appendAutonomousAlertDecision(stateRoot, decision);
+				} else if (decision.recommendedAction === "ask_human") {
+					appendAutonomousAlertDecision(stateRoot, decision);
+				}
+			}
+			const finalReport = { ...report, tasksCreated };
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
-				summary: `Autonomous alert tick report-only: ${report.decisions.length} decision(s).`,
+				summary: `Autonomous alert tick: ${tasksCreated.length} task(s) created, ${finalReport.humanEscalations.length} escalation(s).`,
 				data: {
-					report,
-					requestedTaskCreation,
-					taskCreationStatus: "deferred_to_next_slice",
+					report: finalReport,
+					allowTaskCreation,
+					taskCreationStatus: allowTaskCreation ? "enabled" : "disabled",
 				},
 				safeNotes: [
 					...resolution.safeNotes,
-					...report.safeNotes,
-					"Task 3 tick is report-only: no tasks were created even if allowTaskCreation was requested.",
+					...finalReport.safeNotes,
+					"Tick may create capped routine tasks only; it did not implement code, run AgentLabs, update dependencies, or mutate rules/skills/contracts.",
 					...taskRead.safeNotes,
 				],
 			});
@@ -2608,7 +2638,8 @@ async function dispatchTool(
 					tool: name,
 					projectId: runtime.projectId,
 					projectPath: runtime.projectPath,
-					summary: "Autonomous alert control requires a registered project stateRoot.",
+					summary:
+						"Autonomous alert control requires a registered project stateRoot.",
 					data: { resolutionStatus: resolution.status },
 					safeNotes: [
 						...resolution.safeNotes,
@@ -2649,7 +2680,9 @@ async function dispatchTool(
 				action !== "disable_domain" &&
 				action !== "enable_domain"
 			) {
-				throw new Error(`unsupported autonomous alerts control action: ${action}`);
+				throw new Error(
+					`unsupported autonomous alerts control action: ${action}`,
+				);
 			}
 			const state = updateAutonomousAlertControlState(
 				resolution.stateRoot,
