@@ -44,6 +44,21 @@ test("buildMasterPlanObjectiveSnapshot bounds objective and blocks unapproved pl
 	assert.equal(snapshot.advisoryOnly, true);
 });
 
+test("buildMasterPlanObjectiveSnapshot blocks approved plan with missing objective", () => {
+	const snapshot = buildMasterPlanObjectiveSnapshot({
+		projectId: "idu-pi",
+		projectPath: "C:/repo",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		plan: {
+			status: "approved",
+			criticalRisks: [],
+		},
+	});
+	assert.equal(snapshot.planApproved, true);
+	assert.equal(snapshot.blocked, true);
+	assert.match(snapshot.blockReason ?? "", /objective missing/u);
+});
+
 test("getCachedMasterPlanObjectiveSnapshot reuses valid cache and writes stateRoot-only", () => {
 	const stateRoot = tempRoot();
 	let calls = 0;

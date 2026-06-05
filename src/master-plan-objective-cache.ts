@@ -33,14 +33,10 @@ export function buildMasterPlanObjectiveSnapshot(input: {
 	const now = input.now ?? new Date();
 	const ttlMinutes = input.ttlMinutes ?? 60;
 	const status = String(input.plan.status ?? "unknown");
-	const objective = boundText(
-		String(
-			input.plan.inferredObjective ??
-				input.plan.executiveSummary ??
-				"Objective unavailable.",
-		),
-		500,
+	const rawObjective = String(
+		input.plan.inferredObjective ?? input.plan.executiveSummary ?? "",
 	);
+	const objective = boundText(rawObjective, 500);
 	const summary = boundText(String(input.plan.executiveSummary ?? ""), 500);
 	const risks = stringArray(input.plan.criticalRisks)
 		.slice(0, 8)
