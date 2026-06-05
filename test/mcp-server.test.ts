@@ -1022,6 +1022,11 @@ test("mcp server lists Idu-pi tools", async () => {
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_context_pruning_advisory"));
 	assert.ok(
+		tools.some(
+			(tool) => tool.name === "idu_supervisor_self_maintenance_advisory",
+		),
+	);
+	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_intelligence_report"),
 	);
 	assert.ok(
@@ -1030,7 +1035,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 54);
+	assert.equal(tools.length, 55);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2910,6 +2915,69 @@ test("idu_context_pruning_advisory is read-only and advisory-only", async () => 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	const runtime = fakeRuntime();
+	for (let index = 0; index < 10; index += 1) {
+		const task = runtime.createTask(
+			"bug",
+			`postflight context.md repeated failure ${index}`,
+		);
+		task.id = `maintenance-${index}`;
+	}
+	const result = await callIduMcpTool(
+		"idu_supervisor_self_maintenance_advisory",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		authority: string;
+		mode: string;
+		noWrites: boolean;
+		agentLabsExecuted: boolean;
+		rulesApplied: boolean;
+		skillsModified: boolean;
+		totals: { pendingTasks: number };
+		signals: Array<{ category: string }>;
+		safeNotes: string[];
+	};
+	assert.equal(report.authority, "advisory");
+	assert.equal(report.mode, "advisory_only");
+	assert.equal(report.noWrites, true);
+	assert.equal(report.agentLabsExecuted, false);
+	assert.equal(report.rulesApplied, false);
+	assert.equal(report.skillsModified, false);
+	assert.equal(report.totals.pendingTasks, 10);
+	assert.ok(
+		report.signals.some((signal) => signal.category === "backlog_pressure"),
+	);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "repeated_failure_patterns",
+		),
+	);
+	assert.equal(result.data.structuredTaskInputStatus, "available");
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		false,
+	);
+	assert.match(report.safeNotes.join("\n"), /no files, tasks, rules, skills/u);
+	assert.match(result.safeNotes.join("\n"), /No creé tareas/u);
+	assert.match(result.safeNotes.join("\n"), /no toqué AgentLabs/u);
+	assert.equal(existsSync(stateRoot), false);
+	rmSync(root, { recursive: true, force: true });
 });
 
 test("idu_external_intelligence_report is allowlisted and advisory-only", async () => {

@@ -42,6 +42,7 @@ import {
 } from "./context-budget.js";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
+import { buildSupervisorSelfMaintenanceAdvisory } from "./supervisor-self-maintenance-advisory.js";
 import {
 	buildExternalIntelligenceReport,
 	writeExternalIntelligenceReport,
@@ -123,6 +124,7 @@ export type IduMcpToolName =
 	| "idu_supervisor_cron_plan"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
+	| "idu_supervisor_self_maintenance_advisory"
 	| "idu_bibliotecario_proactive_advisory"
 	| "idu_external_intelligence_report"
 	| "idu_external_source_recommend"
@@ -456,6 +458,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool(
 		"idu_context_pruning_advisory",
 		"Devuelve reporte advisory-only de deuda semántica/context pruning; no borra, no archiva y no promueve contratos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_supervisor_self_maintenance_advisory",
+		"Devuelve reporte advisory-only de autocuidado supervisor: backlog, tareas stale y patrones repetidos; no escribe, no crea tareas y no ejecuta AgentLabs.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
@@ -989,14 +998,16 @@ export async function callIduMcpTool(
 		);
 		const startedAt = Date.now();
 		const result = await dispatchTool(name, args, runtime, resolution);
-		await recordMcpUsage(
-			runtime,
-			result,
-			Date.now() - startedAt,
-			resolution.stateRoot,
-		);
-		recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
-		recordMcpContextQuality(runtime, result, resolution.stateRoot);
+		if (name !== "idu_supervisor_self_maintenance_advisory") {
+			await recordMcpUsage(
+				runtime,
+				result,
+				Date.now() - startedAt,
+				resolution.stateRoot,
+			);
+			recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
+			recordMcpContextQuality(runtime, result, resolution.stateRoot);
+		}
 		return result;
 	} catch (error) {
 		return envelope({
@@ -1479,6 +1490,37 @@ function resolveLifecycleProjectPath(inputProjectPath?: string): string {
 	if (inputProjectPath?.trim()) return inputProjectPath.trim();
 	const resolution = resolveMcpProjectContext();
 	return resolution.projectPath;
+}
+
+function readRuntimeStructuredTasks(runtime: CliRuntime): {
+	status: "available" | "unavailable";
+	tasks: StructuredTask[];
+	safeNotes: string[];
+} {
+	if (!runtime.listTasks) {
+		return {
+			status: "unavailable",
+			tasks: [],
+			safeNotes: [
+				"Structured task queue direct access was unavailable; report used an empty task snapshot.",
+			],
+		};
+	}
+	try {
+		return {
+			status: "available",
+			tasks: runtime.listTasks(),
+			safeNotes: ["Leí snapshot de cola estructurada sin modificarla."],
+		};
+	} catch {
+		return {
+			status: "unavailable",
+			tasks: [],
+			safeNotes: [
+				"Structured task queue read failed safely; report used an empty task snapshot.",
+			],
+		};
+	}
 }
 
 async function dispatchTool(
@@ -2442,6 +2484,62 @@ async function dispatchTool(
 					"No promoví contratos, no degradé contratos, no ejecuté AgentLabs y no escribí analytics remota.",
 					"No guardé prompts ni documentos crudos; sólo devolví conteos, ids, rutas y metadatos derivados.",
 				],
+			});
+		}
+		case "idu_supervisor_self_maintenance_advisory": {
+			const taskRead = readRuntimeStructuredTasks(runtime);
+			const report = buildSupervisorSelfMaintenanceAdvisory({
+				projectId: runtime.projectId,
+				now: new Date(),
+				tasks: taskRead.tasks,
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: report.signals.length ? "warn" : "allow",
+				severity: report.signals.some((signal) => signal.severity === "high")
+					? "warning"
+					: "info",
+				confidence: report.signals.length ? 0.8 : 0.7,
+				summary: `Supervisor self-maintenance advisory signals: ${report.signals.length}`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: report.signals.map((signal) => signal.id),
+				nextActions: report.recommendedActions,
+				requiredActions: report.signals.length
+					? [
+							{
+								id: "supervisor-self-maintenance-orchestrator-review",
+								owner: "orchestrator",
+								action: "review_self_maintenance_advisory_before_changes",
+								reason:
+									"Self-maintenance signals are advisory and must not trigger automatic writes, task creation, AgentLabs, rules, or skill changes.",
+								blocking: true,
+							},
+						]
+					: [],
+			});
+			const safeNotes = [
+				...resolution.safeNotes,
+				...report.safeNotes,
+				"No creé tareas, no modifiqué reglas, no modifiqué skills y no toqué AgentLabs.",
+				...taskRead.safeNotes,
+			];
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Supervisor self-maintenance advisory signals: ${report.signals.length}`,
+				data: {
+					decisionEnvelope,
+					report,
+					signals: report.signals,
+					structuredTaskInputStatus: taskRead.status,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes,
 			});
 		}
 		case "idu_bibliotecario_proactive_advisory": {
