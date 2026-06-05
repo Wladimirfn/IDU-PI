@@ -3021,6 +3021,29 @@ test("idu_autonomous_alerts_tick creates capped routine repeated bug tasks", asy
 	}
 });
 
+test("idu_autonomous_alerts_tick is read-only by default for human escalations", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-read-only-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `security db auth bug repeated ${index}`);
+		}
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		assert.equal(existsSync(join(stateRoot, "reports")), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("idu_autonomous_alerts_tick escalates high-risk repeated bug without task", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-high-mcp-"));
 	try {

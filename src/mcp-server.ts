@@ -2665,7 +2665,7 @@ async function dispatchTool(
 						evidenceRefs: decision.evidenceRefs,
 					});
 					appendAutonomousAlertDecision(stateRoot, decision);
-				} else if (decision.recommendedAction === "ask_human") {
+				} else if (decision.recommendedAction === "ask_human" && allowTaskCreation) {
 					appendAutonomousAlertDecision(stateRoot, decision);
 				}
 			}

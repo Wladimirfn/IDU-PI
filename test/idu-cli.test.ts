@@ -1642,6 +1642,7 @@ test("CLI alert commands expose status tick and control safely", async () => {
 		assert.equal(tick.exitCode, 0);
 		assert.match(tick.stdout, /allowTaskCreation: false/u);
 		assert.equal(runtime.listTasks?.().length ?? 0, beforeTick);
+		assert.equal(existsSync(join(workspaceRoot, "reports")), false);
 
 		const pause = await runCliCommand(
 			["alerts", "control", "pause", "60"],
@@ -1656,6 +1657,18 @@ test("CLI alert commands expose status tick and control safely", async () => {
 		);
 		assert.equal(existsSync(statePath), true);
 		assert.match(readFileSync(statePath, "utf8"), /pausedUntil/u);
+	});
+});
+
+test("CLI alert tick is read-only by default for human escalations", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `security db auth bug repeated ${index}`);
+		}
+		const result = await runCliCommand(["alerts", "tick"], runtime);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /allowTaskCreation: false/u);
+		assert.equal(existsSync(join(workspaceRoot, "reports")), false);
 	});
 });
 

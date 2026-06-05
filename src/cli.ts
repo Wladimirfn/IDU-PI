@@ -2160,7 +2160,7 @@ function runCliAutonomousAlertTick(
 				evidenceRefs: decision.evidenceRefs,
 			});
 			appendAutonomousAlertDecision(runtime.workspaceRoot, decision);
-		} else if (decision.recommendedAction === "ask_human") {
+		} else if (decision.recommendedAction === "ask_human" && allowTaskCreation) {
 			appendAutonomousAlertDecision(runtime.workspaceRoot, decision);
 		}
 	}
