@@ -172,14 +172,18 @@ test("automaticov1 cycle injects stale MCP context pack refresh advisory", async
 
 	assert.equal(result.status, "ran");
 	assert.equal(result.allowedToProceed, false);
-	assert.ok(result.evidenceRefs.includes("automaticov1:mcp-context-pack:stale"));
+	assert.ok(
+		result.evidenceRefs.includes("automaticov1:mcp-context-pack:stale"),
+	);
 	assert.ok(
 		result.nextActions.some((action) =>
 			/refresh idu_supervisor_context_pack/u.test(action),
 		),
 	);
 	assert.ok(
-		result.safeNotes.some((note) => /does not auto-run supervisor context/u.test(note)),
+		result.safeNotes.some((note) =>
+			/does not auto-run supervisor context/u.test(note),
+		),
 	);
 });
 

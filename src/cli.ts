@@ -1426,7 +1426,7 @@ export async function runCliCommand(
 					: ok(activeRuntime.formatMasterPlanOperation(decision.result));
 			}
 		}
-			switch (command) {
+		switch (command) {
 			case "automaticov1":
 			case "idu-automaticov1": {
 				const result = await runCliAutomaticov1Cycle(activeRuntime, rest);
