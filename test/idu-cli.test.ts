@@ -1740,12 +1740,21 @@ test("CLI automaticov1 cycle composes engines without authorizing work", async (
 				},
 			}) as any;
 		const result = await runCliCommand(["automaticov1", "cycle"], runtime);
+		await flushIduUsageEvents();
+		const usageEvents = readIduUsageEvents(workspaceRoot);
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /automaticov1 cycle/u);
 		assert.match(result.stdout, /allowedToProceed: false/u);
 		assert.match(result.stdout, /externalFetch: disabled/u);
 		assert.match(result.stdout, /skillProposals: disabled/u);
 		assert.match(result.stdout, /automaticov1:bibliotecario-snapshot/u);
+		assert.equal(usageEvents.length, 1);
+		assert.equal(usageEvents[0]?.surface, "cli");
+		assert.equal(usageEvents[0]?.action, "automaticov1");
+		assert.equal(usageEvents[0]?.allowedToProceed, false);
+		assert.equal(usageEvents[0]?.requiresHuman, true);
+		assert.equal(usageEvents[0]?.recommendation, "warn");
+		assert.equal(usageEvents[0]?.ok, true);
 	});
 });
 

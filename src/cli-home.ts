@@ -61,7 +61,7 @@ export type CliHomeProjectStatus = {
 	reportsDir?: string;
 	supervisor: "active" | "inactive" | "unknown";
 	projectCore: "confirmed" | "pending" | "missing" | "unknown";
-	constitution: "confirmed" | "draft" | "missing" | "unknown";
+	constitution: "active" | "stale" | "draft" | "missing" | "unknown";
 	allowedRoot: boolean | "unknown";
 	recommendedNext: "enroll" | "bootstrap" | "idu" | "prepare";
 	warning?: string;
@@ -688,7 +688,9 @@ function constitutionStatus(
 		const parsed = JSON.parse(readFileSync(constitutionPath, "utf8")) as {
 			status?: string;
 		};
-		return parsed.status === "confirmed" ? "confirmed" : "draft";
+		if (parsed.status === "active") return "active";
+		if (parsed.status === "stale") return "stale";
+		return "draft";
 	} catch {
 		return "unknown";
 	}

@@ -322,6 +322,37 @@ test("project status renderer shows enrolled and unregistered project states", (
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("current project panel shows active Constitution status", () => {
+	const root = tempDir("idu-cli-home-constitution-");
+	try {
+		const projectPath = join(root, "project");
+		const configPath = join(projectPath, "config");
+		mkdirSync(configPath, { recursive: true });
+		writeFileSync(
+			join(configPath, "project-constitution.json"),
+			JSON.stringify({ status: "active" }),
+			"utf8",
+		);
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus(status);
+		assert.match(output, /Constitution: active/u);
+		assert.doesNotMatch(output, /Constitution: draft/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("current project panel shows local usage metrics from stateRoot", async () => {
 	const root = tempDir("idu-cli-home-usage-");
 	try {
