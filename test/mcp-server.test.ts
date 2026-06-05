@@ -2917,6 +2917,72 @@ test("idu_context_pruning_advisory is read-only and advisory-only", async () => 
 	}
 });
 
+test("autonomous alert MCP tools are listed", () => {
+	const tools = listIduMcpTools().map((tool) => tool.name);
+	assert.ok(tools.includes("idu_autonomous_alerts_status"));
+	assert.ok(tools.includes("idu_autonomous_alerts_tick"));
+	assert.ok(tools.includes("idu_autonomous_alerts_control"));
+});
+
+test("autonomous alert status is read-only and raw honest", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-status-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_status",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			rawHonesty: boolean;
+			noImplementation: boolean;
+			agentLabsExecuted: boolean;
+		};
+		assert.equal(report.rawHonesty, true);
+		assert.equal(report.noImplementation, true);
+		assert.equal(report.agentLabsExecuted, false);
+		assert.equal(existsSync(stateRoot), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("autonomous alert control writes only alert control state", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-control-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_control",
+			{ action: "disable", reason: "user stop" },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const state = result.data.state as {
+			control: { active: boolean; reason?: string };
+		};
+		assert.equal(state.control.active, false);
+		assert.equal(state.control.reason, "user stop");
+		assert.equal(
+			existsSync(
+				join(stateRoot, "reports", "autonomous-alert-engine-state.json"),
+			),
+			true,
+		);
+		assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");

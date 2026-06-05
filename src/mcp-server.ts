@@ -42,6 +42,11 @@ import {
 } from "./context-budget.js";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
+import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
+import {
+	readAutonomousAlertEngineState,
+	updateAutonomousAlertControlState,
+} from "./autonomous-alert-engine-state.js";
 import { buildSupervisorSelfMaintenanceAdvisory } from "./supervisor-self-maintenance-advisory.js";
 import {
 	buildExternalIntelligenceReport,
@@ -135,6 +140,9 @@ export type IduMcpToolName =
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
 	| "idu_supervisor_self_maintenance_advisory"
+	| "idu_autonomous_alerts_status"
+	| "idu_autonomous_alerts_tick"
+	| "idu_autonomous_alerts_control"
 	| "idu_bibliotecario_proactive_advisory"
 	| "idu_external_intelligence_report"
 	| "idu_external_source_recommend"
@@ -477,6 +485,36 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Devuelve reporte advisory-only de autocuidado supervisor: backlog, tareas stale y patrones repetidos; no escribe, no crea tareas y no ejecuta AgentLabs.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_status",
+		"Lee estado y reporte raw-honesty del motor de alertas autónomas; advisory-only y sin writes.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_tick",
+		"Evalúa alertas autónomas y devuelve decisiones advisory-only; creación de tareas se implementa en slice posterior.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			allowTaskCreation: optionalBoolean(
+				"Solicita crear tareas; Task 3 lo reporta sin crear tareas.",
+			),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_control",
+		"Activa, desactiva, pausa, reanuda o controla dominios de alertas autónomas con escritura stateRoot-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredString(
+				'enable, disable, pause, resume, disable_domain o enable_domain.',
+			),
+			domain: optionalString("Dominio a activar/desactivar."),
+			pauseMinutes: optionalString("Minutos de pausa, default 60."),
+			reason: optionalString("Motivo humano/orquestador para auditoría."),
 		},
 	),
 	tool(
@@ -1008,7 +1046,7 @@ export async function callIduMcpTool(
 		);
 		const startedAt = Date.now();
 		const result = await dispatchTool(name, args, runtime, resolution);
-		if (name !== "idu_supervisor_self_maintenance_advisory") {
+		if (!isReadOnlyAlertTelemetryExcludedTool(name)) {
 			await recordMcpUsage(
 				runtime,
 				result,
@@ -1143,6 +1181,14 @@ function isProjectLifecycleTool(
 		"idu_bootstrap_project",
 		"idu_start",
 	].includes(name);
+}
+
+function isReadOnlyAlertTelemetryExcludedTool(name: IduMcpToolName): boolean {
+	return (
+		name === "idu_supervisor_self_maintenance_advisory" ||
+		name === "idu_autonomous_alerts_status" ||
+		name === "idu_autonomous_alerts_tick"
+	);
 }
 
 async function handleProjectLifecycleTool(
@@ -2493,6 +2539,138 @@ async function dispatchTool(
 					"Reporte de deuda semántica advisory-only: no borré archivos, no archivé fuentes y no apliqué refactors.",
 					"No promoví contratos, no degradé contratos, no ejecuté AgentLabs y no escribí analytics remota.",
 					"No guardé prompts ni documentos crudos; sólo devolví conteos, ids, rutas y metadatos derivados.",
+				],
+			});
+		}
+		case "idu_autonomous_alerts_status": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const state = readAutonomousAlertEngineState(stateRoot);
+			const taskRead = readRuntimeStructuredTasks(runtime);
+			const report = buildAutonomousAlertEngineReport({
+				projectId: runtime.projectId,
+				control: state.control,
+				tasks: taskRead.tasks,
+				selfMaintenanceSignals: [],
+				allowTaskCreation: false,
+				cooldowns: state.cooldowns,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Autonomous alert status: ${report.decisions.length} decision(s).`,
+				data: { report, state },
+				safeNotes: [
+					...resolution.safeNotes,
+					...report.safeNotes,
+					"Status read-only: no alert state, tasks, AgentLabs, rules, skills, contracts, or dependencies were changed.",
+					...taskRead.safeNotes,
+				],
+			});
+		}
+		case "idu_autonomous_alerts_tick": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const state = readAutonomousAlertEngineState(stateRoot);
+			const taskRead = readRuntimeStructuredTasks(runtime);
+			const requestedTaskCreation = booleanArg(args, "allowTaskCreation", false);
+			const report = buildAutonomousAlertEngineReport({
+				projectId: runtime.projectId,
+				control: state.control,
+				tasks: taskRead.tasks,
+				selfMaintenanceSignals: [],
+				allowTaskCreation: false,
+				cooldowns: state.cooldowns,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Autonomous alert tick report-only: ${report.decisions.length} decision(s).`,
+				data: {
+					report,
+					requestedTaskCreation,
+					taskCreationStatus: "deferred_to_next_slice",
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					...report.safeNotes,
+					"Task 3 tick is report-only: no tasks were created even if allowTaskCreation was requested.",
+					...taskRead.safeNotes,
+				],
+			});
+		}
+		case "idu_autonomous_alerts_control": {
+			if (!resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Autonomous alert control requires a registered project stateRoot.",
+					data: { resolutionStatus: resolution.status },
+					safeNotes: [
+						...resolution.safeNotes,
+						"No escribí control de alertas porque falta stateRoot registrado.",
+					],
+					errors: ["registered stateRoot is required"],
+				});
+			}
+			const action = requiredText(args, "action");
+			const now = new Date();
+			const current = readAutonomousAlertEngineState(resolution.stateRoot, now);
+			let disabledDomains = current.control.disabledDomains;
+			if (action === "disable_domain") {
+				disabledDomains = [
+					...new Set([...disabledDomains, requiredText(args, "domain")]),
+				];
+			} else if (action === "enable_domain") {
+				const domain = requiredText(args, "domain");
+				disabledDomains = disabledDomains.filter((item) => item !== domain);
+			}
+			const pauseMinutes = positiveIntegerArg(args, "pauseMinutes") ?? 60;
+			let pausedUntil = current.control.pausedUntil;
+			if (action === "pause") {
+				pausedUntil = new Date(
+					now.getTime() + pauseMinutes * 60 * 1000,
+				).toISOString();
+			} else if (action === "resume") {
+				pausedUntil = "1970-01-01T00:00:00.000Z";
+			}
+			let active = current.control.active;
+			if (action === "enable") active = true;
+			else if (action === "disable") active = false;
+			if (
+				action !== "enable" &&
+				action !== "disable" &&
+				action !== "pause" &&
+				action !== "resume" &&
+				action !== "disable_domain" &&
+				action !== "enable_domain"
+			) {
+				throw new Error(`unsupported autonomous alerts control action: ${action}`);
+			}
+			const state = updateAutonomousAlertControlState(
+				resolution.stateRoot,
+				{
+					active,
+					...(pausedUntil ? { pausedUntil } : {}),
+					disabledDomains,
+					reason: stringArg(args, "reason") ?? action,
+				},
+				now,
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Autonomous alerts control updated: ${action}`,
+				data: { state },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Control write is stateRoot-only; no repo files, tasks, AgentLabs, rules, skills, contracts, or dependencies were changed.",
 				],
 			});
 		}
