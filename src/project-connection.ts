@@ -4,6 +4,7 @@ import { isAllowedCwd } from "./config.js";
 import { validateProjectBlueprint } from "./project-blueprint.js";
 import { validateProjectFlows } from "./project-flows.js";
 import type { ProjectEntry, ProjectRegistry } from "./projects.js";
+import type { ProjectAlignmentState } from "./project-alignment-state.js";
 
 export type ProjectConnectionStatus =
 	| "connected"
@@ -71,13 +72,14 @@ export type InspectProjectConnectionOptions = {
 	workspaceRoot: string;
 	projectId?: string;
 	now?: () => Date;
+	alignmentState?: ProjectAlignmentState;
 };
 
 export function formatProjectConnectionReport(
 	report: ProjectConnectionReport,
 ): string {
 	return [
-		statusMessage(report.status),
+		statusMessage(report),
 		"",
 		"Proyecto:",
 		report.projectId ?? "—",
@@ -117,10 +119,12 @@ export function formatProjectConnectionReport(
 	].join("\n");
 }
 
-function statusMessage(status: ProjectConnectionStatus): string {
-	switch (status) {
+function statusMessage(report: ProjectConnectionReport): string {
+	switch (report.status) {
 		case "ready":
-			return "Idu-pi conectado con configuración válida; alineación pendiente.";
+			return report.alignmentStatus === "aligned"
+				? "Idu-pi conectado con configuración válida; alineación verificada."
+				: "Idu-pi conectado con configuración válida; alineación pendiente.";
 		case "connected":
 			return "Idu-pi conectado, pero falta comprensión/config completa.";
 		case "needs_understanding":
@@ -283,19 +287,21 @@ export function inspectProjectConnection(
 		};
 	}
 
+	const alignmentState = matchingAlignmentState(options.alignmentState, project);
+	const alignmentStatus = alignmentState?.alignmentStatus ?? "pending_scan";
 	return {
 		status: "ready",
 		configStatus: "project_local_valid",
-		alignmentStatus: "pending_scan",
-		readiness: "config_ready",
-		alignmentReason: ["no existe scan reciente"],
+		alignmentStatus,
+		readiness: alignmentState?.readiness ?? "config_ready",
+		alignmentReason: alignmentState?.alignmentReason ?? ["no existe scan reciente"],
 		projectId: project.id,
 		projectPath: project.path,
 		problems,
 		warnings,
-		recommendedNext: "/idu_prepare",
+		recommendedNext: recommendedNextForAlignment(alignmentStatus),
 		safeToOperate: true,
-		needsUserConfirmation: false,
+		needsUserConfirmation: alignmentRequiresHuman(alignmentStatus),
 		inspectedAt,
 		blueprint,
 		flows,
@@ -314,6 +320,39 @@ function resolveProject(
 	return registry.projects.find(
 		(project) => project.id === registry.activeProjectId,
 	);
+}
+
+function matchingAlignmentState(
+	state: ProjectAlignmentState | undefined,
+	project: ProjectEntry,
+): ProjectAlignmentState | undefined {
+	if (!state) return undefined;
+	if (state.projectId !== project.id) return undefined;
+	return sameRuntimePath(state.projectPath, project.path) ? state : undefined;
+}
+
+function recommendedNextForAlignment(status: ProjectAlignmentStatus): string {
+	switch (status) {
+		case "aligned":
+			return "continuar bajo riesgo";
+		case "needs_review":
+			return "/config review_project_flows_draft";
+		case "stale":
+			return "/idu_prepare";
+		case "unknown":
+		case "pending_scan":
+			return "/idu_prepare";
+	}
+}
+
+function alignmentRequiresHuman(status: ProjectAlignmentStatus): boolean {
+	return status === "needs_review";
+}
+
+function sameRuntimePath(left: string, right: string): boolean {
+	const normalize = (value: string) =>
+		process.platform === "win32" ? value.toLowerCase() : value;
+	return normalize(left) === normalize(right);
 }
 
 function baseReport(options: {

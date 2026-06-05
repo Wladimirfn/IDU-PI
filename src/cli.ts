@@ -146,6 +146,10 @@ import {
 	inspectProjectConnection,
 	type ProjectConnectionReport,
 } from "./project-connection.js";
+import {
+	readProjectAlignmentState,
+	recordProjectAlignmentState,
+} from "./project-alignment-state.js";
 import { formatProjectCoreForPrompt, loadProjectCore } from "./project-core.js";
 import {
 	deriveConstitutionFromProjectCore,
@@ -2795,6 +2799,10 @@ function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
 		allowedRoots: context.config.allowedRoots,
 		workspaceRoot: context.runtimeWorkspaceRoot,
 		projectId: context.activeProject.id,
+		alignmentState: readProjectAlignmentState(context.runtimeWorkspaceRoot, {
+			projectId: context.activeProject.id,
+			projectPath: context.activeProject.path,
+		}),
 	});
 }
 
@@ -2888,7 +2896,7 @@ function runPrepare(context: RuntimeContext): IduPrepareResult {
 	const reportsPath = context.reportsPath;
 	const projectId = context.activeProject.id;
 	const projectPath = context.activeProject.path;
-	return runIduPrepare({
+	const result = runIduPrepare({
 		projectId,
 		projectPath,
 		reportsPath,
@@ -2911,6 +2919,15 @@ function runPrepare(context: RuntimeContext): IduPrepareResult {
 		createStructuredTask: (input) =>
 			context.structuredTaskQueue.enqueueTask(input),
 	});
+	recordProjectAlignmentState(context.runtimeWorkspaceRoot, {
+		projectId,
+		projectPath,
+		alignmentStatus: result.alignmentStatus,
+		readiness: result.readiness,
+		alignmentReason: [`último prepare: ${result.recommendedNext}`],
+		differencesDetected: result.differencesDetected,
+	});
+	return result;
 }
 
 function loadConfirmedProjectConstitution(projectPath: string | undefined) {
