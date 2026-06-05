@@ -2076,7 +2076,9 @@ function handleCliAlertCommand(
 ): CliResult {
 	const [subcommand = "status", ...rest] = parts;
 	if (subcommand === "status") {
-		return ok(formatCliAutonomousAlertReport(buildCliAutonomousAlertStatus(runtime)));
+		return ok(
+			formatCliAutonomousAlertReport(buildCliAutonomousAlertStatus(runtime)),
+		);
 	}
 	if (subcommand === "tick") {
 		return ok(
@@ -2104,7 +2106,10 @@ function buildCliAutonomousAlertStatus(
 	runtime: CliRuntime,
 ): AutonomousAlertEngineReport {
 	const state = readAutonomousAlertEngineState(runtime.workspaceRoot);
-	const selfMaintenance = buildCliSelfMaintenanceReport(runtime, runtime.workspaceRoot);
+	const selfMaintenance = buildCliSelfMaintenanceReport(
+		runtime,
+		runtime.workspaceRoot,
+	);
 	return buildAutonomousAlertEngineReport({
 		projectId: runtime.projectId,
 		control: state.control,
@@ -2120,7 +2125,10 @@ function runCliAutonomousAlertTick(
 	options: { allowTaskCreation?: boolean } = {},
 ): CliAutonomousAlertTickResult {
 	const state = readAutonomousAlertEngineState(runtime.workspaceRoot);
-	const selfMaintenance = buildCliSelfMaintenanceReport(runtime, runtime.workspaceRoot);
+	const selfMaintenance = buildCliSelfMaintenanceReport(
+		runtime,
+		runtime.workspaceRoot,
+	);
 	const allowTaskCreation = options.allowTaskCreation === true;
 	const report = buildAutonomousAlertEngineReport({
 		projectId: runtime.projectId,
@@ -2172,25 +2180,39 @@ function runCliAutonomousAlertControl(
 	const now = new Date();
 	let disabledDomains = current.control.disabledDomains;
 	if (action === "disable-domain") {
-		disabledDomains = [...new Set([...disabledDomains, requiredArg(parts, 0, "domain")])];
+		disabledDomains = [
+			...new Set([...disabledDomains, requiredArg(parts, 0, "domain")]),
+		];
 	}
 	if (action === "enable-domain") {
 		const domain = requiredArg(parts, 0, "domain");
 		disabledDomains = disabledDomains.filter((item) => item !== domain);
 	}
-	const pauseMinutes = action === "pause" ? positiveIntegerText(parts[0], 60) : undefined;
+	const pauseMinutes =
+		action === "pause" ? positiveIntegerText(parts[0], 60) : undefined;
 	const state = updateAutonomousAlertControlState(
 		runtime.workspaceRoot,
 		{
-			active: action === "enable" ? true : action === "disable" ? false : current.control.active,
+			active:
+				action === "enable"
+					? true
+					: action === "disable"
+						? false
+						: current.control.active,
 			pausedUntil:
 				action === "pause"
-					? new Date(now.getTime() + (pauseMinutes ?? 60) * 60 * 1000).toISOString()
+					? new Date(
+							now.getTime() + (pauseMinutes ?? 60) * 60 * 1000,
+						).toISOString()
 					: action === "resume"
 						? "1970-01-01T00:00:00.000Z"
 						: current.control.pausedUntil,
 			disabledDomains,
-			reason: parts.slice(action === "pause" ? 1 : 0).join(" ").trim() || action,
+			reason:
+				parts
+					.slice(action === "pause" ? 1 : 0)
+					.join(" ")
+					.trim() || action,
 		},
 		now,
 	);
@@ -2247,7 +2269,8 @@ function formatCliAutonomousAlertReport(
 	result: AutonomousAlertEngineReport | CliAutonomousAlertTickResult,
 ): string {
 	const report = "report" in result ? result.report : result;
-	const allowTaskCreation = "allowTaskCreation" in result ? result.allowTaskCreation : false;
+	const allowTaskCreation =
+		"allowTaskCreation" in result ? result.allowTaskCreation : false;
 	const topTruth = report.uncomfortableTruths[0];
 	return [
 		"Autonomous Alerts",
@@ -2284,7 +2307,10 @@ function formatCliAutonomousAlertControl(
 	].join("\n");
 }
 
-function positiveIntegerText(value: string | undefined, fallback: number): number {
+function positiveIntegerText(
+	value: string | undefined,
+	fallback: number,
+): number {
 	if (!value) return fallback;
 	const parsed = Number.parseInt(value, 10);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -2516,7 +2542,11 @@ function formatCliSupervisorStartupSection(
 ): string[] {
 	if (!startup) return [""];
 	const reason = startup.reason ? ` (${startup.reason})` : "";
-	return ["", "Arranque supervisor:", `${startup.status}${reason} — ${startup.summary}`];
+	return [
+		"",
+		"Arranque supervisor:",
+		`${startup.status}${reason} — ${startup.summary}`,
+	];
 }
 
 function formatDashboard(report: ProjectConnectionReport): string {

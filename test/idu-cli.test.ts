@@ -1525,7 +1525,11 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"Solo registré tareas para revisión. No ejecuté AgentLabs.",
 			].join("\n"),
 		createTask: (_kind: TaskTemplateKind, details: string) => {
-			const task = { ...fakeTask(), id: `task-${tasks.length + 1}`, text: details };
+			const task = {
+				...fakeTask(),
+				id: `task-${tasks.length + 1}`,
+				text: details,
+			};
 			tasks.push(task);
 			return task;
 		},
