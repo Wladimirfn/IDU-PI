@@ -7,7 +7,9 @@ import {
 	buildBridgeControlCommand,
 	consumeBridgeControlIntent,
 	formatBridgeStartupStatus,
+	tryLaunchBridgeControl,
 	writeBridgeControlIntent,
+	type BridgeControlSpawner,
 } from "../src/bridge-control.js";
 
 test("bridge control intent is written and consumed once", () => {
@@ -106,6 +108,27 @@ test("bridge control command rejects unsafe shell metacharacters in root", () =>
 		() => buildBridgeControlCommand("restart", "C:\\bridge&echo owned"),
 		/unsafe shell metacharacters/i,
 	);
+});
+
+test("tryLaunchBridgeControl reports command construction failures", () => {
+	const result = tryLaunchBridgeControl("restart", "C:\\bridge&echo owned");
+	assert.equal(result.ok, false);
+	if (!result.ok) {
+		assert.match(result.error.message, /unsafe shell metacharacters/i);
+	}
+});
+
+test("tryLaunchBridgeControl reports synchronous spawn failures", () => {
+	const spawner: BridgeControlSpawner = () => {
+		throw new Error("spawn failed");
+	};
+
+	const result = tryLaunchBridgeControl("stop", "C:\\bridge", spawner);
+
+	assert.equal(result.ok, false);
+	if (!result.ok) {
+		assert.match(result.error.message, /spawn failed/i);
+	}
 });
 
 test("bridge lifecycle scripts require a root boundary when matching relative dist entrypoints", () => {

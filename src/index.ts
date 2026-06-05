@@ -1,5 +1,5 @@
 import { Bot, type Context } from "grammy";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -296,7 +296,7 @@ import {
 	bridgeControlIntentPath,
 	consumeBridgeControlIntent,
 	formatBridgeStartupStatus,
-	launchBridgeControl,
+	tryLaunchBridgeControl,
 	writeBridgeControlIntent,
 } from "./bridge-control.js";
 import {
@@ -2344,6 +2344,23 @@ bot.command("task", async (ctx) => {
 	void runPrompt(ctx, prompt, { structuredTaskCategory: parsed.kind });
 });
 
+function cleanupBridgeControlIntent(path: string): void {
+	try {
+		rmSync(path, { force: true });
+	} catch {
+		// best effort cleanup only
+	}
+}
+
+function formatBridgeControlLaunchFailure(action: "restart" | "stop", error: Error): string {
+	const label = action === "restart" ? "reinicio" : "apagado";
+	return [
+		`No pude iniciar el helper de ${label} del bridge.`,
+		"El bridge y la sesión Pi activa quedan corriendo.",
+		`Error: ${error.message}`,
+	].join("\n");
+}
+
 async function requestBridgeRestart(
 	ctx: Context,
 	reason: string,
@@ -2354,7 +2371,8 @@ async function requestBridgeRestart(
 		await ctx.reply("No pude identificar el chat para avisar el arranque.");
 		return;
 	}
-	writeBridgeControlIntent(bridgeControlIntentPath(packageRoot), {
+	const intentPath = bridgeControlIntentPath(packageRoot);
+	writeBridgeControlIntent(intentPath, {
 		type: "restart",
 		origin: "telegram",
 		chatId,
@@ -2362,12 +2380,17 @@ async function requestBridgeRestart(
 		notifyOnStartup: true,
 		requestedAt: new Date().toISOString(),
 	});
+	const launch = tryLaunchBridgeControl("restart", packageRoot);
+	if (!launch.ok) {
+		cleanupBridgeControlIntent(intentPath);
+		await ctx.reply(formatBridgeControlLaunchFailure("restart", launch.error));
+		return;
+	}
 	await ctx.reply(
 		"Reinicio completo del bridge solicitado. Si todo sale bien, voy a volver con un status de arranque.",
 	);
 	clearPendingUiRequest();
 	agentRouter.stopActive("Bridge reiniciándose.");
-	launchBridgeControl("restart", packageRoot);
 }
 
 bot.command("reset", async (ctx) => {
@@ -2398,12 +2421,16 @@ bot.command("server", async (ctx) => {
 		return;
 	}
 	const packageRoot = resolvePackageRootForTelegram();
+	const launch = tryLaunchBridgeControl("stop", packageRoot);
+	if (!launch.ok) {
+		await ctx.reply(formatBridgeControlLaunchFailure("stop", launch.error));
+		return;
+	}
 	await ctx.reply(
 		"Apagando bridge completo. Telegram no puede volver a iniciarlo salvo que uses start-pi-telegram-bridge.bat, scheduled task o watchdog.",
 	);
 	clearPendingUiRequest();
 	agentRouter.stopActive("Bridge detenido.");
-	launchBridgeControl("stop", packageRoot);
 });
 
 bot.command("agents", async (ctx) => {

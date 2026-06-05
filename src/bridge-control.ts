@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type SpawnOptions } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -15,6 +15,16 @@ export type BridgeControlCommand = {
 	args: string[];
 	cwd: string;
 };
+
+export type BridgeControlLaunchResult =
+	| { ok: true }
+	| { ok: false; error: Error };
+
+export type BridgeControlSpawner = (
+	file: string,
+	args: string[],
+	options: SpawnOptions,
+) => { unref(): void };
 
 export type BridgeControlIntent = {
 	type: "restart" | "stop";
@@ -78,18 +88,36 @@ export function buildBridgeControlCommand(
 	};
 }
 
+function asError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
+}
+
+export function tryLaunchBridgeControl(
+	action: BridgeControlAction,
+	root: string,
+	spawner: BridgeControlSpawner = spawn,
+): BridgeControlLaunchResult {
+	try {
+		const command = buildBridgeControlCommand(action, root);
+		const child = spawner(command.file, command.args, {
+			cwd: command.cwd,
+			detached: true,
+			stdio: "ignore",
+			windowsHide: false,
+		});
+		child.unref();
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, error: asError(error) };
+	}
+}
+
 export function launchBridgeControl(
 	action: BridgeControlAction,
 	root: string,
 ): void {
-	const command = buildBridgeControlCommand(action, root);
-	const child = spawn(command.file, command.args, {
-		cwd: command.cwd,
-		detached: true,
-		stdio: "ignore",
-		windowsHide: false,
-	});
-	child.unref();
+	const result = tryLaunchBridgeControl(action, root);
+	if (!result.ok) throw result.error;
 }
 
 export function bridgeControlIntentPath(root: string): string {
