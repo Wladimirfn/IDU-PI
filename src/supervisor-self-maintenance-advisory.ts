@@ -97,7 +97,7 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		runningTasks: runningTasks.length,
 		failedTasks: failedTasks.length,
 		staleTasks: stalePendingTasks.length + staleRunningTasks.length,
-		guardedTasks: 0,
+		guardedTasks: tasks.filter(isGuardedTask).length,
 		supervisorEvents: boundedCount(input.supervisorEvents),
 		usageFailures: boundedCount(input.usageFailures),
 		agentLabStaleRequests: boundedCount(input.agentLabStaleRequests),
@@ -111,7 +111,11 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 	);
 
 	const signals: SupervisorSelfMaintenanceSignal[] = [];
-	const backlogSignal = buildBacklogSignal(openTasks, runningTasks.length);
+	const backlogSignal = buildBacklogSignal(
+		openTasks,
+		runningTasks.length,
+		totals.guardedTasks,
+	);
 	if (backlogSignal) signals.push(backlogSignal);
 
 	const staleSignal = buildStaleSignal(stalePendingTasks, staleRunningTasks);
@@ -167,6 +171,7 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 function buildBacklogSignal(
 	openTasks: number,
 	runningTasks: number,
+	guardedTasks: number,
 ): SupervisorSelfMaintenanceSignal | undefined {
 	if (openTasks < 10 && runningTasks < 5) return undefined;
 	const severity: SupervisorSelfMaintenanceSeverity =
@@ -179,6 +184,9 @@ function buildBacklogSignal(
 		evidenceRefs: [
 			`structured-task-queue:open=${openTasks}`,
 			`structured-task-queue:running=${runningTasks}`,
+			...(guardedTasks > 0
+				? [`structured-task-queue:guarded=${guardedTasks}`]
+				: []),
 		],
 		summary: "Structured task queue has backlog pressure",
 		recommendedActions: [
@@ -398,6 +406,10 @@ function searchableText(task: StructuredTask): string {
 		.filter((value): value is string => Boolean(value))
 		.join(" ")
 		.toLowerCase();
+}
+
+function isGuardedTask(task: StructuredTask): boolean {
+	return task.guardStatus !== undefined && task.guardStatus !== "clear";
 }
 
 function boundedCount(value: number | undefined): number {

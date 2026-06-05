@@ -56,6 +56,40 @@ test("self-maintenance advisory detects backlog and stale pressure", () => {
 	}
 });
 
+test("self-maintenance advisory counts guarded tasks in totals and backlog evidence", () => {
+	const guardedStatuses = [
+		"needs_confirmation" as const,
+		"approved" as const,
+		"rejected" as const,
+		"clear" as const,
+	];
+	const tasks = Array.from({ length: 10 }, (_, index) => ({
+		...baseTask,
+		id: `guarded-${index}`,
+		guardStatus: guardedStatuses[index],
+	}));
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(report.totals.pendingTasks, 10);
+	assert.equal(report.totals.guardedTasks, 3);
+	const backlog = report.signals.find(
+		(signal) => signal.category === "backlog_pressure",
+	);
+	assert.ok(backlog);
+	assertSignalContract(backlog);
+	assert.ok(
+		backlog.evidenceRefs.some(
+			(ref) => ref === "structured-task-queue:guarded=3",
+		),
+	);
+	assert.ok(report.recommendedActions.length > 0);
+});
+
 test("self-maintenance advisory detects repeated failure without hiding safety", () => {
 	const tasks = [
 		{
