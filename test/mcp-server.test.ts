@@ -3326,6 +3326,8 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 			pendingTasks: number;
 			supervisorEvents: number;
 			usageFailures: number;
+			usageNotAllowed: number;
+			usageRequiresHuman: number;
 			agentLabStaleRequests: number;
 			semanticNewEvents: number;
 		};
@@ -3340,7 +3342,9 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	assert.equal(report.skillsModified, false);
 	assert.equal(report.totals.pendingTasks, 10);
 	assert.equal(report.totals.supervisorEvents, 3);
-	assert.equal(report.totals.usageFailures, 3);
+	assert.equal(report.totals.usageFailures, 1);
+	assert.equal(report.totals.usageNotAllowed, 1);
+	assert.equal(report.totals.usageRequiresHuman, 1);
 	assert.equal(report.totals.agentLabStaleRequests, 3);
 	assert.equal(report.totals.semanticNewEvents, 150);
 	assert.ok(
