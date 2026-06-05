@@ -833,6 +833,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- alerts scheduled-tick",
 	},
 	{
+		label: "Idu automaticov1 cycle",
+		command: "corepack pnpm cli -- automaticov1 cycle",
+	},
+	{
 		label: "Idu alerts pause",
 		command: "corepack pnpm cli -- alerts control pause 60",
 	},

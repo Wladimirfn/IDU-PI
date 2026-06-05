@@ -392,6 +392,10 @@ import {
 	type AutonomousAlertEngineReport,
 } from "./autonomous-alert-engine.js";
 import {
+	runAutomaticov1AdvisoryCycle,
+	type Automaticov1CycleResult,
+} from "./automaticov1-cycle.js";
+import {
 	runAutonomousAlertScheduledTick,
 	type AutonomousAlertScheduledTickResult,
 } from "./autonomous-alert-scheduler.js";
@@ -401,6 +405,11 @@ import {
 	updateAutonomousAlertControlState,
 	type AutonomousAlertEngineState,
 } from "./autonomous-alert-engine-state.js";
+import { buildExternalIntelligenceReport } from "./external-intelligence.js";
+import {
+	recommendExternalSources,
+	type ExternalSourceDomain,
+} from "./external-source-registry.js";
 import {
 	buildSupervisorSelfMaintenanceAdvisory,
 	type SupervisorSelfMaintenanceAdvisory,
@@ -1414,6 +1423,13 @@ export async function runCliCommand(
 			}
 		}
 		switch (command) {
+			case "automaticov1":
+			case "idu-automaticov1":
+				return ok(
+					formatCliAutomaticov1Cycle(
+						await runCliAutomaticov1Cycle(activeRuntime, rest),
+					),
+				);
 			case "status":
 				return ok(
 					activeRuntime.formatConnection(activeRuntime.inspectConnection()),
@@ -2081,6 +2097,123 @@ export async function runCliCommand(
 	} catch (error) {
 		return fail(error instanceof Error ? error.message : String(error));
 	}
+}
+
+async function runCliAutomaticov1Cycle(
+	runtime: CliRuntime,
+	parts: string[],
+): Promise<Automaticov1CycleResult> {
+	const command = parts[0] === "cycle" ? parts.slice(1) : parts;
+	const allowTaskCreation = command.includes("--allow-task-creation");
+	const allowExternalFetch = command.includes("--allow-external-fetch");
+	const allowSkillDraftProposal = command.includes("--allow-skill-proposals");
+	let selfMaintenance:
+		| ReturnType<typeof buildCliSelfMaintenanceReport>
+		| undefined;
+	const loadSelfMaintenance = () => {
+		selfMaintenance ??= buildCliSelfMaintenanceReport(
+			runtime,
+			runtime.workspaceRoot,
+		);
+		return selfMaintenance;
+	};
+	const request =
+		"automaticov1 cyclic autonomous loop: Bibliotecario evidence/news/docs intelligence, supervisor participation, skill proposals, project structure optimization, failure detection and repair boundaries.";
+	return runAutomaticov1AdvisoryCycle({
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		stateRoot: runtime.workspaceRoot,
+		iduActive: getIduSessionStatus(runtime.projectId).active,
+		allowTaskCreation,
+		allowExternalFetch,
+		allowSkillDraftProposal,
+		loadPlan: () => {
+			if (!runtime.masterPlanReview) {
+				return {
+					status: "draft",
+					inferredObjective:
+						"Master Plan no disponible; automaticov1 bloqueado para evitar autonomía sin objetivo.",
+					executiveSummary:
+						"Master Plan no disponible; no se ejecuta ciclo autónomo real.",
+					criticalRisks: ["Master Plan no disponible"],
+				};
+			}
+			try {
+				return runtime.masterPlanReview("latest").plan as unknown as Record<
+					string,
+					unknown
+				>;
+			} catch (error) {
+				return {
+					status: "draft",
+					inferredObjective:
+						"Master Plan no disponible o ilegible; automaticov1 bloqueado para evitar drift.",
+					executiveSummary: String(
+						error instanceof Error ? error.message : error,
+					),
+					criticalRisks: ["Master Plan no disponible"],
+				};
+			}
+		},
+		loadTasks: () => loadSelfMaintenance().tasks,
+		loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
+		createTask: (draft) => {
+			const task = runtime.createTask(
+				inferTaskTemplateKind(draft.text),
+				draft.text,
+			);
+			return { id: task.id };
+		},
+		buildSupervisorCronPlan: () => runtime.supervisorCronPlan(),
+		buildBibliotecarioSnapshot: () => ({
+			local: runtime.sourceRecommend(request),
+			requiredActions: runtime.sourceRequiredActions(),
+			externalRegistry: recommendExternalSources({
+				projectId: runtime.projectId,
+				request,
+				domains: [
+					"programming_structure",
+					"security",
+					"academic",
+					"standards",
+				] as ExternalSourceDomain[],
+				language: "typescript",
+				framework: "node",
+				maxMatches: 8,
+			}),
+			rawContentIncluded: false,
+			webFetchAllowed: false,
+			contractPromotionAllowed: false,
+		}),
+		buildExternalIntelligenceReport: () =>
+			buildExternalIntelligenceReport({ projectId: runtime.projectId }),
+		createSkillDraftFromLessons: () =>
+			runtime.skillDraftFromLessons({ mode: "proposal-only" }),
+	});
+}
+
+function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
+	return [
+		"🤖 automaticov1 cycle",
+		`status: ${result.status}`,
+		`authority: ${result.authority}`,
+		`allowedToProceed: ${result.allowedToProceed}`,
+		`taskCreation: ${result.allowTaskCreation ? "enabled" : "disabled"}`,
+		`externalFetch: ${result.externalFetchExecuted ? "executed" : "disabled"}`,
+		`skillProposals: ${result.skillProposalExecuted ? "executed" : "disabled"}`,
+		`alertTick: ${result.alertScheduledTick.status}`,
+		`alertDecisions: ${result.alertScheduledTick.report?.decisions.length ?? 0}`,
+		`tasksCreated: ${result.alertScheduledTick.tasksCreated.length}`,
+		"",
+		"Evidence:",
+		...result.evidenceRefs.map((ref) => `- ${ref}`),
+		"",
+		"Next:",
+		...result.nextActions.map((action) => `- ${action}`),
+		"",
+		"Safe notes:",
+		...result.safeNotes.map((note) => `- ${note}`),
+	].join("\n");
 }
 
 function handleCliAlertCommand(

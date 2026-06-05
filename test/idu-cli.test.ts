@@ -1724,6 +1724,31 @@ test("CLI scheduled alert tick is OS-priority and read-only by default", async (
 	});
 });
 
+test("CLI automaticov1 cycle composes engines without authorizing work", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureIduSessionStore({ workspaceRoot });
+		activateIduSession(runtime.projectId);
+		runtime.masterPlanReview = () =>
+			({
+				markdown: "# Plan Maestro Idu-pi\n",
+				plan: {
+					status: "approved",
+					inferredObjective:
+						"Idu-pi supervises the Pi orchestrator with evidence.",
+					executiveSummary: "Supervisor/auditor summary",
+					criticalRisks: [],
+				},
+			}) as any;
+		const result = await runCliCommand(["automaticov1", "cycle"], runtime);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /automaticov1 cycle/u);
+		assert.match(result.stdout, /allowedToProceed: false/u);
+		assert.match(result.stdout, /externalFetch: disabled/u);
+		assert.match(result.stdout, /skillProposals: disabled/u);
+		assert.match(result.stdout, /automaticov1:bibliotecario-snapshot/u);
+	});
+});
+
 test("CLI scheduled alert tick creates tasks only with explicit allow-task-creation", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
 		configureIduSessionStore({ workspaceRoot });
