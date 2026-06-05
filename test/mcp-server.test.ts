@@ -46,6 +46,10 @@ import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { DecisionEnvelope } from "../src/decision-envelope.js";
 import { flushIduUsageEvents } from "../src/usage-events.js";
 import {
+	flushSupervisorActivityEvents,
+	readSupervisorActivityEvents,
+} from "../src/supervisor-activity-events.js";
+import {
 	buildAgentLabEffectivenessReport,
 	flushAgentLabEffectivenessEvents,
 	readAgentLabEffectivenessEvents,
@@ -3010,6 +3014,14 @@ test("idu_automaticov1_cycle composes existing engines without authorizing work"
 		assert.equal(cycle.alertScheduledTick.tasksCreated.length, 0);
 		assert.ok(cycle.bibliotecarioSnapshot);
 		assert.ok(cycle.supervisorCronPlan);
+		await flushSupervisorActivityEvents();
+		const supervisorEvents = readSupervisorActivityEvents(stateRoot);
+		assert.equal(supervisorEvents.length, 1);
+		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
+		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
+		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
+		assert.equal(supervisorEvents[0]?.status, "completed");
+		assert.equal(supervisorEvents[0]?.active, true);
 		assert.match(result.safeNotes.join("\n"), /no autoriza implementación/u);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

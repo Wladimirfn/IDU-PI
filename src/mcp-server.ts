@@ -90,6 +90,7 @@ import {
 } from "./context-quality-events.js";
 import {
 	readSupervisorActivityEvents,
+	recordSupervisorActivityEventDeferred,
 	summarizeSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
 import {
@@ -2927,6 +2928,16 @@ async function dispatchTool(
 					buildExternalIntelligenceReport({ projectId: runtime.projectId }),
 				createSkillDraftFromLessons: () =>
 					runtime.skillDraftFromLessons({ mode: "proposal-only" }),
+			});
+			recordSupervisorActivityEventDeferred(stateRoot, {
+				projectId: runtime.projectId,
+				eventType: "supervisor_tick",
+				origin: "orchestrator_requested",
+				trigger: "cron_planning",
+				status: result.status === "ran" ? "completed" : "skipped",
+				active: getIduSessionStatus(runtime.projectId).active,
+				createdTasks: result.alertScheduledTick.tasksCreated.length,
+				ok: result.status === "ran",
 			});
 			const decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
