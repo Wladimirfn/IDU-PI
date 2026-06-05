@@ -169,6 +169,15 @@ import {
 	runIduSupervisorLoop,
 } from "./idu-supervisor-loop.js";
 import {
+	buildAutonomousAlertEngineReport,
+	type AutonomousAlertEngineReport,
+} from "./autonomous-alert-engine.js";
+import {
+	readAutonomousAlertEngineState,
+	updateAutonomousAlertControlState,
+	type AutonomousAlertEngineState,
+} from "./autonomous-alert-engine-state.js";
+import {
 	maybeRunSupervisorAfterPostflight,
 	maybeRunSupervisorAfterSemanticTrigger,
 	maybeRunSupervisorAfterTask,
@@ -319,7 +328,24 @@ import {
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
 	structuredTaskInputForText,
+	type StructuredTask,
 } from "./structured-task-queue.js";
+import {
+	buildSupervisorSelfMaintenanceAdvisory,
+	type SupervisorSelfMaintenanceAdvisory,
+} from "./supervisor-self-maintenance-advisory.js";
+import {
+	readSupervisorActivityEvents,
+	summarizeSupervisorActivityEvents,
+} from "./supervisor-activity-events.js";
+import {
+	buildIduUsageReport,
+	readIduUsageEvents,
+} from "./usage-events.js";
+import {
+	buildAgentLabEffectivenessReport,
+	readAgentLabEffectivenessEvents,
+} from "./agentlab-effectiveness-events.js";
 
 const config = loadConfig();
 process.env.AGENT_WORKSPACE_ROOT ??= config.agentWorkspaceRoot;
@@ -1422,6 +1448,166 @@ function activeProjectStateRoot(): string {
 	}).stateRoot;
 }
 
+type TelegramAutonomousAlertTickResult = {
+	report: AutonomousAlertEngineReport;
+	allowTaskCreation: false;
+	taskCreationStatus: "disabled";
+};
+
+type TelegramAutonomousAlertControlResult = {
+	action: string;
+	state: AutonomousAlertEngineState;
+};
+
+function buildTelegramSelfMaintenanceReport(stateRoot: string): {
+	tasks: StructuredTask[];
+	report: SupervisorSelfMaintenanceAdvisory;
+} {
+	const tasks = structuredTaskQueue.listTasks();
+	const supervisorActivity = summarizeSupervisorActivityEvents(
+		readSupervisorActivityEvents(stateRoot),
+	);
+	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+		readAgentLabEffectivenessEvents(stateRoot),
+	);
+	let semanticNewEvents = 0;
+	try {
+		const semanticDelta = buildSemanticAuditStatus({
+			projectId: currentProjectId(),
+			repository: labDbRepository,
+		}).newEvents;
+		semanticNewEvents =
+			semanticDelta.labRuns +
+			semanticDelta.findings +
+			semanticDelta.proposals +
+			semanticDelta.tasks +
+			semanticDelta.userSignals +
+			semanticDelta.memoryItems;
+	} catch {
+		semanticNewEvents = 0;
+	}
+	return {
+		tasks,
+		report: buildSupervisorSelfMaintenanceAdvisory({
+			projectId: currentProjectId(),
+			now: new Date(),
+			tasks,
+			supervisorEvents: supervisorActivity.totalEvents,
+			supervisorActivitySkipped:
+				(supervisorActivity.byReason.throttled ?? 0) +
+				(supervisorActivity.byReason.idu_inactive ?? 0) +
+				(supervisorActivity.byReason.no_new_events ?? 0) +
+				(supervisorActivity.byReason.not_enough_data ?? 0),
+			supervisorActivityThrottled:
+				supervisorActivity.byReason.throttled ?? 0,
+			usageFailures:
+				usageReport.failed +
+				usageReport.notAllowed +
+				usageReport.requiresHuman,
+			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+			semanticNewEvents,
+		}),
+	};
+}
+
+function buildTelegramAutonomousAlertStatus(): AutonomousAlertEngineReport {
+	const stateRoot = activeProjectStateRoot();
+	const state = readAutonomousAlertEngineState(stateRoot);
+	const selfMaintenance = buildTelegramSelfMaintenanceReport(stateRoot);
+	return buildAutonomousAlertEngineReport({
+		projectId: currentProjectId(),
+		control: state.control,
+		tasks: selfMaintenance.tasks,
+		selfMaintenanceSignals: selfMaintenance.report.signals,
+		allowTaskCreation: false,
+		cooldowns: state.cooldowns,
+	});
+}
+
+function runTelegramAutonomousAlertTick(options: {
+	allowTaskCreation: false;
+}): TelegramAutonomousAlertTickResult {
+	return {
+		report: buildTelegramAutonomousAlertStatus(),
+		allowTaskCreation: options.allowTaskCreation,
+		taskCreationStatus: "disabled",
+	};
+}
+
+function runTelegramAutonomousAlertControl(
+	action: "enable" | "disable" | "pause" | "resume",
+	pauseMinutes?: number,
+): TelegramAutonomousAlertControlResult {
+	const stateRoot = activeProjectStateRoot();
+	const current = readAutonomousAlertEngineState(stateRoot);
+	const now = new Date();
+	const state = updateAutonomousAlertControlState(
+		stateRoot,
+		{
+			active:
+				action === "enable"
+					? true
+					: action === "disable"
+						? false
+						: current.control.active,
+			pausedUntil:
+				action === "pause"
+					? new Date(
+							now.getTime() + (pauseMinutes ?? 60) * 60 * 1000,
+						).toISOString()
+					: action === "resume"
+						? "1970-01-01T00:00:00.000Z"
+						: current.control.pausedUntil,
+			disabledDomains: current.control.disabledDomains,
+			reason: action,
+		},
+		now,
+	);
+	return { action, state };
+}
+
+function formatTelegramAutonomousAlertReport(
+	result: AutonomousAlertEngineReport | TelegramAutonomousAlertTickResult,
+): string {
+	const report = "report" in result ? result.report : result;
+	const allowTaskCreation =
+		"allowTaskCreation" in result ? result.allowTaskCreation : false;
+	const topTruth = report.uncomfortableTruths[0]?.claim;
+	return [
+		"Alertas Idu-pi",
+		`Estado: ${report.active ? (report.paused ? "paused" : "active") : "off"}`,
+		`Decisiones: ${report.decisions.length}`,
+		`Escalaciones humanas: ${report.humanEscalations.length}`,
+		`Tareas creadas: ${report.tasksCreated.length}`,
+		`allowTaskCreation: ${allowTaskCreation}`,
+		"",
+		"Honestidad cruda:",
+		topTruth ?? "Sin verdades incómodas nuevas con la evidencia actual.",
+		"",
+		"Seguro: no implementé código, no ejecuté AgentLabs, no actualicé dependencias y no modifiqué reglas, skills ni contratos.",
+	].join("\n");
+}
+
+function formatTelegramAutonomousAlertControl(
+	result: TelegramAutonomousAlertControlResult,
+): string {
+	return [
+		"Control de alertas actualizado",
+		`Acción: ${result.action}`,
+		`Activo: ${result.state.control.active}`,
+		`Pausado hasta: ${result.state.control.pausedUntil ?? "no"}`,
+		`Dominios desactivados: ${result.state.control.disabledDomains.join(", ") || "ninguno"}`,
+		"",
+		"Seguro: sólo escribí estado de control bajo stateRoot/reports.",
+	].join("\n");
+}
+
+function parsePauseMinutes(text: string | undefined): number {
+	const parsed = Number.parseInt((text ?? "").trim(), 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+}
+
 function semanticCompactionProjectContext(projectPath: string): {
 	projectCore?: string;
 	constitution?: string;
@@ -1660,6 +1846,69 @@ bot.command("idu_supervisor_tick", async (ctx) => {
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
 			}),
+		),
+	);
+});
+
+bot.command("idu_alerts_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertReport(
+			buildTelegramAutonomousAlertStatus(),
+		),
+	);
+});
+
+bot.command("idu_alerts_tick", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertReport(
+			runTelegramAutonomousAlertTick({ allowTaskCreation: false }),
+		),
+	);
+});
+
+bot.command("idu_alerts_pause", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl(
+				"pause",
+				parsePauseMinutes(ctx.match),
+			),
+		),
+	);
+});
+
+bot.command("idu_alerts_resume", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("resume"),
+		),
+	);
+});
+
+bot.command("idu_alerts_off", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("disable"),
+		),
+	);
+});
+
+bot.command("idu_alerts_on", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("enable"),
 		),
 	);
 });

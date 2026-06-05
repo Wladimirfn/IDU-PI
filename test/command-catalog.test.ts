@@ -11,7 +11,7 @@ import {
 } from "../src/command-catalog.js";
 import { PUBLIC_TELEGRAM_HANDLER_COMMANDS } from "../src/telegram-command-registry.js";
 
-const STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS = [
+const ALERT_COMMANDS = [
 	"idu_alerts_status",
 	"idu_alerts_tick",
 	"idu_alerts_pause",
@@ -228,7 +228,7 @@ test("telegram command catalog has unique commands", () => {
 test("alert commands are registered in Telegram catalog registry and CLI catalog", () => {
 	const telegramCommands = TELEGRAM_COMMANDS.map((entry) => entry.command);
 	const registryCommands = [...PUBLIC_TELEGRAM_HANDLER_COMMANDS];
-	for (const command of STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS) {
+	for (const command of ALERT_COMMANDS) {
 		assert.ok(telegramCommands.includes(command));
 		assert.ok(registryCommands.includes(command));
 	}
@@ -270,13 +270,7 @@ test("telegram command catalog matches registered handlers", () => {
 	}
 
 	assert.deepEqual(registryCommands, catalogCommands);
-	const catalogCommandsWithHandlers = catalogCommands.filter(
-		(command) =>
-			!STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS.includes(
-				command as (typeof STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS)[number],
-			),
-	);
-	assert.deepEqual([...registeredCommands].sort(), catalogCommandsWithHandlers);
+	assert.deepEqual([...registeredCommands].sort(), catalogCommands);
 });
 
 test("telegramCommandsForApi creates setMyCommands payload from catalog", () => {
@@ -293,7 +287,7 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	assert.ok(commands.some((entry) => entry.command === "idu_off"));
 	assert.ok(commands.some((entry) => entry.command === "idu_status"));
 	assert.ok(commands.some((entry) => entry.command === "idu_prepare"));
-	for (const command of STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS) {
+	for (const command of ALERT_COMMANDS) {
 		assert.ok(commands.some((entry) => entry.command === command));
 	}
 	assert.ok(
