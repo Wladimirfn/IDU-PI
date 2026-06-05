@@ -1688,6 +1688,85 @@ test("CLI alert tick requires explicit allow-task-creation", async () => {
 	});
 });
 
+test("CLI scheduled alert tick is OS-priority and read-only by default", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureIduSessionStore({ workspaceRoot });
+		activateIduSession(runtime.projectId);
+		runtime.masterPlanReview = () =>
+			({
+				markdown: "# Plan Maestro Idu-pi\n",
+				plan: {
+					status: "approved",
+					inferredObjective:
+						"Idu-pi supervises the Pi orchestrator with evidence.",
+					executiveSummary: "Supervisor/auditor summary",
+					criticalRisks: [],
+				},
+			}) as any;
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `scheduled backlog repeated ${index}`);
+		}
+		const beforeTick = runtime.listTasks?.().length ?? 0;
+		const result = await runCliCommand(["alerts", "scheduled-tick"], runtime);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Autonomous Alerts Scheduled Tick/u);
+		assert.match(result.stdout, /status: ran/u);
+		assert.match(result.stdout, /planApproved: true/u);
+		assert.match(result.stdout, /allowTaskCreation: false/u);
+		assert.match(result.stdout, /Telegram no es requerido/u);
+		assert.equal(runtime.listTasks?.().length ?? 0, beforeTick);
+		assert.equal(
+			existsSync(
+				join(workspaceRoot, "reports", "master-plan-objective-cache.json"),
+			),
+			true,
+		);
+	});
+});
+
+test("CLI scheduled alert tick creates tasks only with explicit allow-task-creation", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureIduSessionStore({ workspaceRoot });
+		activateIduSession(runtime.projectId);
+		runtime.masterPlanReview = () =>
+			({
+				markdown: "# Plan Maestro Idu-pi\n",
+				plan: {
+					status: "approved",
+					inferredObjective:
+						"Idu-pi supervises the Pi orchestrator with evidence.",
+					executiveSummary: "Supervisor/auditor summary",
+					criticalRisks: [],
+				},
+			}) as any;
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `scheduled backlog repeated ${index}`);
+		}
+		const result = await runCliCommand(
+			["alerts", "scheduled-tick", "--allow-task-creation"],
+			runtime,
+		);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /status: ran/u);
+		assert.match(result.stdout, /allowTaskCreation: true/u);
+		assert.match(result.stdout, /Tareas creadas: 1/u);
+		assert.ok((runtime.listTasks?.().length ?? 0) > 4);
+	});
+});
+
+test("CLI scheduled alert tick blocks when Master Plan review is unavailable", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureIduSessionStore({ workspaceRoot });
+		activateIduSession(runtime.projectId);
+		runtime.masterPlanReview = undefined;
+		const result = await runCliCommand(["alerts", "scheduled-tick"], runtime);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /status: blocked_objective/u);
+		assert.match(result.stdout, /planApproved: false/u);
+		assert.match(result.stdout, /Master Plan no disponible/u);
+	});
+});
+
 test("CLI source library commands are wired with aliases", async () => {
 	await withRuntime(async (runtime) => {
 		const status = await runCliCommand(["source-status"], runtime);

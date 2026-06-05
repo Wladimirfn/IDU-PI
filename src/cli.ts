@@ -392,6 +392,10 @@ import {
 	type AutonomousAlertEngineReport,
 } from "./autonomous-alert-engine.js";
 import {
+	runAutonomousAlertScheduledTick,
+	type AutonomousAlertScheduledTickResult,
+} from "./autonomous-alert-scheduler.js";
+import {
 	appendAutonomousAlertDecision,
 	readAutonomousAlertEngineState,
 	updateAutonomousAlertControlState,
@@ -1456,6 +1460,15 @@ export async function runCliCommand(
 						}),
 					),
 				);
+			case "idu-alerts-scheduled-tick":
+			case "alerts-scheduled-tick":
+				return ok(
+					formatCliAutonomousAlertScheduledTick(
+						runCliAutonomousAlertScheduledTick(activeRuntime, {
+							allowTaskCreation: rest.includes("--allow-task-creation"),
+						}),
+					),
+				);
 			case "idu-prepare":
 			case "prepare": {
 				const result = activeRuntime.prepare();
@@ -2089,6 +2102,15 @@ function handleCliAlertCommand(
 			),
 		);
 	}
+	if (subcommand === "scheduled-tick") {
+		return ok(
+			formatCliAutonomousAlertScheduledTick(
+				runCliAutonomousAlertScheduledTick(runtime, {
+					allowTaskCreation: rest.includes("--allow-task-creation"),
+				}),
+			),
+		);
+	}
 	if (subcommand === "control") {
 		const [action = "", ...controlRest] = rest;
 		return ok(
@@ -2098,7 +2120,7 @@ function handleCliAlertCommand(
 		);
 	}
 	return fail(
-		"Uso: idu-pi alerts status|tick|control <enable|disable|pause|resume|disable-domain|enable-domain>",
+		"Uso: idu-pi alerts status|tick|scheduled-tick|control <enable|disable|pause|resume|disable-domain|enable-domain>",
 	);
 }
 
@@ -2160,7 +2182,10 @@ function runCliAutonomousAlertTick(
 				evidenceRefs: decision.evidenceRefs,
 			});
 			appendAutonomousAlertDecision(runtime.workspaceRoot, decision);
-		} else if (decision.recommendedAction === "ask_human" && allowTaskCreation) {
+		} else if (
+			decision.recommendedAction === "ask_human" &&
+			allowTaskCreation
+		) {
 			appendAutonomousAlertDecision(runtime.workspaceRoot, decision);
 		}
 	}
@@ -2169,6 +2194,66 @@ function runCliAutonomousAlertTick(
 		allowTaskCreation,
 		taskCreationStatus: allowTaskCreation ? "enabled" : "disabled",
 	};
+}
+
+function runCliAutonomousAlertScheduledTick(
+	runtime: CliRuntime,
+	options: { allowTaskCreation?: boolean } = {},
+): AutonomousAlertScheduledTickResult {
+	let selfMaintenance:
+		| ReturnType<typeof buildCliSelfMaintenanceReport>
+		| undefined;
+	const loadSelfMaintenance = () => {
+		selfMaintenance ??= buildCliSelfMaintenanceReport(
+			runtime,
+			runtime.workspaceRoot,
+		);
+		return selfMaintenance;
+	};
+	return runAutonomousAlertScheduledTick({
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		stateRoot: runtime.workspaceRoot,
+		iduActive: getIduSessionStatus(runtime.projectId).active,
+		allowTaskCreation: options.allowTaskCreation === true,
+		loadPlan: () => {
+			if (!runtime.masterPlanReview) {
+				return {
+					status: "draft",
+					inferredObjective:
+						"Master Plan no disponible en este runtime; scheduled tick bloqueado para evitar desorientación del objetivo Idu-pi.",
+					executiveSummary:
+						"Master Plan no disponible; no se crean tareas autónomas.",
+					criticalRisks: ["Master Plan no disponible"],
+				};
+			}
+			try {
+				return runtime.masterPlanReview("latest").plan as unknown as Record<
+					string,
+					unknown
+				>;
+			} catch (error) {
+				return {
+					status: "draft",
+					inferredObjective:
+						"Master Plan no disponible o ilegible; scheduled tick bloqueado para evitar desorientación del objetivo Idu-pi.",
+					executiveSummary: String(
+						error instanceof Error ? error.message : error,
+					),
+					criticalRisks: ["Master Plan no disponible"],
+				};
+			}
+		},
+		loadTasks: () => loadSelfMaintenance().tasks,
+		loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
+		createTask: (draft) => {
+			const task = runtime.createTask(
+				inferTaskTemplateKind(draft.text),
+				draft.text,
+			);
+			return { id: task.id };
+		},
+	});
 }
 
 function runCliAutonomousAlertControl(
@@ -2288,6 +2373,35 @@ function formatCliAutonomousAlertReport(
 		"",
 		"Nota segura:",
 		"No implementé código, no ejecuté AgentLabs, no actualicé dependencias y no modifiqué reglas, skills ni contratos.",
+	].join("\n");
+}
+
+function formatCliAutonomousAlertScheduledTick(
+	result: AutonomousAlertScheduledTickResult,
+): string {
+	const topTruth = result.report?.uncomfortableTruths[0];
+	return [
+		"Autonomous Alerts Scheduled Tick",
+		"",
+		`status: ${result.status}`,
+		`planApproved: ${result.objective.planApproved}`,
+		`planStatus: ${result.objective.planStatus}`,
+		`allowTaskCreation: ${result.allowTaskCreation}`,
+		`Tareas creadas: ${result.tasksCreated.length}`,
+		"",
+		"Objetivo Idu-pi:",
+		result.objective.objective,
+		"",
+		"Honestidad cruda:",
+		topTruth?.claim ??
+			result.objective.blockReason ??
+			"Sin verdades incómodas nuevas con la evidencia actual.",
+		"",
+		"Nota segura:",
+		[
+			...result.safeNotes,
+			"Telegram no es requerido para este scheduled tick; es sólo una superficie remota opcional.",
+		].join(" "),
 	].join("\n");
 }
 
