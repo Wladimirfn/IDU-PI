@@ -76,8 +76,15 @@ test("semantic debt advisory report keeps safety flags and detects context bloat
 		assert.equal(report.remoteAnalytics, false);
 		assert.equal(report.totals.contextQualityEvents, 1);
 		assert.equal(report.totals.truncatedContextEvents, 1);
+		const contextBloat = report.signals.find(
+			(signal) => signal.category === "context_bloat",
+		);
+		assert.ok(contextBloat);
 		assert.ok(
-			report.signals.some((signal) => signal.category === "context_bloat"),
+			contextBloat.evidenceRefs.includes("omittedPath:goals.humanVision:1"),
+		);
+		assert.ok(
+			contextBloat.evidenceRefs.includes("omittedPath:requiredReads:1"),
 		);
 		const serialized = JSON.stringify(report);
 		for (const forbidden of [

@@ -25,6 +25,7 @@ export type ContextQualityEvent = {
 	truncated: boolean;
 	omittedCount: number;
 	omittedReasons: Record<string, number>;
+	omittedPaths: Record<string, number>;
 	contractsCount: number;
 	requiredReadsCount: number;
 	risksCount: number;
@@ -61,6 +62,7 @@ export type ContextQualityReport = {
 	byCompleteness: Record<ContextQualityRating, number>;
 	truncatedEvents: number;
 	omittedReasons: Record<string, number>;
+	omittedPaths: Record<string, number>;
 	averageUsedChars: number;
 	maxObservedChars: number;
 	promptTextStored: false;
@@ -153,6 +155,7 @@ export function buildContextQualityReport(
 	const byNoise = emptyRatings();
 	const byCompleteness = emptyRatings();
 	const omittedReasons: Record<string, number> = {};
+	const omittedPaths: Record<string, number> = {};
 	let truncatedEvents = 0;
 	let totalUsedChars = 0;
 	let maxObservedChars = 0;
@@ -168,6 +171,9 @@ export function buildContextQualityReport(
 		for (const [reason, count] of Object.entries(event.omittedReasons)) {
 			omittedReasons[reason] = (omittedReasons[reason] ?? 0) + count;
 		}
+		for (const [path, count] of Object.entries(event.omittedPaths)) {
+			omittedPaths[path] = (omittedPaths[path] ?? 0) + count;
+		}
 	}
 	return {
 		version: 1,
@@ -179,6 +185,7 @@ export function buildContextQualityReport(
 		byCompleteness,
 		truncatedEvents,
 		omittedReasons: sortRecord(omittedReasons),
+		omittedPaths: sortRecord(omittedPaths),
 		averageUsedChars: events.length
 			? Math.round(totalUsedChars / events.length)
 			: 0,
@@ -203,6 +210,7 @@ export function contextQualityEventFromSupervisorContextPack(
 	const budget = isRecord(data.contextBudget) ? data.contextBudget : undefined;
 	const omitted = Array.isArray(budget?.omitted) ? budget.omitted : [];
 	const omittedReasons = omittedReasonsFrom(omitted);
+	const omittedPaths = omittedPathsFrom(omitted);
 	const goals = isRecord(data.goals) ? data.goals : {};
 	const hasHumanVision = hasNonEmptyText(goals.humanVision);
 	const hasPlanObjective = hasNonEmptyText(goals.planObjective);
@@ -253,6 +261,7 @@ export function contextQualityEventFromSupervisorContextPack(
 		truncated: Boolean(budget?.truncated),
 		omittedCount: omitted.length,
 		omittedReasons,
+		omittedPaths,
 		contractsCount,
 		requiredReadsCount,
 		risksCount,
@@ -309,6 +318,7 @@ function normalizeContextQualityEvent(
 		truncated: Boolean(input.truncated),
 		omittedCount: safeCount(input.omittedCount),
 		omittedReasons: normalizeReasonCounts(input.omittedReasons),
+		omittedPaths: normalizeReasonCounts(input.omittedPaths),
 		contractsCount: safeCount(input.contractsCount),
 		requiredReadsCount: safeCount(input.requiredReadsCount),
 		risksCount: safeCount(input.risksCount),
@@ -348,6 +358,9 @@ function parseContextQualityEvent(
 			omittedReasons: isRecord(value.omittedReasons)
 				? normalizeReasonCounts(value.omittedReasons)
 				: {},
+			omittedPaths: isRecord(value.omittedPaths)
+				? normalizeReasonCounts(value.omittedPaths)
+				: {},
 			contractsCount: numberField(value.contractsCount),
 			requiredReadsCount: numberField(value.requiredReadsCount),
 			risksCount: numberField(value.risksCount),
@@ -382,6 +395,19 @@ function omittedReasonsFrom(items: unknown[]): Record<string, number> {
 		reasons[reason] = (reasons[reason] ?? 0) + 1;
 	}
 	return sortRecord(reasons);
+}
+
+function omittedPathsFrom(items: unknown[]): Record<string, number> {
+	const paths: Record<string, number> = {};
+	for (const item of items) {
+		if (!isRecord(item)) continue;
+		const path = sanitizeLabel(
+			typeof item.path === "string" ? item.path : "unknown",
+			"unknown",
+		);
+		paths[path] = (paths[path] ?? 0) + 1;
+	}
+	return sortRecord(paths);
 }
 
 function normalizeReasonCounts(value: unknown): Record<string, number> {

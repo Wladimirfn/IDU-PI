@@ -139,6 +139,10 @@ test("context quality report ignores malformed JSONL and summarizes warnings", (
 		assert.equal(report.truncatedEvents, 1);
 		assert.equal(report.omittedReasons.max_chars, 1);
 		assert.equal(report.omittedReasons.max_items, 1);
+		assert.equal(events[0]?.omittedPaths["goals.humanVision"], 1);
+		assert.equal(events[0]?.omittedPaths.requiredReads, 1);
+		assert.equal(report.omittedPaths["goals.humanVision"], 1);
+		assert.equal(report.omittedPaths.requiredReads, 1);
 		assert.match(
 			formatContextQualityPanel(report),
 			/Calidad de contexto local/u,
