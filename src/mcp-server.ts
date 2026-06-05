@@ -1580,6 +1580,55 @@ function readRuntimeStructuredTasks(runtime: CliRuntime): {
 	}
 }
 
+function buildRuntimeSelfMaintenanceReport(
+	runtime: CliRuntime,
+	stateRoot: string,
+): {
+	taskRead: ReturnType<typeof readRuntimeStructuredTasks>;
+	report: ReturnType<typeof buildSupervisorSelfMaintenanceAdvisory>;
+} {
+	const taskRead = readRuntimeStructuredTasks(runtime);
+	const supervisorActivity = summarizeSupervisorActivityEvents(
+		readSupervisorActivityEvents(stateRoot),
+	);
+	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+		readAgentLabEffectivenessEvents(stateRoot),
+	);
+	let semanticNewEvents = 0;
+	try {
+		const semanticDelta = runtime.semanticAuditStatus().newEvents;
+		semanticNewEvents =
+			semanticDelta.labRuns +
+			semanticDelta.findings +
+			semanticDelta.proposals +
+			semanticDelta.tasks +
+			semanticDelta.userSignals +
+			semanticDelta.memoryItems;
+	} catch {
+		semanticNewEvents = 0;
+	}
+	return {
+		taskRead,
+		report: buildSupervisorSelfMaintenanceAdvisory({
+			projectId: runtime.projectId,
+			now: new Date(),
+			tasks: taskRead.tasks,
+			supervisorEvents: supervisorActivity.totalEvents,
+			supervisorActivitySkipped:
+				(supervisorActivity.byReason.throttled ?? 0) +
+				(supervisorActivity.byReason.idu_inactive ?? 0) +
+				(supervisorActivity.byReason.no_new_events ?? 0) +
+				(supervisorActivity.byReason.not_enough_data ?? 0),
+			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
+			usageFailures:
+				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
+			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+			semanticNewEvents,
+		}),
+	};
+}
+
 async function dispatchTool(
 	name: IduMcpToolName,
 	args: JsonObject,
@@ -2546,12 +2595,16 @@ async function dispatchTool(
 		case "idu_autonomous_alerts_status": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const state = readAutonomousAlertEngineState(stateRoot);
-			const taskRead = readRuntimeStructuredTasks(runtime);
+			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+				runtime,
+				stateRoot,
+			);
+			const taskRead = selfMaintenance.taskRead;
 			const report = buildAutonomousAlertEngineReport({
 				projectId: runtime.projectId,
 				control: state.control,
 				tasks: taskRead.tasks,
-				selfMaintenanceSignals: [],
+				selfMaintenanceSignals: selfMaintenance.report.signals,
 				allowTaskCreation: false,
 				cooldowns: state.cooldowns,
 			});
@@ -2573,17 +2626,17 @@ async function dispatchTool(
 		case "idu_autonomous_alerts_tick": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const state = readAutonomousAlertEngineState(stateRoot);
-			const taskRead = readRuntimeStructuredTasks(runtime);
-			const allowTaskCreation = booleanArg(
-				args,
-				"allowTaskCreation",
-				false,
+			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+				runtime,
+				stateRoot,
 			);
+			const taskRead = selfMaintenance.taskRead;
+			const allowTaskCreation = booleanArg(args, "allowTaskCreation", false);
 			const report = buildAutonomousAlertEngineReport({
 				projectId: runtime.projectId,
 				control: state.control,
 				tasks: taskRead.tasks,
-				selfMaintenanceSignals: [],
+				selfMaintenanceSignals: selfMaintenance.report.signals,
 				allowTaskCreation,
 				cooldowns: state.cooldowns,
 			});
@@ -2708,46 +2761,13 @@ async function dispatchTool(
 			});
 		}
 		case "idu_supervisor_self_maintenance_advisory": {
-			const taskRead = readRuntimeStructuredTasks(runtime);
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const supervisorActivity = summarizeSupervisorActivityEvents(
-				readSupervisorActivityEvents(stateRoot),
+			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+				runtime,
+				stateRoot,
 			);
-			const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
-			const agentLabEffectiveness = buildAgentLabEffectivenessReport(
-				readAgentLabEffectivenessEvents(stateRoot),
-			);
-			let semanticNewEvents = 0;
-			try {
-				const semanticDelta = runtime.semanticAuditStatus().newEvents;
-				semanticNewEvents =
-					semanticDelta.labRuns +
-					semanticDelta.findings +
-					semanticDelta.proposals +
-					semanticDelta.tasks +
-					semanticDelta.userSignals +
-					semanticDelta.memoryItems;
-			} catch {
-				semanticNewEvents = 0;
-			}
-			const report = buildSupervisorSelfMaintenanceAdvisory({
-				projectId: runtime.projectId,
-				now: new Date(),
-				tasks: taskRead.tasks,
-				supervisorEvents: supervisorActivity.totalEvents,
-				supervisorActivitySkipped:
-					(supervisorActivity.byReason.throttled ?? 0) +
-					(supervisorActivity.byReason.idu_inactive ?? 0) +
-					(supervisorActivity.byReason.no_new_events ?? 0) +
-					(supervisorActivity.byReason.not_enough_data ?? 0),
-				supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
-				usageFailures:
-					usageReport.failed +
-					usageReport.notAllowed +
-					usageReport.requiresHuman,
-				agentLabStaleRequests: agentLabEffectiveness.staleRequests,
-				semanticNewEvents,
-			});
+			const taskRead = selfMaintenance.taskRead;
+			const report = selfMaintenance.report;
 			const decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
 				recommendation: report.signals.length ? "warn" : "allow",

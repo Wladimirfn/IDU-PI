@@ -3055,6 +3055,53 @@ test("idu_autonomous_alerts_tick escalates high-risk repeated bug without task",
 	}
 });
 
+test("idu_autonomous_alerts_tick converts self-maintenance backlog into maintenance task", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-self-maintenance-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 10; index += 1) {
+			const task = runtime.createTask(
+				"feature",
+				`routine backlog item ${index}`,
+			);
+			task.id = `backlog-${index}`;
+		}
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{ allowTaskCreation: true },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			decisions: Array<{ domain: string; recommendedAction: string }>;
+			tasksCreated: Array<{ taskId: string; alertId: string }>;
+		};
+		assert.ok(
+			report.decisions.some(
+				(decision) =>
+					decision.domain === "backlog" &&
+					decision.recommendedAction === "create_task",
+			),
+		);
+		assert.ok(
+			report.tasksCreated.some((created) =>
+				created.alertId.includes("backlog-pressure"),
+			),
+		);
+		assert.ok(
+			(runtime.listTasks?.() ?? []).some((task) =>
+				/Structured task queue has backlog pressure/u.test(task.text),
+			),
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
