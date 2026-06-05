@@ -15,6 +15,7 @@ export function parseServerCommand(text: string): ServerCommand | undefined {
 	const [, rawArg = "status"] =
 		text.trim().match(/^\/server(?:\s+(\S+))?/iu) ?? [];
 	const arg = rawArg.toLowerCase();
+	if (arg === "reset") return "restart";
 	if (arg === "run" || arg === "restart" || arg === "off" || arg === "status")
 		return arg;
 	return undefined;

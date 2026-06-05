@@ -79,6 +79,42 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/idu_supervisor_tick"],
 	},
 	{
+		command: "idu_alerts_status",
+		description: "Ver alertas autónomas Idu-pi",
+		help: "/idu_alerts_status - ver estado, decisiones y honestidad cruda de alertas autónomas",
+		usage: ["/idu_alerts_status"],
+	},
+	{
+		command: "idu_alerts_tick",
+		description: "Evaluar alertas Idu-pi",
+		help: "/idu_alerts_tick - evaluar alertas en modo lectura; no crea tareas por Telegram en v2",
+		usage: ["/idu_alerts_tick"],
+	},
+	{
+		command: "idu_alerts_pause",
+		description: "Pausar alertas Idu-pi",
+		help: "/idu_alerts_pause - pausar alertas autónomas sin apagar todo Idu-pi",
+		usage: ["/idu_alerts_pause", "/idu_alerts_pause 60"],
+	},
+	{
+		command: "idu_alerts_resume",
+		description: "Reanudar alertas Idu-pi",
+		help: "/idu_alerts_resume - reanudar alertas autónomas pausadas",
+		usage: ["/idu_alerts_resume"],
+	},
+	{
+		command: "idu_alerts_off",
+		description: "Apagar alertas Idu-pi",
+		help: "/idu_alerts_off - desactivar alertas autónomas; /idu_off sigue siendo corte global",
+		usage: ["/idu_alerts_off"],
+	},
+	{
+		command: "idu_alerts_on",
+		description: "Encender alertas Idu-pi",
+		help: "/idu_alerts_on - activar alertas autónomas si Idu-pi está activo",
+		usage: ["/idu_alerts_on"],
+	},
+	{
 		command: "idu_master_plan_status",
 		description: "Ver Plan Maestro",
 		help: "/idu_master_plan_status - ver estado del Plan Maestro Idu-pi",
@@ -418,9 +454,15 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 	},
 	{
 		command: "server",
-		description: "Controlar sesión Pi RPC",
-		help: "/server status|run|restart|off - controlar sesión Pi RPC activa",
+		description: "Controlar bridge y sesión Pi",
+		help: "/reset o /server restart - reiniciar bridge completo; /server status - ver estado; /server off - apagar bridge",
 		usage: ["/server status", "/server run", "/server restart", "/server off"],
+	},
+	{
+		command: "reset",
+		description: "Reiniciar bridge completo",
+		help: "/reset - reiniciar bridge completo y avisar al volver",
+		usage: ["/reset"],
 	},
 	{
 		command: "review",
@@ -777,6 +819,26 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{
 		label: "Idu supervisor tick",
 		command: "corepack pnpm cli -- idu-supervisor-tick",
+	},
+	{
+		label: "Idu alerts status",
+		command: "corepack pnpm cli -- alerts status",
+	},
+	{
+		label: "Idu alerts tick",
+		command: "corepack pnpm cli -- alerts tick",
+	},
+	{
+		label: "Idu alerts scheduled tick",
+		command: "corepack pnpm cli -- alerts scheduled-tick",
+	},
+	{
+		label: "Idu alerts pause",
+		command: "corepack pnpm cli -- alerts control pause 60",
+	},
+	{
+		label: "Idu alerts resume",
+		command: "corepack pnpm cli -- alerts control resume",
 	},
 	{
 		label: "Preflight",

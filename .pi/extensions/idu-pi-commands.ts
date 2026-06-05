@@ -3,13 +3,18 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+type PiRunMode = "tui" | "rpc" | "json" | "print";
+
 type ExtensionCommandContext = {
 	cwd: string;
-	ui: {
+	mode?: PiRunMode;
+	hasUI?: boolean;
+	ui?: {
 		notify(message: string, level: "info" | "warning" | "error"): void;
 		setStatus(key: string, value: string | undefined): void;
 	};
 	waitForIdle(): Promise<void>;
+	getSystemPromptOptions?(): unknown;
 	modelRegistry?: {
 		getAvailable(): Promise<unknown[]>;
 	};
@@ -68,12 +73,172 @@ function trimOutput(value: string): string {
 	return `${value.slice(0, MAX_OUTPUT_CHARS)}\n\n[Salida truncada por extensión Pi: ${value.length} caracteres totales]`;
 }
 
+function resolveIduPiHomeDir(): string {
+	const home =
+		process.env.USERPROFILE?.trim() || process.env.HOME?.trim() || homedir();
+	return join(home, ".pi", "idu-pi");
+}
+
 function resolveModelCatalogSnapshotPath(): string {
 	const override = process.env.IDU_PI_MODEL_CATALOG_PATH?.trim();
 	if (override) return override;
-	const home =
-		process.env.USERPROFILE?.trim() || process.env.HOME?.trim() || homedir();
-	return join(home, ".pi", "idu-pi", "model-catalog.json");
+	return join(resolveIduPiHomeDir(), "model-catalog.json");
+}
+
+function resolvePromptContextSnapshotPath(): string {
+	const override = process.env.IDU_PI_PROMPT_CONTEXT_PATH?.trim();
+	if (override) return override;
+	return join(resolveIduPiHomeDir(), "prompt-context-snapshot.json");
+}
+
+export function canUseExtensionUi(ctx: {
+	mode?: PiRunMode;
+	hasUI?: boolean;
+	ui?: ExtensionCommandContext["ui"];
+}): boolean {
+	if (!ctx.ui) return false;
+	if (ctx.hasUI === false) return false;
+	if (ctx.mode === "json" || ctx.mode === "print") return false;
+	return true;
+}
+
+function notifyIfUi(
+	ctx: ExtensionCommandContext,
+	message: string,
+	level: "info" | "warning" | "error",
+): void {
+	if (!canUseExtensionUi(ctx)) return;
+	ctx.ui?.notify(message, level);
+}
+
+function setStatusIfUi(
+	ctx: ExtensionCommandContext,
+	key: string,
+	value: string | undefined,
+): void {
+	if (!canUseExtensionUi(ctx)) return;
+	ctx.ui?.setStatus(key, value);
+}
+
+function objectField(value: unknown): Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+function arrayField(value: Record<string, unknown>, key: string): unknown[] {
+	const field = value[key];
+	return Array.isArray(field) ? field : [];
+}
+
+function safeString(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function measuredChars(value: unknown): number {
+	if (typeof value === "string") return value.length;
+	if (value === undefined || value === null) return 0;
+	try {
+		return JSON.stringify(value).length;
+	} catch {
+		return 0;
+	}
+}
+
+type PromptContextSnapshot = {
+	version: 1;
+	mode: PiRunMode | "unknown";
+	generatedAt: string;
+	rawContentIncluded: false;
+	contextFiles: {
+		count: number;
+		paths: string[];
+		totalChars: number;
+	};
+	skills: {
+		count: number;
+		names: string[];
+	};
+	tools: {
+		count: number;
+	};
+	limitations: string[];
+};
+
+export function buildPromptContextSnapshot(
+	options: unknown,
+	mode: PiRunMode | "unknown",
+): PromptContextSnapshot {
+	const record = objectField(options);
+	const contextFiles = arrayField(record, "contextFiles");
+	const contextSummaries = contextFiles.map((file) => {
+		const fileRecord = objectField(file);
+		return {
+			path:
+				safeString(fileRecord.path) ??
+				safeString(fileRecord.filePath) ??
+				"[unknown-context-file]",
+			chars: measuredChars(fileRecord.content ?? fileRecord.text),
+		};
+	});
+	const skills = arrayField(record, "loadedSkills").length
+		? arrayField(record, "loadedSkills")
+		: arrayField(record, "skills");
+	const skillNames = skills
+		.map((skill) => {
+			const skillRecord = objectField(skill);
+			return safeString(skillRecord.name) ?? safeString(skill);
+		})
+		.filter((name): name is string => Boolean(name));
+	const activeTools = arrayField(record, "activeTools").length
+		? arrayField(record, "activeTools")
+		: arrayField(record, "tools");
+	return {
+		version: 1,
+		mode,
+		generatedAt: new Date().toISOString(),
+		rawContentIncluded: false,
+		contextFiles: {
+			count: contextSummaries.length,
+			paths: contextSummaries.map((file) => file.path).slice(0, 50),
+			totalChars: contextSummaries.reduce(
+				(total, file) => total + file.chars,
+				0,
+			),
+		},
+		skills: {
+			count: skills.length,
+			names: skillNames.slice(0, 50),
+		},
+		tools: {
+			count: activeTools.length,
+		},
+		limitations: [
+			"Snapshot records counts, paths, and sizes only; raw prompt and file contents are intentionally omitted.",
+		],
+	};
+}
+
+async function refreshPiPromptContextSnapshot(
+	ctx: ExtensionCommandContext,
+): Promise<void> {
+	const getOptions = ctx.getSystemPromptOptions;
+	if (!getOptions) return;
+	try {
+		const snapshot = buildPromptContextSnapshot(
+			getOptions.call(ctx),
+			ctx.mode ?? "unknown",
+		);
+		const path = resolvePromptContextSnapshotPath();
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+	} catch (error) {
+		notifyIfUi(
+			ctx,
+			`Idu-pi no pudo refrescar snapshot de contexto Pi: ${error instanceof Error ? error.message : String(error)}`,
+			"warning",
+		);
+	}
 }
 
 function normalizeModelCatalogId(value: string): string | undefined {
@@ -167,7 +332,8 @@ async function refreshPiModelCatalogSnapshot(
 			"utf8",
 		);
 	} catch (error) {
-		ctx.ui.notify(
+		notifyIfUi(
+			ctx,
 			`Idu-pi no pudo refrescar catálogo de modelos: ${error instanceof Error ? error.message : String(error)}`,
 			"warning",
 		);
@@ -304,7 +470,8 @@ export default function (pi: ExtensionAPI) {
 			display: true,
 			details: { command, cliArgs, code, killed },
 		});
-		ctx.ui.notify(
+		notifyIfUi(
+			ctx,
 			code === 0 ? `Idu-pi OK: /${command}` : `Idu-pi falló: /${command}`,
 			code === 0 ? "info" : "error",
 		);
@@ -317,7 +484,8 @@ export default function (pi: ExtensionAPI) {
 	) {
 		await ctx.waitForIdle();
 		await refreshPiModelCatalogSnapshot(ctx);
-		ctx.ui.setStatus("idu-pi", `running ${command}`);
+		await refreshPiPromptContextSnapshot(ctx);
+		setStatusIfUi(ctx, "idu-pi", `running ${command}`);
 		try {
 			if (command === "idu") {
 				await runCliStreamingIdu(command, cliArgs, ctx);
@@ -345,14 +513,15 @@ export default function (pi: ExtensionAPI) {
 					killed: result.killed,
 				},
 			});
-			ctx.ui.notify(
+			notifyIfUi(
+				ctx,
 				result.code === 0
 					? `Idu-pi OK: /${command}`
 					: `Idu-pi falló: /${command}`,
 				result.code === 0 ? "info" : "error",
 			);
 		} finally {
-			ctx.ui.setStatus("idu-pi", undefined);
+			setStatusIfUi(ctx, "idu-pi", undefined);
 		}
 	}
 
@@ -362,7 +531,8 @@ export default function (pi: ExtensionAPI) {
 			handler: async (args, ctx) => {
 				const trimmed = args.trim();
 				if (config.requiresArgs && !trimmed) {
-					ctx.ui.notify(
+					notifyIfUi(
+						ctx,
 						`Uso: ${config.usage ?? `/${name} <texto>`}`,
 						"warning",
 					);

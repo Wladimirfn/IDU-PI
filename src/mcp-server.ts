@@ -42,6 +42,13 @@ import {
 } from "./context-budget.js";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
+import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
+import {
+	appendAutonomousAlertDecision,
+	readAutonomousAlertEngineState,
+	updateAutonomousAlertControlState,
+} from "./autonomous-alert-engine-state.js";
+import { buildSupervisorSelfMaintenanceAdvisory } from "./supervisor-self-maintenance-advisory.js";
 import {
 	buildExternalIntelligenceReport,
 	writeExternalIntelligenceReport,
@@ -63,17 +70,27 @@ import {
 	slugifyProjectId,
 } from "./projects.js";
 import type { StructuredTask } from "./structured-task-queue.js";
-import { recordIduUsageEvent } from "./usage-events.js";
+import {
+	buildIduUsageReport,
+	readIduUsageEvents,
+	recordIduUsageEvent,
+} from "./usage-events.js";
 import {
 	agentLabEffectivenessEventFromRequestPlan,
 	agentLabEffectivenessEventFromRunResult,
 	agentLabEffectivenessEventFromStatus,
+	buildAgentLabEffectivenessReport,
+	readAgentLabEffectivenessEvents,
 	recordAgentLabEffectivenessEventDeferred,
 } from "./agentlab-effectiveness-events.js";
 import {
 	contextQualityEventFromSupervisorContextPack,
 	recordContextQualityEventDeferred,
 } from "./context-quality-events.js";
+import {
+	readSupervisorActivityEvents,
+	summarizeSupervisorActivityEvents,
+} from "./supervisor-activity-events.js";
 import {
 	buildAgentLabWorkloadEnvelope,
 	type AgentLabSpecialty,
@@ -123,6 +140,10 @@ export type IduMcpToolName =
 	| "idu_supervisor_cron_plan"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
+	| "idu_supervisor_self_maintenance_advisory"
+	| "idu_autonomous_alerts_status"
+	| "idu_autonomous_alerts_tick"
+	| "idu_autonomous_alerts_control"
 	| "idu_bibliotecario_proactive_advisory"
 	| "idu_external_intelligence_report"
 	| "idu_external_source_recommend"
@@ -418,6 +439,9 @@ const TOOLS: IduMcpToolDefinition[] = [
 			expectedFiles: optionalStringArray(
 				"Archivos esperados para detectar áreas inesperadas.",
 			),
+			ignoredFiles: optionalStringArray(
+				"Archivos local-only/ignorados explícitamente para esta revisión postflight.",
+			),
 			expectedChangeMode: optionalString(
 				'Modo esperado del cambio: "no-op", "docs", "tests", "code" o "stateRoot".',
 			),
@@ -455,6 +479,43 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Devuelve reporte advisory-only de deuda semántica/context pruning; no borra, no archiva y no promueve contratos.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_supervisor_self_maintenance_advisory",
+		"Devuelve reporte advisory-only de autocuidado supervisor: backlog, tareas stale y patrones repetidos; no escribe, no crea tareas y no ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_status",
+		"Lee estado y reporte raw-honesty del motor de alertas autónomas; advisory-only y sin writes.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_tick",
+		"Evalúa alertas autónomas y devuelve decisiones advisory-only; creación de tareas se implementa en slice posterior.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			allowTaskCreation: optionalBoolean(
+				"Solicita crear tareas; Task 3 lo reporta sin crear tareas.",
+			),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_control",
+		"Activa, desactiva, pausa, reanuda o controla dominios de alertas autónomas con escritura stateRoot-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredString(
+				"enable, disable, pause, resume, disable_domain o enable_domain.",
+			),
+			domain: optionalString("Dominio a activar/desactivar."),
+			pauseMinutes: optionalString("Minutos de pausa, default 60."),
+			reason: optionalString("Motivo humano/orquestador para auditoría."),
 		},
 	),
 	tool(
@@ -986,14 +1047,16 @@ export async function callIduMcpTool(
 		);
 		const startedAt = Date.now();
 		const result = await dispatchTool(name, args, runtime, resolution);
-		await recordMcpUsage(
-			runtime,
-			result,
-			Date.now() - startedAt,
-			resolution.stateRoot,
-		);
-		recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
-		recordMcpContextQuality(runtime, result, resolution.stateRoot);
+		if (!isReadOnlyAlertTelemetryExcludedTool(name)) {
+			await recordMcpUsage(
+				runtime,
+				result,
+				Date.now() - startedAt,
+				resolution.stateRoot,
+			);
+			recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
+			recordMcpContextQuality(runtime, result, resolution.stateRoot);
+		}
 		return result;
 	} catch (error) {
 		return envelope({
@@ -1119,6 +1182,14 @@ function isProjectLifecycleTool(
 		"idu_bootstrap_project",
 		"idu_start",
 	].includes(name);
+}
+
+function isReadOnlyAlertTelemetryExcludedTool(name: IduMcpToolName): boolean {
+	return (
+		name === "idu_supervisor_self_maintenance_advisory" ||
+		name === "idu_autonomous_alerts_status" ||
+		name === "idu_autonomous_alerts_tick"
+	);
 }
 
 async function handleProjectLifecycleTool(
@@ -1476,6 +1547,86 @@ function resolveLifecycleProjectPath(inputProjectPath?: string): string {
 	if (inputProjectPath?.trim()) return inputProjectPath.trim();
 	const resolution = resolveMcpProjectContext();
 	return resolution.projectPath;
+}
+
+function readRuntimeStructuredTasks(runtime: CliRuntime): {
+	status: "available" | "unavailable";
+	tasks: StructuredTask[];
+	safeNotes: string[];
+} {
+	if (!runtime.listTasks) {
+		return {
+			status: "unavailable",
+			tasks: [],
+			safeNotes: [
+				"Structured task queue direct access was unavailable; report used an empty task snapshot.",
+			],
+		};
+	}
+	try {
+		return {
+			status: "available",
+			tasks: runtime.listTasks(),
+			safeNotes: ["Leí snapshot de cola estructurada sin modificarla."],
+		};
+	} catch {
+		return {
+			status: "unavailable",
+			tasks: [],
+			safeNotes: [
+				"Structured task queue read failed safely; report used an empty task snapshot.",
+			],
+		};
+	}
+}
+
+function buildRuntimeSelfMaintenanceReport(
+	runtime: CliRuntime,
+	stateRoot: string,
+): {
+	taskRead: ReturnType<typeof readRuntimeStructuredTasks>;
+	report: ReturnType<typeof buildSupervisorSelfMaintenanceAdvisory>;
+} {
+	const taskRead = readRuntimeStructuredTasks(runtime);
+	const supervisorActivity = summarizeSupervisorActivityEvents(
+		readSupervisorActivityEvents(stateRoot),
+	);
+	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+		readAgentLabEffectivenessEvents(stateRoot),
+	);
+	let semanticNewEvents = 0;
+	try {
+		const semanticDelta = runtime.semanticAuditStatus().newEvents;
+		semanticNewEvents =
+			semanticDelta.labRuns +
+			semanticDelta.findings +
+			semanticDelta.proposals +
+			semanticDelta.tasks +
+			semanticDelta.userSignals +
+			semanticDelta.memoryItems;
+	} catch {
+		semanticNewEvents = 0;
+	}
+	return {
+		taskRead,
+		report: buildSupervisorSelfMaintenanceAdvisory({
+			projectId: runtime.projectId,
+			now: new Date(),
+			tasks: taskRead.tasks,
+			supervisorEvents: supervisorActivity.totalEvents,
+			supervisorActivitySkipped:
+				(supervisorActivity.byReason.throttled ?? 0) +
+				(supervisorActivity.byReason.idu_inactive ?? 0) +
+				(supervisorActivity.byReason.no_new_events ?? 0) +
+				(supervisorActivity.byReason.not_enough_data ?? 0),
+			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
+			usageFailures:
+				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
+			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+			semanticNewEvents,
+		}),
+	};
 }
 
 async function dispatchTool(
@@ -2160,12 +2311,14 @@ async function dispatchTool(
 			const taskPackageId = stringArg(args, "taskPackageId");
 			const expectedContracts = stringListArg(args, "expectedContracts");
 			const expectedFiles = stringListArg(args, "expectedFiles");
+			const ignoredFiles = stringListArg(args, "ignoredFiles");
 			const expectedChangeMode = stringArg(args, "expectedChangeMode");
 			const taskTrace = buildPostflightTaskTrace({
 				actionId,
 				taskPackageId,
 				expectedContracts,
 				expectedFiles,
+				ignoredFiles,
 				expectedChangeMode,
 				report,
 			});
@@ -2439,6 +2592,236 @@ async function dispatchTool(
 				],
 			});
 		}
+		case "idu_autonomous_alerts_status": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const state = readAutonomousAlertEngineState(stateRoot);
+			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+				runtime,
+				stateRoot,
+			);
+			const taskRead = selfMaintenance.taskRead;
+			const report = buildAutonomousAlertEngineReport({
+				projectId: runtime.projectId,
+				control: state.control,
+				tasks: taskRead.tasks,
+				selfMaintenanceSignals: selfMaintenance.report.signals,
+				allowTaskCreation: false,
+				cooldowns: state.cooldowns,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Autonomous alert status: ${report.decisions.length} decision(s).`,
+				data: { report, state },
+				safeNotes: [
+					...resolution.safeNotes,
+					...report.safeNotes,
+					"Status read-only: no alert state, tasks, AgentLabs, rules, skills, contracts, or dependencies were changed.",
+					...taskRead.safeNotes,
+				],
+			});
+		}
+		case "idu_autonomous_alerts_tick": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const state = readAutonomousAlertEngineState(stateRoot);
+			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+				runtime,
+				stateRoot,
+			);
+			const taskRead = selfMaintenance.taskRead;
+			const allowTaskCreation = booleanArg(args, "allowTaskCreation", false);
+			const report = buildAutonomousAlertEngineReport({
+				projectId: runtime.projectId,
+				control: state.control,
+				tasks: taskRead.tasks,
+				selfMaintenanceSignals: selfMaintenance.report.signals,
+				allowTaskCreation,
+				cooldowns: state.cooldowns,
+			});
+			const tasksCreated: Array<{
+				taskId: string;
+				alertId: string;
+				evidenceRefs: string[];
+			}> = [];
+			const taskCreationBlockedByHumanEscalation = report.humanEscalations.some(
+				(decision) =>
+					["repeated_bug", "security", "db"].includes(decision.domain),
+			);
+			for (const decision of report.decisions) {
+				if (
+					decision.recommendedAction === "create_task" &&
+					decision.taskDraft &&
+					allowTaskCreation &&
+					!taskCreationBlockedByHumanEscalation &&
+					tasksCreated.length < 3
+				) {
+					const taskKind = inferTaskTemplateKind(decision.taskDraft.text);
+					const task = runtime.createTask(taskKind, decision.taskDraft.text);
+					tasksCreated.push({
+						taskId: task.id,
+						alertId: decision.id,
+						evidenceRefs: decision.evidenceRefs,
+					});
+					appendAutonomousAlertDecision(stateRoot, decision);
+				} else if (decision.recommendedAction === "ask_human" && allowTaskCreation) {
+					appendAutonomousAlertDecision(stateRoot, decision);
+				}
+			}
+			const finalReport = { ...report, tasksCreated };
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Autonomous alert tick: ${tasksCreated.length} task(s) created, ${finalReport.humanEscalations.length} escalation(s).`,
+				data: {
+					report: finalReport,
+					allowTaskCreation,
+					taskCreationStatus: allowTaskCreation ? "enabled" : "disabled",
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					...finalReport.safeNotes,
+					"Tick may create capped routine tasks only; it did not implement code, run AgentLabs, update dependencies, or mutate rules/skills/contracts.",
+					...taskRead.safeNotes,
+				],
+			});
+		}
+		case "idu_autonomous_alerts_control": {
+			if (!resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary:
+						"Autonomous alert control requires a registered project stateRoot.",
+					data: { resolutionStatus: resolution.status },
+					safeNotes: [
+						...resolution.safeNotes,
+						"No escribí control de alertas porque falta stateRoot registrado.",
+					],
+					errors: ["registered stateRoot is required"],
+				});
+			}
+			const action = requiredText(args, "action");
+			const now = new Date();
+			const current = readAutonomousAlertEngineState(resolution.stateRoot, now);
+			let disabledDomains = current.control.disabledDomains;
+			if (action === "disable_domain") {
+				disabledDomains = [
+					...new Set([...disabledDomains, requiredText(args, "domain")]),
+				];
+			} else if (action === "enable_domain") {
+				const domain = requiredText(args, "domain");
+				disabledDomains = disabledDomains.filter((item) => item !== domain);
+			}
+			const pauseMinutes = positiveIntegerArg(args, "pauseMinutes") ?? 60;
+			let pausedUntil = current.control.pausedUntil;
+			if (action === "pause") {
+				pausedUntil = new Date(
+					now.getTime() + pauseMinutes * 60 * 1000,
+				).toISOString();
+			} else if (action === "resume") {
+				pausedUntil = "1970-01-01T00:00:00.000Z";
+			}
+			let active = current.control.active;
+			if (action === "enable") active = true;
+			else if (action === "disable") active = false;
+			if (
+				action !== "enable" &&
+				action !== "disable" &&
+				action !== "pause" &&
+				action !== "resume" &&
+				action !== "disable_domain" &&
+				action !== "enable_domain"
+			) {
+				throw new Error(
+					`unsupported autonomous alerts control action: ${action}`,
+				);
+			}
+			const state = updateAutonomousAlertControlState(
+				resolution.stateRoot,
+				{
+					active,
+					...(pausedUntil ? { pausedUntil } : {}),
+					disabledDomains,
+					reason: stringArg(args, "reason") ?? action,
+				},
+				now,
+			);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Autonomous alerts control updated: ${action}`,
+				data: { state },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Control write is stateRoot-only; no repo files, tasks, AgentLabs, rules, skills, contracts, or dependencies were changed.",
+				],
+			});
+		}
+		case "idu_supervisor_self_maintenance_advisory": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+				runtime,
+				stateRoot,
+			);
+			const taskRead = selfMaintenance.taskRead;
+			const report = selfMaintenance.report;
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: report.signals.length ? "warn" : "allow",
+				severity: report.signals.some((signal) => signal.severity === "high")
+					? "warning"
+					: "info",
+				confidence: report.signals.length ? 0.8 : 0.7,
+				summary: `Supervisor self-maintenance advisory signals: ${report.signals.length}`,
+				requiresHuman: false,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: report.signals.map((signal) => signal.id),
+				nextActions: report.recommendedActions,
+				requiredActions: report.signals.length
+					? [
+							{
+								id: "supervisor-self-maintenance-orchestrator-review",
+								owner: "orchestrator",
+								action: "review_self_maintenance_advisory_before_changes",
+								reason:
+									"Self-maintenance signals are advisory and must not trigger automatic writes, task creation, AgentLabs, rules, or skill changes.",
+								blocking: true,
+							},
+						]
+					: [],
+			});
+			const safeNotes = [
+				...resolution.safeNotes,
+				...report.safeNotes,
+				"No creé tareas, no modifiqué reglas, no modifiqué skills y no toqué AgentLabs.",
+				...taskRead.safeNotes,
+			];
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Supervisor self-maintenance advisory signals: ${report.signals.length}`,
+				data: {
+					decisionEnvelope,
+					report,
+					signals: report.signals,
+					structuredTaskInputStatus: taskRead.status,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes,
+			});
+		}
 		case "idu_bibliotecario_proactive_advisory": {
 			const request = requiredText(args, "request");
 			const sourceRecommendations = runtime.sourceRecommend(request);
@@ -2486,19 +2869,32 @@ async function dispatchTool(
 					"No promueve contratos; sólo pide evidencia y revisión del orquestador.",
 				],
 			};
+			const boundedSourceRecommendations =
+				boundSourceRecommendationForInjection(sourceRecommendations);
+			const boundedSourceMatches = arrayField(
+				boundedSourceRecommendations,
+				"matches",
+			) as JsonObject[];
 			const sourceEcosystem = {
 				surface: "source_ecosystem",
 				local: {
-					matches: sourceRecommendations.matches.map((match) => ({
-						sourceId: match.sourceId,
-						title: match.title,
-						chunkIds: match.chunkIds,
-						confidence: match.confidence,
-						whyRelevant: match.whyRelevant,
+					matches: boundedSourceMatches.map((match) => ({
+						sourceId: String(match.sourceId ?? ""),
+						title: String(match.title ?? ""),
+						chunkIds: arrayField(match, "chunkIds").map(String),
+						confidence: String(match.confidence ?? "low"),
+						whyRelevant: String(match.whyRelevant ?? ""),
 					})),
-					missingKnowledge: sourceRecommendations.missingKnowledge,
-					limitations: sourceRecommendations.limitations,
+					missingKnowledge: arrayField(
+						boundedSourceRecommendations,
+						"missingKnowledge",
+					).map(String),
+					limitations: arrayField(
+						boundedSourceRecommendations,
+						"limitations",
+					).map(String),
 					requiredActions: requiredSourceActions.actions,
+					contextPressure: boundedSourceRecommendations.contextPressure,
 				},
 				externalRegistry: {
 					matches: externalRegistry.matches.map((match) => ({
@@ -2543,6 +2939,13 @@ async function dispatchTool(
 				totals: semanticDebt.totals,
 				limitations: semanticDebt.limitations,
 			};
+			const contextPressure = semanticDebt.signals.some(
+				(signal) => signal.severity === "high",
+			)
+				? "high"
+				: semanticDebt.signals.length > 0
+					? "medium"
+					: "low";
 			const resourceContextCheck = {
 				rawContentIncluded: false,
 				webFetchAllowed: false,
@@ -2550,19 +2953,24 @@ async function dispatchTool(
 				agentLabAutoRunAllowed: false,
 				contractPromotionAllowed: false,
 				skillPromotionAllowed: false,
+				tokenCostMeasured: false,
+				estimatedTokenUse: "not_measured",
+				pressure: contextPressure,
 				surfacesConsulted: 4,
-				localSourceMatches: sourceRecommendations.matches.length,
+				localSourceMatches: boundedSourceMatches.length,
 				externalRegistryMatches: externalRegistry.matches.length,
 				semanticDebtSignals: semanticDebt.signals.length,
 				contextBudgetSignals: semanticDebt.totals.contextQualityEvents,
 				recommendation:
-					semanticDebt.signals.length > 0
+					contextPressure === "high"
 						? "review_resource_and_semantic_debt_before_adding_more_context"
-						: "bounded_context_ok",
+						: contextPressure === "medium"
+							? "review_before_adding_more_context"
+							: "bounded_context_ok",
 			};
 			const evidenceRefs = [
-				...sourceRecommendations.matches.map(
-					(match) => `source:${match.sourceId}`,
+				...boundedSourceMatches.map(
+					(match) => `source:${String(match.sourceId)}`,
 				),
 				...externalRegistry.matches.map(
 					(match) => `external-source:${match.sourceId}`,
@@ -3058,19 +3466,23 @@ async function dispatchTool(
 			});
 		}
 		case "idu_source_recommend_for_task": {
-			const result = runtime.sourceRecommend(requiredText(args, "request"));
+			const rawResult = runtime.sourceRecommend(requiredText(args, "request"));
+			const result = boundSourceRecommendationForInjection(rawResult);
+			const matches = arrayField(result, "matches") as JsonObject[];
 			const decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
-				recommendation: result.matches.length > 0 ? "warn" : "allow",
-				severity: result.matches.length > 0 ? "warning" : "info",
+				recommendation: matches.length > 0 ? "warn" : "allow",
+				severity: matches.length > 0 ? "warning" : "info",
 				confidence: 0.68,
-				summary: `Source recommendations: ${result.matches.length} matches`,
+				summary: `Source recommendations: ${matches.length} matches`,
 				requiresHuman: false,
-				orchestratorDecisionRequired: result.matches.length > 0,
+				orchestratorDecisionRequired: matches.length > 0,
 				allowedToProceed: true,
-				evidenceRefs: result.matches.map((match) => `source:${match.sourceId}`),
-				nextActions: result.matches.map(
-					(match) => match.orchestratorInstruction,
+				evidenceRefs: matches.map(
+					(match) => `source:${String(match.sourceId)}`,
+				),
+				nextActions: matches.map((match) =>
+					String(match.orchestratorInstruction ?? ""),
 				),
 			});
 			return envelope({
@@ -3078,7 +3490,7 @@ async function dispatchTool(
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
-				summary: `Source recommendations: ${result.matches.length} matches`,
+				summary: `Source recommendations: ${matches.length} matches`,
 				data: { result, decisionEnvelope },
 				safeNotes: [
 					...resolution.safeNotes,
@@ -3886,6 +4298,49 @@ function boundSupervisorSourceRecommendation(
 			.slice(0, 5)
 			.map((item) => boundSupervisorSourceText(item, 220)),
 		contractPromotionAllowed: false,
+	};
+}
+
+function boundSourceRecommendationForInjection(
+	report: SourceRecommendationReport,
+): JsonObject {
+	const bounded = boundSupervisorSourceRecommendation(report);
+	const originalChunkRefs = report.matches.reduce(
+		(total, match) => total + match.chunkIds.length,
+		0,
+	);
+	const boundedMatches = arrayField(bounded, "matches") as JsonObject[];
+	const boundedChunkRefs = boundedMatches.reduce(
+		(total, match) => total + arrayField(match, "chunkIds").length,
+		0,
+	);
+	const truncated =
+		report.matches.length > boundedMatches.length ||
+		originalChunkRefs > boundedChunkRefs ||
+		report.request.length > String(bounded.request ?? "").length ||
+		report.missingKnowledge.length >
+			arrayField(bounded, "missingKnowledge").length ||
+		report.limitations.length > arrayField(bounded, "limitations").length;
+	return {
+		...bounded,
+		contextPressure: {
+			mode: "advisory_only",
+			tokenCostMeasured: false,
+			estimatedTokenUse: "not_measured",
+			pressure: truncated ? "medium" : "low",
+			recommendation: truncated
+				? "review_before_adding_more_context"
+				: "bounded_context_ok",
+			rawContentIncluded: false,
+			webFetchAllowed: false,
+			writesAllowed: false,
+			contractPromotionAllowed: false,
+			matchCount: boundedMatches.length,
+			originalMatchCount: report.matches.length,
+			chunkRefCount: boundedChunkRefs,
+			originalChunkRefCount: originalChunkRefs,
+			truncated,
+		},
 	};
 }
 
@@ -4833,18 +5288,30 @@ const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([
 function compactSourceLibraryEvidence(
 	report: SourceRecommendationReport,
 ): AgentLabSourceLibraryEvidence {
+	const bounded = boundSourceRecommendationForInjection(report);
+	const matches = (arrayField(bounded, "matches") as JsonObject[]).map(
+		(match) => {
+			const confidence: "high" | "medium" | "low" =
+				match.confidence === "high" ||
+				match.confidence === "medium" ||
+				match.confidence === "low"
+					? match.confidence
+					: "low";
+			return {
+				sourceId: String(match.sourceId ?? ""),
+				title: String(match.title ?? ""),
+				chunkIds: arrayField(match, "chunkIds").map(String),
+				whyRelevant: String(match.whyRelevant ?? ""),
+				confidence,
+			};
+		},
+	);
 	return {
-		request: report.request,
+		request: String(bounded.request ?? ""),
 		generatedAt: report.generatedAt,
-		matches: report.matches.map((match) => ({
-			sourceId: match.sourceId,
-			title: match.title,
-			chunkIds: match.chunkIds,
-			whyRelevant: match.whyRelevant,
-			confidence: match.confidence,
-		})),
-		missingKnowledge: report.missingKnowledge,
-		limitations: report.limitations,
+		matches,
+		missingKnowledge: arrayField(bounded, "missingKnowledge").map(String),
+		limitations: arrayField(bounded, "limitations").map(String),
 		contractPromotionAllowed: false,
 	};
 }

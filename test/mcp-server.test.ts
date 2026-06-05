@@ -1022,6 +1022,11 @@ test("mcp server lists Idu-pi tools", async () => {
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_context_pruning_advisory"));
 	assert.ok(
+		tools.some(
+			(tool) => tool.name === "idu_supervisor_self_maintenance_advisory",
+		),
+	);
+	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_intelligence_report"),
 	);
 	assert.ok(
@@ -1030,7 +1035,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 54);
+	assert.equal(tools.length, 58);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2014,9 +2019,8 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		"clear",
 	);
 	assert.equal(
-		(
-			continuationWithRequest.data.planAlignment as { withinObjective: boolean }
-		).withinObjective,
+		(continuationWithRequest.data.planAlignment as { withinObjective: boolean })
+			.withinObjective,
 		true,
 	);
 	assert.doesNotMatch(
@@ -2026,9 +2030,8 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		/tarea de cola aprobada/iu,
 	);
 	assert.equal(
-		(
-			continuationWithRequest.data.decisionEnvelope as DecisionEnvelope
-		).allowedToProceed,
+		(continuationWithRequest.data.decisionEnvelope as DecisionEnvelope)
+			.allowedToProceed,
 		true,
 	);
 	assert.equal(
@@ -2510,6 +2513,49 @@ test("idu_postflight accepts expectedChangeMode and maps normalized contracts", 
 	assert.ok(trace.observedContracts.includes("tests"));
 });
 
+test("idu_postflight accepts explicit ignored files for task trace", async () => {
+	const runtime = fakeRuntime();
+	runtime.postflight = (): ProjectPostflightReport => ({
+		risk: "low",
+		changedFiles: ["src/mcp-server.ts", "context.md"],
+		ignoredFiles: [],
+		observedChangeMode: "code",
+		impactedAreas: ["orquestación"],
+		warnings: [],
+		recommendedNext: "Revisar cambios.",
+		shouldRunAgentLab: false,
+		suggestedAgentLabs: [],
+		requiresHumanConfirmation: false,
+	});
+	const result = await callIduMcpTool(
+		"idu_postflight",
+		{
+			expectedContracts: ["agent"],
+			expectedFiles: ["src/"],
+			expectedChangeMode: "code",
+			ignoredFiles: ["context.md"],
+		},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	const trace = result.data.taskTrace as {
+		matchesIntent: boolean;
+		ignoredFiles: string[];
+		unexpectedAreas: string[];
+	};
+	const decisionEnvelope = result.data.decisionEnvelope as DecisionEnvelope;
+
+	assert.equal(result.ok, true);
+	assert.equal(trace.matchesIntent, true);
+	assert.deepEqual(trace.unexpectedAreas, []);
+	assert.deepEqual(trace.ignoredFiles, ["context.md"]);
+	assert.equal(
+		decisionEnvelope.requiredActions.some(
+			(action) => action.action === "resolve_task_trace_delta",
+		),
+		false,
+	);
+});
+
 test("idu_postflight stays advisory with active session and no-op mode", async () => {
 	const runtime = fakeRuntime();
 	runtime.supervisorOnIduActivation();
@@ -2645,6 +2691,27 @@ test("idu_architectural_pruning_plan is advisory-only", async () => {
 });
 
 test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", async () => {
+	const runtime = fakeRuntime();
+	runtime.sourceRecommend = (request) => ({
+		projectId: "sistema_de_mantencion",
+		request: `${request} ${"q".repeat(1000)}`,
+		generatedAt: "2026-06-01T00:00:00.000Z",
+		matches: [
+			{
+				sourceId: `source-${"a".repeat(400)}`,
+				title: `Huge local source ${"b".repeat(400)}`,
+				chunkIds: Array.from({ length: 20 }, (_, index) => `chunk-${index}`),
+				whyRelevant: `Relevant ${"c".repeat(1000)}`,
+				confidence: "high",
+				orchestratorInstruction: `Read ${"d".repeat(1000)}`,
+				contractPromotionAllowed: false,
+				content: "RAW_CHUNK_BODY_MUST_NOT_LEAK",
+			} as any,
+		],
+		missingKnowledge: [`Missing ${"e".repeat(1000)}`],
+		limitations: [`Limit ${"f".repeat(1000)}`],
+		contractPromotionAllowed: false,
+	});
 	const result = await callIduMcpTool(
 		"idu_bibliotecario_proactive_advisory",
 		{
@@ -2654,14 +2721,23 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 			language: "typescript",
 			framework: "node",
 		},
-		{ runtimeFactory: factory(), projectResolver: () => registered() },
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
 	assert.equal(result.ok, true);
 	const data = result.data as {
 		decisionEnvelope: DecisionEnvelope;
 		planLibrarian: unknown;
-		sourceEcosystem: unknown;
+		sourceEcosystem: {
+			local: {
+				matches: Array<{ chunkIds: string[]; whyRelevant: string }>;
+				contextPressure: {
+					rawContentIncluded: boolean;
+					tokenCostMeasured: boolean;
+					pressure: string;
+				};
+			};
+		};
 		skillOptimization: { skillPromotionAllowed: boolean };
 		failureSemanticDebt: unknown;
 		resourceContextCheck: {
@@ -2671,12 +2747,26 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 			agentLabAutoRunAllowed: boolean;
 			contractPromotionAllowed: boolean;
 			skillPromotionAllowed: boolean;
+			tokenCostMeasured: boolean;
+			estimatedTokenUse: string;
+			pressure: string;
 		};
 	};
 	assert.equal(data.decisionEnvelope.authority, "advisory");
 	assert.equal(data.decisionEnvelope.allowedToProceed, false);
 	assert.ok(data.planLibrarian);
 	assert.ok(data.sourceEcosystem);
+	assert.equal(data.sourceEcosystem.local.matches[0].chunkIds.length, 5);
+	assert.ok(data.sourceEcosystem.local.matches[0].whyRelevant.length <= 280);
+	assert.equal(
+		data.sourceEcosystem.local.contextPressure.rawContentIncluded,
+		false,
+	);
+	assert.equal(
+		data.sourceEcosystem.local.contextPressure.tokenCostMeasured,
+		false,
+	);
+	assert.equal(data.sourceEcosystem.local.contextPressure.pressure, "medium");
 	assert.ok(data.skillOptimization);
 	assert.ok(data.failureSemanticDebt);
 	assert.ok(data.resourceContextCheck);
@@ -2686,6 +2776,9 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 	assert.equal(data.resourceContextCheck.agentLabAutoRunAllowed, false);
 	assert.equal(data.resourceContextCheck.contractPromotionAllowed, false);
 	assert.equal(data.resourceContextCheck.skillPromotionAllowed, false);
+	assert.equal(data.resourceContextCheck.tokenCostMeasured, false);
+	assert.equal(data.resourceContextCheck.estimatedTokenUse, "not_measured");
+	assert.match(data.resourceContextCheck.pressure, /^(low|medium|high)$/u);
 	assert.equal(data.skillOptimization.skillPromotionAllowed, false);
 	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/iu);
 	const serialized = JSON.stringify(result.data);
@@ -2822,6 +2915,362 @@ test("idu_context_pruning_advisory is read-only and advisory-only", async () => 
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("autonomous alert MCP tools are listed", () => {
+	const tools = listIduMcpTools().map((tool) => tool.name);
+	assert.ok(tools.includes("idu_autonomous_alerts_status"));
+	assert.ok(tools.includes("idu_autonomous_alerts_tick"));
+	assert.ok(tools.includes("idu_autonomous_alerts_control"));
+});
+
+test("autonomous alert status is read-only and raw honest", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-status-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_status",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			rawHonesty: boolean;
+			noImplementation: boolean;
+			agentLabsExecuted: boolean;
+		};
+		assert.equal(report.rawHonesty, true);
+		assert.equal(report.noImplementation, true);
+		assert.equal(report.agentLabsExecuted, false);
+		assert.equal(existsSync(stateRoot), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("autonomous alert control writes only alert control state", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-control-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_control",
+			{ action: "disable", reason: "user stop" },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const state = result.data.state as {
+			control: { active: boolean; reason?: string };
+		};
+		assert.equal(state.control.active, false);
+		assert.equal(state.control.reason, "user stop");
+		assert.equal(
+			existsSync(
+				join(stateRoot, "reports", "autonomous-alert-engine-state.json"),
+			),
+			true,
+		);
+		assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_autonomous_alerts_tick creates capped routine repeated bug tasks", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `telegram bug repeated ${index}`);
+		}
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{ allowTaskCreation: true },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			tasksCreated: Array<{ taskId: string; alertId: string }>;
+		};
+		assert.ok(report.tasksCreated.length >= 1);
+		assert.ok(report.tasksCreated.length <= 3);
+		assert.equal(
+			(runtime.listTasks?.() ?? []).some((task) =>
+				/regression test/u.test(task.text),
+			),
+			true,
+		);
+		const ledger = readFileSync(
+			join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
+			"utf8",
+		);
+		assert.match(ledger, /alert-repeated_bug:telegram/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_autonomous_alerts_tick is read-only by default for human escalations", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-read-only-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `security db auth bug repeated ${index}`);
+		}
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		assert.equal(existsSync(join(stateRoot, "reports")), false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_autonomous_alerts_tick escalates high-risk repeated bug without task", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-high-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `security db auth bug repeated ${index}`);
+		}
+		const before = runtime.listTasks?.().length ?? 0;
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{ allowTaskCreation: true },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			humanEscalations: unknown[];
+			tasksCreated: unknown[];
+		};
+		assert.ok(report.humanEscalations.length >= 1);
+		assert.equal(report.tasksCreated.length, 0);
+		assert.equal(runtime.listTasks?.().length ?? 0, before);
+		const ledger = readFileSync(
+			join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
+			"utf8",
+		);
+		assert.match(ledger, /alert-repeated_bug:/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_autonomous_alerts_tick converts self-maintenance backlog into maintenance task", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-alert-self-maintenance-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		const runtime = fakeRuntime();
+		for (let index = 0; index < 10; index += 1) {
+			const task = runtime.createTask(
+				"feature",
+				`routine backlog item ${index}`,
+			);
+			task.id = `backlog-${index}`;
+		}
+		const result = await callIduMcpTool(
+			"idu_autonomous_alerts_tick",
+			{ allowTaskCreation: true },
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		assert.equal(result.ok, true);
+		const report = result.data.report as {
+			decisions: Array<{ domain: string; recommendedAction: string }>;
+			tasksCreated: Array<{ taskId: string; alertId: string }>;
+		};
+		assert.ok(
+			report.decisions.some(
+				(decision) =>
+					decision.domain === "backlog" &&
+					decision.recommendedAction === "create_task",
+			),
+		);
+		assert.ok(
+			report.tasksCreated.some((created) =>
+				created.alertId.includes("backlog-pressure"),
+			),
+		);
+		assert.ok(
+			(runtime.listTasks?.() ?? []).some((task) =>
+				/Structured task queue has backlog pressure/u.test(task.text),
+			),
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	mkdirSync(join(stateRoot, "reports"), { recursive: true });
+	writeFileSync(
+		join(stateRoot, "reports", "idu-usage-events.jsonl"),
+		`${JSON.stringify({
+			version: 1,
+			id: "usage-1",
+			timestamp: "2026-06-05T00:00:00.000Z",
+			projectId: "sistema_de_mantencion",
+			surface: "mcp",
+			action: "idu_postflight",
+			ok: false,
+			allowedToProceed: false,
+			requiresHuman: true,
+		})}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "reports", "agentlab-effectiveness-events.jsonl"),
+		`${JSON.stringify({
+			version: 1,
+			id: "agentlab-1",
+			timestamp: "2026-06-05T00:00:00.000Z",
+			projectId: "sistema_de_mantencion",
+			eventType: "status_checked",
+			source: "mcp",
+			staleRequests: 3,
+		})}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "reports", "idu-supervisor-activity-events.jsonl"),
+		Array.from({ length: 3 }, (_, index) =>
+			JSON.stringify({
+				version: 1,
+				id: `supervisor-${index}`,
+				timestamp: "2026-06-05T00:00:00.000Z",
+				projectId: "sistema_de_mantencion",
+				eventType: "supervisor_hook",
+				origin: "supervisor_auto_hook",
+				trigger: "after_postflight",
+				status: "skipped",
+				reason: "throttled",
+				active: true,
+			}),
+		).join("\n") + "\n",
+		"utf8",
+	);
+	const runtime = fakeRuntime();
+	runtime.semanticAuditStatus = () => ({
+		projectId: "sistema_de_mantencion",
+		stats: {} as never,
+		checkpoint: {} as never,
+		newEvents: {
+			labRuns: 50,
+			findings: 50,
+			proposals: 25,
+			tasks: 25,
+			userSignals: 0,
+			memoryItems: 0,
+			criticalFindings: 0,
+			highFindings: 0,
+		},
+		decision: {} as never,
+		recommendedNext: "Run semantic audit.",
+	});
+	for (let index = 0; index < 10; index += 1) {
+		const task = runtime.createTask(
+			"bug",
+			`postflight context.md repeated failure ${index}`,
+		);
+		task.id = `maintenance-${index}`;
+	}
+	const result = await callIduMcpTool(
+		"idu_supervisor_self_maintenance_advisory",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		authority: string;
+		mode: string;
+		noWrites: boolean;
+		agentLabsExecuted: boolean;
+		rulesApplied: boolean;
+		skillsModified: boolean;
+		totals: {
+			pendingTasks: number;
+			supervisorEvents: number;
+			usageFailures: number;
+			agentLabStaleRequests: number;
+			semanticNewEvents: number;
+		};
+		signals: Array<{ category: string }>;
+		safeNotes: string[];
+	};
+	assert.equal(report.authority, "advisory");
+	assert.equal(report.mode, "advisory_only");
+	assert.equal(report.noWrites, true);
+	assert.equal(report.agentLabsExecuted, false);
+	assert.equal(report.rulesApplied, false);
+	assert.equal(report.skillsModified, false);
+	assert.equal(report.totals.pendingTasks, 10);
+	assert.equal(report.totals.supervisorEvents, 3);
+	assert.equal(report.totals.usageFailures, 3);
+	assert.equal(report.totals.agentLabStaleRequests, 3);
+	assert.equal(report.totals.semanticNewEvents, 150);
+	assert.ok(
+		report.signals.some((signal) => signal.category === "backlog_pressure"),
+	);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "repeated_failure_patterns",
+		),
+	);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "semantic_audit_pressure",
+		),
+	);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "supervisor_activity_pressure",
+		),
+	);
+	assert.equal(result.data.structuredTaskInputStatus, "available");
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		false,
+	);
+	assert.match(report.safeNotes.join("\n"), /no files, tasks, rules, skills/u);
+	assert.match(result.safeNotes.join("\n"), /No creé tareas/u);
+	assert.match(result.safeNotes.join("\n"), /no toqué AgentLabs/u);
+	assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
+	rmSync(root, { recursive: true, force: true });
 });
 
 test("idu_external_intelligence_report is allowlisted and advisory-only", async () => {
@@ -3501,6 +3950,64 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		recommend.safeNotes.some((note) => /orquestador decide/u.test(note)),
 	);
 
+	const oversizedRuntime = fakeRuntime();
+	oversizedRuntime.sourceRecommend = (request) => ({
+		projectId: "sistema_de_mantencion",
+		request: `${request} ${"x".repeat(1000)}`,
+		generatedAt: "2026-06-01T00:00:00.000Z",
+		matches: [
+			{
+				sourceId: `source-${"a".repeat(400)}`,
+				title: `Huge source ${"b".repeat(400)}`,
+				chunkIds: Array.from({ length: 20 }, (_, index) => `chunk-${index}`),
+				whyRelevant: `Relevant ${"c".repeat(1000)}`,
+				confidence: "high",
+				orchestratorInstruction: `Read carefully ${"d".repeat(1000)}`,
+				contractPromotionAllowed: false,
+				content: "RAW_CHUNK_BODY_MUST_NOT_LEAK",
+			} as any,
+		],
+		missingKnowledge: [`Missing ${"e".repeat(1000)}`],
+		limitations: [`Limit ${"f".repeat(1000)}`],
+		contractPromotionAllowed: false,
+	});
+	const oversizedRecommend = await callIduMcpTool(
+		"idu_source_recommend_for_task",
+		{ request: "robusto" },
+		{
+			runtimeFactory: () => oversizedRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(oversizedRecommend.ok, true);
+	const oversizedResult = oversizedRecommend.data.result as {
+		matches: Array<{
+			chunkIds: string[];
+			orchestratorInstruction: string;
+			whyRelevant: string;
+		}>;
+		contextPressure: {
+			rawContentIncluded: boolean;
+			tokenCostMeasured: boolean;
+			estimatedTokenUse: string;
+			pressure: string;
+		};
+	};
+	assert.equal(oversizedResult.matches[0].chunkIds.length, 5);
+	assert.ok(oversizedResult.matches[0].orchestratorInstruction.length <= 280);
+	assert.ok(oversizedResult.matches[0].whyRelevant.length <= 280);
+	assert.equal(oversizedResult.contextPressure.rawContentIncluded, false);
+	assert.equal(oversizedResult.contextPressure.tokenCostMeasured, false);
+	assert.equal(
+		oversizedResult.contextPressure.estimatedTokenUse,
+		"not_measured",
+	);
+	assert.equal(oversizedResult.contextPressure.pressure, "medium");
+	assert.doesNotMatch(
+		JSON.stringify(oversizedRecommend.data),
+		/RAW_CHUNK_BODY_MUST_NOT_LEAK/u,
+	);
+
 	const requiredActions = await callIduMcpTool(
 		"idu_source_required_actions",
 		{},
@@ -3599,20 +4106,21 @@ test("postflight request create remains request-only and review-run reports sand
 	const externalRuntime = fakeRuntime();
 	externalRuntime.sourceRecommend = (request) => ({
 		projectId: "sistema_de_mantencion",
-		request,
+		request: `${request} ${"x".repeat(1000)}`,
 		generatedAt: "2026-06-01T00:00:00.000Z",
 		matches: [
 			{
 				sourceId: "source-doc-1",
-				title: "Dependency advisory digest",
-				chunkIds: ["chunk-001"],
-				whyRelevant: "Local digest mentions dependency governance.",
+				title: `Dependency advisory digest ${"t".repeat(400)}`,
+				chunkIds: Array.from({ length: 20 }, (_, index) => `chunk-${index}`),
+				whyRelevant: `Local digest mentions dependency governance. ${"r".repeat(1000)}`,
 				confidence: "high",
-				orchestratorInstruction: "Read chunk-001 if needed.",
+				orchestratorInstruction: `Read chunk-001 if needed. ${"i".repeat(1000)}`,
 				contractPromotionAllowed: false,
-			},
+				content: "RAW_CHUNK_BODY_MUST_NOT_LEAK",
+			} as any,
 		],
-		missingKnowledge: [],
+		missingKnowledge: [`Missing ${"m".repeat(1000)}`],
 		limitations: ["Local Source Library digest only; no web fetch."],
 		contractPromotionAllowed: false,
 	});
@@ -3645,7 +4153,12 @@ test("postflight request create remains request-only and review-run reports sand
 	const externalPlan = external.data.plan as AgentLabReviewRequestPlan;
 	assert.equal(externalPlan.source, "external_source_intelligence");
 	assert.match(JSON.stringify(externalPlan), /source-doc-1/u);
-	assert.match(JSON.stringify(externalPlan), /chunk-001/u);
+	assert.match(JSON.stringify(externalPlan), /chunk-0/u);
+	assert.doesNotMatch(
+		JSON.stringify(externalPlan),
+		/RAW_CHUNK_BODY_MUST_NOT_LEAK/u,
+	);
+	assert.ok(JSON.stringify(externalPlan).length < 6000);
 	assert.ok(!external.data.run);
 	assert.ok(
 		external.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),

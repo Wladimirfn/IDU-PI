@@ -4,6 +4,7 @@ export type PostflightTaskTraceInput = {
 	expectedContracts: string[];
 	expectedFiles: string[];
 	expectedChangeMode?: string;
+	ignoredFiles?: string[];
 	report: {
 		changedFiles: string[];
 		ignoredFiles?: string[];
@@ -33,8 +34,15 @@ export type PostflightTaskTrace = {
 export function buildPostflightTaskTrace(
 	input: PostflightTaskTraceInput,
 ): PostflightTaskTrace {
+	const explicitIgnoredFiles = explicitIgnoredChangedFiles(
+		input.report.changedFiles,
+		input.ignoredFiles ?? [],
+	);
+	const effectiveChangedFiles = input.report.changedFiles.filter(
+		(file) => !explicitIgnoredFiles.includes(file),
+	);
 	const unexpectedAreas = input.expectedFiles.length
-		? input.report.changedFiles.filter(
+		? effectiveChangedFiles.filter(
 				(file) =>
 					!input.expectedFiles.some((expected) =>
 						normalizePath(file).startsWith(normalizePath(expected)),
@@ -59,7 +67,10 @@ export function buildPostflightTaskTrace(
 			missingExpectedContracts.length === 0 &&
 			modeMatches,
 		unexpectedAreas,
-		ignoredFiles: input.report.ignoredFiles ?? [],
+		ignoredFiles: dedupe([
+			...(input.report.ignoredFiles ?? []),
+			...explicitIgnoredFiles,
+		]),
 		expectedChangeMode: input.expectedChangeMode ?? null,
 		observedChangeMode,
 		modeDelta: modeMatches
@@ -73,7 +84,7 @@ export function buildPostflightTaskTrace(
 		})),
 		missingExpectedContracts,
 		objectiveProgress:
-			input.report.changedFiles.length === 0
+			effectiveChangedFiles.length === 0
 				? "none"
 				: input.report.risk === "low"
 					? "partial"
@@ -83,6 +94,23 @@ export function buildPostflightTaskTrace(
 				? "Puede pasar a revisión del orquestador y AgentLab si la política lo requiere."
 				: "Revalidar contratos y considerar AgentLab audit-only antes de cerrar.",
 	};
+}
+
+function explicitIgnoredChangedFiles(
+	changedFiles: string[],
+	ignoredFiles: string[],
+): string[] {
+	const normalizedIgnored = ignoredFiles.map((file) => normalizePath(file));
+	return changedFiles.filter((changedFile) => {
+		const normalizedChanged = normalizePath(changedFile);
+		return normalizedIgnored.some((ignoredFile) => {
+			if (!ignoredFile) return false;
+			if (ignoredFile.endsWith("/")) {
+				return normalizedChanged.startsWith(ignoredFile);
+			}
+			return normalizedChanged === ignoredFile;
+		});
+	});
 }
 
 function contractsFromPostflightImpact(areas: string[]): string[] {

@@ -26,6 +26,45 @@ test("postflight task trace passes when files, contracts, and mode match", () =>
 	assert.deepEqual(trace.ignoredFiles, ["subagent-artifacts/review.md"]);
 });
 
+test("postflight task trace accepts explicit local-only ignored files", () => {
+	const trace = buildPostflightTaskTrace({
+		expectedContracts: ["agent"],
+		expectedFiles: ["src/"],
+		expectedChangeMode: "code",
+		ignoredFiles: ["context.md"],
+		report: {
+			changedFiles: ["src/mcp-server.ts", "context.md"],
+			observedChangeMode: "code",
+			impactedAreas: ["orquestación"],
+			risk: "low",
+		},
+	});
+
+	assert.equal(trace.matchesIntent, true);
+	assert.deepEqual(trace.unexpectedAreas, []);
+	assert.deepEqual(trace.ignoredFiles, ["context.md"]);
+	assert.equal(trace.modeDelta, null);
+});
+
+test("postflight task trace explicit ignores do not hide unexpected files", () => {
+	const trace = buildPostflightTaskTrace({
+		expectedContracts: ["agent"],
+		expectedFiles: ["src/"],
+		expectedChangeMode: "code",
+		ignoredFiles: ["context.md"],
+		report: {
+			changedFiles: ["src/mcp-server.ts", "context.md", "scripts/rogue.ts"],
+			observedChangeMode: "code",
+			impactedAreas: ["orquestación"],
+			risk: "low",
+		},
+	});
+
+	assert.equal(trace.matchesIntent, false);
+	assert.deepEqual(trace.unexpectedAreas, ["scripts/rogue.ts"]);
+	assert.deepEqual(trace.ignoredFiles, ["context.md"]);
+});
+
 test("postflight task trace reports unexpected files, missing contracts, and mode deltas", () => {
 	const trace = buildPostflightTaskTrace({
 		expectedContracts: ["security", "data"],

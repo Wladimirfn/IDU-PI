@@ -1,5 +1,5 @@
 import { Bot, type Context } from "grammy";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -169,6 +169,15 @@ import {
 	runIduSupervisorLoop,
 } from "./idu-supervisor-loop.js";
 import {
+	buildAutonomousAlertEngineReport,
+	type AutonomousAlertEngineReport,
+} from "./autonomous-alert-engine.js";
+import {
+	readAutonomousAlertEngineState,
+	updateAutonomousAlertControlState,
+	type AutonomousAlertEngineState,
+} from "./autonomous-alert-engine-state.js";
+import {
 	maybeRunSupervisorAfterPostflight,
 	maybeRunSupervisorAfterSemanticTrigger,
 	maybeRunSupervisorAfterTask,
@@ -256,6 +265,7 @@ import { buildSafePushReport } from "./safe-push.js";
 import {
 	LEGACY_SESSION_COMMANDS,
 	PATH_SESSION_COMMANDS,
+	PUBLIC_TELEGRAM_HANDLER_COMMANDS,
 	QUICK_PROMPT_COMMANDS,
 	WORK_SESSION_COMMANDS,
 } from "./telegram-command-registry.js";
@@ -292,6 +302,13 @@ import {
 	launchBridgeLifecycle,
 } from "./bridge-lifecycle.js";
 import {
+	bridgeControlIntentPath,
+	consumeBridgeControlIntent,
+	formatBridgeStartupStatus,
+	launchBridgeControlSafely,
+	writeBridgeControlIntent,
+} from "./bridge-control.js";
+import {
 	formatBridgeEnvStatus,
 	packageEnvPath,
 	readEnvDraft,
@@ -311,7 +328,21 @@ import {
 	formatStructuredTaskQueueDetail,
 	StructuredTaskQueue,
 	structuredTaskInputForText,
+	type StructuredTask,
 } from "./structured-task-queue.js";
+import {
+	buildSupervisorSelfMaintenanceAdvisory,
+	type SupervisorSelfMaintenanceAdvisory,
+} from "./supervisor-self-maintenance-advisory.js";
+import {
+	readSupervisorActivityEvents,
+	summarizeSupervisorActivityEvents,
+} from "./supervisor-activity-events.js";
+import { buildIduUsageReport, readIduUsageEvents } from "./usage-events.js";
+import {
+	buildAgentLabEffectivenessReport,
+	readAgentLabEffectivenessEvents,
+} from "./agentlab-effectiveness-events.js";
 
 const config = loadConfig();
 process.env.AGENT_WORKSPACE_ROOT ??= config.agentWorkspaceRoot;
@@ -1358,6 +1389,40 @@ function formatServerStatus(): string {
 	return `Estado agente activo: ${state.busy ? "ocupado" : "libre"}\nRPC agente activo: ${state.rpcRunning ? "iniciado" : "en espera"}\nPID bridge: ${state.bridgePid}\nProyecto: ${state.projectLabel}\nAgente: ${state.agentLabel} (${state.agentId})\nProyecto target: ${state.currentCwd}\nWorkspace: ${state.workspace}\nModo workspace: ${state.workspaceKind}\nModo agente activo: ${state.modePrefix || "default"}`;
 }
 
+async function notifyBridgeStartupFromIntent(): Promise<void> {
+	const packageRoot = resolvePackageRootForTelegram();
+	const intent = consumeBridgeControlIntent(
+		bridgeControlIntentPath(packageRoot),
+	);
+	if (
+		intent?.type !== "restart" ||
+		!intent.notifyOnStartup ||
+		intent.chatId === undefined
+	) {
+		return;
+	}
+
+	const runtime = agentRouter.activeRuntime();
+	try {
+		await bot.api.sendMessage(
+			intent.chatId,
+			formatBridgeStartupStatus({
+				origin: intent.origin,
+				pid: process.pid,
+				projectLabel: activeProjectLabel(),
+				currentCwd,
+				agentLabel: runtime.profile.label,
+				rpcRunning: runtime.session.running,
+				iduActive: getIduSessionStatus(currentProjectId()).active,
+				telegramCommandCount: PUBLIC_TELEGRAM_HANDLER_COMMANDS.length,
+				now: new Date(),
+			}),
+		);
+	} catch (error) {
+		console.error("Failed to send bridge startup notification", error);
+	}
+}
+
 function labDbPath(): string {
 	return join(config.agentWorkspaceRoot, "reports", "lab.db");
 }
@@ -1378,6 +1443,163 @@ function activeProjectStateRoot(): string {
 		projectId: currentProjectId(),
 		projectPath: activeProjectPath(),
 	}).stateRoot;
+}
+
+type TelegramAutonomousAlertTickResult = {
+	report: AutonomousAlertEngineReport;
+	allowTaskCreation: false;
+	taskCreationStatus: "disabled";
+};
+
+type TelegramAutonomousAlertControlResult = {
+	action: string;
+	state: AutonomousAlertEngineState;
+};
+
+function buildTelegramSelfMaintenanceReport(stateRoot: string): {
+	tasks: StructuredTask[];
+	report: SupervisorSelfMaintenanceAdvisory;
+} {
+	const tasks = structuredTaskQueue.listTasks();
+	const supervisorActivity = summarizeSupervisorActivityEvents(
+		readSupervisorActivityEvents(stateRoot),
+	);
+	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+		readAgentLabEffectivenessEvents(stateRoot),
+	);
+	let semanticNewEvents = 0;
+	try {
+		const semanticDelta = buildSemanticAuditStatus({
+			projectId: currentProjectId(),
+			repository: labDbRepository,
+		}).newEvents;
+		semanticNewEvents =
+			semanticDelta.labRuns +
+			semanticDelta.findings +
+			semanticDelta.proposals +
+			semanticDelta.tasks +
+			semanticDelta.userSignals +
+			semanticDelta.memoryItems;
+	} catch {
+		semanticNewEvents = 0;
+	}
+	return {
+		tasks,
+		report: buildSupervisorSelfMaintenanceAdvisory({
+			projectId: currentProjectId(),
+			now: new Date(),
+			tasks,
+			supervisorEvents: supervisorActivity.totalEvents,
+			supervisorActivitySkipped:
+				(supervisorActivity.byReason.throttled ?? 0) +
+				(supervisorActivity.byReason.idu_inactive ?? 0) +
+				(supervisorActivity.byReason.no_new_events ?? 0) +
+				(supervisorActivity.byReason.not_enough_data ?? 0),
+			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
+			usageFailures:
+				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
+			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+			semanticNewEvents,
+		}),
+	};
+}
+
+function buildTelegramAutonomousAlertStatus(): AutonomousAlertEngineReport {
+	const stateRoot = activeProjectStateRoot();
+	const state = readAutonomousAlertEngineState(stateRoot);
+	const selfMaintenance = buildTelegramSelfMaintenanceReport(stateRoot);
+	return buildAutonomousAlertEngineReport({
+		projectId: currentProjectId(),
+		control: state.control,
+		tasks: selfMaintenance.tasks,
+		selfMaintenanceSignals: selfMaintenance.report.signals,
+		allowTaskCreation: false,
+		cooldowns: state.cooldowns,
+	});
+}
+
+function runTelegramAutonomousAlertTick(options: {
+	allowTaskCreation: false;
+}): TelegramAutonomousAlertTickResult {
+	return {
+		report: buildTelegramAutonomousAlertStatus(),
+		allowTaskCreation: options.allowTaskCreation,
+		taskCreationStatus: "disabled",
+	};
+}
+
+function runTelegramAutonomousAlertControl(
+	action: "enable" | "disable" | "pause" | "resume",
+	pauseMinutes?: number,
+): TelegramAutonomousAlertControlResult {
+	const stateRoot = activeProjectStateRoot();
+	const current = readAutonomousAlertEngineState(stateRoot);
+	const now = new Date();
+	const state = updateAutonomousAlertControlState(
+		stateRoot,
+		{
+			active:
+				action === "enable"
+					? true
+					: action === "disable"
+						? false
+						: current.control.active,
+			pausedUntil:
+				action === "pause"
+					? new Date(
+							now.getTime() + (pauseMinutes ?? 60) * 60 * 1000,
+						).toISOString()
+					: action === "resume"
+						? "1970-01-01T00:00:00.000Z"
+						: current.control.pausedUntil,
+			disabledDomains: current.control.disabledDomains,
+			reason: action,
+		},
+		now,
+	);
+	return { action, state };
+}
+
+function formatTelegramAutonomousAlertReport(
+	result: AutonomousAlertEngineReport | TelegramAutonomousAlertTickResult,
+): string {
+	const report = "report" in result ? result.report : result;
+	const allowTaskCreation =
+		"allowTaskCreation" in result ? result.allowTaskCreation : false;
+	const topTruth = report.uncomfortableTruths[0]?.claim;
+	return [
+		"Alertas Idu-pi",
+		`Estado: ${report.active ? (report.paused ? "paused" : "active") : "off"}`,
+		`Decisiones: ${report.decisions.length}`,
+		`Escalaciones humanas: ${report.humanEscalations.length}`,
+		`Tareas creadas: ${report.tasksCreated.length}`,
+		`allowTaskCreation: ${allowTaskCreation}`,
+		"",
+		"Honestidad cruda:",
+		topTruth ?? "Sin verdades incómodas nuevas con la evidencia actual.",
+		"",
+		"Seguro: no implementé código, no ejecuté AgentLabs, no actualicé dependencias y no modifiqué reglas, skills ni contratos.",
+	].join("\n");
+}
+
+function formatTelegramAutonomousAlertControl(
+	result: TelegramAutonomousAlertControlResult,
+): string {
+	return [
+		"Control de alertas actualizado",
+		`Acción: ${result.action}`,
+		`Activo: ${result.state.control.active}`,
+		`Pausado hasta: ${result.state.control.pausedUntil ?? "no"}`,
+		`Dominios desactivados: ${result.state.control.disabledDomains.join(", ") || "ninguno"}`,
+		"",
+		"Seguro: sólo escribí estado de control bajo stateRoot/reports.",
+	].join("\n");
+}
+
+function parsePauseMinutes(text: string | undefined): number {
+	const parsed = Number.parseInt((text ?? "").trim(), 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 
 function semanticCompactionProjectContext(projectPath: string): {
@@ -1618,6 +1840,64 @@ bot.command("idu_supervisor_tick", async (ctx) => {
 				repository: labDbRepository,
 				queue: structuredTaskQueue,
 			}),
+		),
+	);
+});
+
+bot.command("idu_alerts_status", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertReport(buildTelegramAutonomousAlertStatus()),
+	);
+});
+
+bot.command("idu_alerts_tick", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertReport(
+			runTelegramAutonomousAlertTick({ allowTaskCreation: false }),
+		),
+	);
+});
+
+bot.command("idu_alerts_pause", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("pause", parsePauseMinutes(ctx.match)),
+		),
+	);
+});
+
+bot.command("idu_alerts_resume", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("resume"),
+		),
+	);
+});
+
+bot.command("idu_alerts_off", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("disable"),
+		),
+	);
+});
+
+bot.command("idu_alerts_on", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await replyLong(
+		ctx,
+		formatTelegramAutonomousAlertControl(
+			runTelegramAutonomousAlertControl("enable"),
 		),
 	);
 });
@@ -2302,11 +2582,68 @@ bot.command("task", async (ctx) => {
 	void runPrompt(ctx, prompt, { structuredTaskCategory: parsed.kind });
 });
 
+function cleanupBridgeControlIntent(path: string): void {
+	try {
+		rmSync(path, { force: true });
+	} catch {
+		// best effort cleanup only
+	}
+}
+
+function formatBridgeControlLaunchFailure(
+	action: "restart" | "stop",
+	error: Error,
+): string {
+	const label = action === "restart" ? "reinicio" : "apagado";
+	return [
+		`No pude iniciar el helper de ${label} del bridge.`,
+		"El bridge y la sesión Pi activa quedan corriendo.",
+		`Error: ${error.message}`,
+	].join("\n");
+}
+
+async function requestBridgeRestart(
+	ctx: Context,
+	reason: string,
+): Promise<void> {
+	const packageRoot = resolvePackageRootForTelegram();
+	const chatId = ctx.chat?.id;
+	if (chatId === undefined) {
+		await ctx.reply("No pude identificar el chat para avisar el arranque.");
+		return;
+	}
+	const intentPath = bridgeControlIntentPath(packageRoot);
+	writeBridgeControlIntent(intentPath, {
+		type: "restart",
+		origin: "telegram",
+		chatId,
+		reason,
+		notifyOnStartup: true,
+		requestedAt: new Date().toISOString(),
+	});
+	const launch = await launchBridgeControlSafely("restart", packageRoot);
+	if (!launch.ok) {
+		cleanupBridgeControlIntent(intentPath);
+		await ctx.reply(formatBridgeControlLaunchFailure("restart", launch.error));
+		return;
+	}
+	await ctx.reply(
+		"Reinicio completo del bridge solicitado. Si todo sale bien, voy a volver con un status de arranque.",
+	);
+	clearPendingUiRequest();
+	agentRouter.stopActive("Bridge reiniciándose.");
+}
+
+bot.command("reset", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await requestBridgeRestart(ctx, "/reset");
+});
+
 bot.command("server", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const command = parseServerCommand(ctx.message?.text ?? "");
 	if (!command) {
-		await ctx.reply("Uso: /server status | run | restart | off");
+		await ctx.reply("Uso: /server status | run | restart | reset | off");
 		return;
 	}
 	if (command === "status") {
@@ -2316,25 +2653,25 @@ bot.command("server", async (ctx) => {
 	if (command === "run") {
 		const runtime = agentRouter.startActive();
 		await ctx.reply(
-			`Servidor Pi activo iniciado/en espera.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
+			`Bridge ya está activo; /server run sólo prepara la sesión Pi interna.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}\nSi el bridge estuviera apagado, Telegram no podría recibir este comando.`,
 		);
 		return;
 	}
 	if (command === "restart") {
-		const runtime = agentRouter.restartActive();
-		clearPendingUiRequest();
-		await ctx.reply(
-			`Servidor Pi reiniciado.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
-		);
+		await requestBridgeRestart(ctx, "/server restart");
 		return;
 	}
-	const stopped = agentRouter.stopActive();
-	clearPendingUiRequest();
+	const packageRoot = resolvePackageRootForTelegram();
+	const launch = await launchBridgeControlSafely("stop", packageRoot);
+	if (!launch.ok) {
+		await ctx.reply(formatBridgeControlLaunchFailure("stop", launch.error));
+		return;
+	}
 	await ctx.reply(
-		stopped
-			? "Servidor Pi activo detenido."
-			: "El servidor Pi activo ya estaba detenido.",
+		"Apagando bridge completo. Telegram no puede volver a iniciarlo salvo que uses start-pi-telegram-bridge.bat, scheduled task o watchdog.",
 	);
+	clearPendingUiRequest();
+	agentRouter.stopActive("Bridge detenido.");
 });
 
 bot.command("agents", async (ctx) => {
@@ -3349,4 +3686,8 @@ process.once("exit", shutdown);
 console.log(
 	`pi-telegram-bridge iniciado. PID=${process.pid} CWD=${currentCwd} PI=${[config.piBin, "<PI_CLI_JS>", "--mode", "rpc"].join(" ")}`,
 );
-bot.start();
+void bot.start({
+	onStart: async () => {
+		await notifyBridgeStartupFromIntent();
+	},
+});

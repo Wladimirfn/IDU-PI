@@ -5,26 +5,44 @@ import {
 	bridgeLifecycleReply,
 } from "../src/bridge-lifecycle.js";
 
-test("buildBridgeLifecycleCommand opens a persistent cmd window for run and restart", () => {
-	for (const action of ["run", "restart"] as const) {
-		const command = buildBridgeLifecycleCommand(action, "C:\\bridge");
+test("buildBridgeLifecycleCommand opens a persistent cmd window for run", () => {
+	const command = buildBridgeLifecycleCommand("run", "C:\\bridge");
 
-		assert.equal(command.file, "cmd.exe");
-		assert.deepEqual(command.args, [
-			"/c",
-			"start",
-			'"pi-telegram-bridge"',
-			"cmd.exe",
-			"/k",
-			"powershell",
-			"-NoProfile",
-			"-ExecutionPolicy",
-			"Bypass",
-			"-File",
-			"C:\\bridge\\scripts\\start-bridge.ps1",
-		]);
-		assert.equal(command.cwd, "C:\\bridge");
-	}
+	assert.equal(command.file, "cmd.exe");
+	assert.deepEqual(command.args, [
+		"/c",
+		"start",
+		'"pi-telegram-bridge"',
+		"cmd.exe",
+		"/k",
+		"powershell",
+		"-NoProfile",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-File",
+		"C:\\bridge\\scripts\\start-bridge.ps1",
+	]);
+	assert.equal(command.cwd, "C:\\bridge");
+});
+
+test("restart lifecycle uses bridge-control helper", () => {
+	const command = buildBridgeLifecycleCommand("restart", "C:\\bridge");
+	assert.equal(command.file, "cmd.exe");
+	assert.deepEqual(command.args, [
+		"/c",
+		"start",
+		'"pi-telegram-bridge-control"',
+		"cmd.exe",
+		"/c",
+		"powershell",
+		"-NoProfile",
+		"-ExecutionPolicy",
+		"Bypass",
+		"-File",
+		"C:\\bridge\\scripts\\bridge-control.ps1",
+		"restart",
+	]);
+	assert.equal(command.cwd, "C:\\bridge");
 });
 
 test("buildBridgeLifecycleCommand opens a stop script for off", () => {
