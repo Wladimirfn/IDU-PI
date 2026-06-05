@@ -24,13 +24,8 @@ test("self-maintenance advisory detects backlog and stale pressure", () => {
 		tasks,
 	});
 
-	assert.equal(report.version, 1);
-	assert.equal(report.authority, "advisory");
-	assert.equal(report.mode, "advisory_only");
-	assert.equal(report.noWrites, true);
-	assert.equal(report.agentLabsExecuted, false);
-	assert.equal(report.rulesApplied, false);
-	assert.equal(report.skillsModified, false);
+	assertTopLevelContract(report);
+	assert.equal(report.generatedAt, "2026-06-05T00:00:00.000Z");
 	assert.deepEqual(Object.keys(report.totals).sort(), [
 		"agentLabStaleRequests",
 		"failedTasks",
@@ -88,8 +83,8 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 		tasks,
 	});
 
-	assert.equal(report.version, 1);
-	assert.equal(report.mode, "advisory_only");
+	assertTopLevelContract(report);
+	assert.equal(report.generatedAt, "2026-06-05T00:00:00.000Z");
 	assert.equal(report.totals.guardedTasks, 0);
 	assert.equal(report.totals.supervisorEvents, 0);
 	assert.equal(report.totals.usageFailures, 0);
@@ -109,6 +104,79 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 	);
 });
 
+test("self-maintenance advisory includes semantic and usage inputs in totals and signals", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: [],
+		semanticNewEvents: 125,
+		usageFailures: 3,
+		agentLabStaleRequests: 4,
+		supervisorEvents: 2,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(report.totals.semanticNewEvents, 125);
+	assert.equal(report.totals.usageFailures, 3);
+	assert.equal(report.totals.agentLabStaleRequests, 4);
+	assert.equal(report.totals.supervisorEvents, 2);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "semantic_audit_pressure",
+		),
+	);
+	const repeated = report.signals.find(
+		(signal) => signal.category === "repeated_failure_patterns",
+	);
+	assert.ok(repeated);
+	assertSignalContract(repeated);
+	assert.ok(
+		repeated.evidenceRefs.some((ref) => ref.includes("usage-events")),
+	);
+	assert.ok(
+		repeated.evidenceRefs.some((ref) => ref.includes("agentlab-review")),
+	);
+});
+
+test("self-maintenance advisory detects missing supervisor activity during pressure", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: Array.from({ length: 10 }, (_, index) => ({
+			...baseTask,
+			id: `pending-${index}`,
+		})),
+		supervisorEvents: 0,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(report.totals.supervisorEvents, 0);
+	const activity = report.signals.find(
+		(signal) => signal.category === "supervisor_activity_pressure",
+	);
+	assert.ok(activity);
+	assertSignalContract(activity);
+	assert.ok(
+		activity.evidenceRefs.some((ref) => ref === "supervisor-activity:events=0"),
+	);
+});
+
+function assertTopLevelContract(
+	report: ReturnType<typeof buildSupervisorSelfMaintenanceAdvisory>,
+): void {
+	assert.equal(report.version, 1);
+	assert.equal(report.authority, "advisory");
+	assert.equal(report.mode, "advisory_only");
+	assert.equal(report.projectId, "idu-pi");
+	assert.equal(typeof report.generatedAt, "string");
+	assert.equal(report.noWrites, true);
+	assert.equal(report.agentLabsExecuted, false);
+	assert.equal(report.rulesApplied, false);
+	assert.equal(report.skillsModified, false);
+	assert.ok(Array.isArray(report.safeNotes));
+	assert.ok(report.safeNotes.length > 0);
+}
+
 function assertSignalContract(signal: {
 	id: string;
 	category:
@@ -119,6 +187,7 @@ function assertSignalContract(signal: {
 		| "learning_loop_pressure"
 		| "semantic_audit_pressure"
 		| "supervisor_activity_pressure";
+	severity: "info" | "warning" | "high";
 	confidence: number;
 	evidenceRefs: string[];
 	summary: string;
@@ -128,6 +197,7 @@ function assertSignalContract(signal: {
 }): void {
 	assert.equal(typeof signal.id, "string");
 	assert.ok(signal.id.length > 0);
+	assert.ok(["info", "warning", "high"].includes(signal.severity));
 	assert.equal(typeof signal.confidence, "number");
 	assert.ok(signal.confidence >= 0);
 	assert.ok(signal.confidence <= 1);

@@ -55,6 +55,12 @@ export type BuildSupervisorSelfMaintenanceAdvisoryInput = {
 	projectId: string;
 	now?: Date;
 	tasks: readonly StructuredTask[];
+	supervisorEvents?: number;
+	usageFailures?: number;
+	agentLabStaleRequests?: number;
+	semanticNewEvents?: number;
+	supervisorActivitySkipped?: number;
+	supervisorActivityThrottled?: number;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -86,6 +92,23 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 	const staleRunningTasks = runningTasks.filter(
 		(task) => ageMs(now, task.updatedAt) > 2 * HOUR_MS,
 	);
+	const totals: SupervisorSelfMaintenanceTotals = {
+		pendingTasks: pendingTasks.length,
+		runningTasks: runningTasks.length,
+		failedTasks: failedTasks.length,
+		staleTasks: stalePendingTasks.length + staleRunningTasks.length,
+		guardedTasks: 0,
+		supervisorEvents: boundedCount(input.supervisorEvents),
+		usageFailures: boundedCount(input.usageFailures),
+		agentLabStaleRequests: boundedCount(input.agentLabStaleRequests),
+		semanticNewEvents: boundedCount(input.semanticNewEvents),
+	};
+	const supervisorActivitySkipped = boundedCount(
+		input.supervisorActivitySkipped,
+	);
+	const supervisorActivityThrottled = boundedCount(
+		input.supervisorActivityThrottled,
+	);
 
 	const signals: SupervisorSelfMaintenanceSignal[] = [];
 	const backlogSignal = buildBacklogSignal(openTasks, runningTasks.length);
@@ -94,11 +117,32 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 	const staleSignal = buildStaleSignal(stalePendingTasks, staleRunningTasks);
 	if (staleSignal) signals.push(staleSignal);
 
-	const repeatedSignal = buildRepeatedFailureSignal(tasks);
+	const repeatedSignal = buildRepeatedFailureSignal(
+		tasks,
+		totals.usageFailures,
+		totals.agentLabStaleRequests,
+	);
 	if (repeatedSignal) signals.push(repeatedSignal);
 
 	const learningSignal = buildLearningLoopSignal(tasks, failedTasks.length);
 	if (learningSignal) signals.push(learningSignal);
+
+	const semanticSignal = buildSemanticAuditPressureSignal(
+		totals.semanticNewEvents,
+	);
+	if (semanticSignal) signals.push(semanticSignal);
+
+	const supervisorActivitySignal = buildSupervisorActivityPressureSignal({
+		supervisorEvents: totals.supervisorEvents,
+		openTasks,
+		staleTasks: totals.staleTasks,
+		usageFailures: totals.usageFailures,
+		agentLabStaleRequests: totals.agentLabStaleRequests,
+		semanticNewEvents: totals.semanticNewEvents,
+		supervisorActivitySkipped,
+		supervisorActivityThrottled,
+	});
+	if (supervisorActivitySignal) signals.push(supervisorActivitySignal);
 
 	return {
 		version: 1,
@@ -110,17 +154,7 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		agentLabsExecuted: false,
 		rulesApplied: false,
 		skillsModified: false,
-		totals: {
-			pendingTasks: pendingTasks.length,
-			runningTasks: runningTasks.length,
-			failedTasks: failedTasks.length,
-			staleTasks: stalePendingTasks.length + staleRunningTasks.length,
-			guardedTasks: 0,
-			supervisorEvents: 0,
-			usageFailures: 0,
-			agentLabStaleRequests: 0,
-			semanticNewEvents: 0,
-		},
+		totals,
 		signals,
 		recommendedActions: recommendedActionsFor(signals),
 		safeNotes: [
@@ -181,6 +215,8 @@ function buildStaleSignal(
 
 function buildRepeatedFailureSignal(
 	tasks: readonly StructuredTask[],
+	usageFailures: number,
+	agentLabStaleRequests: number,
 ): SupervisorSelfMaintenanceSignal | undefined {
 	const grouped = new Map<string, StructuredTask[]>();
 	for (const task of tasks) {
@@ -197,27 +233,118 @@ function buildRepeatedFailureSignal(
 	const repeated = [...grouped.entries()].filter(
 		([, group]) => group.length >= 2,
 	);
-	if (repeated.length === 0) return undefined;
+	const externalPatterns = [
+		usageFailures >= 2
+			? {
+					label: `idu-usage-events:failures=${usageFailures}`,
+					learningInput: `usage_failures: ${usageFailures} failure(s)`,
+				}
+			: undefined,
+		agentLabStaleRequests >= 2
+			? {
+					label: `agentlab-review-requests:stale=${agentLabStaleRequests}`,
+					learningInput: `agentlab_stale_requests: ${agentLabStaleRequests} stale request(s)`,
+				}
+			: undefined,
+	].filter((pattern): pattern is { label: string; learningInput: string } =>
+		Boolean(pattern),
+	);
+	if (repeated.length === 0 && externalPatterns.length === 0) return undefined;
 	const labels = repeated.map(
 		([keyword, group]) => `structured-task-queue:${keyword}=${group.length}`,
 	);
+	const highSeverity =
+		repeated.some(([, group]) => group.length >= 3) ||
+		usageFailures >= 5 ||
+		agentLabStaleRequests >= 5;
 	return {
 		id: "repeated-failure-patterns",
 		category: "repeated_failure_patterns",
-		severity: repeated.some(([, group]) => group.length >= 3)
-			? "high"
-			: "warning",
-		confidence: repeated.some(([, group]) => group.length >= 3) ? 0.85 : 0.75,
-		evidenceRefs: labels,
+		severity: highSeverity ? "high" : "warning",
+		confidence: highSeverity ? 0.85 : 0.75,
+		evidenceRefs: [...labels, ...externalPatterns.map((pattern) => pattern.label)],
 		summary: "Repeated failure patterns need supervisor learning review",
 		recommendedActions: [
 			"Add or strengthen a regression test around the repeated failure before changing automation.",
 			"Review whether the repeated pattern needs a small skill, rule, or checklist update after evidence is confirmed.",
 		],
-		skillLearningInputs: repeated.map(
-			([keyword, group]) =>
-				`${keyword}: ${sampleTaskIds(group).join(", ") || `${group.length} task(s)`}`,
-		),
+		skillLearningInputs: [
+			...repeated.map(
+				([keyword, group]) =>
+					`${keyword}: ${sampleTaskIds(group).join(", ") || `${group.length} task(s)`}`,
+			),
+			...externalPatterns.map((pattern) => pattern.learningInput),
+		],
+	};
+}
+
+function buildSemanticAuditPressureSignal(
+	semanticNewEvents: number,
+): SupervisorSelfMaintenanceSignal | undefined {
+	if (semanticNewEvents < 100) return undefined;
+	return {
+		id: "semantic-audit-pressure",
+		category: "semantic_audit_pressure",
+		severity: semanticNewEvents >= 250 ? "high" : "warning",
+		confidence: semanticNewEvents >= 250 ? 0.9 : 0.8,
+		evidenceRefs: [`semantic-events:new=${semanticNewEvents}`],
+		summary: "Semantic event backlog is ready for bounded audit triage",
+		recommendedActions: [
+			"Run a bounded semantic audit pass before promoting new supervisor rules or skills.",
+			"Sample high-signal semantic events and convert confirmed patterns into review evidence.",
+		],
+		bibliotecarioInputs: [
+			`semantic_new_events: ${semanticNewEvents} event(s) awaiting audit`,
+		],
+	};
+}
+
+function buildSupervisorActivityPressureSignal(input: {
+	supervisorEvents: number;
+	openTasks: number;
+	staleTasks: number;
+	usageFailures: number;
+	agentLabStaleRequests: number;
+	semanticNewEvents: number;
+	supervisorActivitySkipped: number;
+	supervisorActivityThrottled: number;
+}): SupervisorSelfMaintenanceSignal | undefined {
+	const pressureScore =
+		input.openTasks +
+		input.staleTasks +
+		input.usageFailures +
+		input.agentLabStaleRequests +
+		Math.floor(input.semanticNewEvents / 25);
+	const skippedOrThrottled =
+		input.supervisorActivitySkipped + input.supervisorActivityThrottled;
+	if (input.supervisorEvents > 0 && skippedOrThrottled < 3) {
+		return undefined;
+	}
+	if (pressureScore === 0 && skippedOrThrottled < 3) return undefined;
+	const highSeverity =
+		pressureScore >= 20 ||
+		skippedOrThrottled >= 5 ||
+		input.supervisorEvents === 0;
+	return {
+		id: "supervisor-activity-pressure",
+		category: "supervisor_activity_pressure",
+		severity: highSeverity ? "high" : "warning",
+		confidence: highSeverity ? 0.85 : 0.7,
+		evidenceRefs: [
+			`supervisor-activity:events=${input.supervisorEvents}`,
+			`structured-task-queue:open=${input.openTasks}`,
+			`structured-task-queue:stale=${input.staleTasks}`,
+			`idu-usage-events:failures=${input.usageFailures}`,
+			`agentlab-review-requests:stale=${input.agentLabStaleRequests}`,
+			`semantic-events:new=${input.semanticNewEvents}`,
+			`supervisor-activity:skipped=${input.supervisorActivitySkipped}`,
+			`supervisor-activity:throttled=${input.supervisorActivityThrottled}`,
+		],
+		summary: "Supervisor activity is absent or throttled while maintenance pressure exists",
+		recommendedActions: [
+			"Review why supervisor activity is absent, skipped, or throttled before increasing automation scope.",
+			"Resolve stale/backlog signals or record bounded supervisor activity evidence for the next advisory run.",
+		],
 	};
 }
 
@@ -271,6 +398,11 @@ function searchableText(task: StructuredTask): string {
 		.filter((value): value is string => Boolean(value))
 		.join(" ")
 		.toLowerCase();
+}
+
+function boundedCount(value: number | undefined): number {
+	if (value === undefined || !Number.isFinite(value) || value <= 0) return 0;
+	return Math.floor(Math.min(value, Number.MAX_SAFE_INTEGER));
 }
 
 function ageMs(now: Date, timestamp: string): number {
