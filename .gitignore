@@ -98,3 +98,6 @@ desktop.ini
 NUL
 # Local Pi runtime state
 .atl/
+
+# Local generated code context
+context.md
