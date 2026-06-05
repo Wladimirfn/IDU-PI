@@ -21,7 +21,9 @@ test("autonomous alert cron plan returns idle when Idu is inactive", () => {
 	assert.equal(plan.status, "idle");
 	assert.equal(plan.allowTaskCreation, false);
 	assert.equal(plan.advisoryOnly, true);
-	assert.deepEqual(plan.proposedActions, ["Activate Idu-pi before scheduled alert ticks can run."]);
+	assert.deepEqual(plan.proposedActions, [
+		"Activate Idu-pi before scheduled alert ticks can run.",
+	]);
 });
 
 test("autonomous alert cron plan returns paused when alert engine is paused", () => {

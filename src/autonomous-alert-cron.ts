@@ -20,7 +20,11 @@ export type AutonomousAlertCronPlan = {
 	projectId: string;
 	generatedAt: string;
 	status: AutonomousAlertCronStatus;
-	reason: "idu_inactive" | "alert_engine_inactive" | "alert_engine_paused" | "ready";
+	reason:
+		| "idu_inactive"
+		| "alert_engine_inactive"
+		| "alert_engine_paused"
+		| "ready";
 	allowTaskCreation: boolean;
 	nextToolCall?: {
 		tool: "idu_autonomous_alerts_tick";
@@ -60,7 +64,8 @@ export function planAutonomousAlertCron(
 				evidenceRefs: ["idu-session:inactive"],
 				impact:
 					"No scheduled alert loop will protect the project while Idu-pi is off.",
-				requiredNext: "Run Idu activation before expecting automatic alert checks.",
+				requiredNext:
+					"Run Idu activation before expecting automatic alert checks.",
 			},
 		});
 	}
@@ -80,7 +85,8 @@ export function planAutonomousAlertCron(
 				evidenceRefs: ["autonomous-alert-control:active=false"],
 				impact:
 					"Idu-pi will not create alert decisions or routine tasks from scheduled checks.",
-				requiredNext: "Enable alerts only if autonomous supervision is desired.",
+				requiredNext:
+					"Enable alerts only if autonomous supervision is desired.",
 			},
 		});
 	}
@@ -95,8 +101,7 @@ export function planAutonomousAlertCron(
 				"Wait until the pause expires or resume autonomous alerts before scheduled ticks run.",
 			],
 			truth: {
-				claim:
-					"Autonomous alert cron is paused by alert control state.",
+				claim: "Autonomous alert cron is paused by alert control state.",
 				evidenceRefs: [
 					`autonomous-alert-control:pausedUntil=${input.control.pausedUntil}`,
 				],
