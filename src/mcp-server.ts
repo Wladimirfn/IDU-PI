@@ -2866,6 +2866,7 @@ async function dispatchTool(
 				allowTaskCreation: booleanArg(args, "allowTaskCreation", false),
 				allowExternalFetch: booleanArg(args, "allowExternalFetch", false),
 				allowSkillDraftProposal: booleanArg(args, "allowSkillProposals", false),
+				usageEvents: readIduUsageEvents(stateRoot, 500),
 				loadPlan: () => {
 					if (!runtime.masterPlanReview) {
 						return {

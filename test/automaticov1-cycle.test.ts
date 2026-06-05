@@ -7,6 +7,7 @@ import {
 	runAutomaticov1AdvisoryCycle,
 	type Automaticov1CycleInput,
 } from "../src/automaticov1-cycle.js";
+import type { IduUsageEvent } from "../src/usage-events.js";
 import type { StructuredTask } from "../src/structured-task-queue.js";
 import type { SupervisorSelfMaintenanceSignal } from "../src/supervisor-self-maintenance-advisory.js";
 
@@ -143,6 +144,43 @@ test("automaticov1 cycle is advisory and no-fetch/no-skill-writes by default", a
 	assert.equal(result.alertScheduledTick.tasksCreated.length, 0);
 	assert.ok(result.bibliotecarioSnapshot);
 	assert.ok(result.supervisorCronPlan);
+});
+
+test("automaticov1 cycle injects stale MCP context pack refresh advisory", async () => {
+	const stateRoot = tempRoot();
+	const usageEvents: IduUsageEvent[] = [
+		{
+			version: 1,
+			id: "stale-context-pack",
+			timestamp: "2026-06-04T23:45:00.000Z",
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_supervisor_context_pack",
+		},
+		{
+			version: 1,
+			id: "recent-cli",
+			timestamp: "2026-06-04T23:59:00.000Z",
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "automaticov1",
+		},
+	];
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, { usageEvents }),
+	);
+
+	assert.equal(result.status, "ran");
+	assert.equal(result.allowedToProceed, false);
+	assert.ok(result.evidenceRefs.includes("automaticov1:mcp-context-pack:stale"));
+	assert.ok(
+		result.nextActions.some((action) =>
+			/refresh idu_supervisor_context_pack/u.test(action),
+		),
+	);
+	assert.ok(
+		result.safeNotes.some((note) => /does not auto-run supervisor context/u.test(note)),
+	);
 });
 
 test("automaticov1 cycle delegates bounded task creation to scheduled alert executor", async () => {

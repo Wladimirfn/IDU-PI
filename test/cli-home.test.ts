@@ -35,7 +35,7 @@ import {
 	runInteractiveHomeWithQuestion,
 } from "../src/cli.js";
 import { saveModelAssignment } from "../src/model-assignments.js";
-import { recordIduUsageEvent } from "../src/usage-events.js";
+import { recordIduUsageEvent, usageEventsPath } from "../src/usage-events.js";
 import { recordSupervisorActivityEvent } from "../src/supervisor-activity-events.js";
 import { recordContextQualityEvent } from "../src/context-quality-events.js";
 
@@ -393,6 +393,66 @@ test("current project panel shows local usage metrics from stateRoot", async () 
 		assert.match(output, /superficie: cli 1 · mcp 0 · tui 0/u);
 		assert.match(output, /Actividad supervisor local/u);
 		assert.match(output, /tokens Idu-pi: no medido/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel surfaces stale MCP context pack separately from local usage", async () => {
+	const root = tempDir("idu-cli-home-stale-mcp-context-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "project",
+			surface: "mcp",
+			action: "idu_supervisor_context_pack",
+		});
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "project",
+			surface: "cli",
+			action: "automaticov1",
+		});
+		const path = usageEventsPath(stateRoot);
+		const staleContextPack = new Date(Date.now() - 15 * 60_000).toISOString();
+		const recentCli = new Date(Date.now() - 1 * 60_000).toISOString();
+		const jsonl = readFileSync(path, "utf8")
+			.trim()
+			.split(/\r?\n/u)
+			.map((line, index) => {
+				const event = JSON.parse(line) as Record<string, unknown>;
+				event.timestamp = index === 0 ? staleContextPack : recentCli;
+				return JSON.stringify(event);
+			})
+			.join("\n");
+		writeFileSync(path, `${jsonl}\n`, "utf8");
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /última llamada Idu-pi: hace 1m/u);
+		assert.match(
+			output,
+			/MCP context pack: stale hace 15m; sugerido refrescar idu_supervisor_context_pack/u,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

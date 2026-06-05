@@ -53,6 +53,8 @@ export type IduUsageSummary = {
 	recent: IduUsageEvent[];
 };
 
+export type IduMcpContextPackStaleness = "fresh" | "stale" | "missing";
+
 export type IduUsageReport = {
 	version: 1;
 	totalEvents: number;
@@ -62,6 +64,9 @@ export type IduUsageReport = {
 	tokensMeasured: false;
 	contextPercentMeasured: false;
 	lastActivity?: string;
+	lastMcpActivity?: string;
+	lastSupervisorContextPack?: string;
+	mcpContextPackStaleness: IduMcpContextPackStaleness;
 	surface: { cli: number; mcp: number; tui: number; other: number };
 	active: { true: number; false: number; unknown: number };
 	requiresHuman: number;
@@ -183,10 +188,11 @@ export function summarizeIduUsageEvents(
 
 export function buildIduUsageReport(
 	events: IduUsageEvent[],
-	options: { topLimit?: number; recentLimit?: number } = {},
+	options: { topLimit?: number; recentLimit?: number; now?: Date } = {},
 ): IduUsageReport {
 	const topLimit = Math.max(1, options.topLimit ?? 5);
 	const recentLimit = Math.max(0, options.recentLimit ?? 5);
+	const nowMs = options.now?.getTime() ?? Date.now();
 	const byAction: Record<string, number> = {};
 	const byRecommendation: Record<string, number> = {};
 	const surface = { cli: 0, mcp: 0, tui: 0, other: 0 };
@@ -199,6 +205,10 @@ export function buildIduUsageReport(
 	let failed = 0;
 	let lastActivity: string | undefined;
 	let lastActivityMs = Number.NEGATIVE_INFINITY;
+	let lastMcpActivity: string | undefined;
+	let lastMcpActivityMs = Number.NEGATIVE_INFINITY;
+	let lastSupervisorContextPack: string | undefined;
+	let lastSupervisorContextPackMs = Number.NEGATIVE_INFINITY;
 	for (const event of events) {
 		if (event.sessionId) sessions.add(event.sessionId);
 		const eventType = effectiveEventType(event);
@@ -210,6 +220,23 @@ export function buildIduUsageReport(
 		if (Number.isFinite(eventMs) && eventMs > lastActivityMs) {
 			lastActivity = event.timestamp;
 			lastActivityMs = eventMs;
+		}
+		if (
+			event.surface === "mcp" &&
+			Number.isFinite(eventMs) &&
+			eventMs > lastMcpActivityMs
+		) {
+			lastMcpActivity = event.timestamp;
+			lastMcpActivityMs = eventMs;
+		}
+		if (
+			event.surface === "mcp" &&
+			event.action === "idu_supervisor_context_pack" &&
+			Number.isFinite(eventMs) &&
+			eventMs > lastSupervisorContextPackMs
+		) {
+			lastSupervisorContextPack = event.timestamp;
+			lastSupervisorContextPackMs = eventMs;
 		}
 		totalIduCalls += 1;
 		if (event.surface === "cli") surface.cli += 1;
@@ -232,6 +259,12 @@ export function buildIduUsageReport(
 		tokensMeasured: false,
 		contextPercentMeasured: false,
 		...(lastActivity ? { lastActivity } : {}),
+		...(lastMcpActivity ? { lastMcpActivity } : {}),
+		...(lastSupervisorContextPack ? { lastSupervisorContextPack } : {}),
+		mcpContextPackStaleness: classifyMcpContextPackStaleness(
+			lastSupervisorContextPackMs,
+			nowMs,
+		),
 		surface,
 		active,
 		requiresHuman,
@@ -255,6 +288,7 @@ export function formatIduUsagePanel(report: IduUsageReport): string {
 		`última llamada Idu-pi: ${report.totalIduCalls ? formatRelativeUsageTime(report.lastActivity) : "sin eventos"}`,
 		`llamadas Idu-pi: ${report.totalIduCalls}`,
 		`superficie: cli ${report.surface.cli} · mcp ${report.surface.mcp} · tui ${report.surface.tui}`,
+		formatMcpContextPackLine(report),
 		`activo/inactivo: ${report.active.true} / ${report.active.false}`,
 		`requiere humano: ${report.requiresHuman}`,
 		`bloqueados/no permitido: ${report.notAllowed}`,
@@ -307,6 +341,26 @@ export function formatIduUsageSummary(summary: IduUsageSummary): string {
 
 function formatCompactionsDetected(count: number): string {
 	return count > 0 ? String(count) : "no medido";
+}
+
+function classifyMcpContextPackStaleness(
+	lastSupervisorContextPackMs: number,
+	nowMs: number,
+): IduMcpContextPackStaleness {
+	if (!Number.isFinite(lastSupervisorContextPackMs)) return "missing";
+	const ageMs = Math.max(0, nowMs - lastSupervisorContextPackMs);
+	return ageMs >= 10 * 60_000 ? "stale" : "fresh";
+}
+
+function formatMcpContextPackLine(report: IduUsageReport): string {
+	if (report.mcpContextPackStaleness === "missing") {
+		return "MCP context pack: sin eventos; sugerido refrescar idu_supervisor_context_pack";
+	}
+	const age = formatRelativeUsageTime(report.lastSupervisorContextPack);
+	if (report.mcpContextPackStaleness === "stale") {
+		return `MCP context pack: stale ${age}; sugerido refrescar idu_supervisor_context_pack`;
+	}
+	return `MCP context pack: fresh ${age}`;
 }
 
 function normalizeEventType(value: unknown): IduUsageEventType | undefined {

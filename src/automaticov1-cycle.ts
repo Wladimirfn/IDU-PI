@@ -8,6 +8,7 @@ import type { IduSupervisorCronPlanResult } from "./idu-supervisor-cron.js";
 import type { SkillDraftFromLessonsResult } from "./skill-draft-from-lessons.js";
 import type { StructuredTask } from "./structured-task-queue.js";
 import type { SupervisorSelfMaintenanceSignal } from "./supervisor-self-maintenance-advisory.js";
+import { buildIduUsageReport, type IduUsageEvent } from "./usage-events.js";
 
 type UnknownJson =
 	| Record<string, unknown>
@@ -45,6 +46,7 @@ export type Automaticov1CycleInput = {
 		ExternalIntelligenceReport | UnknownJson
 	>;
 	createSkillDraftFromLessons?: () => SkillDraftFromLessonsResult | UnknownJson;
+	usageEvents?: readonly IduUsageEvent[];
 };
 
 export type Automaticov1CycleResult = {
@@ -183,12 +185,15 @@ function baseResult(input: {
 }
 
 function evidenceRefs(input: {
+	input: Automaticov1CycleInput;
+	now: Date;
 	alertScheduledTick: AutonomousAlertScheduledTickResult;
 	supervisorCronPlan?: IduSupervisorCronPlanResult | UnknownJson;
 	bibliotecarioSnapshot?: UnknownJson;
 	externalIntelligenceReport?: ExternalIntelligenceReport | UnknownJson;
 	skillDraftFromLessons?: SkillDraftFromLessonsResult | UnknownJson;
 }): string[] {
+	const usageReport = automaticov1UsageReport(input.input, input.now);
 	return [
 		`automaticov1:alert:${input.alertScheduledTick.status}`,
 		...(input.supervisorCronPlan ? ["automaticov1:supervisor-cron-plan"] : []),
@@ -199,14 +204,23 @@ function evidenceRefs(input: {
 			? ["automaticov1:external-intelligence"]
 			: []),
 		...(input.skillDraftFromLessons ? ["automaticov1:skill-lessons"] : []),
+		...(usageReport?.mcpContextPackStaleness === "stale"
+			? ["automaticov1:mcp-context-pack:stale"]
+			: []),
+		...(usageReport?.mcpContextPackStaleness === "missing"
+			? ["automaticov1:mcp-context-pack:missing"]
+			: []),
 	];
 }
 
 function nextActions(input: {
+	input: Automaticov1CycleInput;
+	now: Date;
 	allowExternalFetch: boolean;
 	allowSkillDraftProposal: boolean;
 	alertScheduledTick: AutonomousAlertScheduledTickResult;
 }): string[] {
+	const usageReport = automaticov1UsageReport(input.input, input.now);
 	const actions = [
 		"Review the combined automaticov1 cycle report before implementing changes.",
 		"Keep Bibliotecario outputs as evidence pointers until canonical sources are verified.",
@@ -226,15 +240,28 @@ function nextActions(input: {
 			"Review capped tasks created by the alert scheduler before execution.",
 		);
 	}
+	if (usageReport?.mcpContextPackStaleness === "stale") {
+		actions.push(
+			"Active project work detected with stale MCP supervisor context; refresh idu_supervisor_context_pack before defining closure or delegating the next worker.",
+		);
+	}
+	if (usageReport?.mcpContextPackStaleness === "missing") {
+		actions.push(
+			"No MCP supervisor context pack call is recorded; refresh idu_supervisor_context_pack before continuing autonomous iteration.",
+		);
+	}
 	return actions;
 }
 
 function safeNotes(input: {
+	input: Automaticov1CycleInput;
+	now: Date;
 	allowExternalFetch: boolean;
 	allowSkillDraftProposal: boolean;
 	externalIntelligenceReport?: ExternalIntelligenceReport | UnknownJson;
 	skillDraftFromLessons?: SkillDraftFromLessonsResult | UnknownJson;
 }): string[] {
+	const usageReport = automaticov1UsageReport(input.input, input.now);
 	return [
 		"automaticov1 is an advisory cycle: it coordinates existing engines but does not authorize implementation.",
 		"Repository writes, dependency updates, contract promotion, skill installation, and AgentLab auto-run are forbidden by this cycle.",
@@ -255,5 +282,15 @@ function safeNotes(input: {
 					"Skill lessons output must keep allowedToProceed=false and require human approval.",
 				]
 			: []),
+		...(usageReport?.mcpContextPackStaleness !== "fresh"
+			? [
+					"Stale/missing MCP context pack is advisory telemetry only; automaticov1 does not auto-run supervisor context or change authority.",
+				]
+			: []),
 	];
+}
+
+function automaticov1UsageReport(input: Automaticov1CycleInput, now: Date) {
+	if (!input.usageEvents) return undefined;
+	return buildIduUsageReport([...input.usageEvents], { now, recentLimit: 0 });
 }

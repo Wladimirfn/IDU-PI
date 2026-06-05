@@ -2145,6 +2145,7 @@ async function runCliAutomaticov1Cycle(
 		allowTaskCreation,
 		allowExternalFetch,
 		allowSkillDraftProposal,
+		usageEvents: readIduUsageEvents(runtime.workspaceRoot, 500),
 		loadPlan: () => {
 			if (!runtime.masterPlanReview) {
 				return {

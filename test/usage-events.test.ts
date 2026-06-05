@@ -384,6 +384,40 @@ test("usage report uses newest timestamp instead of event order", () => {
 	);
 });
 
+test("usage report surfaces stale MCP supervisor context pack separately from fresh CLI activity", () => {
+	const recentCli = new Date(Date.now() - 1 * 60_000).toISOString();
+	const staleContextPack = new Date(Date.now() - 15 * 60_000).toISOString();
+	const report = buildIduUsageReport([
+		{
+			version: 1,
+			id: "context-pack",
+			timestamp: staleContextPack,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_supervisor_context_pack",
+		},
+		{
+			version: 1,
+			id: "recent-cli",
+			timestamp: recentCli,
+			projectId: "idu-pi",
+			surface: "cli",
+			action: "automaticov1",
+		},
+	]);
+
+	assert.equal(report.lastActivity, recentCli);
+	assert.equal(report.lastMcpActivity, staleContextPack);
+	assert.equal(report.lastSupervisorContextPack, staleContextPack);
+	assert.equal(report.mcpContextPackStaleness, "stale");
+	const panel = formatIduUsagePanel(report);
+	assert.match(panel, /última llamada Idu-pi: hace 1m/u);
+	assert.match(
+		panel,
+		/MCP context pack: stale hace 15m; sugerido refrescar idu_supervisor_context_pack/u,
+	);
+});
+
 test("usage panel distinguishes refresh time from last recorded event", async () => {
 	const root = tempStateRoot();
 	try {
