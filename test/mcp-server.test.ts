@@ -2920,7 +2920,71 @@ test("idu_context_pruning_advisory is read-only and advisory-only", async () => 
 test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	mkdirSync(join(stateRoot, "reports"), { recursive: true });
+	writeFileSync(
+		join(stateRoot, "reports", "idu-usage-events.jsonl"),
+		`${JSON.stringify({
+			version: 1,
+			id: "usage-1",
+			timestamp: "2026-06-05T00:00:00.000Z",
+			projectId: "sistema_de_mantencion",
+			surface: "mcp",
+			action: "idu_postflight",
+			ok: false,
+			allowedToProceed: false,
+			requiresHuman: true,
+		})}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "reports", "agentlab-effectiveness-events.jsonl"),
+		`${JSON.stringify({
+			version: 1,
+			id: "agentlab-1",
+			timestamp: "2026-06-05T00:00:00.000Z",
+			projectId: "sistema_de_mantencion",
+			eventType: "status_checked",
+			source: "mcp",
+			staleRequests: 3,
+		})}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "reports", "idu-supervisor-activity-events.jsonl"),
+		Array.from({ length: 3 }, (_, index) =>
+			JSON.stringify({
+				version: 1,
+				id: `supervisor-${index}`,
+				timestamp: "2026-06-05T00:00:00.000Z",
+				projectId: "sistema_de_mantencion",
+				eventType: "supervisor_hook",
+				origin: "supervisor_auto_hook",
+				trigger: "after_postflight",
+				status: "skipped",
+				reason: "throttled",
+				active: true,
+			}),
+		).join("\n") + "\n",
+		"utf8",
+	);
 	const runtime = fakeRuntime();
+	runtime.semanticAuditStatus = () => ({
+		projectId: "sistema_de_mantencion",
+		stats: {} as never,
+		checkpoint: {} as never,
+		newEvents: {
+			labRuns: 50,
+			findings: 50,
+			proposals: 25,
+			tasks: 25,
+			userSignals: 0,
+			memoryItems: 0,
+			criticalFindings: 0,
+			highFindings: 0,
+		},
+		decision: {} as never,
+		recommendedNext: "Run semantic audit.",
+	});
 	for (let index = 0; index < 10; index += 1) {
 		const task = runtime.createTask(
 			"bug",
@@ -2945,7 +3009,13 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 		agentLabsExecuted: boolean;
 		rulesApplied: boolean;
 		skillsModified: boolean;
-		totals: { pendingTasks: number };
+		totals: {
+			pendingTasks: number;
+			supervisorEvents: number;
+			usageFailures: number;
+			agentLabStaleRequests: number;
+			semanticNewEvents: number;
+		};
 		signals: Array<{ category: string }>;
 		safeNotes: string[];
 	};
@@ -2956,12 +3026,26 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	assert.equal(report.rulesApplied, false);
 	assert.equal(report.skillsModified, false);
 	assert.equal(report.totals.pendingTasks, 10);
+	assert.equal(report.totals.supervisorEvents, 3);
+	assert.equal(report.totals.usageFailures, 3);
+	assert.equal(report.totals.agentLabStaleRequests, 3);
+	assert.equal(report.totals.semanticNewEvents, 150);
 	assert.ok(
 		report.signals.some((signal) => signal.category === "backlog_pressure"),
 	);
 	assert.ok(
 		report.signals.some(
 			(signal) => signal.category === "repeated_failure_patterns",
+		),
+	);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "semantic_audit_pressure",
+		),
+	);
+	assert.ok(
+		report.signals.some(
+			(signal) => signal.category === "supervisor_activity_pressure",
 		),
 	);
 	assert.equal(result.data.structuredTaskInputStatus, "available");
@@ -2976,7 +3060,7 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	assert.match(report.safeNotes.join("\n"), /no files, tasks, rules, skills/u);
 	assert.match(result.safeNotes.join("\n"), /No creé tareas/u);
 	assert.match(result.safeNotes.join("\n"), /no toqué AgentLabs/u);
-	assert.equal(existsSync(stateRoot), false);
+	assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
 	rmSync(root, { recursive: true, force: true });
 });
 

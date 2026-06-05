@@ -138,6 +138,49 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 	);
 });
 
+test("self-maintenance advisory detects neglected areas conservatively", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "telegram-1",
+			text: "Design Telegram bridge parity",
+			status: "done" as const,
+		},
+		{
+			...baseTask,
+			id: "telegram-2",
+			text: "Implement Telegram reset command",
+			status: "pending" as const,
+		},
+		{
+			...baseTask,
+			id: "telegram-3",
+			text: "Review Telegram startup status",
+			status: "pending" as const,
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	assertTopLevelContract(report);
+	const neglected = report.signals.find(
+		(signal) => signal.category === "neglected_areas",
+	);
+	assert.ok(neglected);
+	assertSignalContract(neglected);
+	assert.ok(
+		neglected.bibliotecarioInputs?.some((input) => /telegram/u.test(input)),
+	);
+	assert.ok(
+		neglected.evidenceRefs.some((ref) =>
+			ref.includes("structured-task-queue:telegram=total:3,done:1"),
+		),
+	);
+});
+
 test("self-maintenance advisory includes semantic and usage inputs in totals and signals", () => {
 	const report = buildSupervisorSelfMaintenanceAdvisory({
 		projectId: "idu-pi",
@@ -164,9 +207,7 @@ test("self-maintenance advisory includes semantic and usage inputs in totals and
 	);
 	assert.ok(repeated);
 	assertSignalContract(repeated);
-	assert.ok(
-		repeated.evidenceRefs.some((ref) => ref.includes("usage-events")),
-	);
+	assert.ok(repeated.evidenceRefs.some((ref) => ref.includes("usage-events")));
 	assert.ok(
 		repeated.evidenceRefs.some((ref) => ref.includes("agentlab-review")),
 	);

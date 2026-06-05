@@ -75,6 +75,15 @@ const REPEATED_PATTERN_KEYWORDS = [
 	"source",
 ] as const;
 
+const NEGLECTED_AREA_KEYWORDS = [
+	"telegram",
+	"bibliotecario",
+	"context",
+	"source",
+	"agentlab",
+	"skill",
+] as const;
+
 export function buildSupervisorSelfMaintenanceAdvisory(
 	input: BuildSupervisorSelfMaintenanceAdvisoryInput,
 ): SupervisorSelfMaintenanceAdvisory {
@@ -127,6 +136,9 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		totals.agentLabStaleRequests,
 	);
 	if (repeatedSignal) signals.push(repeatedSignal);
+
+	const neglectedAreaSignal = buildNeglectedAreaSignal(tasks);
+	if (neglectedAreaSignal) signals.push(neglectedAreaSignal);
 
 	const learningSignal = buildLearningLoopSignal(tasks, failedTasks.length);
 	if (learningSignal) signals.push(learningSignal);
@@ -270,7 +282,10 @@ function buildRepeatedFailureSignal(
 		category: "repeated_failure_patterns",
 		severity: highSeverity ? "high" : "warning",
 		confidence: highSeverity ? 0.85 : 0.75,
-		evidenceRefs: [...labels, ...externalPatterns.map((pattern) => pattern.label)],
+		evidenceRefs: [
+			...labels,
+			...externalPatterns.map((pattern) => pattern.label),
+		],
 		summary: "Repeated failure patterns need supervisor learning review",
 		recommendedActions: [
 			"Add or strengthen a regression test around the repeated failure before changing automation.",
@@ -283,6 +298,50 @@ function buildRepeatedFailureSignal(
 			),
 			...externalPatterns.map((pattern) => pattern.learningInput),
 		],
+	};
+}
+
+function buildNeglectedAreaSignal(
+	tasks: readonly StructuredTask[],
+): SupervisorSelfMaintenanceSignal | undefined {
+	const areas = new Map<
+		string,
+		{ total: number; done: number; taskIds: string[] }
+	>();
+	for (const task of tasks) {
+		const text = searchableText(task);
+		for (const keyword of NEGLECTED_AREA_KEYWORDS) {
+			if (!text.includes(keyword)) continue;
+			const area = areas.get(keyword) ?? { total: 0, done: 0, taskIds: [] };
+			area.total += 1;
+			if (task.status === "done") area.done += 1;
+			if (area.taskIds.length < 5) area.taskIds.push(task.id);
+			areas.set(keyword, area);
+		}
+	}
+	const neglected = [...areas.entries()].filter(
+		([, area]) => area.total >= 3 && area.done < area.total,
+	);
+	if (!neglected.length) return undefined;
+	const highSeverity = neglected.some(([, area]) => area.total >= 5);
+	return {
+		id: "neglected-areas",
+		category: "neglected_areas",
+		severity: highSeverity ? "high" : "warning",
+		confidence: highSeverity ? 0.75 : 0.65,
+		evidenceRefs: neglected.map(
+			([keyword, area]) =>
+				`structured-task-queue:${keyword}=total:${area.total},done:${area.done}`,
+		),
+		summary: "Repeatedly mentioned project areas have unfinished follow-up",
+		recommendedActions: [
+			"Open an orchestrator review to decide whether the neglected area still matters to the Master Plan.",
+			"Create one bounded task or explicitly close/defer the neglected area with evidence.",
+		],
+		bibliotecarioInputs: neglected.map(
+			([keyword, area]) =>
+				`${keyword}: ${area.total - area.done} unfinished mention(s); sample tasks ${area.taskIds.join(", ")}`,
+		),
 	};
 }
 
@@ -348,7 +407,8 @@ function buildSupervisorActivityPressureSignal(input: {
 			`supervisor-activity:skipped=${input.supervisorActivitySkipped}`,
 			`supervisor-activity:throttled=${input.supervisorActivityThrottled}`,
 		],
-		summary: "Supervisor activity is absent or throttled while maintenance pressure exists",
+		summary:
+			"Supervisor activity is absent or throttled while maintenance pressure exists",
 		recommendedActions: [
 			"Review why supervisor activity is absent, skipped, or throttled before increasing automation scope.",
 			"Resolve stale/backlog signals or record bounded supervisor activity evidence for the next advisory run.",

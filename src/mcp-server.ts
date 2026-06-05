@@ -64,17 +64,27 @@ import {
 	slugifyProjectId,
 } from "./projects.js";
 import type { StructuredTask } from "./structured-task-queue.js";
-import { recordIduUsageEvent } from "./usage-events.js";
+import {
+	buildIduUsageReport,
+	readIduUsageEvents,
+	recordIduUsageEvent,
+} from "./usage-events.js";
 import {
 	agentLabEffectivenessEventFromRequestPlan,
 	agentLabEffectivenessEventFromRunResult,
 	agentLabEffectivenessEventFromStatus,
+	buildAgentLabEffectivenessReport,
+	readAgentLabEffectivenessEvents,
 	recordAgentLabEffectivenessEventDeferred,
 } from "./agentlab-effectiveness-events.js";
 import {
 	contextQualityEventFromSupervisorContextPack,
 	recordContextQualityEventDeferred,
 } from "./context-quality-events.js";
+import {
+	readSupervisorActivityEvents,
+	summarizeSupervisorActivityEvents,
+} from "./supervisor-activity-events.js";
 import {
 	buildAgentLabWorkloadEnvelope,
 	type AgentLabSpecialty,
@@ -2488,10 +2498,44 @@ async function dispatchTool(
 		}
 		case "idu_supervisor_self_maintenance_advisory": {
 			const taskRead = readRuntimeStructuredTasks(runtime);
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const supervisorActivity = summarizeSupervisorActivityEvents(
+				readSupervisorActivityEvents(stateRoot),
+			);
+			const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+			const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+				readAgentLabEffectivenessEvents(stateRoot),
+			);
+			let semanticNewEvents = 0;
+			try {
+				const semanticDelta = runtime.semanticAuditStatus().newEvents;
+				semanticNewEvents =
+					semanticDelta.labRuns +
+					semanticDelta.findings +
+					semanticDelta.proposals +
+					semanticDelta.tasks +
+					semanticDelta.userSignals +
+					semanticDelta.memoryItems;
+			} catch {
+				semanticNewEvents = 0;
+			}
 			const report = buildSupervisorSelfMaintenanceAdvisory({
 				projectId: runtime.projectId,
 				now: new Date(),
 				tasks: taskRead.tasks,
+				supervisorEvents: supervisorActivity.totalEvents,
+				supervisorActivitySkipped:
+					(supervisorActivity.byReason.throttled ?? 0) +
+					(supervisorActivity.byReason.idu_inactive ?? 0) +
+					(supervisorActivity.byReason.no_new_events ?? 0) +
+					(supervisorActivity.byReason.not_enough_data ?? 0),
+				supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
+				usageFailures:
+					usageReport.failed +
+					usageReport.notAllowed +
+					usageReport.requiresHuman,
+				agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+				semanticNewEvents,
 			});
 			const decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
