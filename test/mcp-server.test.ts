@@ -2014,9 +2014,8 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		"clear",
 	);
 	assert.equal(
-		(
-			continuationWithRequest.data.planAlignment as { withinObjective: boolean }
-		).withinObjective,
+		(continuationWithRequest.data.planAlignment as { withinObjective: boolean })
+			.withinObjective,
 		true,
 	);
 	assert.doesNotMatch(
@@ -2026,9 +2025,8 @@ test("approved plan advisory loop returns snapshot, next action, and task packag
 		/tarea de cola aprobada/iu,
 	);
 	assert.equal(
-		(
-			continuationWithRequest.data.decisionEnvelope as DecisionEnvelope
-		).allowedToProceed,
+		(continuationWithRequest.data.decisionEnvelope as DecisionEnvelope)
+			.allowedToProceed,
 		true,
 	);
 	assert.equal(
@@ -2645,6 +2643,27 @@ test("idu_architectural_pruning_plan is advisory-only", async () => {
 });
 
 test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", async () => {
+	const runtime = fakeRuntime();
+	runtime.sourceRecommend = (request) => ({
+		projectId: "sistema_de_mantencion",
+		request: `${request} ${"q".repeat(1000)}`,
+		generatedAt: "2026-06-01T00:00:00.000Z",
+		matches: [
+			{
+				sourceId: `source-${"a".repeat(400)}`,
+				title: `Huge local source ${"b".repeat(400)}`,
+				chunkIds: Array.from({ length: 20 }, (_, index) => `chunk-${index}`),
+				whyRelevant: `Relevant ${"c".repeat(1000)}`,
+				confidence: "high",
+				orchestratorInstruction: `Read ${"d".repeat(1000)}`,
+				contractPromotionAllowed: false,
+				content: "RAW_CHUNK_BODY_MUST_NOT_LEAK",
+			} as any,
+		],
+		missingKnowledge: [`Missing ${"e".repeat(1000)}`],
+		limitations: [`Limit ${"f".repeat(1000)}`],
+		contractPromotionAllowed: false,
+	});
 	const result = await callIduMcpTool(
 		"idu_bibliotecario_proactive_advisory",
 		{
@@ -2654,14 +2673,23 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 			language: "typescript",
 			framework: "node",
 		},
-		{ runtimeFactory: factory(), projectResolver: () => registered() },
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
 	assert.equal(result.ok, true);
 	const data = result.data as {
 		decisionEnvelope: DecisionEnvelope;
 		planLibrarian: unknown;
-		sourceEcosystem: unknown;
+		sourceEcosystem: {
+			local: {
+				matches: Array<{ chunkIds: string[]; whyRelevant: string }>;
+				contextPressure: {
+					rawContentIncluded: boolean;
+					tokenCostMeasured: boolean;
+					pressure: string;
+				};
+			};
+		};
 		skillOptimization: { skillPromotionAllowed: boolean };
 		failureSemanticDebt: unknown;
 		resourceContextCheck: {
@@ -2671,12 +2699,26 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 			agentLabAutoRunAllowed: boolean;
 			contractPromotionAllowed: boolean;
 			skillPromotionAllowed: boolean;
+			tokenCostMeasured: boolean;
+			estimatedTokenUse: string;
+			pressure: string;
 		};
 	};
 	assert.equal(data.decisionEnvelope.authority, "advisory");
 	assert.equal(data.decisionEnvelope.allowedToProceed, false);
 	assert.ok(data.planLibrarian);
 	assert.ok(data.sourceEcosystem);
+	assert.equal(data.sourceEcosystem.local.matches[0].chunkIds.length, 5);
+	assert.ok(data.sourceEcosystem.local.matches[0].whyRelevant.length <= 280);
+	assert.equal(
+		data.sourceEcosystem.local.contextPressure.rawContentIncluded,
+		false,
+	);
+	assert.equal(
+		data.sourceEcosystem.local.contextPressure.tokenCostMeasured,
+		false,
+	);
+	assert.equal(data.sourceEcosystem.local.contextPressure.pressure, "medium");
 	assert.ok(data.skillOptimization);
 	assert.ok(data.failureSemanticDebt);
 	assert.ok(data.resourceContextCheck);
@@ -2686,6 +2728,9 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 	assert.equal(data.resourceContextCheck.agentLabAutoRunAllowed, false);
 	assert.equal(data.resourceContextCheck.contractPromotionAllowed, false);
 	assert.equal(data.resourceContextCheck.skillPromotionAllowed, false);
+	assert.equal(data.resourceContextCheck.tokenCostMeasured, false);
+	assert.equal(data.resourceContextCheck.estimatedTokenUse, "not_measured");
+	assert.match(data.resourceContextCheck.pressure, /^(low|medium|high)$/u);
 	assert.equal(data.skillOptimization.skillPromotionAllowed, false);
 	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/iu);
 	const serialized = JSON.stringify(result.data);
@@ -3501,6 +3546,64 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 		recommend.safeNotes.some((note) => /orquestador decide/u.test(note)),
 	);
 
+	const oversizedRuntime = fakeRuntime();
+	oversizedRuntime.sourceRecommend = (request) => ({
+		projectId: "sistema_de_mantencion",
+		request: `${request} ${"x".repeat(1000)}`,
+		generatedAt: "2026-06-01T00:00:00.000Z",
+		matches: [
+			{
+				sourceId: `source-${"a".repeat(400)}`,
+				title: `Huge source ${"b".repeat(400)}`,
+				chunkIds: Array.from({ length: 20 }, (_, index) => `chunk-${index}`),
+				whyRelevant: `Relevant ${"c".repeat(1000)}`,
+				confidence: "high",
+				orchestratorInstruction: `Read carefully ${"d".repeat(1000)}`,
+				contractPromotionAllowed: false,
+				content: "RAW_CHUNK_BODY_MUST_NOT_LEAK",
+			} as any,
+		],
+		missingKnowledge: [`Missing ${"e".repeat(1000)}`],
+		limitations: [`Limit ${"f".repeat(1000)}`],
+		contractPromotionAllowed: false,
+	});
+	const oversizedRecommend = await callIduMcpTool(
+		"idu_source_recommend_for_task",
+		{ request: "robusto" },
+		{
+			runtimeFactory: () => oversizedRuntime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(oversizedRecommend.ok, true);
+	const oversizedResult = oversizedRecommend.data.result as {
+		matches: Array<{
+			chunkIds: string[];
+			orchestratorInstruction: string;
+			whyRelevant: string;
+		}>;
+		contextPressure: {
+			rawContentIncluded: boolean;
+			tokenCostMeasured: boolean;
+			estimatedTokenUse: string;
+			pressure: string;
+		};
+	};
+	assert.equal(oversizedResult.matches[0].chunkIds.length, 5);
+	assert.ok(oversizedResult.matches[0].orchestratorInstruction.length <= 280);
+	assert.ok(oversizedResult.matches[0].whyRelevant.length <= 280);
+	assert.equal(oversizedResult.contextPressure.rawContentIncluded, false);
+	assert.equal(oversizedResult.contextPressure.tokenCostMeasured, false);
+	assert.equal(
+		oversizedResult.contextPressure.estimatedTokenUse,
+		"not_measured",
+	);
+	assert.equal(oversizedResult.contextPressure.pressure, "medium");
+	assert.doesNotMatch(
+		JSON.stringify(oversizedRecommend.data),
+		/RAW_CHUNK_BODY_MUST_NOT_LEAK/u,
+	);
+
 	const requiredActions = await callIduMcpTool(
 		"idu_source_required_actions",
 		{},
@@ -3599,20 +3702,21 @@ test("postflight request create remains request-only and review-run reports sand
 	const externalRuntime = fakeRuntime();
 	externalRuntime.sourceRecommend = (request) => ({
 		projectId: "sistema_de_mantencion",
-		request,
+		request: `${request} ${"x".repeat(1000)}`,
 		generatedAt: "2026-06-01T00:00:00.000Z",
 		matches: [
 			{
 				sourceId: "source-doc-1",
-				title: "Dependency advisory digest",
-				chunkIds: ["chunk-001"],
-				whyRelevant: "Local digest mentions dependency governance.",
+				title: `Dependency advisory digest ${"t".repeat(400)}`,
+				chunkIds: Array.from({ length: 20 }, (_, index) => `chunk-${index}`),
+				whyRelevant: `Local digest mentions dependency governance. ${"r".repeat(1000)}`,
 				confidence: "high",
-				orchestratorInstruction: "Read chunk-001 if needed.",
+				orchestratorInstruction: `Read chunk-001 if needed. ${"i".repeat(1000)}`,
 				contractPromotionAllowed: false,
-			},
+				content: "RAW_CHUNK_BODY_MUST_NOT_LEAK",
+			} as any,
 		],
-		missingKnowledge: [],
+		missingKnowledge: [`Missing ${"m".repeat(1000)}`],
 		limitations: ["Local Source Library digest only; no web fetch."],
 		contractPromotionAllowed: false,
 	});
@@ -3645,7 +3749,12 @@ test("postflight request create remains request-only and review-run reports sand
 	const externalPlan = external.data.plan as AgentLabReviewRequestPlan;
 	assert.equal(externalPlan.source, "external_source_intelligence");
 	assert.match(JSON.stringify(externalPlan), /source-doc-1/u);
-	assert.match(JSON.stringify(externalPlan), /chunk-001/u);
+	assert.match(JSON.stringify(externalPlan), /chunk-0/u);
+	assert.doesNotMatch(
+		JSON.stringify(externalPlan),
+		/RAW_CHUNK_BODY_MUST_NOT_LEAK/u,
+	);
+	assert.ok(JSON.stringify(externalPlan).length < 6000);
 	assert.ok(!external.data.run);
 	assert.ok(
 		external.safeNotes.some((note) => /No ejecuté AgentLabs/u.test(note)),

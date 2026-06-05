@@ -2486,19 +2486,32 @@ async function dispatchTool(
 					"No promueve contratos; sólo pide evidencia y revisión del orquestador.",
 				],
 			};
+			const boundedSourceRecommendations =
+				boundSourceRecommendationForInjection(sourceRecommendations);
+			const boundedSourceMatches = arrayField(
+				boundedSourceRecommendations,
+				"matches",
+			) as JsonObject[];
 			const sourceEcosystem = {
 				surface: "source_ecosystem",
 				local: {
-					matches: sourceRecommendations.matches.map((match) => ({
-						sourceId: match.sourceId,
-						title: match.title,
-						chunkIds: match.chunkIds,
-						confidence: match.confidence,
-						whyRelevant: match.whyRelevant,
+					matches: boundedSourceMatches.map((match) => ({
+						sourceId: String(match.sourceId ?? ""),
+						title: String(match.title ?? ""),
+						chunkIds: arrayField(match, "chunkIds").map(String),
+						confidence: String(match.confidence ?? "low"),
+						whyRelevant: String(match.whyRelevant ?? ""),
 					})),
-					missingKnowledge: sourceRecommendations.missingKnowledge,
-					limitations: sourceRecommendations.limitations,
+					missingKnowledge: arrayField(
+						boundedSourceRecommendations,
+						"missingKnowledge",
+					).map(String),
+					limitations: arrayField(
+						boundedSourceRecommendations,
+						"limitations",
+					).map(String),
 					requiredActions: requiredSourceActions.actions,
+					contextPressure: boundedSourceRecommendations.contextPressure,
 				},
 				externalRegistry: {
 					matches: externalRegistry.matches.map((match) => ({
@@ -2543,6 +2556,13 @@ async function dispatchTool(
 				totals: semanticDebt.totals,
 				limitations: semanticDebt.limitations,
 			};
+			const contextPressure = semanticDebt.signals.some(
+				(signal) => signal.severity === "high",
+			)
+				? "high"
+				: semanticDebt.signals.length > 0
+					? "medium"
+					: "low";
 			const resourceContextCheck = {
 				rawContentIncluded: false,
 				webFetchAllowed: false,
@@ -2550,19 +2570,24 @@ async function dispatchTool(
 				agentLabAutoRunAllowed: false,
 				contractPromotionAllowed: false,
 				skillPromotionAllowed: false,
+				tokenCostMeasured: false,
+				estimatedTokenUse: "not_measured",
+				pressure: contextPressure,
 				surfacesConsulted: 4,
-				localSourceMatches: sourceRecommendations.matches.length,
+				localSourceMatches: boundedSourceMatches.length,
 				externalRegistryMatches: externalRegistry.matches.length,
 				semanticDebtSignals: semanticDebt.signals.length,
 				contextBudgetSignals: semanticDebt.totals.contextQualityEvents,
 				recommendation:
-					semanticDebt.signals.length > 0
+					contextPressure === "high"
 						? "review_resource_and_semantic_debt_before_adding_more_context"
-						: "bounded_context_ok",
+						: contextPressure === "medium"
+							? "review_before_adding_more_context"
+							: "bounded_context_ok",
 			};
 			const evidenceRefs = [
-				...sourceRecommendations.matches.map(
-					(match) => `source:${match.sourceId}`,
+				...boundedSourceMatches.map(
+					(match) => `source:${String(match.sourceId)}`,
 				),
 				...externalRegistry.matches.map(
 					(match) => `external-source:${match.sourceId}`,
@@ -3058,19 +3083,23 @@ async function dispatchTool(
 			});
 		}
 		case "idu_source_recommend_for_task": {
-			const result = runtime.sourceRecommend(requiredText(args, "request"));
+			const rawResult = runtime.sourceRecommend(requiredText(args, "request"));
+			const result = boundSourceRecommendationForInjection(rawResult);
+			const matches = arrayField(result, "matches") as JsonObject[];
 			const decisionEnvelope = buildDecisionEnvelope({
 				tool: name,
-				recommendation: result.matches.length > 0 ? "warn" : "allow",
-				severity: result.matches.length > 0 ? "warning" : "info",
+				recommendation: matches.length > 0 ? "warn" : "allow",
+				severity: matches.length > 0 ? "warning" : "info",
 				confidence: 0.68,
-				summary: `Source recommendations: ${result.matches.length} matches`,
+				summary: `Source recommendations: ${matches.length} matches`,
 				requiresHuman: false,
-				orchestratorDecisionRequired: result.matches.length > 0,
+				orchestratorDecisionRequired: matches.length > 0,
 				allowedToProceed: true,
-				evidenceRefs: result.matches.map((match) => `source:${match.sourceId}`),
-				nextActions: result.matches.map(
-					(match) => match.orchestratorInstruction,
+				evidenceRefs: matches.map(
+					(match) => `source:${String(match.sourceId)}`,
+				),
+				nextActions: matches.map((match) =>
+					String(match.orchestratorInstruction ?? ""),
 				),
 			});
 			return envelope({
@@ -3078,7 +3107,7 @@ async function dispatchTool(
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
-				summary: `Source recommendations: ${result.matches.length} matches`,
+				summary: `Source recommendations: ${matches.length} matches`,
 				data: { result, decisionEnvelope },
 				safeNotes: [
 					...resolution.safeNotes,
@@ -3886,6 +3915,49 @@ function boundSupervisorSourceRecommendation(
 			.slice(0, 5)
 			.map((item) => boundSupervisorSourceText(item, 220)),
 		contractPromotionAllowed: false,
+	};
+}
+
+function boundSourceRecommendationForInjection(
+	report: SourceRecommendationReport,
+): JsonObject {
+	const bounded = boundSupervisorSourceRecommendation(report);
+	const originalChunkRefs = report.matches.reduce(
+		(total, match) => total + match.chunkIds.length,
+		0,
+	);
+	const boundedMatches = arrayField(bounded, "matches") as JsonObject[];
+	const boundedChunkRefs = boundedMatches.reduce(
+		(total, match) => total + arrayField(match, "chunkIds").length,
+		0,
+	);
+	const truncated =
+		report.matches.length > boundedMatches.length ||
+		originalChunkRefs > boundedChunkRefs ||
+		report.request.length > String(bounded.request ?? "").length ||
+		report.missingKnowledge.length >
+			arrayField(bounded, "missingKnowledge").length ||
+		report.limitations.length > arrayField(bounded, "limitations").length;
+	return {
+		...bounded,
+		contextPressure: {
+			mode: "advisory_only",
+			tokenCostMeasured: false,
+			estimatedTokenUse: "not_measured",
+			pressure: truncated ? "medium" : "low",
+			recommendation: truncated
+				? "review_before_adding_more_context"
+				: "bounded_context_ok",
+			rawContentIncluded: false,
+			webFetchAllowed: false,
+			writesAllowed: false,
+			contractPromotionAllowed: false,
+			matchCount: boundedMatches.length,
+			originalMatchCount: report.matches.length,
+			chunkRefCount: boundedChunkRefs,
+			originalChunkRefCount: originalChunkRefs,
+			truncated,
+		},
 	};
 }
 
@@ -4833,18 +4905,30 @@ const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([
 function compactSourceLibraryEvidence(
 	report: SourceRecommendationReport,
 ): AgentLabSourceLibraryEvidence {
+	const bounded = boundSourceRecommendationForInjection(report);
+	const matches = (arrayField(bounded, "matches") as JsonObject[]).map(
+		(match) => {
+			const confidence: "high" | "medium" | "low" =
+				match.confidence === "high" ||
+				match.confidence === "medium" ||
+				match.confidence === "low"
+					? match.confidence
+					: "low";
+			return {
+				sourceId: String(match.sourceId ?? ""),
+				title: String(match.title ?? ""),
+				chunkIds: arrayField(match, "chunkIds").map(String),
+				whyRelevant: String(match.whyRelevant ?? ""),
+				confidence,
+			};
+		},
+	);
 	return {
-		request: report.request,
+		request: String(bounded.request ?? ""),
 		generatedAt: report.generatedAt,
-		matches: report.matches.map((match) => ({
-			sourceId: match.sourceId,
-			title: match.title,
-			chunkIds: match.chunkIds,
-			whyRelevant: match.whyRelevant,
-			confidence: match.confidence,
-		})),
-		missingKnowledge: report.missingKnowledge,
-		limitations: report.limitations,
+		matches,
+		missingKnowledge: arrayField(bounded, "missingKnowledge").map(String),
+		limitations: arrayField(bounded, "limitations").map(String),
 		contractPromotionAllowed: false,
 	};
 }
