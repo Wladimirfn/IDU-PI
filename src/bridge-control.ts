@@ -1,0 +1,141 @@
+import { spawn } from "node:child_process";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+
+export type BridgeControlAction = "status" | "restart" | "stop";
+
+export type BridgeControlCommand = {
+	file: string;
+	args: string[];
+	cwd: string;
+};
+
+export type BridgeControlIntent = {
+	type: "restart" | "stop";
+	origin: "telegram" | "manual" | "scheduled-task" | "unknown";
+	chatId?: number;
+	reason?: string;
+	notifyOnStartup: boolean;
+	requestedAt: string;
+};
+
+export type BridgeStartupStatusInput = {
+	origin: BridgeControlIntent["origin"] | "reset";
+	pid: number;
+	projectLabel: string;
+	currentCwd: string;
+	agentLabel: string;
+	rpcRunning: boolean;
+	iduActive: boolean;
+	telegramCommandCount: number;
+	now: Date;
+};
+
+const powershellArgs = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass"];
+
+function cmdStartTitle(title: string): string {
+	return `"${title}"`;
+}
+
+export function buildBridgeControlCommand(
+	action: BridgeControlAction,
+	root: string,
+): BridgeControlCommand {
+	return {
+		file: "cmd.exe",
+		args: [
+			"/c",
+			"start",
+			cmdStartTitle("pi-telegram-bridge-control"),
+			"cmd.exe",
+			"/c",
+			...powershellArgs,
+			"-File",
+			join(root, "scripts", "bridge-control.ps1"),
+			action,
+		],
+		cwd: root,
+	};
+}
+
+export function launchBridgeControl(action: BridgeControlAction, root: string): void {
+	const command = buildBridgeControlCommand(action, root);
+	const child = spawn(command.file, command.args, {
+		cwd: command.cwd,
+		detached: true,
+		stdio: "ignore",
+		windowsHide: false,
+	});
+	child.unref();
+}
+
+export function writeBridgeControlIntent(
+	path: string,
+	intent: BridgeControlIntent,
+): void {
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(intent, null, 2)}\n`, "utf8");
+}
+
+export function consumeBridgeControlIntent(
+	path: string,
+): BridgeControlIntent | undefined {
+	if (!existsSync(path)) return undefined;
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+		rmSync(path, { force: true });
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			return undefined;
+		}
+		const record = parsed as Record<string, unknown>;
+		if (record.type !== "restart" && record.type !== "stop") return undefined;
+		if (
+			record.origin !== "telegram" &&
+			record.origin !== "manual" &&
+			record.origin !== "scheduled-task" &&
+			record.origin !== "unknown"
+		) {
+			return undefined;
+		}
+		if (typeof record.notifyOnStartup !== "boolean") return undefined;
+		if (typeof record.requestedAt !== "string") return undefined;
+		return {
+			type: record.type,
+			origin: record.origin,
+			chatId: typeof record.chatId === "number" ? record.chatId : undefined,
+			reason: typeof record.reason === "string" ? record.reason : undefined,
+			notifyOnStartup: record.notifyOnStartup,
+			requestedAt: record.requestedAt,
+		};
+	} catch {
+		try {
+			rmSync(path, { force: true });
+		} catch {
+			// best effort cleanup only
+		}
+		return undefined;
+	}
+}
+
+export function formatBridgeStartupStatus(input: BridgeStartupStatusInput): string {
+	return [
+		"✅ Bridge iniciado",
+		"",
+		"Estado: activo",
+		`Origen: ${input.origin}`,
+		`PID: ${input.pid}`,
+		`Proyecto: ${input.projectLabel}`,
+		`Proyecto target: ${input.currentCwd}`,
+		`Pi/orquestador: ${input.rpcRunning ? "iniciado" : "en espera"}`,
+		`Agente: ${input.agentLabel}`,
+		`Idu-pi: ${input.iduActive ? "activo" : "inactivo"}`,
+		`Comandos Telegram: ${input.telegramCommandCount}`,
+		`Hora: ${input.now.toISOString()}`,
+	].join("\n");
+}
