@@ -1432,6 +1432,16 @@ export async function runCliCommand(
 					requiresHuman: true,
 					ok: true,
 				});
+				recordSupervisorActivityEventDeferred(activeRuntime.workspaceRoot, {
+					projectId: activeRuntime.projectId,
+					eventType: "supervisor_tick",
+					origin: "orchestrator_requested",
+					trigger: "cron_planning",
+					status: result.status === "ran" ? "completed" : "skipped",
+					active: getIduSessionStatus(activeRuntime.projectId).active,
+					createdTasks: result.alertScheduledTick.tasksCreated.length,
+					ok: result.status === "ran",
+				});
 				return ok(formatCliAutomaticov1Cycle(result));
 			}
 			case "status":
