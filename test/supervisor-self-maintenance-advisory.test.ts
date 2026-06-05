@@ -24,16 +24,24 @@ test("self-maintenance advisory detects backlog and stale pressure", () => {
 		tasks,
 	});
 
+	assert.equal(report.version, 1);
+	assert.equal(report.authority, "advisory");
+	assert.equal(report.mode, "advisory_only");
 	assert.equal(report.noWrites, true);
 	assert.equal(report.agentLabsExecuted, false);
 	assert.equal(report.rulesApplied, false);
 	assert.equal(report.skillsModified, false);
 	assert.equal(report.totals.pendingTasks, 15);
 	assert.equal(report.totals.runningTasks, 6);
+	assert.equal(report.totals.staleTasks, 21);
+	assert.ok(report.recommendedActions.length > 0);
 	assert.ok(
 		report.signals.some((signal) => signal.category === "backlog_pressure"),
 	);
 	assert.ok(report.signals.some((signal) => signal.category === "stale_tasks"));
+	for (const signal of report.signals) {
+		assertSignalContract(signal);
+	}
 });
 
 test("self-maintenance advisory detects repeated failure without hiding safety", () => {
@@ -63,10 +71,14 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 		tasks,
 	});
 
+	assert.equal(report.version, 1);
+	assert.equal(report.mode, "advisory_only");
+	assert.ok(report.recommendedActions.length > 0);
 	const repeated = report.signals.find(
 		(signal) => signal.category === "repeated_failure_patterns",
 	);
 	assert.ok(repeated);
+	assertSignalContract(repeated);
 	assert.ok(repeated.skillLearningInputs?.length);
 	assert.ok(
 		repeated.recommendedActions.some((action) =>
@@ -74,3 +86,24 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 		),
 	);
 });
+
+function assertSignalContract(signal: {
+	id: string;
+	confidence: number;
+	evidenceRefs: string[];
+	summary: string;
+	recommendedActions: string[];
+}): void {
+	assert.equal(typeof signal.id, "string");
+	assert.ok(signal.id.length > 0);
+	assert.equal(typeof signal.confidence, "number");
+	assert.ok(signal.confidence >= 0);
+	assert.ok(signal.confidence <= 1);
+	assert.ok(Array.isArray(signal.evidenceRefs));
+	assert.ok(signal.evidenceRefs.length > 0);
+	assert.equal(typeof signal.summary, "string");
+	assert.ok(signal.summary.length > 0);
+	assert.ok(signal.recommendedActions.length > 0);
+	assert.equal("title" in signal, false);
+	assert.equal("evidence" in signal, false);
+}

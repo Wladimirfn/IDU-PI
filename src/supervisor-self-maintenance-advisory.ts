@@ -10,10 +10,12 @@ export type SupervisorSelfMaintenanceSignalCategory =
 export type SupervisorSelfMaintenanceSeverity = "info" | "warning" | "high";
 
 export type SupervisorSelfMaintenanceSignal = {
+	id: string;
 	category: SupervisorSelfMaintenanceSignalCategory;
 	severity: SupervisorSelfMaintenanceSeverity;
-	title: string;
-	evidence: string[];
+	confidence: number;
+	evidenceRefs: string[];
+	summary: string;
 	recommendedActions: string[];
 	skillLearningInputs?: string[];
 };
@@ -27,18 +29,22 @@ export type SupervisorSelfMaintenanceTotals = {
 	failedTasks: number;
 	stalePendingTasks: number;
 	staleRunningTasks: number;
+	staleTasks: number;
 };
 
 export type SupervisorSelfMaintenanceAdvisory = {
+	version: 1;
+	authority: "advisory";
+	mode: "advisory_only";
 	projectId: string;
 	generatedAt: string;
-	authority: "advisory";
 	noWrites: true;
 	agentLabsExecuted: false;
 	rulesApplied: false;
 	skillsModified: false;
 	totals: SupervisorSelfMaintenanceTotals;
 	signals: SupervisorSelfMaintenanceSignal[];
+	recommendedActions: string[];
 	safeNotes: string[];
 };
 
@@ -93,9 +99,11 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 	if (learningSignal) signals.push(learningSignal);
 
 	return {
+		version: 1,
+		authority: "advisory",
+		mode: "advisory_only",
 		projectId: input.projectId,
 		generatedAt: now.toISOString(),
-		authority: "advisory",
 		noWrites: true,
 		agentLabsExecuted: false,
 		rulesApplied: false,
@@ -109,8 +117,10 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 			failedTasks: failedTasks.length,
 			stalePendingTasks: stalePendingTasks.length,
 			staleRunningTasks: staleRunningTasks.length,
+			staleTasks: stalePendingTasks.length + staleRunningTasks.length,
 		},
 		signals,
+		recommendedActions: recommendedActionsFor(signals),
 		safeNotes: [
 			"Advisory-only report: no files, tasks, rules, skills, or contracts were written.",
 			"AgentLabs was not executed by this builder.",
@@ -126,13 +136,15 @@ function buildBacklogSignal(
 	const severity: SupervisorSelfMaintenanceSeverity =
 		openTasks >= 20 || runningTasks >= 5 ? "high" : "warning";
 	return {
+		id: "backlog-pressure",
 		category: "backlog_pressure",
 		severity,
-		title: "Structured task queue has backlog pressure",
-		evidence: [
-			`${openTasks} open task(s) detected`,
-			`${runningTasks} running task(s) detected`,
+		confidence: 0.9,
+		evidenceRefs: [
+			`structured-task-queue:open=${openTasks}`,
+			`structured-task-queue:running=${runningTasks}`,
 		],
+		summary: "Structured task queue has backlog pressure",
 		recommendedActions: [
 			"Triage open work before adding new supervisor initiatives.",
 			"Finish, pause, or re-scope running tasks to reduce concurrency pressure.",
@@ -148,14 +160,16 @@ function buildStaleSignal(
 		return undefined;
 	}
 	return {
+		id: "stale-tasks",
 		category: "stale_tasks",
 		severity: staleRunningTasks.length > 0 ? "high" : "warning",
-		title: "Structured tasks are stale",
-		evidence: [
-			`${stalePendingTasks.length} pending task(s) older than 3 days`,
-			`${staleRunningTasks.length} running task(s) older than 2 hours`,
+		confidence: 0.9,
+		evidenceRefs: [
+			`structured-task-queue:stale-pending=${stalePendingTasks.length}`,
+			`structured-task-queue:stale-running=${staleRunningTasks.length}`,
 			...sampleTaskIds([...stalePendingTasks, ...staleRunningTasks]),
 		],
+		summary: "Structured tasks are stale",
 		recommendedActions: [
 			"Review stale pending tasks and close, re-prioritize, or refresh them with current evidence.",
 			"Inspect stale running tasks for blocked workers before launching more work.",
@@ -178,14 +192,22 @@ function buildRepeatedFailureSignal(
 			}
 		}
 	}
-	const repeated = [...grouped.entries()].filter(([, group]) => group.length >= 2);
+	const repeated = [...grouped.entries()].filter(
+		([, group]) => group.length >= 2,
+	);
 	if (repeated.length === 0) return undefined;
-	const labels = repeated.map(([keyword, group]) => `${keyword} (${group.length})`);
+	const labels = repeated.map(
+		([keyword, group]) => `structured-task-queue:${keyword}=${group.length}`,
+	);
 	return {
+		id: "repeated-failure-patterns",
 		category: "repeated_failure_patterns",
-		severity: repeated.some(([, group]) => group.length >= 3) ? "high" : "warning",
-		title: "Repeated failure patterns need supervisor learning review",
-		evidence: labels,
+		severity: repeated.some(([, group]) => group.length >= 3)
+			? "high"
+			: "warning",
+		confidence: repeated.some(([, group]) => group.length >= 3) ? 0.85 : 0.75,
+		evidenceRefs: labels,
+		summary: "Repeated failure patterns need supervisor learning review",
 		recommendedActions: [
 			"Add or strengthen a regression test around the repeated failure before changing automation.",
 			"Review whether the repeated pattern needs a small skill, rule, or checklist update after evidence is confirmed.",
@@ -207,18 +229,26 @@ function buildLearningLoopSignal(
 	});
 	if (failedTaskCount < 3 && learningMentions.length < 3) return undefined;
 	return {
+		id: "learning-loop-pressure",
 		category: "learning_loop_pressure",
 		severity: failedTaskCount >= 3 ? "high" : "warning",
-		title: "Learning loop has unresolved evidence pressure",
-		evidence: [
-			`${failedTaskCount} failed task(s)`,
-			`${learningMentions.length} task(s) mention learning/evidence pressure`,
+		confidence: failedTaskCount >= 3 ? 0.85 : 0.7,
+		evidenceRefs: [
+			`structured-task-queue:failed=${failedTaskCount}`,
+			`structured-task-queue:learning-mentions=${learningMentions.length}`,
 		],
+		summary: "Learning loop has unresolved evidence pressure",
 		recommendedActions: [
 			"Convert repeated lessons into explicit tests or review checklist evidence before modifying skills.",
 		],
 		skillLearningInputs: sampleTaskIds(learningMentions),
 	};
+}
+
+function recommendedActionsFor(
+	signals: readonly SupervisorSelfMaintenanceSignal[],
+): string[] {
+	return [...new Set(signals.flatMap((signal) => signal.recommendedActions))];
 }
 
 function isFailureLike(task: StructuredTask, text: string): boolean {
@@ -230,7 +260,12 @@ function isFailureLike(task: StructuredTask, text: string): boolean {
 }
 
 function searchableText(task: StructuredTask): string {
-	return [task.text, task.originalText, task.failureReason, task.completionEvidence]
+	return [
+		task.text,
+		task.originalText,
+		task.failureReason,
+		task.completionEvidence,
+	]
 		.filter((value): value is string => Boolean(value))
 		.join(" ")
 		.toLowerCase();
