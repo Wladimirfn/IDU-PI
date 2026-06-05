@@ -24,19 +24,21 @@ function Log($Message) {
 function Get-BridgeProcesses {
   $distIndex = [System.IO.Path]::GetFullPath((Join-Path $Root 'dist/src/index.js'))
   $distIndexSlash = $distIndex.Replace('\', '/')
-  $rootText = ([string]$Root).TrimEnd('\')
-  $rootSlash = $rootText.Replace('\', '/')
+  $rootSlash = ([string]$Root).TrimEnd('\').Replace('\', '/')
+  $rootBoundaryPattern = '(^|[^A-Za-z0-9._-])' + [regex]::Escape($rootSlash) + '(?=$|[^A-Za-z0-9._-])'
+
+  function Test-BridgeCommandLine($CommandLine) {
+    if (-not $CommandLine) { return $false }
+    $commandSlash = ([string]$CommandLine).Replace('\', '/')
+    return $commandSlash.Contains($distIndexSlash) -or
+      (($commandSlash -match $rootBoundaryPattern) -and $commandSlash.Contains('dist/src/index.js'))
+  }
 
   Get-CimInstance Win32_Process |
     Where-Object {
       $_.ProcessId -ne $PID -and
       $_.Name -match '^(node|node\.exe)$' -and
-      $_.CommandLine -and (
-        $_.CommandLine.Contains($distIndex) -or
-        $_.CommandLine.Contains($distIndexSlash) -or
-        ($_.CommandLine.Contains($rootText) -and $_.CommandLine.Contains('dist/src/index.js')) -or
-        ($_.CommandLine.Contains($rootSlash) -and $_.CommandLine.Contains('dist/src/index.js'))
-      )
+      (Test-BridgeCommandLine $_.CommandLine)
     }
 }
 

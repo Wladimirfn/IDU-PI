@@ -90,3 +90,18 @@ test("bridge control command rejects unsafe shell metacharacters in root", () =>
 		/unsafe shell metacharacters/i,
 	);
 });
+
+test("bridge lifecycle scripts require a root boundary when matching relative dist entrypoints", () => {
+	for (const script of [
+		"scripts/bridge-control.ps1",
+		"scripts/start-bridge.ps1",
+		"scripts/stop-bridge.ps1",
+	]) {
+		const source = readFileSync(script, "utf8");
+		assert.doesNotMatch(source, /Contains\(\$rootText\)/, script);
+		assert.doesNotMatch(source, /Contains\(\$rootSlash\).*dist\/src\/index\.js/s, script);
+		assert.match(source, /\[regex\]::Escape\(\$rootSlash\)/, script);
+		assert.match(source, /\(\?=\$\|\[\^A-Za-z0-9\._-\]\)/, script);
+		assert.match(source, /Test-BridgeCommandLine \$_.CommandLine/, script);
+	}
+});
