@@ -78,6 +78,23 @@ test("bridge control command launches deterministic helper", () => {
 	assert.equal(command.cwd, "C:\\bridge");
 });
 
+test("startup status can be built from a consumed restart intent", () => {
+	const text = formatBridgeStartupStatus({
+		origin: "telegram",
+		pid: 99,
+		projectLabel: "idu-pi",
+		currentCwd: "C:/repo",
+		agentLabel: "codex",
+		rpcRunning: true,
+		iduActive: false,
+		telegramCommandCount: 91,
+		now: new Date("2026-06-05T00:00:00.000Z"),
+	});
+	assert.match(text, /Origen: telegram/);
+	assert.match(text, /Pi\/orquestador: iniciado/);
+	assert.match(text, /Idu-pi: inactivo/);
+});
+
 test("bridge control command allows roots with spaces", () => {
 	const command = buildBridgeControlCommand("restart", "C:\\bridge root");
 	assert.equal(command.args.at(-2), "C:\\bridge root\\scripts\\bridge-control.ps1");

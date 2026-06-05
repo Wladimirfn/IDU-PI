@@ -256,6 +256,7 @@ import { buildSafePushReport } from "./safe-push.js";
 import {
 	LEGACY_SESSION_COMMANDS,
 	PATH_SESSION_COMMANDS,
+	PUBLIC_TELEGRAM_HANDLER_COMMANDS,
 	QUICK_PROMPT_COMMANDS,
 	WORK_SESSION_COMMANDS,
 } from "./telegram-command-registry.js";
@@ -291,6 +292,11 @@ import {
 	bridgeLifecycleReply,
 	launchBridgeLifecycle,
 } from "./bridge-lifecycle.js";
+import {
+	bridgeControlIntentPath,
+	consumeBridgeControlIntent,
+	formatBridgeStartupStatus,
+} from "./bridge-control.js";
 import {
 	formatBridgeEnvStatus,
 	packageEnvPath,
@@ -1356,6 +1362,38 @@ function dashboardState() {
 function formatServerStatus(): string {
 	const state = dashboardState();
 	return `Estado agente activo: ${state.busy ? "ocupado" : "libre"}\nRPC agente activo: ${state.rpcRunning ? "iniciado" : "en espera"}\nPID bridge: ${state.bridgePid}\nProyecto: ${state.projectLabel}\nAgente: ${state.agentLabel} (${state.agentId})\nProyecto target: ${state.currentCwd}\nWorkspace: ${state.workspace}\nModo workspace: ${state.workspaceKind}\nModo agente activo: ${state.modePrefix || "default"}`;
+}
+
+async function notifyBridgeStartupFromIntent(): Promise<void> {
+	const packageRoot = resolvePackageRootForTelegram();
+	const intent = consumeBridgeControlIntent(bridgeControlIntentPath(packageRoot));
+	if (
+		intent?.type !== "restart" ||
+		!intent.notifyOnStartup ||
+		intent.chatId === undefined
+	) {
+		return;
+	}
+
+	const runtime = agentRouter.activeRuntime();
+	try {
+		await bot.api.sendMessage(
+			intent.chatId,
+			formatBridgeStartupStatus({
+				origin: intent.origin,
+				pid: process.pid,
+				projectLabel: activeProjectLabel(),
+				currentCwd,
+				agentLabel: runtime.profile.label,
+				rpcRunning: runtime.session.running,
+				iduActive: getIduSessionStatus(currentProjectId()).active,
+				telegramCommandCount: PUBLIC_TELEGRAM_HANDLER_COMMANDS.length,
+				now: new Date(),
+			}),
+		);
+	} catch (error) {
+		console.error("Failed to send bridge startup notification", error);
+	}
 }
 
 function labDbPath(): string {
@@ -3349,4 +3387,8 @@ process.once("exit", shutdown);
 console.log(
 	`pi-telegram-bridge iniciado. PID=${process.pid} CWD=${currentCwd} PI=${[config.piBin, "<PI_CLI_JS>", "--mode", "rpc"].join(" ")}`,
 );
-bot.start();
+void bot.start({
+	onStart: async () => {
+		await notifyBridgeStartupFromIntent();
+	},
+});

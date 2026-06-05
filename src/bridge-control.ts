@@ -92,6 +92,10 @@ export function launchBridgeControl(
 	child.unref();
 }
 
+export function bridgeControlIntentPath(root: string): string {
+	return join(root, "logs", "bridge-control-intent.json");
+}
+
 export function writeBridgeControlIntent(
 	path: string,
 	intent: BridgeControlIntent,
