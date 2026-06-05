@@ -418,6 +418,9 @@ const TOOLS: IduMcpToolDefinition[] = [
 			expectedFiles: optionalStringArray(
 				"Archivos esperados para detectar áreas inesperadas.",
 			),
+			ignoredFiles: optionalStringArray(
+				"Archivos local-only/ignorados explícitamente para esta revisión postflight.",
+			),
 			expectedChangeMode: optionalString(
 				'Modo esperado del cambio: "no-op", "docs", "tests", "code" o "stateRoot".',
 			),
@@ -2160,12 +2163,14 @@ async function dispatchTool(
 			const taskPackageId = stringArg(args, "taskPackageId");
 			const expectedContracts = stringListArg(args, "expectedContracts");
 			const expectedFiles = stringListArg(args, "expectedFiles");
+			const ignoredFiles = stringListArg(args, "ignoredFiles");
 			const expectedChangeMode = stringArg(args, "expectedChangeMode");
 			const taskTrace = buildPostflightTaskTrace({
 				actionId,
 				taskPackageId,
 				expectedContracts,
 				expectedFiles,
+				ignoredFiles,
 				expectedChangeMode,
 				report,
 			});

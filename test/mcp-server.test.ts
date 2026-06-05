@@ -2508,6 +2508,49 @@ test("idu_postflight accepts expectedChangeMode and maps normalized contracts", 
 	assert.ok(trace.observedContracts.includes("tests"));
 });
 
+test("idu_postflight accepts explicit ignored files for task trace", async () => {
+	const runtime = fakeRuntime();
+	runtime.postflight = (): ProjectPostflightReport => ({
+		risk: "low",
+		changedFiles: ["src/mcp-server.ts", "context.md"],
+		ignoredFiles: [],
+		observedChangeMode: "code",
+		impactedAreas: ["orquestación"],
+		warnings: [],
+		recommendedNext: "Revisar cambios.",
+		shouldRunAgentLab: false,
+		suggestedAgentLabs: [],
+		requiresHumanConfirmation: false,
+	});
+	const result = await callIduMcpTool(
+		"idu_postflight",
+		{
+			expectedContracts: ["agent"],
+			expectedFiles: ["src/"],
+			expectedChangeMode: "code",
+			ignoredFiles: ["context.md"],
+		},
+		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
+	);
+	const trace = result.data.taskTrace as {
+		matchesIntent: boolean;
+		ignoredFiles: string[];
+		unexpectedAreas: string[];
+	};
+	const decisionEnvelope = result.data.decisionEnvelope as DecisionEnvelope;
+
+	assert.equal(result.ok, true);
+	assert.equal(trace.matchesIntent, true);
+	assert.deepEqual(trace.unexpectedAreas, []);
+	assert.deepEqual(trace.ignoredFiles, ["context.md"]);
+	assert.equal(
+		decisionEnvelope.requiredActions.some(
+			(action) => action.action === "resolve_task_trace_delta",
+		),
+		false,
+	);
+});
+
 test("idu_postflight stays advisory with active session and no-op mode", async () => {
 	const runtime = fakeRuntime();
 	runtime.supervisorOnIduActivation();
