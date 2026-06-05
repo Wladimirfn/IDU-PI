@@ -38,9 +38,7 @@ test("default state is active with no disabled domains", () => {
 		);
 		assert.deepEqual(
 			state.control,
-			defaultAutonomousAlertControlState(
-				new Date("2026-06-05T00:00:00.000Z"),
-			),
+			defaultAutonomousAlertControlState(new Date("2026-06-05T00:00:00.000Z")),
 		);
 		assert.deepEqual(state.cooldowns, {});
 	} finally {
