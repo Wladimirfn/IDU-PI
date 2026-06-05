@@ -91,9 +91,23 @@ const NEGLECTED_AREA_KEYWORDS = [
 
 const DOMAIN_PRESSURE_KEYWORDS = {
 	bibliotecario: ["bibliotecario", "source", "fuente", "version", "news"],
-	security: ["security", "seguridad", "auth", "vulnerability", "npm", "advisory"],
+	security: [
+		"security",
+		"seguridad",
+		"auth",
+		"vulnerability",
+		"npm",
+		"advisory",
+	],
 	db: ["db", "database", "schema", "migration", "data", "datos"],
-	optimization: ["optimization", "optimizacion", "optimización", "performance", "resource", "recursos"],
+	optimization: [
+		"optimization",
+		"optimizacion",
+		"optimización",
+		"performance",
+		"resource",
+		"recursos",
+	],
 } as const;
 
 export function buildSupervisorSelfMaintenanceAdvisory(
@@ -462,7 +476,10 @@ function buildEvidenceDomainSignals(
 	tasks: readonly StructuredTask[],
 ): SupervisorSelfMaintenanceSignal[] {
 	const signals: SupervisorSelfMaintenanceSignal[] = [];
-	const bibliotecario = domainMatches(tasks, DOMAIN_PRESSURE_KEYWORDS.bibliotecario);
+	const bibliotecario = domainMatches(
+		tasks,
+		DOMAIN_PRESSURE_KEYWORDS.bibliotecario,
+	);
 	if (bibliotecario.unfinished >= 2) {
 		signals.push({
 			id: "bibliotecario-source-pressure",
@@ -510,7 +527,10 @@ function buildEvidenceDomainSignals(
 		});
 	}
 
-	const optimization = domainMatches(tasks, DOMAIN_PRESSURE_KEYWORDS.optimization);
+	const optimization = domainMatches(
+		tasks,
+		DOMAIN_PRESSURE_KEYWORDS.optimization,
+	);
 	if (optimization.unfinished >= 2) {
 		signals.push({
 			id: "optimization-review-pressure",
@@ -540,7 +560,8 @@ function buildEvidenceDomainSignals(
 			severity: "warning",
 			confidence: 0.8,
 			evidenceRefs: ["external-intelligence:npm-security-coverage=unproven"],
-			summary: "npm/security advisory coverage is unavailable, skipped, or unproven",
+			summary:
+				"npm/security advisory coverage is unavailable, skipped, or unproven",
 			recommendedActions: [
 				"Do not claim dependency-risk awareness until allowlisted evidence exists.",
 			],

@@ -232,8 +232,8 @@ test("npm security coverage gap is raw honest and does not claim coverage", () =
 		allowTaskCreation: true,
 	});
 
-	const decision = report.decisions.find(
-		(item) => item.id.includes("external-security-coverage-gap"),
+	const decision = report.decisions.find((item) =>
+		item.id.includes("external-security-coverage-gap"),
 	);
 	assert.ok(decision);
 	assert.equal(decision.domain, "security");
