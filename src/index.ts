@@ -296,6 +296,8 @@ import {
 	bridgeControlIntentPath,
 	consumeBridgeControlIntent,
 	formatBridgeStartupStatus,
+	launchBridgeControl,
+	writeBridgeControlIntent,
 } from "./bridge-control.js";
 import {
 	formatBridgeEnvStatus,
@@ -1366,7 +1368,9 @@ function formatServerStatus(): string {
 
 async function notifyBridgeStartupFromIntent(): Promise<void> {
 	const packageRoot = resolvePackageRootForTelegram();
-	const intent = consumeBridgeControlIntent(bridgeControlIntentPath(packageRoot));
+	const intent = consumeBridgeControlIntent(
+		bridgeControlIntentPath(packageRoot),
+	);
 	if (
 		intent?.type !== "restart" ||
 		!intent.notifyOnStartup ||
@@ -2340,11 +2344,42 @@ bot.command("task", async (ctx) => {
 	void runPrompt(ctx, prompt, { structuredTaskCategory: parsed.kind });
 });
 
+async function requestBridgeRestart(
+	ctx: Context,
+	reason: string,
+): Promise<void> {
+	const packageRoot = resolvePackageRootForTelegram();
+	const chatId = ctx.chat?.id;
+	if (chatId === undefined) {
+		await ctx.reply("No pude identificar el chat para avisar el arranque.");
+		return;
+	}
+	writeBridgeControlIntent(bridgeControlIntentPath(packageRoot), {
+		type: "restart",
+		origin: "telegram",
+		chatId,
+		reason,
+		notifyOnStartup: true,
+		requestedAt: new Date().toISOString(),
+	});
+	await ctx.reply(
+		"Reinicio completo del bridge solicitado. Si todo sale bien, voy a volver con un status de arranque.",
+	);
+	clearPendingUiRequest();
+	agentRouter.stopActive("Bridge reiniciándose.");
+	launchBridgeControl("restart", packageRoot);
+}
+
+bot.command("reset", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	await requestBridgeRestart(ctx, "/reset");
+});
+
 bot.command("server", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	const command = parseServerCommand(ctx.message?.text ?? "");
 	if (!command) {
-		await ctx.reply("Uso: /server status | run | restart | off");
+		await ctx.reply("Uso: /server status | run | restart | reset | off");
 		return;
 	}
 	if (command === "status") {
@@ -2354,25 +2389,21 @@ bot.command("server", async (ctx) => {
 	if (command === "run") {
 		const runtime = agentRouter.startActive();
 		await ctx.reply(
-			`Servidor Pi activo iniciado/en espera.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
+			`Bridge ya está activo; /server run sólo prepara la sesión Pi interna.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}\nSi el bridge estuviera apagado, Telegram no podría recibir este comando.`,
 		);
 		return;
 	}
 	if (command === "restart") {
-		const runtime = agentRouter.restartActive();
-		clearPendingUiRequest();
-		await ctx.reply(
-			`Servidor Pi reiniciado.\nAgente: ${runtime.profile.label}\nWorkspace: ${runtime.cwd}`,
-		);
+		await requestBridgeRestart(ctx, "/server restart");
 		return;
 	}
-	const stopped = agentRouter.stopActive();
-	clearPendingUiRequest();
+	const packageRoot = resolvePackageRootForTelegram();
 	await ctx.reply(
-		stopped
-			? "Servidor Pi activo detenido."
-			: "El servidor Pi activo ya estaba detenido.",
+		"Apagando bridge completo. Telegram no puede volver a iniciarlo salvo que uses start-pi-telegram-bridge.bat, scheduled task o watchdog.",
 	);
+	clearPendingUiRequest();
+	agentRouter.stopActive("Bridge detenido.");
+	launchBridgeControl("stop", packageRoot);
 });
 
 bot.command("agents", async (ctx) => {

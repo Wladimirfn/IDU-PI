@@ -13,6 +13,7 @@ test("parseServerCommand accepts run restart off and status", () => {
 	assert.equal(parseServerCommand("/server"), "status");
 	assert.equal(parseServerCommand("/server run"), "run");
 	assert.equal(parseServerCommand("/server restart"), "restart");
+	assert.equal(parseServerCommand("/server reset"), "restart");
 	assert.equal(parseServerCommand("/server off"), "off");
 	assert.equal(parseServerCommand("/server nope"), undefined);
 });

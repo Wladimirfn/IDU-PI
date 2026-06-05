@@ -46,6 +46,7 @@ test("formatHelpText includes primary Telegram commands", () => {
 	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/postflight/);
 	assert.match(text, /\/lab_review_plan/);
+	assert.match(text, /\/reset/);
 	assert.match(text, /\/testlab \[profundidad\]/);
 });
 
@@ -92,6 +93,7 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/advisory <solicitud>/);
 	assert.match(text, /\/postflight/);
 	assert.match(text, /\/lab_review_plan/);
+	assert.match(text, /\/reset/);
 	assert.match(text, /\/server restart/);
 	assert.match(text, /\/task bug <detalle>/);
 	assert.match(text, /\/queue_detail/);
@@ -289,6 +291,7 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	assert.ok(commands.some((entry) => entry.command === "advisory"));
 	assert.ok(commands.some((entry) => entry.command === "postflight"));
 	assert.ok(commands.some((entry) => entry.command === "lab_review_plan"));
+	assert.ok(commands.some((entry) => entry.command === "reset"));
 	assert.ok(commands.some((entry) => entry.command === "queue_detail"));
 	assert.ok(
 		commands.some((entry) => entry.command === "queue_clear_structured"),

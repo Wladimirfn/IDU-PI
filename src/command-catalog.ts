@@ -418,9 +418,15 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 	},
 	{
 		command: "server",
-		description: "Controlar sesión Pi RPC",
-		help: "/server status|run|restart|off - controlar sesión Pi RPC activa",
+		description: "Controlar bridge y sesión Pi",
+		help: "/reset o /server restart - reiniciar bridge completo; /server status - ver estado; /server off - apagar bridge",
 		usage: ["/server status", "/server run", "/server restart", "/server off"],
+	},
+	{
+		command: "reset",
+		description: "Reiniciar bridge completo",
+		help: "/reset - reiniciar bridge completo y avisar al volver",
+		usage: ["/reset"],
 	},
 	{
 		command: "review",

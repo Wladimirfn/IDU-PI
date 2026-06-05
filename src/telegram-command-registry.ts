@@ -67,6 +67,7 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"safe_push",
 	"task",
 	"server",
+	"reset",
 	"agents",
 	"config",
 	"doctor",
