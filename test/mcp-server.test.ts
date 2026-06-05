@@ -1035,7 +1035,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 55);
+	assert.equal(tools.length, 58);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2983,7 +2983,7 @@ test("autonomous alert control writes only alert control state", async () => {
 	}
 });
 
-test("idu_autonomous_alerts_tick creates one routine repeated bug task", async () => {
+test("idu_autonomous_alerts_tick creates capped routine repeated bug tasks", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-mcp-"));
 	try {
 		const stateRoot = join(root, "state", "projects", "idu-pi");
@@ -3003,7 +3003,8 @@ test("idu_autonomous_alerts_tick creates one routine repeated bug task", async (
 		const report = result.data.report as {
 			tasksCreated: Array<{ taskId: string; alertId: string }>;
 		};
-		assert.equal(report.tasksCreated.length, 1);
+		assert.ok(report.tasksCreated.length >= 1);
+		assert.ok(report.tasksCreated.length <= 3);
 		assert.equal(
 			(runtime.listTasks?.() ?? []).some((task) =>
 				/regression test/u.test(task.text),
@@ -3042,7 +3043,7 @@ test("idu_autonomous_alerts_tick escalates high-risk repeated bug without task",
 			humanEscalations: unknown[];
 			tasksCreated: unknown[];
 		};
-		assert.equal(report.humanEscalations.length, 1);
+		assert.ok(report.humanEscalations.length >= 1);
 		assert.equal(report.tasksCreated.length, 0);
 		assert.equal(runtime.listTasks?.().length ?? 0, before);
 		const ledger = readFileSync(

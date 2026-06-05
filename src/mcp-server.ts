@@ -2645,11 +2645,16 @@ async function dispatchTool(
 				alertId: string;
 				evidenceRefs: string[];
 			}> = [];
+			const taskCreationBlockedByHumanEscalation =
+				report.humanEscalations.some((decision) =>
+					["repeated_bug", "security", "db"].includes(decision.domain),
+				);
 			for (const decision of report.decisions) {
 				if (
 					decision.recommendedAction === "create_task" &&
 					decision.taskDraft &&
 					allowTaskCreation &&
+					!taskCreationBlockedByHumanEscalation &&
 					tasksCreated.length < 3
 				) {
 					const taskKind = inferTaskTemplateKind(decision.taskDraft.text);
