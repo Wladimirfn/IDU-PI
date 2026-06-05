@@ -7,8 +7,18 @@ import {
 	formatHelpText,
 	telegramCommandsForApi,
 	TELEGRAM_COMMANDS,
+	CLI_COMMANDS,
 } from "../src/command-catalog.js";
 import { PUBLIC_TELEGRAM_HANDLER_COMMANDS } from "../src/telegram-command-registry.js";
+
+const STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS = [
+	"idu_alerts_status",
+	"idu_alerts_tick",
+	"idu_alerts_pause",
+	"idu_alerts_resume",
+	"idu_alerts_off",
+	"idu_alerts_on",
+] as const;
 
 test("formatHelpText includes primary Telegram commands", () => {
 	const text = formatHelpText();
@@ -25,6 +35,12 @@ test("formatHelpText includes primary Telegram commands", () => {
 	assert.match(text, /\/idu_status/);
 	assert.match(text, /\/idu_prepare/);
 	assert.match(text, /\/idu_supervisor_tick/);
+	assert.match(text, /\/idu_alerts_status/);
+	assert.match(text, /\/idu_alerts_tick/);
+	assert.match(text, /\/idu_alerts_pause/);
+	assert.match(text, /\/idu_alerts_resume/);
+	assert.match(text, /\/idu_alerts_off/);
+	assert.match(text, /\/idu_alerts_on/);
 	assert.match(text, /\/agentlab_request_create/);
 	assert.match(text, /\/agentlab_request_review/);
 	assert.match(text, /\/agentlab_review_run/);
@@ -72,6 +88,12 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	assert.match(text, /\/idu_status/);
 	assert.match(text, /\/idu_prepare/);
 	assert.match(text, /\/idu_supervisor_tick/);
+	assert.match(text, /\/idu_alerts_status/);
+	assert.match(text, /\/idu_alerts_tick/);
+	assert.match(text, /\/idu_alerts_pause 60/);
+	assert.match(text, /\/idu_alerts_resume/);
+	assert.match(text, /\/idu_alerts_off/);
+	assert.match(text, /\/idu_alerts_on/);
 	assert.match(text, /\/agentlab_request_create postflight/);
 	assert.match(text, /\/agentlab_request_review latest/);
 	assert.match(text, /\/agentlab_review_run latest/);
@@ -112,6 +134,10 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	);
 	assert.doesNotMatch(text, /corepack pnpm cli -- supervisor-tick/);
 	assert.match(text, /corepack pnpm cli -- idu-supervisor-tick/);
+	assert.match(text, /corepack pnpm cli -- alerts status/);
+	assert.match(text, /corepack pnpm cli -- alerts tick/);
+	assert.match(text, /corepack pnpm cli -- alerts control pause 60/);
+	assert.match(text, /corepack pnpm cli -- alerts control resume/);
 	assert.match(
 		text,
 		/corepack pnpm cli -- idu-skill-improvements-review latest/,
@@ -199,6 +225,20 @@ test("telegram command catalog has unique commands", () => {
 	assert.equal(new Set(commands).size, commands.length);
 });
 
+test("alert commands are registered in Telegram catalog registry and CLI catalog", () => {
+	const telegramCommands = TELEGRAM_COMMANDS.map((entry) => entry.command);
+	const registryCommands = [...PUBLIC_TELEGRAM_HANDLER_COMMANDS];
+	for (const command of STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS) {
+		assert.ok(telegramCommands.includes(command));
+		assert.ok(registryCommands.includes(command));
+	}
+	const cliCommands = CLI_COMMANDS.map((entry) => entry.command).join("\n");
+	assert.match(cliCommands, /corepack pnpm cli -- alerts status/u);
+	assert.match(cliCommands, /corepack pnpm cli -- alerts tick/u);
+	assert.match(cliCommands, /corepack pnpm cli -- alerts control pause 60/u);
+	assert.match(cliCommands, /corepack pnpm cli -- alerts control resume/u);
+});
+
 test("telegram command catalog matches registered handlers", () => {
 	const catalogCommands = TELEGRAM_COMMANDS.map(
 		(entry) => entry.command,
@@ -230,7 +270,13 @@ test("telegram command catalog matches registered handlers", () => {
 	}
 
 	assert.deepEqual(registryCommands, catalogCommands);
-	assert.deepEqual([...registeredCommands].sort(), catalogCommands);
+	const catalogCommandsWithHandlers = catalogCommands.filter(
+		(command) =>
+			!STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS.includes(
+				command as (typeof STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS)[number],
+			),
+	);
+	assert.deepEqual([...registeredCommands].sort(), catalogCommandsWithHandlers);
 });
 
 test("telegramCommandsForApi creates setMyCommands payload from catalog", () => {
@@ -247,6 +293,9 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 	assert.ok(commands.some((entry) => entry.command === "idu_off"));
 	assert.ok(commands.some((entry) => entry.command === "idu_status"));
 	assert.ok(commands.some((entry) => entry.command === "idu_prepare"));
+	for (const command of STAGED_ALERT_COMMANDS_WITHOUT_HANDLERS) {
+		assert.ok(commands.some((entry) => entry.command === command));
+	}
 	assert.ok(
 		commands.some((entry) => entry.command === "semantic_audit_status"),
 	);
