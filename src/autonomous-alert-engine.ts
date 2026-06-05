@@ -293,10 +293,11 @@ function decisionFromSelfMaintenanceSignal(
 	const cooldownKey = `${domain}:${signal.id}`;
 	const cooldownUntil = input.cooldowns?.[cooldownKey];
 	const inCooldown = cooldownActive(cooldownUntil, now);
-	const highRisk = signal.severity === "high";
+	const protectedDomain = isProtectedDomain(domain);
+	const highRisk = signal.severity === "high" || protectedDomain;
 	const recommendedAction: AutonomousAlertRecommendedAction = inCooldown
 		? "snooze"
-		: highRisk
+		: protectedDomain || signal.severity === "high"
 			? "ask_human"
 			: input.allowTaskCreation
 				? "create_task"
@@ -316,20 +317,25 @@ function decisionFromSelfMaintenanceSignal(
 			{
 				claim: signal.summary,
 				evidenceRefs: signal.evidenceRefs,
-				impact:
-					"Ignoring this signal makes the project less reliable and less centered on the Master Plan.",
+				impact: impactForDomain(domain),
 				requiredNext: highRisk
 					? "Ask the human before high-impact action."
 					: (signal.recommendedActions[0] ??
 						"Create a bounded follow-up task."),
+				...(signal.category === "external_security_coverage_gap"
+					? {
+							omittedComfort:
+								"Do not claim full dependency-risk awareness while npm/security advisory coverage is unavailable, skipped, or unproven.",
+						}
+					: {}),
 			},
 		],
 		recommendedAction,
 		...(recommendedAction === "create_task"
 			? {
 					taskDraft: {
-						text: `${signal.summary}. Evidence: ${signal.evidenceRefs.join(", ")}`,
-						category: "maintenance",
+						text: taskDraftTextForDomain(domain, signal),
+						category: domain === "bibliotecario" ? "docs" : "maintenance",
 						priority: 4,
 						guardRisk: "medium" as const,
 						evidenceRefs: signal.evidenceRefs,
@@ -351,7 +357,45 @@ function mapSignalDomain(
 	if (category === "neglected_areas") return "neglected_area";
 	if (category === "semantic_audit_pressure") return "semantic_audit";
 	if (category === "supervisor_activity_pressure") return "agentlab";
+	if (category === "bibliotecario_source_pressure") return "bibliotecario";
+	if (category === "security_review_pressure") return "security";
+	if (category === "db_review_pressure") return "db";
+	if (category === "optimization_review_pressure") return "optimization";
+	if (category === "external_security_coverage_gap") return "security";
 	return undefined;
+}
+
+function isProtectedDomain(domain: AutonomousAlertDomain): boolean {
+	return domain === "security" || domain === "db";
+}
+
+function impactForDomain(domain: AutonomousAlertDomain): string {
+	if (domain === "security") {
+		return "Security or dependency-risk coverage cannot be assumed from weak evidence; false confidence would make the project less safe.";
+	}
+	if (domain === "db") {
+		return "DB/schema/data drift can corrupt project behavior; it needs human review before changes.";
+	}
+	if (domain === "optimization") {
+		return "Resource efficiency is being assumed, not proven, until a bounded optimization audit exists.";
+	}
+	if (domain === "bibliotecario") {
+		return "Source/version awareness is stale when registered evidence is not reviewed.";
+	}
+	return "Ignoring this signal makes the project less reliable and less centered on the Master Plan.";
+}
+
+function taskDraftTextForDomain(
+	domain: AutonomousAlertDomain,
+	signal: SupervisorSelfMaintenanceSignal,
+): string {
+	if (domain === "optimization") {
+		return `Run a bounded resource optimization audit. Evidence: ${signal.evidenceRefs.join(", ")}`;
+	}
+	if (domain === "bibliotecario") {
+		return `Run a bounded Bibliotecario/source review using registered or allowlisted evidence only. Evidence: ${signal.evidenceRefs.join(", ")}`;
+	}
+	return `${signal.summary}. Evidence: ${signal.evidenceRefs.join(", ")}`;
 }
 
 function blockedDecision(

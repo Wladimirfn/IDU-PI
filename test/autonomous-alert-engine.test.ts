@@ -124,3 +124,126 @@ test("cooldown suppresses duplicate task creation", () => {
 	assert.equal(decision.recommendedAction, "snooze");
 	assert.equal(report.suppressedByCooldown.length, 1);
 });
+
+test("security and db domain signals ask human without task drafts", () => {
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: [],
+		selfMaintenanceSignals: [
+			{
+				id: "security-review-pressure",
+				category: "security_review_pressure",
+				severity: "warning",
+				confidence: 0.7,
+				evidenceRefs: ["structured-task-queue:security=2"],
+				summary: "Security review evidence is stale or incomplete",
+				recommendedActions: ["Ask the human before changing security posture."],
+			},
+			{
+				id: "db-review-pressure",
+				category: "db_review_pressure",
+				severity: "warning",
+				confidence: 0.7,
+				evidenceRefs: ["structured-task-queue:db=2"],
+				summary: "DB review evidence is stale or incomplete",
+				recommendedActions: ["Ask the human before changing DB/schema/data."],
+			},
+		],
+		allowTaskCreation: true,
+	});
+
+	const protectedDecisions = report.decisions.filter(
+		(decision) => decision.domain === "security" || decision.domain === "db",
+	);
+	assert.equal(protectedDecisions.length, 2);
+	for (const decision of protectedDecisions) {
+		assert.equal(decision.recommendedAction, "ask_human");
+		assert.equal(decision.requiresHuman, true);
+		assert.equal(decision.taskDraft, undefined);
+	}
+});
+
+test("optimization and bibliotecario signals can create bounded task drafts", () => {
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: [],
+		selfMaintenanceSignals: [
+			{
+				id: "optimization-review-pressure",
+				category: "optimization_review_pressure",
+				severity: "warning",
+				confidence: 0.65,
+				evidenceRefs: ["structured-task-queue:optimization=2"],
+				summary: "Optimization review is stale",
+				recommendedActions: ["Create a bounded resource optimization audit."],
+			},
+			{
+				id: "bibliotecario-source-pressure",
+				category: "bibliotecario_source_pressure",
+				severity: "warning",
+				confidence: 0.65,
+				evidenceRefs: ["structured-task-queue:bibliotecario=2"],
+				summary: "Bibliotecario/source evidence is stale",
+				recommendedActions: ["Create a bounded Bibliotecario source review."],
+				bibliotecarioInputs: ["review registered version/source evidence"],
+			},
+		],
+		allowTaskCreation: true,
+	});
+
+	const optimization = report.decisions.find(
+		(decision) => decision.domain === "optimization",
+	);
+	const bibliotecario = report.decisions.find(
+		(decision) => decision.domain === "bibliotecario",
+	);
+	assert.ok(optimization);
+	assert.equal(optimization.recommendedAction, "create_task");
+	assert.equal(optimization.taskDraft?.guardRisk, "medium");
+	assert.match(optimization.taskDraft?.text ?? "", /optimization/i);
+	assert.ok(bibliotecario);
+	assert.equal(bibliotecario.recommendedAction, "create_task");
+	assert.match(bibliotecario.taskDraft?.text ?? "", /Bibliotecario|source/i);
+});
+
+test("npm security coverage gap is raw honest and does not claim coverage", () => {
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: [],
+		selfMaintenanceSignals: [
+			{
+				id: "external-security-coverage-gap",
+				category: "external_security_coverage_gap",
+				severity: "warning",
+				confidence: 0.8,
+				evidenceRefs: ["external-intelligence:npm-advisories=skipped"],
+				summary: "npm/security advisory coverage is unavailable or skipped",
+				recommendedActions: [
+					"Do not claim dependency-risk awareness until allowlisted evidence exists.",
+				],
+			},
+		],
+		allowTaskCreation: true,
+	});
+
+	const decision = report.decisions.find(
+		(item) => item.id.includes("external-security-coverage-gap"),
+	);
+	assert.ok(decision);
+	assert.equal(decision.domain, "security");
+	assert.equal(decision.recommendedAction, "ask_human");
+	assert.equal(decision.taskDraft, undefined);
+	assert.ok(
+		decision.uncomfortableTruths.some((truth) =>
+			/Do not claim full dependency-risk awareness/u.test(
+				truth.omittedComfort ?? truth.claim,
+			),
+		),
+	);
+});

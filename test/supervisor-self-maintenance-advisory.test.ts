@@ -236,6 +236,58 @@ test("self-maintenance advisory detects missing supervisor activity during press
 	);
 });
 
+test("self-maintenance advisory emits richer domain signals conservatively", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "source-1",
+			text: "Bibliotecario source version review pending",
+		},
+		{
+			...baseTask,
+			id: "source-2",
+			text: "Review source news evidence for registered libraries",
+		},
+		{
+			...baseTask,
+			id: "security-1",
+			text: "Security npm advisory coverage unavailable",
+		},
+		{
+			...baseTask,
+			id: "db-1",
+			text: "DB schema migration review pending",
+		},
+		{
+			...baseTask,
+			id: "opt-1",
+			text: "Optimization resource audit pending",
+		},
+		{
+			...baseTask,
+			id: "opt-2",
+			text: "Performance recursos review pending",
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	for (const category of [
+		"bibliotecario_source_pressure",
+		"security_review_pressure",
+		"db_review_pressure",
+		"optimization_review_pressure",
+		"external_security_coverage_gap",
+	] as const) {
+		const signal = report.signals.find((item) => item.category === category);
+		assert.ok(signal, category);
+		assertSignalContract(signal);
+	}
+});
+
 function assertTopLevelContract(
 	report: ReturnType<typeof buildSupervisorSelfMaintenanceAdvisory>,
 ): void {
@@ -261,7 +313,12 @@ function assertSignalContract(signal: {
 		| "neglected_areas"
 		| "learning_loop_pressure"
 		| "semantic_audit_pressure"
-		| "supervisor_activity_pressure";
+		| "supervisor_activity_pressure"
+		| "bibliotecario_source_pressure"
+		| "security_review_pressure"
+		| "db_review_pressure"
+		| "optimization_review_pressure"
+		| "external_security_coverage_gap";
 	severity: "info" | "warning" | "high";
 	confidence: number;
 	evidenceRefs: string[];

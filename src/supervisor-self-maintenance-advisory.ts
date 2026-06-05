@@ -7,7 +7,12 @@ export type SupervisorSelfMaintenanceSignalCategory =
 	| "neglected_areas"
 	| "learning_loop_pressure"
 	| "semantic_audit_pressure"
-	| "supervisor_activity_pressure";
+	| "supervisor_activity_pressure"
+	| "bibliotecario_source_pressure"
+	| "security_review_pressure"
+	| "db_review_pressure"
+	| "optimization_review_pressure"
+	| "external_security_coverage_gap";
 
 export type SupervisorSelfMaintenanceSeverity = "info" | "warning" | "high";
 
@@ -84,6 +89,13 @@ const NEGLECTED_AREA_KEYWORDS = [
 	"skill",
 ] as const;
 
+const DOMAIN_PRESSURE_KEYWORDS = {
+	bibliotecario: ["bibliotecario", "source", "fuente", "version", "news"],
+	security: ["security", "seguridad", "auth", "vulnerability", "npm", "advisory"],
+	db: ["db", "database", "schema", "migration", "data", "datos"],
+	optimization: ["optimization", "optimizacion", "optimización", "performance", "resource", "recursos"],
+} as const;
+
 export function buildSupervisorSelfMaintenanceAdvisory(
 	input: BuildSupervisorSelfMaintenanceAdvisoryInput,
 ): SupervisorSelfMaintenanceAdvisory {
@@ -159,6 +171,10 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		supervisorActivityThrottled,
 	});
 	if (supervisorActivitySignal) signals.push(supervisorActivitySignal);
+
+	for (const domainSignal of buildEvidenceDomainSignals(tasks)) {
+		signals.push(domainSignal);
+	}
 
 	return {
 		version: 1,
@@ -439,6 +455,111 @@ function buildLearningLoopSignal(
 			"Convert repeated lessons into explicit tests or review checklist evidence before modifying skills.",
 		],
 		skillLearningInputs: sampleTaskIds(learningMentions),
+	};
+}
+
+function buildEvidenceDomainSignals(
+	tasks: readonly StructuredTask[],
+): SupervisorSelfMaintenanceSignal[] {
+	const signals: SupervisorSelfMaintenanceSignal[] = [];
+	const bibliotecario = domainMatches(tasks, DOMAIN_PRESSURE_KEYWORDS.bibliotecario);
+	if (bibliotecario.unfinished >= 2) {
+		signals.push({
+			id: "bibliotecario-source-pressure",
+			category: "bibliotecario_source_pressure",
+			severity: "warning",
+			confidence: 0.65,
+			evidenceRefs: [
+				`structured-task-queue:bibliotecario-source=${bibliotecario.unfinished}`,
+			],
+			summary: "Bibliotecario/source evidence is stale or incomplete",
+			recommendedActions: [
+				"Create a bounded Bibliotecario source review using registered or allowlisted sources only.",
+			],
+			bibliotecarioInputs: sampleTaskIds(bibliotecario.tasks),
+		});
+	}
+
+	const security = domainMatches(tasks, DOMAIN_PRESSURE_KEYWORDS.security);
+	if (security.unfinished >= 1) {
+		signals.push({
+			id: "security-review-pressure",
+			category: "security_review_pressure",
+			severity: "warning",
+			confidence: 0.7,
+			evidenceRefs: [`structured-task-queue:security=${security.unfinished}`],
+			summary: "Security review evidence is stale or incomplete",
+			recommendedActions: [
+				"Ask the human before changing security posture or dependency risk handling.",
+			],
+		});
+	}
+
+	const db = domainMatches(tasks, DOMAIN_PRESSURE_KEYWORDS.db);
+	if (db.unfinished >= 1) {
+		signals.push({
+			id: "db-review-pressure",
+			category: "db_review_pressure",
+			severity: "warning",
+			confidence: 0.7,
+			evidenceRefs: [`structured-task-queue:db=${db.unfinished}`],
+			summary: "DB/schema/data review evidence is stale or incomplete",
+			recommendedActions: [
+				"Ask the human before changing DB, schema, migration, or data behavior.",
+			],
+		});
+	}
+
+	const optimization = domainMatches(tasks, DOMAIN_PRESSURE_KEYWORDS.optimization);
+	if (optimization.unfinished >= 2) {
+		signals.push({
+			id: "optimization-review-pressure",
+			category: "optimization_review_pressure",
+			severity: "warning",
+			confidence: 0.65,
+			evidenceRefs: [
+				`structured-task-queue:optimization=${optimization.unfinished}`,
+			],
+			summary: "Optimization/resource review evidence is stale or incomplete",
+			recommendedActions: [
+				"Create a bounded resource optimization audit before assuming efficiency is healthy.",
+			],
+		});
+	}
+
+	if (
+		security.tasks.some((task) =>
+			/npm|advisory|vulnerability|coverage|skipped|unavailable/u.test(
+				searchableText(task),
+			),
+		)
+	) {
+		signals.push({
+			id: "external-security-coverage-gap",
+			category: "external_security_coverage_gap",
+			severity: "warning",
+			confidence: 0.8,
+			evidenceRefs: ["external-intelligence:npm-security-coverage=unproven"],
+			summary: "npm/security advisory coverage is unavailable, skipped, or unproven",
+			recommendedActions: [
+				"Do not claim dependency-risk awareness until allowlisted evidence exists.",
+			],
+		});
+	}
+
+	return signals;
+}
+
+function domainMatches(
+	tasks: readonly StructuredTask[],
+	keywords: readonly string[],
+): { tasks: StructuredTask[]; unfinished: number } {
+	const matches = tasks.filter((task) =>
+		keywords.some((keyword) => searchableText(task).includes(keyword)),
+	);
+	return {
+		tasks: matches,
+		unfinished: matches.filter((task) => task.status !== "done").length,
 	};
 }
 
