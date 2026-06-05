@@ -338,10 +338,7 @@ import {
 	readSupervisorActivityEvents,
 	summarizeSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
-import {
-	buildIduUsageReport,
-	readIduUsageEvents,
-} from "./usage-events.js";
+import { buildIduUsageReport, readIduUsageEvents } from "./usage-events.js";
 import {
 	buildAgentLabEffectivenessReport,
 	readAgentLabEffectivenessEvents,
@@ -1499,12 +1496,9 @@ function buildTelegramSelfMaintenanceReport(stateRoot: string): {
 				(supervisorActivity.byReason.idu_inactive ?? 0) +
 				(supervisorActivity.byReason.no_new_events ?? 0) +
 				(supervisorActivity.byReason.not_enough_data ?? 0),
-			supervisorActivityThrottled:
-				supervisorActivity.byReason.throttled ?? 0,
+			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
 			usageFailures:
-				usageReport.failed +
-				usageReport.notAllowed +
-				usageReport.requiresHuman,
+				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
 			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
 			semanticNewEvents,
 		}),
@@ -1854,9 +1848,7 @@ bot.command("idu_alerts_status", async (ctx) => {
 	if (!(await guard(ctx))) return;
 	await replyLong(
 		ctx,
-		formatTelegramAutonomousAlertReport(
-			buildTelegramAutonomousAlertStatus(),
-		),
+		formatTelegramAutonomousAlertReport(buildTelegramAutonomousAlertStatus()),
 	);
 });
 
@@ -1875,10 +1867,7 @@ bot.command("idu_alerts_pause", async (ctx) => {
 	await replyLong(
 		ctx,
 		formatTelegramAutonomousAlertControl(
-			runTelegramAutonomousAlertControl(
-				"pause",
-				parsePauseMinutes(ctx.match),
-			),
+			runTelegramAutonomousAlertControl("pause", parsePauseMinutes(ctx.match)),
 		),
 	);
 });
@@ -2601,7 +2590,10 @@ function cleanupBridgeControlIntent(path: string): void {
 	}
 }
 
-function formatBridgeControlLaunchFailure(action: "restart" | "stop", error: Error): string {
+function formatBridgeControlLaunchFailure(
+	action: "restart" | "stop",
+	error: Error,
+): string {
 	const label = action === "restart" ? "reinicio" : "apagado";
 	return [
 		`No pude iniciar el helper de ${label} del bridge.`,
