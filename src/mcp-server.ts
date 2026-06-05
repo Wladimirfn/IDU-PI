@@ -2665,7 +2665,10 @@ async function dispatchTool(
 						evidenceRefs: decision.evidenceRefs,
 					});
 					appendAutonomousAlertDecision(stateRoot, decision);
-				} else if (decision.recommendedAction === "ask_human" && allowTaskCreation) {
+				} else if (
+					decision.recommendedAction === "ask_human" &&
+					allowTaskCreation
+				) {
 					appendAutonomousAlertDecision(stateRoot, decision);
 				}
 			}
@@ -2875,6 +2878,7 @@ async function dispatchTool(
 				boundedSourceRecommendations,
 				"matches",
 			) as JsonObject[];
+			const evidencePolicy = externalRegistry.evidencePolicy;
 			const sourceEcosystem = {
 				surface: "source_ecosystem",
 				local: {
@@ -2904,6 +2908,12 @@ async function dispatchTool(
 						whyRelevant: match.whyRelevant,
 						automationMode: match.automationMode,
 						promotionAllowed: match.promotionAllowed,
+						claimType: match.claimType,
+						evidenceRole: match.evidenceRole,
+						canonicality: match.canonicality,
+						requiresCorroboration: match.requiresCorroboration,
+						forbiddenAsSoleAuthority: match.forbiddenAsSoleAuthority,
+						policyWarnings: match.policyWarnings.slice(0, 4),
 					})),
 					limitations: externalRegistry.limitations,
 					fetchAllowed: externalRegistry.fetchAllowed,
@@ -3016,6 +3026,7 @@ async function dispatchTool(
 				data: {
 					decisionEnvelope,
 					planLibrarian,
+					evidencePolicy,
 					sourceEcosystem,
 					skillOptimization,
 					failureSemanticDebt,
@@ -3133,7 +3144,7 @@ async function dispatchTool(
 				summary: `External source registry matches: ${report.matches.length}`,
 				requiresHuman: false,
 				orchestratorDecisionRequired: report.matches.length > 0,
-				allowedToProceed: true,
+				allowedToProceed: false,
 				evidenceRefs: report.matches.map(
 					(match) => `external-source:${match.sourceId}`,
 				),
