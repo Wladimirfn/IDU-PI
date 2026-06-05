@@ -296,7 +296,7 @@ import {
 	bridgeControlIntentPath,
 	consumeBridgeControlIntent,
 	formatBridgeStartupStatus,
-	tryLaunchBridgeControl,
+	launchBridgeControlSafely,
 	writeBridgeControlIntent,
 } from "./bridge-control.js";
 import {
@@ -2380,7 +2380,7 @@ async function requestBridgeRestart(
 		notifyOnStartup: true,
 		requestedAt: new Date().toISOString(),
 	});
-	const launch = tryLaunchBridgeControl("restart", packageRoot);
+	const launch = await launchBridgeControlSafely("restart", packageRoot);
 	if (!launch.ok) {
 		cleanupBridgeControlIntent(intentPath);
 		await ctx.reply(formatBridgeControlLaunchFailure("restart", launch.error));
@@ -2421,7 +2421,7 @@ bot.command("server", async (ctx) => {
 		return;
 	}
 	const packageRoot = resolvePackageRootForTelegram();
-	const launch = tryLaunchBridgeControl("stop", packageRoot);
+	const launch = await launchBridgeControlSafely("stop", packageRoot);
 	if (!launch.ok) {
 		await ctx.reply(formatBridgeControlLaunchFailure("stop", launch.error));
 		return;

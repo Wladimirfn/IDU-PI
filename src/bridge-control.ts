@@ -20,11 +20,17 @@ export type BridgeControlLaunchResult =
 	| { ok: true }
 	| { ok: false; error: Error };
 
+export type BridgeControlChild = {
+	once(event: "error", listener: (error: Error) => void): unknown;
+	removeListener(event: "error", listener: (error: Error) => void): unknown;
+	unref(): void;
+};
+
 export type BridgeControlSpawner = (
 	file: string,
 	args: string[],
 	options: SpawnOptions,
-) => { unref(): void };
+) => BridgeControlChild;
 
 export type BridgeControlIntent = {
 	type: "restart" | "stop";
@@ -92,21 +98,69 @@ function asError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error));
 }
 
+function spawnBridgeControl(
+	action: BridgeControlAction,
+	root: string,
+	spawner: BridgeControlSpawner,
+): BridgeControlChild {
+	const command = buildBridgeControlCommand(action, root);
+	return spawner(command.file, command.args, {
+		cwd: command.cwd,
+		detached: true,
+		stdio: "ignore",
+		windowsHide: false,
+	});
+}
+
 export function tryLaunchBridgeControl(
 	action: BridgeControlAction,
 	root: string,
 	spawner: BridgeControlSpawner = spawn,
 ): BridgeControlLaunchResult {
 	try {
-		const command = buildBridgeControlCommand(action, root);
-		const child = spawner(command.file, command.args, {
-			cwd: command.cwd,
-			detached: true,
-			stdio: "ignore",
-			windowsHide: false,
-		});
+		const child = spawnBridgeControl(action, root, spawner);
 		child.unref();
 		return { ok: true };
+	} catch (error) {
+		return { ok: false, error: asError(error) };
+	}
+}
+
+function waitForImmediateSpawnError(
+	child: BridgeControlChild,
+): Promise<BridgeControlLaunchResult> {
+	return new Promise((resolve) => {
+		let settled = false;
+		let immediate: NodeJS.Immediate | undefined;
+
+		const cleanup = (): void => {
+			child.removeListener("error", onError);
+			if (immediate !== undefined) clearImmediate(immediate);
+		};
+		const settle = (result: BridgeControlLaunchResult): void => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			resolve(result);
+		};
+		const onError = (error: Error): void => {
+			settle({ ok: false, error: asError(error) });
+		};
+
+		child.once("error", onError);
+		immediate = setImmediate(() => settle({ ok: true }));
+	});
+}
+
+export async function launchBridgeControlSafely(
+	action: BridgeControlAction,
+	root: string,
+	spawner: BridgeControlSpawner = spawn,
+): Promise<BridgeControlLaunchResult> {
+	try {
+		const child = spawnBridgeControl(action, root, spawner);
+		child.unref();
+		return await waitForImmediateSpawnError(child);
 	} catch (error) {
 		return { ok: false, error: asError(error) };
 	}

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import {
 	buildBridgeControlCommand,
 	consumeBridgeControlIntent,
 	formatBridgeStartupStatus,
+	launchBridgeControlSafely,
 	tryLaunchBridgeControl,
 	writeBridgeControlIntent,
 	type BridgeControlSpawner,
@@ -129,6 +131,45 @@ test("tryLaunchBridgeControl reports synchronous spawn failures", () => {
 	if (!result.ok) {
 		assert.match(result.error.message, /spawn failed/i);
 	}
+});
+
+class MockBridgeControlChild extends EventEmitter {
+	unrefCalled = false;
+
+	unref(): void {
+		this.unrefCalled = true;
+	}
+}
+
+test("launchBridgeControlSafely reports immediate async spawn errors", async () => {
+	let child: MockBridgeControlChild | undefined;
+	const spawner: BridgeControlSpawner = () => {
+		child = new MockBridgeControlChild();
+		process.nextTick(() => child?.emit("error", new Error("async spawn failed")));
+		return child;
+	};
+
+	const result = await launchBridgeControlSafely("stop", "C:\\bridge", spawner);
+
+	assert.equal(child?.unrefCalled, true);
+	assert.equal(result.ok, false);
+	if (!result.ok) {
+		assert.match(result.error.message, /async spawn failed/i);
+	}
+});
+
+test("launchBridgeControlSafely resolves after the immediate spawn-error window", async () => {
+	let child: MockBridgeControlChild | undefined;
+	const spawner: BridgeControlSpawner = () => {
+		child = new MockBridgeControlChild();
+		return child;
+	};
+
+	const result = await launchBridgeControlSafely("restart", "C:\\bridge", spawner);
+
+	assert.equal(child?.unrefCalled, true);
+	assert.deepEqual(result, { ok: true });
+	assert.equal(child?.listenerCount("error"), 0);
 });
 
 test("bridge lifecycle scripts require a root boundary when matching relative dist entrypoints", () => {
