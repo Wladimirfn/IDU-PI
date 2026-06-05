@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import {
@@ -17,7 +18,8 @@ export type ContextPruningSignalCategory =
 	| "stale_digest"
 	| "artifact_noise"
 	| "old_plan_or_spec"
-	| "semantic_debt";
+	| "semantic_debt"
+	| "prompt_context_pressure";
 
 export type ContextPruningSignalSeverity = "low" | "medium" | "high";
 export type ContextPruningSignalConfidence = "low" | "medium" | "high";
@@ -27,7 +29,8 @@ export type ContextPruningSignalSource =
 	| "source_digest"
 	| "docs_superpowers"
 	| "architectural_pruning_plan"
-	| "artifacts";
+	| "artifacts"
+	| "pi_prompt_context";
 
 export type ContextPruningAdvisorySignal = {
 	id: string;
@@ -50,6 +53,8 @@ export type ContextPruningAdvisoryTotals = {
 	oldPlans: number;
 	noisyArtifacts: number;
 	pruningCandidates: number;
+	piPromptContextFiles: number;
+	piPromptContextChars: number;
 };
 
 export type ContextPruningAdvisoryReport = {
@@ -74,6 +79,7 @@ export function buildContextPruningAdvisoryReport(input: {
 	repoRoot?: string;
 	now?: () => Date;
 	contextEventLimit?: number;
+	promptContextSnapshotPath?: string;
 }): ContextPruningAdvisoryReport {
 	const repoRoot = input.repoRoot ?? process.cwd();
 	const contextEvents = readContextQualityEvents(
@@ -102,6 +108,9 @@ export function buildContextPruningAdvisoryReport(input: {
 		projectId: input.projectId,
 		now: input.now,
 	});
+	const piPromptContext = readPiPromptContextSnapshot(
+		input.promptContextSnapshotPath ?? resolveDefaultPromptContextSnapshotPath(),
+	);
 	const signals: ContextPruningAdvisorySignal[] = [];
 
 	if (contextReport.truncatedEvents > 0) {
@@ -208,6 +217,29 @@ export function buildContextPruningAdvisoryReport(input: {
 		});
 	}
 
+	if (piPromptContext && piPromptContext.totalChars >= 50_000) {
+		signals.push({
+			id: "pi-prompt-context-pressure",
+			category: "prompt_context_pressure",
+			severity: piPromptContext.totalChars >= 80_000 ? "high" : "medium",
+			confidence: "high",
+			source: "pi_prompt_context",
+			evidenceRefs: [
+				`piPromptContextFiles:${piPromptContext.contextFileCount}`,
+				`piPromptContextChars:${piPromptContext.totalChars}`,
+				`piPromptSkills:${piPromptContext.skillCount}`,
+				`piPromptTools:${piPromptContext.toolCount}`,
+				`piPromptMode:${piPromptContext.mode}`,
+				...piPromptContext.paths.slice(0, 5).map((path) => `contextPath:${path}`),
+			],
+			summary:
+				"Pi prompt context snapshot indicates high prompt/context pressure before delegation.",
+			recommendedAction:
+				"Prune context files, skills, and tool surfaces before adding Bibliotecario evidence or external updates.",
+			blockedBy: defaultBlockers(),
+		});
+	}
+
 	if (pruningPlan.candidates.length > 0) {
 		signals.push({
 			id: "architectural-pruning-candidates-present",
@@ -246,12 +278,15 @@ export function buildContextPruningAdvisoryReport(input: {
 			oldPlans: plans.oldPlanOrSpecCount,
 			noisyArtifacts: artifactNoise.noisyArtifacts,
 			pruningCandidates: pruningPlan.candidates.length,
+			piPromptContextFiles: piPromptContext?.contextFileCount ?? 0,
+			piPromptContextChars: piPromptContext?.totalChars ?? 0,
 		},
 		limitations: [
 			"Advisory only: this report does not delete, archive, refactor, or promote contracts.",
 			"Source staleness is local file hash/size drift, not external web freshness.",
 			"Plan/spec metadata is a low-confidence signal, not proof of incomplete implementation.",
 			"Evidence refs are metadata paths/counts/ids only; raw prompts and raw docs are not stored.",
+			"Pi prompt context snapshots are treated as metadata-only; raw system prompt and context contents are ignored.",
 		],
 	};
 }
@@ -278,6 +313,7 @@ export function formatContextPruningAdvisoryPanel(
 		`- digests faltantes: ${report.totals.missingDigests}`,
 		`- planes/specs históricos: ${report.totals.oldPlans}`,
 		`- candidatos de poda: ${report.totals.pruningCandidates}`,
+		`- contexto Pi prompt: ${report.totals.piPromptContextFiles} archivo(s), ${report.totals.piPromptContextChars} chars metadata`,
 		categories,
 		"- advisory-only: sí",
 		"- borrado automático: no",
@@ -287,6 +323,71 @@ export function formatContextPruningAdvisoryPanel(
 	]
 		.filter(Boolean)
 		.join("\n");
+}
+
+type PiPromptContextSnapshotSummary = {
+	mode: string;
+	contextFileCount: number;
+	totalChars: number;
+	skillCount: number;
+	toolCount: number;
+	paths: string[];
+};
+
+function resolveDefaultPromptContextSnapshotPath(): string {
+	const override = process.env.IDU_PI_PROMPT_CONTEXT_PATH?.trim();
+	if (override) return override;
+	const home =
+		process.env.USERPROFILE?.trim() || process.env.HOME?.trim() || homedir();
+	return join(home, ".pi", "idu-pi", "prompt-context-snapshot.json");
+}
+
+function readPiPromptContextSnapshot(
+	path: string | undefined,
+): PiPromptContextSnapshotSummary | undefined {
+	if (!path || !existsSync(path)) return undefined;
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			return undefined;
+		}
+		const record = parsed as Record<string, unknown>;
+		if (record.rawContentIncluded !== false) return undefined;
+		const contextFiles = objectRecord(record.contextFiles);
+		const skills = objectRecord(record.skills);
+		const tools = objectRecord(record.tools);
+		return {
+			mode: safeString(record.mode) ?? "unknown",
+			contextFileCount: safeNumber(contextFiles.count),
+			totalChars: safeNumber(contextFiles.totalChars),
+			skillCount: safeNumber(skills.count),
+			toolCount: safeNumber(tools.count),
+			paths: Array.isArray(contextFiles.paths)
+				? contextFiles.paths.flatMap((entry) => {
+						const value = safeString(entry);
+						return value ? [value] : [];
+					})
+				: [],
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: {};
+}
+
+function safeNumber(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value)
+		? Math.max(0, Math.floor(value))
+		: 0;
+}
+
+function safeString(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function scanSuperpowerArtifacts(repoRoot: string, now: Date): {

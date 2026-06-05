@@ -95,6 +95,61 @@ test("semantic debt advisory report keeps safety flags and detects context bloat
 	}
 });
 
+test("semantic debt advisory reports Pi prompt context pressure without raw content", () => {
+	const temp = tempRoot();
+	try {
+		const repoRoot = join(temp, "repo");
+		const stateRoot = join(temp, "state", "projects", "demo");
+		const promptSnapshotPath = join(temp, "prompt-context-snapshot.json");
+		mkdirSync(repoRoot, { recursive: true });
+		writeFileSync(
+			promptSnapshotPath,
+			JSON.stringify({
+				version: 1,
+				mode: "tui",
+				generatedAt: "2026-06-05T00:00:00.000Z",
+				rawContentIncluded: false,
+				contextFiles: {
+					count: 7,
+					paths: ["AGENTS.md", "context.md", "docs/architecture.md"],
+					totalChars: 85_000,
+				},
+				skills: { count: 6, names: ["skill-a", "skill-b"] },
+				tools: { count: 42 },
+				limitations: ["metadata only"],
+				systemPrompt: "RAW_SYSTEM_PROMPT_MUST_NOT_LEAK",
+				content: "RAW_CONTEXT_MUST_NOT_LEAK",
+			}),
+			"utf8",
+		);
+
+		const report = buildContextPruningAdvisoryReport({
+			stateRoot,
+			projectId: "Demo",
+			repoRoot,
+			now,
+			promptContextSnapshotPath: promptSnapshotPath,
+		});
+
+		assert.equal(report.totals.piPromptContextFiles, 7);
+		assert.equal(report.totals.piPromptContextChars, 85_000);
+		const signal = report.signals.find(
+			(candidate) => candidate.id === "pi-prompt-context-pressure",
+		);
+		assert.ok(signal);
+		assert.equal(signal.severity, "high");
+		assert.equal(signal.source, "pi_prompt_context");
+		assert.ok(signal.evidenceRefs.includes("piPromptContextFiles:7"));
+		assert.ok(signal.evidenceRefs.includes("piPromptContextChars:85000"));
+		assert.ok(signal.evidenceRefs.includes("piPromptMode:tui"));
+		const serialized = JSON.stringify(report);
+		assert.equal(serialized.includes("RAW_SYSTEM_PROMPT_MUST_NOT_LEAK"), false);
+		assert.equal(serialized.includes("RAW_CONTEXT_MUST_NOT_LEAK"), false);
+	} finally {
+		rmSync(temp, { recursive: true, force: true });
+	}
+});
+
 test("semantic debt advisory reports stale sources, missing digest, and librarian actions", () => {
 	const temp = tempRoot();
 	try {
