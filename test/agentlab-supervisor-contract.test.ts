@@ -205,6 +205,10 @@ test("mapRiskToAgentLabSpecialties asigna señales a especialistas", () => {
 		mapRiskToAgentLabSpecialties({ text: "auth login security" }),
 		["security"],
 	);
+	assert.deepEqual(
+		mapRiskToAgentLabSpecialties({ text: "advisory-only authority" }),
+		["librarian"],
+	);
 	assert.deepEqual(mapRiskToAgentLabSpecialties({ text: "DB schema" }), [
 		"database",
 	]);

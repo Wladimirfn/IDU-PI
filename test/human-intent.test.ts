@@ -147,6 +147,18 @@ test("classifyIntentDeterministic handles required auth and task examples", () =
 	}
 });
 
+test("classifyIntentDeterministic does not treat authority as auth", () => {
+	const result = classifyIntentDeterministic("advisory-only authority");
+
+	assert.equal(result.concepts.includes("auth"), false);
+	assert.equal(result.concepts.includes("login"), false);
+	assert.equal(result.concepts.includes("security"), false);
+	assert.equal(result.riskHints.includes("auth_change"), false);
+	assert.equal(result.riskHints.includes("security"), false);
+	assert.notEqual(result.riskHint, "high");
+	assert.equal(result.shouldBlockIfIduActive, false);
+});
+
 test("classifyIntentDeterministic handles change docs and review examples", () => {
 	const table = [
 		["cambia tabla users", "change_request", "feature", ["database", "schema"]],

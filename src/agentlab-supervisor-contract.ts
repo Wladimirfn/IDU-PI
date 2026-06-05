@@ -1019,7 +1019,11 @@ export function mapRiskToAgentLabSpecialties(
 		.join("\n")
 		.toLowerCase();
 	const specialties: AgentLabSpecialty[] = [];
-	if (/auth|login|security|secret|permission|permiso|bearer/u.test(text)) {
+	if (
+		/(^|[^\p{L}\p{N}_])(auth|login|security|secret|permission|permiso|bearer)($|[^\p{L}\p{N}_])/u.test(
+			text,
+		)
+	) {
 		specialties.push("security");
 	}
 	if (
