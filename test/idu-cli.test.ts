@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +95,7 @@ import {
 	StructuredTaskQueue,
 	type StructuredTask,
 } from "../src/structured-task-queue.js";
+import type { TaskTemplateKind } from "../src/task-templates.js";
 
 async function withRuntime(
 	fn: (
@@ -886,6 +887,7 @@ function fakePrepare(projectPath: string): IduPrepareResult {
 }
 
 function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
+	const tasks: StructuredTask[] = [];
 	const runtime: CliRuntime = {
 		projectId: "pi-telegram-bridge",
 		projectPath,
@@ -1522,7 +1524,12 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 				"",
 				"Solo registré tareas para revisión. No ejecuté AgentLabs.",
 			].join("\n"),
-		createTask: fakeTask,
+		createTask: (_kind: TaskTemplateKind, details: string) => {
+			const task = { ...fakeTask(), id: `task-${tasks.length + 1}`, text: details };
+			tasks.push(task);
+			return task;
+		},
+		listTasks: () => tasks.map((task) => ({ ...task })),
 		formatTask: (task) =>
 			[
 				"Idu-pi Task",
@@ -1610,6 +1617,57 @@ test("CLI master-plan commands are wired with aliases", async () => {
 		);
 		assert.equal(redraft.exitCode, 0);
 		assert.match(redraft.stdout, /draft/u);
+	});
+});
+
+test("CLI alert commands expose status tick and control safely", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `telegram bug repeated ${index}`);
+		}
+
+		const status = await runCliCommand(["alerts", "status"], runtime);
+		assert.equal(status.exitCode, 0);
+		assert.match(status.stdout, /Autonomous Alerts/u);
+		assert.match(status.stdout, /rawHonesty: true/u);
+		assert.match(status.stdout, /No implementé código/u);
+		assert.equal(existsSync(join(workspaceRoot, "reports")), false);
+
+		const beforeTick = runtime.listTasks?.().length ?? 0;
+		const tick = await runCliCommand(["alerts", "tick"], runtime);
+		assert.equal(tick.exitCode, 0);
+		assert.match(tick.stdout, /allowTaskCreation: false/u);
+		assert.equal(runtime.listTasks?.().length ?? 0, beforeTick);
+
+		const pause = await runCliCommand(
+			["alerts", "control", "pause", "60"],
+			runtime,
+		);
+		assert.equal(pause.exitCode, 0);
+		assert.match(pause.stdout, /Alert control updated/u);
+		const statePath = join(
+			workspaceRoot,
+			"reports",
+			"autonomous-alert-engine-state.json",
+		);
+		assert.equal(existsSync(statePath), true);
+		assert.match(readFileSync(statePath, "utf8"), /pausedUntil/u);
+	});
+});
+
+test("CLI alert tick requires explicit allow-task-creation", async () => {
+	await withRuntime(async (runtime) => {
+		for (let index = 0; index < 4; index += 1) {
+			runtime.createTask("bug", `telegram bug repeated ${index}`);
+		}
+		const result = await runCliCommand(
+			["alerts", "tick", "--allow-task-creation"],
+			runtime,
+		);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /allowTaskCreation: true/u);
+		assert.match(result.stdout, /Tareas creadas:/u);
+		assert.ok((runtime.listTasks?.().length ?? 0) > 4);
 	});
 });
 
