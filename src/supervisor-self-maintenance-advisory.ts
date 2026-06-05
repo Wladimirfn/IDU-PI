@@ -5,7 +5,9 @@ export type SupervisorSelfMaintenanceSignalCategory =
 	| "stale_tasks"
 	| "repeated_failure_patterns"
 	| "neglected_areas"
-	| "learning_loop_pressure";
+	| "learning_loop_pressure"
+	| "semantic_audit_pressure"
+	| "supervisor_activity_pressure";
 
 export type SupervisorSelfMaintenanceSeverity = "info" | "warning" | "high";
 
@@ -17,19 +19,20 @@ export type SupervisorSelfMaintenanceSignal = {
 	evidenceRefs: string[];
 	summary: string;
 	recommendedActions: string[];
+	bibliotecarioInputs?: string[];
 	skillLearningInputs?: string[];
 };
 
 export type SupervisorSelfMaintenanceTotals = {
-	totalTasks: number;
-	openTasks: number;
 	pendingTasks: number;
 	runningTasks: number;
-	doneTasks: number;
 	failedTasks: number;
-	stalePendingTasks: number;
-	staleRunningTasks: number;
 	staleTasks: number;
+	guardedTasks: number;
+	supervisorEvents: number;
+	usageFailures: number;
+	agentLabStaleRequests: number;
+	semanticNewEvents: number;
 };
 
 export type SupervisorSelfMaintenanceAdvisory = {
@@ -75,7 +78,6 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 	);
 	const pendingTasks = tasks.filter((task) => task.status === "pending");
 	const runningTasks = tasks.filter((task) => task.status === "running");
-	const doneTasks = tasks.filter((task) => task.status === "done");
 	const failedTasks = tasks.filter((task) => task.status === "failed");
 	const openTasks = pendingTasks.length + runningTasks.length;
 	const stalePendingTasks = pendingTasks.filter(
@@ -109,15 +111,15 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		rulesApplied: false,
 		skillsModified: false,
 		totals: {
-			totalTasks: tasks.length,
-			openTasks,
 			pendingTasks: pendingTasks.length,
 			runningTasks: runningTasks.length,
-			doneTasks: doneTasks.length,
 			failedTasks: failedTasks.length,
-			stalePendingTasks: stalePendingTasks.length,
-			staleRunningTasks: staleRunningTasks.length,
 			staleTasks: stalePendingTasks.length + staleRunningTasks.length,
+			guardedTasks: 0,
+			supervisorEvents: 0,
+			usageFailures: 0,
+			agentLabStaleRequests: 0,
+			semanticNewEvents: 0,
 		},
 		signals,
 		recommendedActions: recommendedActionsFor(signals),

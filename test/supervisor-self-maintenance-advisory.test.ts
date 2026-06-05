@@ -31,9 +31,26 @@ test("self-maintenance advisory detects backlog and stale pressure", () => {
 	assert.equal(report.agentLabsExecuted, false);
 	assert.equal(report.rulesApplied, false);
 	assert.equal(report.skillsModified, false);
+	assert.deepEqual(Object.keys(report.totals).sort(), [
+		"agentLabStaleRequests",
+		"failedTasks",
+		"guardedTasks",
+		"pendingTasks",
+		"runningTasks",
+		"semanticNewEvents",
+		"staleTasks",
+		"supervisorEvents",
+		"usageFailures",
+	]);
 	assert.equal(report.totals.pendingTasks, 15);
 	assert.equal(report.totals.runningTasks, 6);
+	assert.equal(report.totals.failedTasks, 0);
 	assert.equal(report.totals.staleTasks, 21);
+	assert.equal(report.totals.guardedTasks, 0);
+	assert.equal(report.totals.supervisorEvents, 0);
+	assert.equal(report.totals.usageFailures, 0);
+	assert.equal(report.totals.agentLabStaleRequests, 0);
+	assert.equal(report.totals.semanticNewEvents, 0);
 	assert.ok(report.recommendedActions.length > 0);
 	assert.ok(
 		report.signals.some((signal) => signal.category === "backlog_pressure"),
@@ -73,6 +90,11 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 
 	assert.equal(report.version, 1);
 	assert.equal(report.mode, "advisory_only");
+	assert.equal(report.totals.guardedTasks, 0);
+	assert.equal(report.totals.supervisorEvents, 0);
+	assert.equal(report.totals.usageFailures, 0);
+	assert.equal(report.totals.agentLabStaleRequests, 0);
+	assert.equal(report.totals.semanticNewEvents, 0);
 	assert.ok(report.recommendedActions.length > 0);
 	const repeated = report.signals.find(
 		(signal) => signal.category === "repeated_failure_patterns",
@@ -89,10 +111,20 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 
 function assertSignalContract(signal: {
 	id: string;
+	category:
+		| "backlog_pressure"
+		| "stale_tasks"
+		| "repeated_failure_patterns"
+		| "neglected_areas"
+		| "learning_loop_pressure"
+		| "semantic_audit_pressure"
+		| "supervisor_activity_pressure";
 	confidence: number;
 	evidenceRefs: string[];
 	summary: string;
 	recommendedActions: string[];
+	bibliotecarioInputs?: string[];
+	skillLearningInputs?: string[];
 }): void {
 	assert.equal(typeof signal.id, "string");
 	assert.ok(signal.id.length > 0);
