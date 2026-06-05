@@ -6,7 +6,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 
 export type BridgeControlAction = "status" | "restart" | "stop";
 
@@ -37,16 +37,30 @@ export type BridgeStartupStatusInput = {
 	now: Date;
 };
 
-const powershellArgs = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass"];
+const powershellArgs = [
+	"powershell",
+	"-NoProfile",
+	"-ExecutionPolicy",
+	"Bypass",
+];
 
 function cmdStartTitle(title: string): string {
 	return `"${title}"`;
+}
+
+function normalizeBridgeRoot(root: string): string {
+	const normalizedRoot = normalize(root);
+	if (/[\r\n&|<>^;%!]/u.test(normalizedRoot)) {
+		throw new Error("Bridge root contains unsafe shell metacharacters");
+	}
+	return normalizedRoot;
 }
 
 export function buildBridgeControlCommand(
 	action: BridgeControlAction,
 	root: string,
 ): BridgeControlCommand {
+	const safeRoot = normalizeBridgeRoot(root);
 	return {
 		file: "cmd.exe",
 		args: [
@@ -57,14 +71,17 @@ export function buildBridgeControlCommand(
 			"/c",
 			...powershellArgs,
 			"-File",
-			join(root, "scripts", "bridge-control.ps1"),
+			join(safeRoot, "scripts", "bridge-control.ps1"),
 			action,
 		],
-		cwd: root,
+		cwd: safeRoot,
 	};
 }
 
-export function launchBridgeControl(action: BridgeControlAction, root: string): void {
+export function launchBridgeControl(
+	action: BridgeControlAction,
+	root: string,
+): void {
 	const command = buildBridgeControlCommand(action, root);
 	const child = spawn(command.file, command.args, {
 		cwd: command.cwd,
@@ -90,7 +107,11 @@ export function consumeBridgeControlIntent(
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
 		rmSync(path, { force: true });
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		if (
+			typeof parsed !== "object" ||
+			parsed === null ||
+			Array.isArray(parsed)
+		) {
 			return undefined;
 		}
 		const record = parsed as Record<string, unknown>;
@@ -123,7 +144,9 @@ export function consumeBridgeControlIntent(
 	}
 }
 
-export function formatBridgeStartupStatus(input: BridgeStartupStatusInput): string {
+export function formatBridgeStartupStatus(
+	input: BridgeStartupStatusInput,
+): string {
 	return [
 		"✅ Bridge iniciado",
 		"",

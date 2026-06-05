@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { buildBridgeControlCommand } from "./bridge-control.js";
 
 export type BridgeLifecycleAction = "run" | "restart" | "off";
 
@@ -24,6 +25,8 @@ export function buildBridgeLifecycleCommand(
   action: BridgeLifecycleAction,
   root: string,
 ): BridgeLifecycleCommand {
+  if (action === "restart") return buildBridgeControlCommand("restart", root);
+
   const script = join(
     root,
     "scripts",

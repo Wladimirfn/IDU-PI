@@ -77,3 +77,16 @@ test("bridge control command launches deterministic helper", () => {
 	]);
 	assert.equal(command.cwd, "C:\\bridge");
 });
+
+test("bridge control command allows roots with spaces", () => {
+	const command = buildBridgeControlCommand("restart", "C:\\bridge root");
+	assert.equal(command.args.at(-2), "C:\\bridge root\\scripts\\bridge-control.ps1");
+	assert.equal(command.cwd, "C:\\bridge root");
+});
+
+test("bridge control command rejects unsafe shell metacharacters in root", () => {
+	assert.throws(
+		() => buildBridgeControlCommand("restart", "C:\\bridge&echo owned"),
+		/unsafe shell metacharacters/i,
+	);
+});
