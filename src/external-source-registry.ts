@@ -1,3 +1,12 @@
+import {
+	buildBibliotecarioEvidencePolicy,
+	policyForSourceRecommendation,
+	type BibliotecarioCanonicality,
+	type BibliotecarioClaimType,
+	type BibliotecarioEvidencePolicy,
+	type BibliotecarioEvidenceRole,
+} from "./bibliotecario-evidence-policy.js";
+
 export type ExternalSourceRegistryVersion = 1;
 
 export type ExternalSourceCategory =
@@ -89,6 +98,12 @@ export type ExternalSourceRegistryRecommendation = {
 	automationMode: ExternalSourceAutomationMode;
 	orchestratorInstruction: string;
 	promotionAllowed: false;
+	claimType: BibliotecarioClaimType;
+	evidenceRole: BibliotecarioEvidenceRole;
+	canonicality: BibliotecarioCanonicality;
+	requiresCorroboration: boolean;
+	forbiddenAsSoleAuthority: boolean;
+	policyWarnings: string[];
 };
 
 export type ExternalSourceRecommendationReport = {
@@ -102,6 +117,7 @@ export type ExternalSourceRecommendationReport = {
 		framework?: string;
 	};
 	matches: ExternalSourceRegistryRecommendation[];
+	evidencePolicy: BibliotecarioEvidencePolicy;
 	missingKnowledge: string[];
 	limitations: string[];
 	advisoryOnly: true;
@@ -622,6 +638,15 @@ export function recommendExternalSources(input: {
 	const language = normalizeTerm(input.language);
 	const framework = normalizeTerm(input.framework);
 	const requestTerms = terms(request);
+	const policyRequest = [
+		request,
+		...requestedDomains,
+		language,
+		framework,
+	].join(" ");
+	const evidencePolicy = buildBibliotecarioEvidencePolicy({
+		request: policyRequest,
+	});
 	const scored = SOURCES.map((source) => ({
 		source,
 		score: scoreSource(source, {
@@ -636,7 +661,7 @@ export function recommendExternalSources(input: {
 		.slice(0, maxMatches);
 
 	const matches = scored.map(({ source, score }) =>
-		recommendationFor(source, score),
+		recommendationFor(source, score, policyRequest),
 	);
 	return {
 		version: 1,
@@ -649,6 +674,7 @@ export function recommendExternalSources(input: {
 			framework: framework || undefined,
 		},
 		matches,
+		evidencePolicy,
 		missingKnowledge: matches.length
 			? []
 			: [
@@ -760,9 +786,15 @@ function scoreSource(
 function recommendationFor(
 	source: ExternalSourceDescriptor,
 	score: number,
+	request: string,
 ): ExternalSourceRegistryRecommendation {
 	const community = source.category === "community_signal";
 	const blocked = source.category === "blocked_or_manual";
+	const policy = policyForSourceRecommendation({
+		request,
+		category: source.category,
+		trustLevel: source.trustLevel,
+	});
 	return {
 		sourceId: source.id,
 		name: source.name,
@@ -778,6 +810,12 @@ function recommendationFor(
 				? "Señal comunitaria únicamente: usar para alertas/ejemplos tempranos y exigir verificación humana más evidencia oficial antes de decidir."
 				: "Use as advisory source pointer; consult/validate source externally before promoting any rule or plan claim.",
 		promotionAllowed: false,
+		claimType: policy.claimType,
+		evidenceRole: policy.evidenceRole,
+		canonicality: policy.canonicality,
+		requiresCorroboration: policy.requiresCorroboration,
+		forbiddenAsSoleAuthority: policy.forbiddenAsSoleAuthority,
+		policyWarnings: policy.policyWarnings,
 	};
 }
 

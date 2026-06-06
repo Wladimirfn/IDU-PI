@@ -154,6 +154,19 @@ test("English database request is high risk", () => {
 	assert.ok(report.affectedAreas.includes("datos"));
 });
 
+test("authority wording is low risk and does not imply auth", () => {
+	const report = analyzeProjectPreflight("advisory-only authority", {
+		connection: connection(),
+		blueprint,
+		flows,
+	});
+
+	assert.equal(report.risk, "low");
+	assert.equal(report.okToProceed, true);
+	assert.equal(report.requiresHumanConfirmation, false);
+	assert.equal(report.affectedAreas.includes("auth/seguridad"), false);
+});
+
 test("auth/login request is high risk", () => {
 	const report = analyzeProjectPreflight("cambia login y permisos", {
 		connection: connection(),

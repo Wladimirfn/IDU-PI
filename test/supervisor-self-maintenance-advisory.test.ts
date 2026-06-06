@@ -36,6 +36,8 @@ test("self-maintenance advisory detects backlog and stale pressure", () => {
 		"staleTasks",
 		"supervisorEvents",
 		"usageFailures",
+		"usageNotAllowed",
+		"usageRequiresHuman",
 	]);
 	assert.equal(report.totals.pendingTasks, 15);
 	assert.equal(report.totals.runningTasks, 6);
@@ -213,6 +215,48 @@ test("self-maintenance advisory includes semantic and usage inputs in totals and
 	);
 });
 
+test("self-maintenance advisory separates hard usage failures from human gates", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: [],
+		supervisorEvents: 2,
+		usageFailures: 1,
+		usageNotAllowed: 10,
+		usageRequiresHuman: 10,
+		supervisorActivitySkipped: 3,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(report.totals.usageFailures, 1);
+	assert.equal(report.totals.usageNotAllowed, 10);
+	assert.equal(report.totals.usageRequiresHuman, 10);
+	assert.equal(
+		report.signals.some(
+			(signal) => signal.category === "repeated_failure_patterns",
+		),
+		false,
+	);
+	const activity = report.signals.find(
+		(signal) => signal.category === "supervisor_activity_pressure",
+	);
+	assert.ok(activity);
+	assertSignalContract(activity);
+	assert.ok(
+		activity.evidenceRefs.some((ref) => ref === "idu-usage-events:failures=1"),
+	);
+	assert.ok(
+		activity.evidenceRefs.some(
+			(ref) => ref === "idu-usage-events:notAllowed=10",
+		),
+	);
+	assert.ok(
+		activity.evidenceRefs.some(
+			(ref) => ref === "idu-usage-events:requiresHuman=10",
+		),
+	);
+});
+
 test("self-maintenance advisory detects missing supervisor activity during pressure", () => {
 	const report = buildSupervisorSelfMaintenanceAdvisory({
 		projectId: "idu-pi",
@@ -233,6 +277,38 @@ test("self-maintenance advisory detects missing supervisor activity during press
 	assertSignalContract(activity);
 	assert.ok(
 		activity.evidenceRefs.some((ref) => ref === "supervisor-activity:events=0"),
+	);
+});
+
+test("self-maintenance advisory separates skipped and throttled supervisor pressure", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: [],
+		supervisorEvents: 4,
+		usageFailures: 1,
+		supervisorActivitySkipped: 0,
+		supervisorActivityThrottled: 4,
+	});
+
+	assertTopLevelContract(report);
+	const activity = report.signals.find(
+		(signal) => signal.category === "supervisor_activity_pressure",
+	);
+	assert.ok(activity);
+	assertSignalContract(activity);
+	assert.equal(activity.severity, "warning");
+	assert.match(activity.summary, /throttled/u);
+	assert.doesNotMatch(activity.summary, /absent or throttled/u);
+	assert.ok(
+		activity.evidenceRefs.some(
+			(ref) => ref === "supervisor-activity:skipped=0",
+		),
+	);
+	assert.ok(
+		activity.evidenceRefs.some(
+			(ref) => ref === "supervisor-activity:throttled=4",
+		),
 	);
 });
 

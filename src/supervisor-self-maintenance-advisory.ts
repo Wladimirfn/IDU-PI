@@ -36,6 +36,8 @@ export type SupervisorSelfMaintenanceTotals = {
 	guardedTasks: number;
 	supervisorEvents: number;
 	usageFailures: number;
+	usageNotAllowed: number;
+	usageRequiresHuman: number;
 	agentLabStaleRequests: number;
 	semanticNewEvents: number;
 };
@@ -62,6 +64,8 @@ export type BuildSupervisorSelfMaintenanceAdvisoryInput = {
 	tasks: readonly StructuredTask[];
 	supervisorEvents?: number;
 	usageFailures?: number;
+	usageNotAllowed?: number;
+	usageRequiresHuman?: number;
 	agentLabStaleRequests?: number;
 	semanticNewEvents?: number;
 	supervisorActivitySkipped?: number;
@@ -135,6 +139,8 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		guardedTasks: tasks.filter(isGuardedTask).length,
 		supervisorEvents: boundedCount(input.supervisorEvents),
 		usageFailures: boundedCount(input.usageFailures),
+		usageNotAllowed: boundedCount(input.usageNotAllowed),
+		usageRequiresHuman: boundedCount(input.usageRequiresHuman),
 		agentLabStaleRequests: boundedCount(input.agentLabStaleRequests),
 		semanticNewEvents: boundedCount(input.semanticNewEvents),
 	};
@@ -179,6 +185,8 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		openTasks,
 		staleTasks: totals.staleTasks,
 		usageFailures: totals.usageFailures,
+		usageNotAllowed: totals.usageNotAllowed,
+		usageRequiresHuman: totals.usageRequiresHuman,
 		agentLabStaleRequests: totals.agentLabStaleRequests,
 		semanticNewEvents: totals.semanticNewEvents,
 		supervisorActivitySkipped,
@@ -401,6 +409,8 @@ function buildSupervisorActivityPressureSignal(input: {
 	openTasks: number;
 	staleTasks: number;
 	usageFailures: number;
+	usageNotAllowed: number;
+	usageRequiresHuman: number;
 	agentLabStaleRequests: number;
 	semanticNewEvents: number;
 	supervisorActivitySkipped: number;
@@ -410,6 +420,8 @@ function buildSupervisorActivityPressureSignal(input: {
 		input.openTasks +
 		input.staleTasks +
 		input.usageFailures +
+		input.usageNotAllowed +
+		input.usageRequiresHuman +
 		input.agentLabStaleRequests +
 		Math.floor(input.semanticNewEvents / 25);
 	const skippedOrThrottled =
@@ -432,18 +444,33 @@ function buildSupervisorActivityPressureSignal(input: {
 			`structured-task-queue:open=${input.openTasks}`,
 			`structured-task-queue:stale=${input.staleTasks}`,
 			`idu-usage-events:failures=${input.usageFailures}`,
+			`idu-usage-events:notAllowed=${input.usageNotAllowed}`,
+			`idu-usage-events:requiresHuman=${input.usageRequiresHuman}`,
 			`agentlab-review-requests:stale=${input.agentLabStaleRequests}`,
 			`semantic-events:new=${input.semanticNewEvents}`,
 			`supervisor-activity:skipped=${input.supervisorActivitySkipped}`,
 			`supervisor-activity:throttled=${input.supervisorActivityThrottled}`,
 		],
-		summary:
-			"Supervisor activity is absent or throttled while maintenance pressure exists",
+		summary: supervisorActivityPressureSummary(input),
 		recommendedActions: [
 			"Review why supervisor activity is absent, skipped, or throttled before increasing automation scope.",
 			"Resolve stale/backlog signals or record bounded supervisor activity evidence for the next advisory run.",
 		],
 	};
+}
+
+function supervisorActivityPressureSummary(input: {
+	supervisorEvents: number;
+	supervisorActivitySkipped: number;
+	supervisorActivityThrottled: number;
+}): string {
+	if (input.supervisorEvents === 0) {
+		return "Supervisor activity events are absent while maintenance pressure exists";
+	}
+	if (input.supervisorActivityThrottled > 0) {
+		return "Supervisor activity is throttled while maintenance pressure exists";
+	}
+	return "Supervisor activity is being skipped while maintenance pressure exists";
 }
 
 function buildLearningLoopSignal(

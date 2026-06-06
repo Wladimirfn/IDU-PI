@@ -61,7 +61,10 @@ test("external source registry is versioned, complete, and no-fetch safe", () =>
 		assert.equal(registry.domains.includes(domain), true, domain);
 	}
 	for (const id of requiredSourceIds) {
-		assert.ok(registry.sources.find((source) => source.id === id), id);
+		assert.ok(
+			registry.sources.find((source) => source.id === id),
+			id,
+		);
 	}
 
 	assert.deepEqual(registry.safety, {
@@ -83,7 +86,8 @@ test("external source registry is versioned, complete, and no-fetch safe", () =>
 test("external source recommendation guides HTML separation without web fetch", () => {
 	const report = recommendExternalSources({
 		projectId: "idu-pi",
-		request: "HTML sin JavaScript embebido ni onclick inline; separar estructura, eventos y servicios",
+		request:
+			"HTML sin JavaScript embebido ni onclick inline; separar estructura, eventos y servicios",
 		domains: ["web", "separation_of_concerns", "programming_structure"],
 		language: "html",
 		now: () => new Date("2026-06-04T12:00:00.000Z"),
@@ -99,7 +103,9 @@ test("external source recommendation guides HTML separation without web fetch", 
 		),
 	);
 	assert.ok(
-		report.matches.some((match) => /HTML|semántica|inline|embebido/iu.test(match.whyRelevant)),
+		report.matches.some((match) =>
+			/HTML|semántica|inline|embebido/iu.test(match.whyRelevant),
+		),
 	);
 	assert.equal(JSON.stringify(report).includes("<script>raw prompt"), false);
 });
@@ -107,8 +113,13 @@ test("external source recommendation guides HTML separation without web fetch", 
 test("external source recommendation covers TypeScript and Next.js project structure", () => {
 	const report = recommendExternalSources({
 		projectId: "idu-pi",
-		request: "estructura de carpetas para una app TypeScript Next.js con routing, services y tests",
-		domains: ["programming_structure", "code_architecture", "project_similarity"],
+		request:
+			"estructura de carpetas para una app TypeScript Next.js con routing, services y tests",
+		domains: [
+			"programming_structure",
+			"code_architecture",
+			"project_similarity",
+		],
 		language: "typescript",
 		framework: "nextjs",
 		maxMatches: 6,
@@ -116,14 +127,14 @@ test("external source recommendation covers TypeScript and Next.js project struc
 
 	assert.ok(report.matches.length > 0);
 	assert.ok(
-		report.matches.some((match) => match.sourceId === "github-similar-projects"),
+		report.matches.some(
+			(match) => match.sourceId === "github-similar-projects",
+		),
 	);
 	assert.ok(
 		report.matches.some((match) => match.domains.includes("code_architecture")),
 	);
-	assert.ok(
-		report.matches.every((match) => match.promotionAllowed === false),
-	);
+	assert.ok(report.matches.every((match) => match.promotionAllowed === false));
 });
 
 test("external source recommendation separates standards, civil works, academic discovery, and manual blocks", () => {
@@ -142,8 +153,19 @@ test("external source recommendation separates standards, civil works, academic 
 		request: "buscar papers académicos y evidencia científica",
 		domains: ["academic"],
 	});
-	for (const id of ["openalex", "crossref", "semantic-scholar", "arxiv", "pubmed", "doaj", "base-search"]) {
-		assert.ok(academic.matches.some((match) => match.sourceId === id), id);
+	for (const id of [
+		"openalex",
+		"crossref",
+		"semantic-scholar",
+		"arxiv",
+		"pubmed",
+		"doaj",
+		"base-search",
+	]) {
+		assert.ok(
+			academic.matches.some((match) => match.sourceId === id),
+			id,
+		);
 	}
 
 	const blocked = recommendExternalSources({
@@ -171,17 +193,58 @@ test("external source recommendation separates standards, civil works, academic 
 test("external source recommendation marks GitHub Reddit and X as community signals", () => {
 	const report = recommendExternalSources({
 		projectId: "idu-pi",
-		request: "noticias de lenguajes, issues, releases y proyectos similares en GitHub Reddit X",
+		request:
+			"noticias de lenguajes, issues, releases y proyectos similares en GitHub Reddit X",
 		domains: ["community_signal" as ExternalSourceDomain, "project_similarity"],
 		maxMatches: 8,
 	});
 
-	for (const id of ["github-similar-projects", "github-issues", "github-releases", "reddit", "x-public-posts-accounts"]) {
+	for (const id of [
+		"github-similar-projects",
+		"github-issues",
+		"github-releases",
+		"reddit",
+		"x-public-posts-accounts",
+	]) {
 		const match = report.matches.find((entry) => entry.sourceId === id);
 		assert.ok(match, id);
 		assert.equal(match.category, "community_signal", id);
-		assert.match(match.orchestratorInstruction, /verificaci[oó]n humana|señal/i, id);
+		assert.match(
+			match.orchestratorInstruction,
+			/verificaci[oó]n humana|señal/i,
+			id,
+		);
+		assert.equal(match.evidenceRole, "discovery", id);
+		assert.equal(match.canonicality, "weak", id);
+		assert.equal(match.requiresCorroboration, true, id);
+		assert.equal(match.forbiddenAsSoleAuthority, true, id);
 	}
+});
+
+test("external source recommendation exposes security evidence policy metadata", () => {
+	const report = recommendExternalSources({
+		projectId: "idu-pi",
+		request: "security vulnerability CVE OWASP advisory for npm dependency",
+		domains: ["security", "standards"],
+		maxMatches: 8,
+	});
+
+	assert.equal(report.evidencePolicy.claimType, "security");
+	assert.equal(report.evidencePolicy.rawHonesty, true);
+	assert.equal(report.evidencePolicy.webFetchAllowed, false);
+	assert.equal(report.evidencePolicy.rawContentIncluded, false);
+	assert.equal(report.evidencePolicy.contractPromotionAllowed, false);
+	assert.equal(report.fetchAllowed, false);
+	assert.equal(report.rawDocsStored, false);
+	assert.equal(report.promotionAllowed, false);
+	const standardsMatch = report.matches.find(
+		(match) => match.sourceId === "iso-obp",
+	);
+	assert.ok(standardsMatch);
+	assert.equal(standardsMatch.claimType, "security");
+	assert.equal(standardsMatch.evidenceRole, "primary");
+	assert.equal(standardsMatch.canonicality, "canonical");
+	assert.equal(standardsMatch.promotionAllowed, false);
 });
 
 test("external source recommendation reports missing knowledge instead of generic claims", () => {

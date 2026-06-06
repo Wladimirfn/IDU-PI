@@ -109,7 +109,8 @@ export function buildContextPruningAdvisoryReport(input: {
 		now: input.now,
 	});
 	const piPromptContext = readPiPromptContextSnapshot(
-		input.promptContextSnapshotPath ?? resolveDefaultPromptContextSnapshotPath(),
+		input.promptContextSnapshotPath ??
+			resolveDefaultPromptContextSnapshotPath(),
 	);
 	const signals: ContextPruningAdvisorySignal[] = [];
 
@@ -126,6 +127,9 @@ export function buildContextPruningAdvisoryReport(input: {
 				...Object.entries(contextReport.omittedReasons).map(
 					([reason, count]) => `omittedReason:${reason}:${count}`,
 				),
+				...Object.entries(contextReport.omittedPaths)
+					.slice(0, 8)
+					.map(([path, count]) => `omittedPath:${path}:${count}`),
 			],
 			summary:
 				"Supervisor context packs are hitting budget limits or omitting sections.",
@@ -230,7 +234,9 @@ export function buildContextPruningAdvisoryReport(input: {
 				`piPromptSkills:${piPromptContext.skillCount}`,
 				`piPromptTools:${piPromptContext.toolCount}`,
 				`piPromptMode:${piPromptContext.mode}`,
-				...piPromptContext.paths.slice(0, 5).map((path) => `contextPath:${path}`),
+				...piPromptContext.paths
+					.slice(0, 5)
+					.map((path) => `contextPath:${path}`),
 			],
 			summary:
 				"Pi prompt context snapshot indicates high prompt/context pressure before delegation.",
@@ -348,7 +354,11 @@ function readPiPromptContextSnapshot(
 	if (!path || !existsSync(path)) return undefined;
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		if (
+			typeof parsed !== "object" ||
+			parsed === null ||
+			Array.isArray(parsed)
+		) {
 			return undefined;
 		}
 		const record = parsed as Record<string, unknown>;
@@ -390,7 +400,10 @@ function safeString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function scanSuperpowerArtifacts(repoRoot: string, now: Date): {
+function scanSuperpowerArtifacts(
+	repoRoot: string,
+	now: Date,
+): {
 	oldPlanOrSpecCount: number;
 	olderThan30Days: number;
 	totalBytes: number;
@@ -444,7 +457,10 @@ function listMarkdownFiles(
 					const stat = statSync(absolutePath);
 					return [
 						{
-							relativePath: relative(repoRoot, absolutePath).replace(/\\/gu, "/"),
+							relativePath: relative(repoRoot, absolutePath).replace(
+								/\\/gu,
+								"/",
+							),
 							sizeBytes: stat.size,
 							mtimeMs: stat.mtimeMs,
 						},

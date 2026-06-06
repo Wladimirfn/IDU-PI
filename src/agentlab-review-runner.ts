@@ -165,7 +165,8 @@ export async function runAgentLabReviewRequestFile(
 				requiresHumanApproval: true,
 				workloadEnvelope: buildAgentLabWorkloadEnvelope({
 					status: "failed",
-					statusReason: "AgentLab request file was invalid; no labs were executed.",
+					statusReason:
+						"AgentLab request file was invalid; no labs were executed.",
 					generatedAt,
 					source: "run",
 					requestIds: ["invalid-request-file"],
@@ -1470,13 +1471,17 @@ function resolveRunPath(
 	const reports = resolve(reportsPath);
 	if (pathOrLatest.trim() === "latest") {
 		const latest = latestRunFile(reports);
-		return latest
+		if (!latest) {
+			return {
+				valid: false,
+				path: reports,
+				errors: ["No encontré runs AgentLab en agentlabs/runs ni reports."],
+			};
+		}
+		const fileCheck = validateAgentLabArtifactFile(latest);
+		return fileCheck.valid
 			? { valid: true, path: latest, errors: [] }
-			: {
-					valid: false,
-					path: reports,
-					errors: ["No encontré runs AgentLab en agentlabs/runs ni reports."],
-				};
+			: { valid: false, path: latest, errors: fileCheck.errors };
 	}
 	const trimmed = pathOrLatest.trim();
 	if (!trimmed)
@@ -1504,14 +1509,10 @@ function resolveRunPath(
 			],
 		};
 	}
-	if (!existsSync(candidate)) {
-		return {
-			valid: false,
-			path: candidate,
-			errors: [`No existe archivo: ${candidate}`],
-		};
-	}
-	return { valid: true, path: candidate, errors: [] };
+	const fileCheck = validateAgentLabArtifactFile(candidate);
+	return fileCheck.valid
+		? { valid: true, path: candidate, errors: [] }
+		: { valid: false, path: candidate, errors: fileCheck.errors };
 }
 
 function resolveRunCandidate(
@@ -1532,14 +1533,14 @@ function latestRunFile(reportsPath: string): string | undefined {
 	const current = join(runDir, RUN_CURRENT_FILE);
 	if (existsSync(current)) return current;
 	if (existsSync(runDir)) {
-		const latest = readdirSync(runDir)
+		const latest = safeReadDirNames(runDir)
 			.filter((file) => RUN_RE.test(file))
 			.sort()
 			.at(-1);
 		if (latest) return join(runDir, latest);
 	}
 	if (!existsSync(reportsPath)) return undefined;
-	const legacy = readdirSync(reportsPath)
+	const legacy = safeReadDirNames(reportsPath)
 		.filter((file) => /^agentlab-review-run-\d{8}-\d{6}\.json$/u.test(file))
 		.sort()
 		.at(-1);
@@ -1548,6 +1549,69 @@ function latestRunFile(reportsPath: string): string | undefined {
 
 function runArtifactsDir(reportsPath: string): string {
 	return join(resolve(reportsPath), "..", "agentlabs", "runs");
+}
+
+function validateAgentLabArtifactFile(
+	path: string,
+): { valid: true } | { valid: false; errors: string[] } {
+	try {
+		const stat = lstatSync(path);
+		if (stat.isSymbolicLink()) {
+			return {
+				valid: false,
+				errors: [
+					"El artifact AgentLab debe ser un archivo regular; symlinks/junctions no están permitidos.",
+				],
+			};
+		}
+		if (!stat.isFile()) {
+			return {
+				valid: false,
+				errors: [
+					"El artifact AgentLab debe ser un archivo regular; directorios u otros tipos no están permitidos.",
+				],
+			};
+		}
+		return { valid: true };
+	} catch (error) {
+		const code = fsErrorCode(error);
+		if (code === "ENOENT")
+			return { valid: false, errors: [`No existe archivo: ${path}`] };
+		if (isToleratedArtifactFsCode(code)) {
+			return {
+				valid: false,
+				errors: [`No puedo acceder al artifact AgentLab (${code}).`],
+			};
+		}
+		return {
+			valid: false,
+			errors: [
+				`No puedo validar el artifact AgentLab: ${error instanceof Error ? error.message : String(error)}`,
+			],
+		};
+	}
+}
+
+function safeReadDirNames(dirPath: string): string[] {
+	try {
+		return readdirSync(dirPath);
+	} catch (error) {
+		const code = fsErrorCode(error);
+		if (isToleratedArtifactFsCode(code)) return [];
+		throw error;
+	}
+}
+
+function fsErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error
+		? String((error as { code?: unknown }).code)
+		: undefined;
+}
+
+function isToleratedArtifactFsCode(code: string | undefined): boolean {
+	return Boolean(
+		code && ["EACCES", "EPERM", "ENOENT", "EISDIR", "ENOTDIR"].includes(code),
+	);
 }
 
 function isInsideDirectory(path: string, directory: string): boolean {

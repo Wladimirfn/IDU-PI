@@ -1492,13 +1492,13 @@ function buildTelegramSelfMaintenanceReport(stateRoot: string): {
 			tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:
-				(supervisorActivity.byReason.throttled ?? 0) +
 				(supervisorActivity.byReason.idu_inactive ?? 0) +
 				(supervisorActivity.byReason.no_new_events ?? 0) +
 				(supervisorActivity.byReason.not_enough_data ?? 0),
 			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
-			usageFailures:
-				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
+			usageFailures: usageReport.failed,
+			usageNotAllowed: usageReport.notAllowed,
+			usageRequiresHuman: usageReport.requiresHuman,
 			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
 			semanticNewEvents,
 		}),

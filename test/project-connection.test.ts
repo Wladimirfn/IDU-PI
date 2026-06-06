@@ -159,6 +159,69 @@ test("ready if local blueprint and flows are valid", () => {
 	assert.equal(report.recommendedNext, "/idu_prepare");
 });
 
+test("ready uses matching prepare alignment state", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-workspace-");
+	mkdirSync(join(workspaceRoot, "reports"), { recursive: true });
+	writeProjectConfig(projectPath);
+
+	const defaultCwd = tempDir("idu-default-");
+	const report = inspectProjectConnection({
+		defaultCwd,
+		allowedRoots: [projectPath],
+		workspaceRoot,
+		registry: registry(projectPath),
+		alignmentState: {
+			version: 1,
+			projectId: "demo",
+			projectPath,
+			alignmentStatus: "aligned",
+			readiness: "aligned_ready",
+			alignmentReason: ["último prepare alineado"],
+			recordedAt: "2026-06-05T00:00:00.000Z",
+		},
+	});
+
+	assert.equal(report.status, "ready");
+	assert.equal(report.alignmentStatus, "aligned");
+	assert.equal(report.readiness, "aligned_ready");
+	assert.deepEqual(report.alignmentReason, ["último prepare alineado"]);
+	assert.equal(report.recommendedNext, "continuar bajo riesgo");
+	assert.match(
+		formatProjectConnectionReport(report),
+		/Idu-pi conectado con configuración válida; alineación verificada\./u,
+	);
+});
+
+test("ready with non-aligned prepare state keeps safe next action", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-workspace-");
+	mkdirSync(join(workspaceRoot, "reports"), { recursive: true });
+	writeProjectConfig(projectPath);
+
+	const defaultCwd = tempDir("idu-default-");
+	const report = inspectProjectConnection({
+		defaultCwd,
+		allowedRoots: [projectPath],
+		workspaceRoot,
+		registry: registry(projectPath),
+		alignmentState: {
+			version: 1,
+			projectId: "demo",
+			projectPath,
+			alignmentStatus: "needs_review",
+			readiness: "config_ready",
+			alignmentReason: ["último prepare detectó diferencias"],
+			recordedAt: "2026-06-05T00:00:00.000Z",
+		},
+	});
+
+	assert.equal(report.status, "ready");
+	assert.equal(report.alignmentStatus, "needs_review");
+	assert.equal(report.recommendedNext, "/config review_project_flows_draft");
+	assert.equal(report.needsUserConfirmation, true);
+});
+
 test("warnings if reports directory does not exist", () => {
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");

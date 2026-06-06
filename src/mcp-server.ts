@@ -43,6 +43,7 @@ import {
 import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
 import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
+import { runAutomaticov1AdvisoryCycle } from "./automaticov1-cycle.js";
 import {
 	appendAutonomousAlertDecision,
 	readAutonomousAlertEngineState,
@@ -89,6 +90,7 @@ import {
 } from "./context-quality-events.js";
 import {
 	readSupervisorActivityEvents,
+	recordSupervisorActivityEventDeferred,
 	summarizeSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
 import {
@@ -144,6 +146,7 @@ export type IduMcpToolName =
 	| "idu_autonomous_alerts_status"
 	| "idu_autonomous_alerts_tick"
 	| "idu_autonomous_alerts_control"
+	| "idu_automaticov1_cycle"
 	| "idu_bibliotecario_proactive_advisory"
 	| "idu_external_intelligence_report"
 	| "idu_external_source_recommend"
@@ -516,6 +519,22 @@ const TOOLS: IduMcpToolDefinition[] = [
 			domain: optionalString("Dominio a activar/desactivar."),
 			pauseMinutes: optionalString("Minutos de pausa, default 60."),
 			reason: optionalString("Motivo humano/orquestador para auditoría."),
+		},
+	),
+	tool(
+		"idu_automaticov1_cycle",
+		"Ejecuta el primer ciclo autónomo bounded/advisory: alert scheduler, supervisor plan, Bibliotecario snapshot, external intelligence opcional y skill proposals opcionales.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			allowTaskCreation: optionalBoolean(
+				"Permite crear hasta 3 tareas rutinarias; default false.",
+			),
+			allowExternalFetch: optionalBoolean(
+				"Permite consultar fuentes externas exactas allowlist; default false.",
+			),
+			allowSkillProposals: optionalBoolean(
+				"Permite crear propuestas de skill reports-only; default false.",
+			),
 		},
 	),
 	tool(
@@ -1616,13 +1635,13 @@ function buildRuntimeSelfMaintenanceReport(
 			tasks: taskRead.tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:
-				(supervisorActivity.byReason.throttled ?? 0) +
 				(supervisorActivity.byReason.idu_inactive ?? 0) +
 				(supervisorActivity.byReason.no_new_events ?? 0) +
 				(supervisorActivity.byReason.not_enough_data ?? 0),
 			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
-			usageFailures:
-				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
+			usageFailures: usageReport.failed,
+			usageNotAllowed: usageReport.notAllowed,
+			usageRequiresHuman: usageReport.requiresHuman,
 			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
 			semanticNewEvents,
 		}),
@@ -2665,7 +2684,10 @@ async function dispatchTool(
 						evidenceRefs: decision.evidenceRefs,
 					});
 					appendAutonomousAlertDecision(stateRoot, decision);
-				} else if (decision.recommendedAction === "ask_human" && allowTaskCreation) {
+				} else if (
+					decision.recommendedAction === "ask_human" &&
+					allowTaskCreation
+				) {
 					appendAutonomousAlertDecision(stateRoot, decision);
 				}
 			}
@@ -2822,6 +2844,143 @@ async function dispatchTool(
 				safeNotes,
 			});
 		}
+		case "idu_automaticov1_cycle": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			let selfMaintenance:
+				| ReturnType<typeof buildRuntimeSelfMaintenanceReport>
+				| undefined;
+			const loadSelfMaintenance = () => {
+				selfMaintenance ??= buildRuntimeSelfMaintenanceReport(
+					runtime,
+					stateRoot,
+				);
+				return selfMaintenance;
+			};
+			const request =
+				"automaticov1 cyclic autonomous loop: Bibliotecario evidence/news/docs intelligence, supervisor participation, skill proposals, project structure optimization, failure detection and repair boundaries.";
+			const result = await runAutomaticov1AdvisoryCycle({
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				stateRoot,
+				iduActive: getIduSessionStatus(runtime.projectId).active,
+				allowTaskCreation: booleanArg(args, "allowTaskCreation", false),
+				allowExternalFetch: booleanArg(args, "allowExternalFetch", false),
+				allowSkillDraftProposal: booleanArg(args, "allowSkillProposals", false),
+				usageEvents: readIduUsageEvents(stateRoot, 500),
+				loadPlan: () => {
+					if (!runtime.masterPlanReview) {
+						return {
+							status: "draft",
+							inferredObjective:
+								"Master Plan no disponible; automaticov1 bloqueado para evitar autonomía sin objetivo.",
+							executiveSummary:
+								"Master Plan no disponible; no se ejecuta ciclo autónomo real.",
+							criticalRisks: ["Master Plan no disponible"],
+						};
+					}
+					try {
+						return runtime.masterPlanReview("latest").plan as unknown as Record<
+							string,
+							unknown
+						>;
+					} catch (error) {
+						return {
+							status: "draft",
+							inferredObjective:
+								"Master Plan no disponible o ilegible; automaticov1 bloqueado para evitar drift.",
+							executiveSummary: String(
+								error instanceof Error ? error.message : error,
+							),
+							criticalRisks: ["Master Plan no disponible"],
+						};
+					}
+				},
+				loadTasks: () => loadSelfMaintenance().taskRead.tasks,
+				loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
+				createTask: (draft) => {
+					const task = runtime.createTask(
+						inferTaskTemplateKind(draft.text),
+						draft.text,
+					);
+					return { id: task.id };
+				},
+				buildSupervisorCronPlan: () => runtime.supervisorCronPlan(),
+				buildBibliotecarioSnapshot: () => ({
+					local: runtime.sourceRecommend(request),
+					requiredActions: runtime.sourceRequiredActions(),
+					externalRegistry: recommendExternalSources({
+						projectId: runtime.projectId,
+						request,
+						domains: [
+							"programming_structure",
+							"security",
+							"academic",
+							"standards",
+						] as ExternalSourceDomain[],
+						language: "typescript",
+						framework: "node",
+						maxMatches: 8,
+					}),
+					rawContentIncluded: false,
+					webFetchAllowed: false,
+					contractPromotionAllowed: false,
+				}),
+				buildExternalIntelligenceReport: () =>
+					buildExternalIntelligenceReport({ projectId: runtime.projectId }),
+				createSkillDraftFromLessons: () =>
+					runtime.skillDraftFromLessons({ mode: "proposal-only" }),
+			});
+			recordSupervisorActivityEventDeferred(stateRoot, {
+				projectId: runtime.projectId,
+				eventType: "supervisor_tick",
+				origin: "orchestrator_requested",
+				trigger: "cron_planning",
+				status: result.status === "ran" ? "completed" : "skipped",
+				active: getIduSessionStatus(runtime.projectId).active,
+				createdTasks: result.alertScheduledTick.tasksCreated.length,
+				ok: result.status === "ran",
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: result.status === "ran" ? "warn" : "warn",
+				severity: result.status === "ran" ? "info" : "warning",
+				confidence: 0.78,
+				summary: `automaticov1 cycle: ${result.status}`,
+				requiresHuman: true,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: false,
+				evidenceRefs: result.evidenceRefs,
+				nextActions: result.nextActions,
+				requiredActions: [
+					{
+						id: "automaticov1-orchestrator-review",
+						owner: "orchestrator",
+						action: "review_cycle_report_before_changes",
+						reason:
+							"automaticov1 coordinates autonomous engines but must not authorize implementation, dependency updates, skill installation, contracts, or AgentLabs.",
+						blocking: true,
+					},
+				],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `automaticov1 cycle: ${result.status}`,
+				data: {
+					decisionEnvelope,
+					result,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					...result.safeNotes,
+					"MCP automaticov1 no autoriza implementación; el orquestador decide próximos cambios.",
+				],
+			});
+		}
 		case "idu_bibliotecario_proactive_advisory": {
 			const request = requiredText(args, "request");
 			const sourceRecommendations = runtime.sourceRecommend(request);
@@ -2875,6 +3034,7 @@ async function dispatchTool(
 				boundedSourceRecommendations,
 				"matches",
 			) as JsonObject[];
+			const evidencePolicy = externalRegistry.evidencePolicy;
 			const sourceEcosystem = {
 				surface: "source_ecosystem",
 				local: {
@@ -2904,6 +3064,12 @@ async function dispatchTool(
 						whyRelevant: match.whyRelevant,
 						automationMode: match.automationMode,
 						promotionAllowed: match.promotionAllowed,
+						claimType: match.claimType,
+						evidenceRole: match.evidenceRole,
+						canonicality: match.canonicality,
+						requiresCorroboration: match.requiresCorroboration,
+						forbiddenAsSoleAuthority: match.forbiddenAsSoleAuthority,
+						policyWarnings: match.policyWarnings.slice(0, 4),
 					})),
 					limitations: externalRegistry.limitations,
 					fetchAllowed: externalRegistry.fetchAllowed,
@@ -3016,6 +3182,7 @@ async function dispatchTool(
 				data: {
 					decisionEnvelope,
 					planLibrarian,
+					evidencePolicy,
 					sourceEcosystem,
 					skillOptimization,
 					failureSemanticDebt,
@@ -3133,7 +3300,7 @@ async function dispatchTool(
 				summary: `External source registry matches: ${report.matches.length}`,
 				requiresHuman: false,
 				orchestratorDecisionRequired: report.matches.length > 0,
-				allowedToProceed: true,
+				allowedToProceed: false,
 				evidenceRefs: report.matches.map(
 					(match) => `external-source:${match.sourceId}`,
 				),

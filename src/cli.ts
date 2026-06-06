@@ -146,6 +146,10 @@ import {
 	inspectProjectConnection,
 	type ProjectConnectionReport,
 } from "./project-connection.js";
+import {
+	readProjectAlignmentState,
+	recordProjectAlignmentState,
+} from "./project-alignment-state.js";
 import { formatProjectCoreForPrompt, loadProjectCore } from "./project-core.js";
 import {
 	deriveConstitutionFromProjectCore,
@@ -392,6 +396,10 @@ import {
 	type AutonomousAlertEngineReport,
 } from "./autonomous-alert-engine.js";
 import {
+	runAutomaticov1AdvisoryCycle,
+	type Automaticov1CycleResult,
+} from "./automaticov1-cycle.js";
+import {
 	runAutonomousAlertScheduledTick,
 	type AutonomousAlertScheduledTickResult,
 } from "./autonomous-alert-scheduler.js";
@@ -401,6 +409,11 @@ import {
 	updateAutonomousAlertControlState,
 	type AutonomousAlertEngineState,
 } from "./autonomous-alert-engine-state.js";
+import { buildExternalIntelligenceReport } from "./external-intelligence.js";
+import {
+	recommendExternalSources,
+	type ExternalSourceDomain,
+} from "./external-source-registry.js";
 import {
 	buildSupervisorSelfMaintenanceAdvisory,
 	type SupervisorSelfMaintenanceAdvisory,
@@ -1414,6 +1427,27 @@ export async function runCliCommand(
 			}
 		}
 		switch (command) {
+			case "automaticov1":
+			case "idu-automaticov1": {
+				const result = await runCliAutomaticov1Cycle(activeRuntime, rest);
+				recordCliUsage(activeRuntime, command, {
+					recommendation: "warn",
+					allowedToProceed: result.allowedToProceed,
+					requiresHuman: true,
+					ok: true,
+				});
+				recordSupervisorActivityEventDeferred(activeRuntime.workspaceRoot, {
+					projectId: activeRuntime.projectId,
+					eventType: "supervisor_tick",
+					origin: "orchestrator_requested",
+					trigger: "cron_planning",
+					status: result.status === "ran" ? "completed" : "skipped",
+					active: getIduSessionStatus(activeRuntime.projectId).active,
+					createdTasks: result.alertScheduledTick.tasksCreated.length,
+					ok: result.status === "ran",
+				});
+				return ok(formatCliAutomaticov1Cycle(result));
+			}
 			case "status":
 				return ok(
 					activeRuntime.formatConnection(activeRuntime.inspectConnection()),
@@ -2083,6 +2117,124 @@ export async function runCliCommand(
 	}
 }
 
+async function runCliAutomaticov1Cycle(
+	runtime: CliRuntime,
+	parts: string[],
+): Promise<Automaticov1CycleResult> {
+	const command = parts[0] === "cycle" ? parts.slice(1) : parts;
+	const allowTaskCreation = command.includes("--allow-task-creation");
+	const allowExternalFetch = command.includes("--allow-external-fetch");
+	const allowSkillDraftProposal = command.includes("--allow-skill-proposals");
+	let selfMaintenance:
+		| ReturnType<typeof buildCliSelfMaintenanceReport>
+		| undefined;
+	const loadSelfMaintenance = () => {
+		selfMaintenance ??= buildCliSelfMaintenanceReport(
+			runtime,
+			runtime.workspaceRoot,
+		);
+		return selfMaintenance;
+	};
+	const request =
+		"automaticov1 cyclic autonomous loop: Bibliotecario evidence/news/docs intelligence, supervisor participation, skill proposals, project structure optimization, failure detection and repair boundaries.";
+	return runAutomaticov1AdvisoryCycle({
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		stateRoot: runtime.workspaceRoot,
+		iduActive: getIduSessionStatus(runtime.projectId).active,
+		allowTaskCreation,
+		allowExternalFetch,
+		allowSkillDraftProposal,
+		usageEvents: readIduUsageEvents(runtime.workspaceRoot, 500),
+		loadPlan: () => {
+			if (!runtime.masterPlanReview) {
+				return {
+					status: "draft",
+					inferredObjective:
+						"Master Plan no disponible; automaticov1 bloqueado para evitar autonomía sin objetivo.",
+					executiveSummary:
+						"Master Plan no disponible; no se ejecuta ciclo autónomo real.",
+					criticalRisks: ["Master Plan no disponible"],
+				};
+			}
+			try {
+				return runtime.masterPlanReview("latest").plan as unknown as Record<
+					string,
+					unknown
+				>;
+			} catch (error) {
+				return {
+					status: "draft",
+					inferredObjective:
+						"Master Plan no disponible o ilegible; automaticov1 bloqueado para evitar drift.",
+					executiveSummary: String(
+						error instanceof Error ? error.message : error,
+					),
+					criticalRisks: ["Master Plan no disponible"],
+				};
+			}
+		},
+		loadTasks: () => loadSelfMaintenance().tasks,
+		loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
+		createTask: (draft) => {
+			const task = runtime.createTask(
+				inferTaskTemplateKind(draft.text),
+				draft.text,
+			);
+			return { id: task.id };
+		},
+		buildSupervisorCronPlan: () => runtime.supervisorCronPlan(),
+		buildBibliotecarioSnapshot: () => ({
+			local: runtime.sourceRecommend(request),
+			requiredActions: runtime.sourceRequiredActions(),
+			externalRegistry: recommendExternalSources({
+				projectId: runtime.projectId,
+				request,
+				domains: [
+					"programming_structure",
+					"security",
+					"academic",
+					"standards",
+				] as ExternalSourceDomain[],
+				language: "typescript",
+				framework: "node",
+				maxMatches: 8,
+			}),
+			rawContentIncluded: false,
+			webFetchAllowed: false,
+			contractPromotionAllowed: false,
+		}),
+		buildExternalIntelligenceReport: () =>
+			buildExternalIntelligenceReport({ projectId: runtime.projectId }),
+		createSkillDraftFromLessons: () =>
+			runtime.skillDraftFromLessons({ mode: "proposal-only" }),
+	});
+}
+
+function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
+	return [
+		"🤖 automaticov1 cycle",
+		`status: ${result.status}`,
+		`authority: ${result.authority}`,
+		`allowedToProceed: ${result.allowedToProceed}`,
+		`taskCreation: ${result.allowTaskCreation ? "enabled" : "disabled"}`,
+		`externalFetch: ${result.externalFetchExecuted ? "executed" : "disabled"}`,
+		`skillProposals: ${result.skillProposalExecuted ? "executed" : "disabled"}`,
+		`alertTick: ${result.alertScheduledTick.status}`,
+		`alertDecisions: ${result.alertScheduledTick.report?.decisions.length ?? 0}`,
+		`tasksCreated: ${result.alertScheduledTick.tasksCreated.length}`,
+		"",
+		"Evidence:",
+		...result.evidenceRefs.map((ref) => `- ${ref}`),
+		"",
+		"Next:",
+		...result.nextActions.map((action) => `- ${action}`),
+		"",
+		"Safe notes:",
+		...result.safeNotes.map((note) => `- ${note}`),
+	].join("\n");
+}
+
 function handleCliAlertCommand(
 	runtime: CliRuntime,
 	parts: string[],
@@ -2337,13 +2489,13 @@ function buildCliSelfMaintenanceReport(
 			tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:
-				(supervisorActivity.byReason.throttled ?? 0) +
 				(supervisorActivity.byReason.idu_inactive ?? 0) +
 				(supervisorActivity.byReason.no_new_events ?? 0) +
 				(supervisorActivity.byReason.not_enough_data ?? 0),
 			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
-			usageFailures:
-				usageReport.failed + usageReport.notAllowed + usageReport.requiresHuman,
+			usageFailures: usageReport.failed,
+			usageNotAllowed: usageReport.notAllowed,
+			usageRequiresHuman: usageReport.requiresHuman,
 			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
 			semanticNewEvents,
 		}),
@@ -2648,6 +2800,10 @@ function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
 		allowedRoots: context.config.allowedRoots,
 		workspaceRoot: context.runtimeWorkspaceRoot,
 		projectId: context.activeProject.id,
+		alignmentState: readProjectAlignmentState(context.runtimeWorkspaceRoot, {
+			projectId: context.activeProject.id,
+			projectPath: context.activeProject.path,
+		}),
 	});
 }
 
@@ -2741,7 +2897,7 @@ function runPrepare(context: RuntimeContext): IduPrepareResult {
 	const reportsPath = context.reportsPath;
 	const projectId = context.activeProject.id;
 	const projectPath = context.activeProject.path;
-	return runIduPrepare({
+	const result = runIduPrepare({
 		projectId,
 		projectPath,
 		reportsPath,
@@ -2764,6 +2920,15 @@ function runPrepare(context: RuntimeContext): IduPrepareResult {
 		createStructuredTask: (input) =>
 			context.structuredTaskQueue.enqueueTask(input),
 	});
+	recordProjectAlignmentState(context.runtimeWorkspaceRoot, {
+		projectId,
+		projectPath,
+		alignmentStatus: result.alignmentStatus,
+		readiness: result.readiness,
+		alignmentReason: [`último prepare: ${result.recommendedNext}`],
+		differencesDetected: result.differencesDetected,
+	});
+	return result;
 }
 
 function loadConfirmedProjectConstitution(projectPath: string | undefined) {

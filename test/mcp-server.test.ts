@@ -46,6 +46,10 @@ import type { ProjectPostflightReport } from "../src/project-postflight.js";
 import type { DecisionEnvelope } from "../src/decision-envelope.js";
 import { flushIduUsageEvents } from "../src/usage-events.js";
 import {
+	flushSupervisorActivityEvents,
+	readSupervisorActivityEvents,
+} from "../src/supervisor-activity-events.js";
+import {
 	buildAgentLabEffectivenessReport,
 	flushAgentLabEffectivenessEvents,
 	readAgentLabEffectivenessEvents,
@@ -1032,10 +1036,11 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_external_source_recommend"),
 	);
+	assert.ok(tools.some((tool) => tool.name === "idu_automaticov1_cycle"));
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 58);
+	assert.equal(tools.length, 59);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2728,6 +2733,15 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 	const data = result.data as {
 		decisionEnvelope: DecisionEnvelope;
 		planLibrarian: unknown;
+		evidencePolicy: {
+			claimType: string;
+			rawHonesty: boolean;
+			webFetchAllowed: boolean;
+			rawContentIncluded: boolean;
+			contractPromotionAllowed: boolean;
+			requiredEvidence: string[];
+			forbiddenSoleAuthority: string[];
+		};
 		sourceEcosystem: {
 			local: {
 				matches: Array<{ chunkIds: string[]; whyRelevant: string }>;
@@ -2736,6 +2750,17 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 					tokenCostMeasured: boolean;
 					pressure: string;
 				};
+			};
+			externalRegistry: {
+				matches: Array<{
+					claimType: string;
+					evidenceRole: string;
+					canonicality: string;
+					requiresCorroboration: boolean;
+					forbiddenAsSoleAuthority: boolean;
+				}>;
+				fetchAllowed: boolean;
+				rawDocsStored: boolean;
 			};
 		};
 		skillOptimization: { skillPromotionAllowed: boolean };
@@ -2755,6 +2780,15 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 	assert.equal(data.decisionEnvelope.authority, "advisory");
 	assert.equal(data.decisionEnvelope.allowedToProceed, false);
 	assert.ok(data.planLibrarian);
+	assert.equal(data.evidencePolicy.claimType, "security");
+	assert.equal(data.evidencePolicy.rawHonesty, true);
+	assert.equal(data.evidencePolicy.webFetchAllowed, false);
+	assert.equal(data.evidencePolicy.rawContentIncluded, false);
+	assert.equal(data.evidencePolicy.contractPromotionAllowed, false);
+	assert.ok(data.evidencePolicy.requiredEvidence.includes("security_advisory"));
+	assert.ok(
+		data.evidencePolicy.forbiddenSoleAuthority.includes("community_signal"),
+	);
 	assert.ok(data.sourceEcosystem);
 	assert.equal(data.sourceEcosystem.local.matches[0].chunkIds.length, 5);
 	assert.ok(data.sourceEcosystem.local.matches[0].whyRelevant.length <= 280);
@@ -2767,6 +2801,16 @@ test("idu_bibliotecario_proactive_advisory composes bounded advisory surfaces", 
 		false,
 	);
 	assert.equal(data.sourceEcosystem.local.contextPressure.pressure, "medium");
+	assert.equal(data.sourceEcosystem.externalRegistry.fetchAllowed, false);
+	assert.equal(data.sourceEcosystem.externalRegistry.rawDocsStored, false);
+	assert.ok(
+		data.sourceEcosystem.externalRegistry.matches.some(
+			(match) =>
+				match.claimType === "security" &&
+				match.evidenceRole === "primary" &&
+				match.canonicality === "canonical",
+		),
+	);
 	assert.ok(data.skillOptimization);
 	assert.ok(data.failureSemanticDebt);
 	assert.ok(data.resourceContextCheck);
@@ -2922,6 +2966,66 @@ test("autonomous alert MCP tools are listed", () => {
 	assert.ok(tools.includes("idu_autonomous_alerts_status"));
 	assert.ok(tools.includes("idu_autonomous_alerts_tick"));
 	assert.ok(tools.includes("idu_autonomous_alerts_control"));
+	assert.ok(tools.includes("idu_automaticov1_cycle"));
+});
+
+test("idu_automaticov1_cycle composes existing engines without authorizing work", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-automaticov1-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		const runtime = fakeRuntime();
+		runtime.supervisorOnIduActivation();
+		await callIduMcpTool(
+			"idu_activate",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+		const result = await callIduMcpTool(
+			"idu_automaticov1_cycle",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(), stateRoot }),
+			},
+		);
+
+		assert.equal(result.ok, true);
+		const envelope = result.data.decisionEnvelope as DecisionEnvelope;
+		assert.equal(envelope.authority, "advisory");
+		assert.equal(envelope.allowedToProceed, false);
+		assert.equal(envelope.orchestratorDecisionRequired, true);
+		const cycle = result.data.result as {
+			status: string;
+			allowedToProceed: boolean;
+			externalFetchExecuted: boolean;
+			skillProposalExecuted: boolean;
+			alertScheduledTick: { status: string; tasksCreated: unknown[] };
+			bibliotecarioSnapshot?: unknown;
+			supervisorCronPlan?: unknown;
+		};
+		assert.equal(cycle.status, "ran");
+		assert.equal(cycle.allowedToProceed, false);
+		assert.equal(cycle.externalFetchExecuted, false);
+		assert.equal(cycle.skillProposalExecuted, false);
+		assert.equal(cycle.alertScheduledTick.status, "ran");
+		assert.equal(cycle.alertScheduledTick.tasksCreated.length, 0);
+		assert.ok(cycle.bibliotecarioSnapshot);
+		assert.ok(cycle.supervisorCronPlan);
+		await flushSupervisorActivityEvents();
+		const supervisorEvents = readSupervisorActivityEvents(stateRoot);
+		assert.equal(supervisorEvents.length, 1);
+		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
+		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
+		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
+		assert.equal(supervisorEvents[0]?.status, "completed");
+		assert.equal(supervisorEvents[0]?.active, true);
+		assert.match(result.safeNotes.join("\n"), /no autoriza implementación/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("autonomous alert status is read-only and raw honest", async () => {
@@ -3222,6 +3326,8 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 			pendingTasks: number;
 			supervisorEvents: number;
 			usageFailures: number;
+			usageNotAllowed: number;
+			usageRequiresHuman: number;
 			agentLabStaleRequests: number;
 			semanticNewEvents: number;
 		};
@@ -3236,7 +3342,9 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	assert.equal(report.skillsModified, false);
 	assert.equal(report.totals.pendingTasks, 10);
 	assert.equal(report.totals.supervisorEvents, 3);
-	assert.equal(report.totals.usageFailures, 3);
+	assert.equal(report.totals.usageFailures, 1);
+	assert.equal(report.totals.usageNotAllowed, 1);
+	assert.equal(report.totals.usageRequiresHuman, 1);
 	assert.equal(report.totals.agentLabStaleRequests, 3);
 	assert.equal(report.totals.semanticNewEvents, 150);
 	assert.ok(
@@ -3396,15 +3504,29 @@ test("idu_external_source_recommend is registry-only and advisory", async () => 
 		assert.equal(report.rawDocsStored, false);
 		assert.equal(report.promotionAllowed, false);
 		assert.equal(report.agentLabAutoRunAllowed, false);
+		assert.equal(report.evidencePolicy.rawHonesty, true);
+		assert.equal(report.evidencePolicy.webFetchAllowed, false);
+		assert.equal(report.evidencePolicy.rawContentIncluded, false);
+		assert.equal(report.evidencePolicy.contractPromotionAllowed, false);
 		assert.ok(Array.isArray(report.matches));
 		assert.ok(report.matches.length > 0);
+		assert.ok(
+			report.matches.every(
+				(match) =>
+					Boolean(match.claimType) &&
+					Boolean(match.evidenceRole) &&
+					Boolean(match.canonicality) &&
+					typeof match.requiresCorroboration === "boolean" &&
+					typeof match.forbiddenAsSoleAuthority === "boolean",
+			),
+		);
 		assert.equal(
 			(result.data.decisionEnvelope as DecisionEnvelope).authority,
 			"advisory",
 		);
 		assert.equal(
 			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
-			true,
+			false,
 		);
 		const safeNotes = result.safeNotes.join("\n");
 		assert.match(safeNotes, /no hice web\/live fetch/u);

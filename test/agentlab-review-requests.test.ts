@@ -421,6 +421,22 @@ test("security/database fuerza requiresHumanApproval", () => {
 	);
 });
 
+test("review latest rechaza current.json directorio sin EISDIR crudo", () => {
+	const reportsPath = join(root(), "reports");
+	const currentDir = join(
+		reportsPath,
+		"..",
+		"agentlabs",
+		"requests",
+		"current.json",
+	);
+	mkdirSync(currentDir, { recursive: true });
+	const review = reviewAgentLabReviewRequest("latest", reportsPath);
+	assert.equal(review.valid, false);
+	assert.match(review.errors.join("\n"), /archivo|file|directorio|directory/iu);
+	assert.doesNotMatch(review.errors.join("\n"), /EISDIR/u);
+});
+
 test("review latest valida request", () => {
 	const reportsPath = join(root(), "reports");
 	createAgentLabReviewRequests({

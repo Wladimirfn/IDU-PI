@@ -64,6 +64,24 @@ El servidor usa stdio JSON-RPC/MCP. No levanta Telegram y no importa el entrypoi
 
 `setup mcp-init` configura el servidor con `cwd` apuntando al repo Idu-pi y `directTools: true`, para que Pi pueda cachear/exponer sus herramientas aunque el orquestador esté abierto en otro proyecto.
 
+## Frescura del runtime MCP
+
+La configuración instalada por `setup mcp-init` apunta al runtime compilado `dist/src/mcp-server.js`. Si modificás `src/mcp-server.ts` o hacés cambios locales en el paquete, un MCP ya cargado por Pi puede quedar ejecutando código viejo hasta que reconstruyas y recargues/reinicies el runtime MCP del orquestador.
+
+Chequeo read-only desde el home/status de la CLI:
+
+```bash
+idu-pi
+```
+
+Si el panel muestra `MCP runtime: source newer`, ejecutá:
+
+```bash
+corepack pnpm build
+```
+
+y después recargá/reiniciá MCP en Pi/orquestador. Idu-pi sólo avisa; no reconstruye ni reinicia MCP automáticamente.
+
 ## Configuración conceptual del orquestador
 
 Ejemplo conceptual:

@@ -7,6 +7,7 @@ import {
 	readdirSync,
 	realpathSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,7 +36,7 @@ import {
 	runInteractiveHomeWithQuestion,
 } from "../src/cli.js";
 import { saveModelAssignment } from "../src/model-assignments.js";
-import { recordIduUsageEvent } from "../src/usage-events.js";
+import { recordIduUsageEvent, usageEventsPath } from "../src/usage-events.js";
 import { recordSupervisorActivityEvent } from "../src/supervisor-activity-events.js";
 import { recordContextQualityEvent } from "../src/context-quality-events.js";
 
@@ -149,6 +150,52 @@ test("home shows MCP installed and missing states", () => {
 		stdinInteractive: false,
 	});
 	assert.equal(installed.mcpInstalled, true);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("home warns when configured MCP runtime build may be stale", () => {
+	const root = tempDir();
+	const agentDir = join(root, "agent");
+	const packageRoot = join(root, "pkg");
+	const sourcePath = join(packageRoot, "src", "mcp-server.ts");
+	const serverPath = join(packageRoot, "dist", "src", "mcp-server.js");
+	mkdirSync(join(packageRoot, "src"), { recursive: true });
+	mkdirSync(join(packageRoot, "dist", "src"), { recursive: true });
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(sourcePath, "source", "utf8");
+	writeFileSync(serverPath, "dist", "utf8");
+	utimesSync(
+		serverPath,
+		new Date("2026-06-05T00:00:00.000Z"),
+		new Date("2026-06-05T00:00:00.000Z"),
+	);
+	utimesSync(
+		sourcePath,
+		new Date("2026-06-05T00:10:00.000Z"),
+		new Date("2026-06-05T00:10:00.000Z"),
+	);
+	writeFileSync(
+		join(agentDir, "mcp.json"),
+		JSON.stringify({
+			mcpServers: {
+				"idu-pi": { command: "node", args: [serverPath] },
+			},
+		}),
+		"utf8",
+	);
+
+	const status = buildCliHomeStatus({
+		env: { PI_CODING_AGENT_DIR: agentDir, PATH: "" },
+		runner: () => undefined,
+		stdinInteractive: false,
+	});
+
+	assert.equal(status.mcpInstalled, true);
+	assert.equal(status.mcpRuntime.status, "source_newer");
+	assert.match(
+		formatCliSystemStatus(status),
+		/MCP runtime: source newer; run corepack pnpm build and reload MCP in Pi/u,
+	);
 	rmSync(root, { recursive: true, force: true });
 });
 
@@ -322,6 +369,37 @@ test("project status renderer shows enrolled and unregistered project states", (
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("current project panel shows active Constitution status", () => {
+	const root = tempDir("idu-cli-home-constitution-");
+	try {
+		const projectPath = join(root, "project");
+		const configPath = join(projectPath, "config");
+		mkdirSync(configPath, { recursive: true });
+		writeFileSync(
+			join(configPath, "project-constitution.json"),
+			JSON.stringify({ status: "active" }),
+			"utf8",
+		);
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus(status);
+		assert.match(output, /Constitution: active/u);
+		assert.doesNotMatch(output, /Constitution: draft/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("current project panel shows local usage metrics from stateRoot", async () => {
 	const root = tempDir("idu-cli-home-usage-");
 	try {
@@ -362,6 +440,66 @@ test("current project panel shows local usage metrics from stateRoot", async () 
 		assert.match(output, /superficie: cli 1 · mcp 0 · tui 0/u);
 		assert.match(output, /Actividad supervisor local/u);
 		assert.match(output, /tokens Idu-pi: no medido/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("current project panel surfaces stale MCP context pack separately from local usage", async () => {
+	const root = tempDir("idu-cli-home-stale-mcp-context-");
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state");
+		mkdirSync(projectPath, { recursive: true });
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "project",
+			surface: "mcp",
+			action: "idu_supervisor_context_pack",
+		});
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "project",
+			surface: "cli",
+			action: "automaticov1",
+		});
+		const path = usageEventsPath(stateRoot);
+		const staleContextPack = new Date(Date.now() - 15 * 60_000).toISOString();
+		const recentCli = new Date(Date.now() - 1 * 60_000).toISOString();
+		const jsonl = readFileSync(path, "utf8")
+			.trim()
+			.split(/\r?\n/u)
+			.map((line, index) => {
+				const event = JSON.parse(line) as Record<string, unknown>;
+				event.timestamp = index === 0 ? staleContextPack : recentCli;
+				return JSON.stringify(event);
+			})
+			.join("\n");
+		writeFileSync(path, `${jsonl}\n`, "utf8");
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus({
+			...status,
+			project: {
+				...status.project,
+				registered: true,
+				projectId: "project",
+				stateRoot,
+			},
+		});
+		assert.match(output, /última llamada Idu-pi: hace 1m/u);
+		assert.match(
+			output,
+			/MCP context pack: stale hace 15m; sugerido refrescar idu_supervisor_context_pack/u,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

@@ -1724,6 +1724,49 @@ test("CLI scheduled alert tick is OS-priority and read-only by default", async (
 	});
 });
 
+test("CLI automaticov1 cycle composes engines without authorizing work", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureIduSessionStore({ workspaceRoot });
+		activateIduSession(runtime.projectId);
+		runtime.masterPlanReview = () =>
+			({
+				markdown: "# Plan Maestro Idu-pi\n",
+				plan: {
+					status: "approved",
+					inferredObjective:
+						"Idu-pi supervises the Pi orchestrator with evidence.",
+					executiveSummary: "Supervisor/auditor summary",
+					criticalRisks: [],
+				},
+			}) as any;
+		const result = await runCliCommand(["automaticov1", "cycle"], runtime);
+		await flushIduUsageEvents();
+		await flushSupervisorActivityEvents();
+		const usageEvents = readIduUsageEvents(workspaceRoot);
+		const supervisorEvents = readSupervisorActivityEvents(workspaceRoot);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /automaticov1 cycle/u);
+		assert.match(result.stdout, /allowedToProceed: false/u);
+		assert.match(result.stdout, /externalFetch: disabled/u);
+		assert.match(result.stdout, /skillProposals: disabled/u);
+		assert.match(result.stdout, /automaticov1:bibliotecario-snapshot/u);
+		assert.equal(usageEvents.length, 1);
+		assert.equal(usageEvents[0]?.surface, "cli");
+		assert.equal(usageEvents[0]?.action, "automaticov1");
+		assert.equal(usageEvents[0]?.allowedToProceed, false);
+		assert.equal(usageEvents[0]?.requiresHuman, true);
+		assert.equal(usageEvents[0]?.recommendation, "warn");
+		assert.equal(usageEvents[0]?.ok, true);
+		assert.equal(supervisorEvents.length, 1);
+		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
+		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
+		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
+		assert.equal(supervisorEvents[0]?.status, "completed");
+		assert.equal(supervisorEvents[0]?.active, true);
+		assert.equal(supervisorEvents[0]?.ok, true);
+	});
+});
+
 test("CLI scheduled alert tick creates tasks only with explicit allow-task-creation", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
 		configureIduSessionStore({ workspaceRoot });

@@ -935,7 +935,7 @@ function matchingTerms(normalizedText: string, terms: string[]): string[] {
 function includesTerm(normalizedText: string, term: string): boolean {
 	const normalizedTerm = normalizeHumanText(term);
 	if (!normalizedTerm) return false;
-	if (normalizedTerm.length <= 3) {
+	if (normalizedTerm.length <= 3 || normalizedTerm === "auth") {
 		return new RegExp(
 			`(^|[^\\p{L}\\p{N}_])${escapeRegExp(normalizedTerm)}($|[^\\p{L}\\p{N}_])`,
 			"u",
