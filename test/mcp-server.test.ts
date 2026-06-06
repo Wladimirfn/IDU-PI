@@ -2969,7 +2969,7 @@ test("autonomous alert MCP tools are listed", () => {
 	assert.ok(tools.includes("idu_automaticov1_cycle"));
 });
 
-test("idu_automaticov1_cycle composes existing engines without authorizing work", async () => {
+test("idu_automaticov1_cycle blocks when execution readiness is missing", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-automaticov1-mcp-"));
 	try {
 		const stateRoot = join(root, "state", "projects", "idu-pi");
@@ -3003,24 +3003,23 @@ test("idu_automaticov1_cycle composes existing engines without authorizing work"
 			externalFetchExecuted: boolean;
 			skillProposalExecuted: boolean;
 			alertScheduledTick: { status: string; tasksCreated: unknown[] };
-			bibliotecarioSnapshot?: unknown;
-			supervisorCronPlan?: unknown;
+			executionReadiness?: { status: string };
 		};
-		assert.equal(cycle.status, "ran");
+		assert.equal(cycle.status, "blocked_readiness");
 		assert.equal(cycle.allowedToProceed, false);
 		assert.equal(cycle.externalFetchExecuted, false);
 		assert.equal(cycle.skillProposalExecuted, false);
-		assert.equal(cycle.alertScheduledTick.status, "ran");
+		assert.equal(cycle.alertScheduledTick.status, "skipped_inactive");
 		assert.equal(cycle.alertScheduledTick.tasksCreated.length, 0);
-		assert.ok(cycle.bibliotecarioSnapshot);
-		assert.ok(cycle.supervisorCronPlan);
+		assert.ok(cycle.executionReadiness);
+		assert.notEqual(cycle.executionReadiness.status, "execution_ready");
 		await flushSupervisorActivityEvents();
 		const supervisorEvents = readSupervisorActivityEvents(stateRoot);
 		assert.equal(supervisorEvents.length, 1);
 		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
 		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
 		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
-		assert.equal(supervisorEvents[0]?.status, "completed");
+		assert.equal(supervisorEvents[0]?.status, "skipped");
 		assert.equal(supervisorEvents[0]?.active, true);
 		assert.match(result.safeNotes.join("\n"), /no autoriza implementación/u);
 	} finally {

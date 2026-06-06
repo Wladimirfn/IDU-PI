@@ -1724,7 +1724,7 @@ test("CLI scheduled alert tick is OS-priority and read-only by default", async (
 	});
 });
 
-test("CLI automaticov1 cycle composes engines without authorizing work", async () => {
+test("CLI automaticov1 cycle blocks when execution readiness is missing", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
 		configureIduSessionStore({ workspaceRoot });
 		activateIduSession(runtime.projectId);
@@ -1756,9 +1756,10 @@ test("CLI automaticov1 cycle composes engines without authorizing work", async (
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /automaticov1 cycle/u);
 		assert.match(result.stdout, /allowedToProceed: false/u);
+		assert.match(result.stdout, /status: blocked_readiness/u);
 		assert.match(result.stdout, /externalFetch: disabled/u);
 		assert.match(result.stdout, /skillProposals: disabled/u);
-		assert.match(result.stdout, /automaticov1:bibliotecario-snapshot/u);
+		assert.match(result.stdout, /automaticov1:readiness:/u);
 		assert.equal(usageEvents.length, 1);
 		assert.equal(usageEvents[0]?.surface, "cli");
 		assert.equal(usageEvents[0]?.action, "automaticov1");
@@ -1770,9 +1771,9 @@ test("CLI automaticov1 cycle composes engines without authorizing work", async (
 		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
 		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
 		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
-		assert.equal(supervisorEvents[0]?.status, "completed");
+		assert.equal(supervisorEvents[0]?.status, "skipped");
 		assert.equal(supervisorEvents[0]?.active, true);
-		assert.equal(supervisorEvents[0]?.ok, true);
+		assert.equal(supervisorEvents[0]?.ok, false);
 	});
 });
 

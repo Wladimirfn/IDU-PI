@@ -44,6 +44,7 @@ import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
 import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
 import { runAutomaticov1AdvisoryCycle } from "./automaticov1-cycle.js";
+import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
 	appendAutonomousAlertDecision,
@@ -72,6 +73,8 @@ import {
 	slugifyProjectId,
 } from "./projects.js";
 import type { StructuredTask } from "./structured-task-queue.js";
+import { loadProjectCore } from "./project-core.js";
+import { loadProjectConstitution } from "./project-constitution.js";
 import {
 	buildIduUsageReport,
 	readIduUsageEvents,
@@ -1609,6 +1612,37 @@ function loadRuntimeAutomaticov1Plan(runtime: CliRuntime) {
 	}
 }
 
+function loadRuntimeExecutionReadiness(runtime: CliRuntime, stateRoot: string) {
+	const taskTree = buildMasterPlanTaskTree(
+		loadRuntimeAutomaticov1Plan(runtime),
+	);
+	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot, 500));
+	return buildIduExecutionReadiness({
+		coreStatus: safeRuntimeProjectCoreStatus(runtime.projectPath),
+		constitutionStatus: safeRuntimeProjectConstitutionStatus(
+			runtime.projectPath,
+		),
+		taskTreeStatus: taskTree.status,
+		mcpContextPackStaleness: usageReport.mcpContextPackStaleness,
+	});
+}
+
+function safeRuntimeProjectCoreStatus(projectPath: string) {
+	try {
+		return loadProjectCore(projectPath).status;
+	} catch {
+		return "unknown" as const;
+	}
+}
+
+function safeRuntimeProjectConstitutionStatus(projectPath: string) {
+	try {
+		return loadProjectConstitution(projectPath).status;
+	} catch {
+		return "unknown" as const;
+	}
+}
+
 function buildRuntimeSelfMaintenanceReport(
 	runtime: CliRuntime,
 	stateRoot: string,
@@ -2908,6 +2942,8 @@ async function dispatchTool(
 				loadTasks: () => loadSelfMaintenance().taskRead.tasks,
 				loadTaskTree: () =>
 					buildMasterPlanTaskTree(loadRuntimeAutomaticov1Plan(runtime)),
+				loadExecutionReadiness: () =>
+					loadRuntimeExecutionReadiness(runtime, stateRoot),
 				loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
 				createTask: (draft) => {
 					const task = runtime.createTask(

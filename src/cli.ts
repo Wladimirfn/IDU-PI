@@ -125,6 +125,7 @@ import {
 	type MasterPlanReview,
 	type MasterPlanStatusResult,
 } from "./master-plan.js";
+import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
 	formatIduProjectDashboard,
@@ -2127,6 +2128,35 @@ function loadAutomaticov1Plan(runtime: CliRuntime) {
 	}
 }
 
+function loadCliExecutionReadiness(runtime: CliRuntime) {
+	const taskTree = buildMasterPlanTaskTree(loadAutomaticov1Plan(runtime));
+	const usageReport = buildIduUsageReport(
+		readIduUsageEvents(runtime.workspaceRoot, 500),
+	);
+	return buildIduExecutionReadiness({
+		coreStatus: safeProjectCoreStatus(runtime.projectPath),
+		constitutionStatus: safeProjectConstitutionStatus(runtime.projectPath),
+		taskTreeStatus: taskTree.status,
+		mcpContextPackStaleness: usageReport.mcpContextPackStaleness,
+	});
+}
+
+function safeProjectCoreStatus(projectPath: string) {
+	try {
+		return loadProjectCore(projectPath).status;
+	} catch {
+		return "unknown" as const;
+	}
+}
+
+function safeProjectConstitutionStatus(projectPath: string) {
+	try {
+		return loadProjectConstitution(projectPath).status;
+	} catch {
+		return "unknown" as const;
+	}
+}
+
 async function runCliAutomaticov1Cycle(
 	runtime: CliRuntime,
 	parts: string[],
@@ -2186,6 +2216,7 @@ async function runCliAutomaticov1Cycle(
 		},
 		loadTasks: () => loadSelfMaintenance().tasks,
 		loadTaskTree: () => buildMasterPlanTaskTree(loadAutomaticov1Plan(runtime)),
+		loadExecutionReadiness: () => loadCliExecutionReadiness(runtime),
 		loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
 		createTask: (draft) => {
 			const task = runtime.createTask(

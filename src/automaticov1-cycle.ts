@@ -5,6 +5,10 @@ import {
 } from "./autonomous-alert-scheduler.js";
 import type { ExternalIntelligenceReport } from "./external-intelligence.js";
 import type { IduSupervisorCronPlanResult } from "./idu-supervisor-cron.js";
+import {
+	buildIduExecutionReadiness,
+	type IduExecutionReadiness,
+} from "./idu-execution-readiness.js";
 import type { MasterPlanTaskTree } from "./master-plan-task-tree.js";
 import type { SkillDraftFromLessonsResult } from "./skill-draft-from-lessons.js";
 import type { StructuredTask } from "./structured-task-queue.js";
@@ -26,7 +30,8 @@ export type Automaticov1CycleStatus =
 	| "skipped_locked"
 	| "blocked_objective"
 	| "blocked_systemic_maintenance"
-	| "blocked_task_tree";
+	| "blocked_task_tree"
+	| "blocked_readiness";
 
 export type Automaticov1CycleInput = {
 	projectId: string;
@@ -42,6 +47,7 @@ export type Automaticov1CycleInput = {
 	loadPlan: () => Record<string, unknown>;
 	loadTasks: () => readonly StructuredTask[];
 	loadTaskTree?: () => MasterPlanTaskTree;
+	loadExecutionReadiness?: () => IduExecutionReadiness;
 	loadSelfMaintenanceSignals: () => readonly SupervisorSelfMaintenanceSignal[];
 	createTask: AutonomousAlertScheduledTickInput["createTask"];
 	buildSupervisorCronPlan?: () => IduSupervisorCronPlanResult | UnknownJson;
@@ -71,6 +77,7 @@ export type Automaticov1CycleResult = {
 	skillProposalExecuted: boolean;
 	alertScheduledTick: AutonomousAlertScheduledTickResult;
 	taskTree?: MasterPlanTaskTree;
+	executionReadiness?: IduExecutionReadiness;
 	supervisorCronPlan?: IduSupervisorCronPlanResult | UnknownJson;
 	bibliotecarioSnapshot?: UnknownJson;
 	externalIntelligenceReport?: ExternalIntelligenceReport | UnknownJson;
@@ -90,14 +97,21 @@ export async function runAutomaticov1AdvisoryCycle(
 
 	const selfMaintenanceSignals = input.loadSelfMaintenanceSignals();
 	const taskTree = input.loadTaskTree?.();
+	const executionReadiness =
+		input.loadExecutionReadiness?.() ?? buildIduExecutionReadiness({});
 	const systemicBlock = systemicMaintenanceBlock(selfMaintenanceSignals);
 	const taskTreeBlock = taskTree !== undefined && taskTree.status !== "ready";
+	const readinessBlock =
+		executionReadiness !== undefined &&
+		executionReadiness.status !== "execution_ready";
 	const alertScheduledTick = runAutonomousAlertScheduledTick({
 		projectId: input.projectId,
 		projectPath: input.projectPath,
 		stateRoot: input.stateRoot,
-		iduActive: input.iduActive && !systemicBlock && !taskTreeBlock,
-		allowTaskCreation: allowTaskCreation && !systemicBlock && !taskTreeBlock,
+		iduActive:
+			input.iduActive && !systemicBlock && !taskTreeBlock && !readinessBlock,
+		allowTaskCreation:
+			allowTaskCreation && !systemicBlock && !taskTreeBlock && !readinessBlock,
 		now,
 		ownerId: input.ownerId,
 		leaseMs: input.leaseMs,
@@ -118,6 +132,22 @@ export async function runAutomaticov1AdvisoryCycle(
 			status: "skipped_inactive",
 			selfMaintenanceSignals,
 			taskTree,
+			executionReadiness,
+		});
+	}
+
+	if (readinessBlock) {
+		return baseResult({
+			input,
+			now,
+			allowTaskCreation: false,
+			allowExternalFetch: false,
+			allowSkillDraftProposal: false,
+			alertScheduledTick,
+			status: "blocked_readiness",
+			selfMaintenanceSignals,
+			taskTree,
+			executionReadiness,
 		});
 	}
 
@@ -132,6 +162,7 @@ export async function runAutomaticov1AdvisoryCycle(
 			status: "blocked_task_tree",
 			selfMaintenanceSignals,
 			taskTree,
+			executionReadiness,
 		});
 	}
 
@@ -146,6 +177,7 @@ export async function runAutomaticov1AdvisoryCycle(
 			status: "blocked_systemic_maintenance",
 			selfMaintenanceSignals,
 			taskTree,
+			executionReadiness,
 		});
 	}
 
@@ -172,6 +204,7 @@ export async function runAutomaticov1AdvisoryCycle(
 		skillDraftFromLessons,
 		selfMaintenanceSignals,
 		taskTree,
+		executionReadiness,
 	});
 }
 
@@ -189,6 +222,7 @@ function baseResult(input: {
 	skillDraftFromLessons?: SkillDraftFromLessonsResult | UnknownJson;
 	selfMaintenanceSignals?: readonly SupervisorSelfMaintenanceSignal[];
 	taskTree?: MasterPlanTaskTree;
+	executionReadiness?: IduExecutionReadiness;
 }): Automaticov1CycleResult {
 	const externalFetchExecuted = Boolean(input.externalIntelligenceReport);
 	const skillProposalExecuted = Boolean(input.skillDraftFromLessons);
@@ -210,6 +244,9 @@ function baseResult(input: {
 		skillProposalExecuted,
 		alertScheduledTick: input.alertScheduledTick,
 		...(input.taskTree ? { taskTree: input.taskTree } : {}),
+		...(input.executionReadiness
+			? { executionReadiness: input.executionReadiness }
+			: {}),
 		...(input.supervisorCronPlan
 			? { supervisorCronPlan: input.supervisorCronPlan }
 			: {}),
@@ -234,6 +271,7 @@ function evidenceRefs(input: {
 	alertScheduledTick: AutonomousAlertScheduledTickResult;
 	selfMaintenanceSignals?: readonly SupervisorSelfMaintenanceSignal[];
 	taskTree?: MasterPlanTaskTree;
+	executionReadiness?: IduExecutionReadiness;
 	supervisorCronPlan?: IduSupervisorCronPlanResult | UnknownJson;
 	bibliotecarioSnapshot?: UnknownJson;
 	externalIntelligenceReport?: ExternalIntelligenceReport | UnknownJson;
@@ -262,6 +300,10 @@ function evidenceRefs(input: {
 		...(input.taskTree && input.taskTree.status !== "ready"
 			? [`automaticov1:task-tree:${input.taskTree.status}`]
 			: []),
+		...(input.executionReadiness &&
+		input.executionReadiness.status !== "execution_ready"
+			? [`automaticov1:readiness:${input.executionReadiness.status}`]
+			: []),
 	];
 }
 
@@ -273,6 +315,7 @@ function nextActions(input: {
 	alertScheduledTick: AutonomousAlertScheduledTickResult;
 	selfMaintenanceSignals?: readonly SupervisorSelfMaintenanceSignal[];
 	taskTree?: MasterPlanTaskTree;
+	executionReadiness?: IduExecutionReadiness;
 }): string[] {
 	const usageReport = automaticov1UsageReport(input.input, input.now);
 	const actions = [
@@ -302,6 +345,14 @@ function nextActions(input: {
 	if (input.taskTree && input.taskTree.status !== "ready") {
 		actions.push(
 			"Generate or repair the Master Plan task tree before continuing automaticov1 execution.",
+		);
+	}
+	if (
+		input.executionReadiness &&
+		input.executionReadiness.status !== "execution_ready"
+	) {
+		actions.push(
+			"Resolve Idu-pi execution readiness blockers before continuing automaticov1 execution.",
 		);
 	}
 	if (usageReport?.mcpContextPackStaleness === "stale") {

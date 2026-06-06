@@ -69,6 +69,15 @@ function input(
 			criticalRisks: [],
 		}),
 		loadTasks: () => [],
+		loadExecutionReadiness: () => ({
+			version: 1,
+			status: "execution_ready",
+			coreStatus: "confirmed",
+			constitutionStatus: "active",
+			taskTreeStatus: "ready",
+			mcpContextPackStaleness: "fresh",
+			blockingReasons: [],
+		}),
 		loadSelfMaintenanceSignals: () => [],
 		createTask: () => ({ id: "created-task" }),
 		...overrides,
@@ -183,6 +192,62 @@ test("automaticov1 cycle injects stale MCP context pack refresh advisory", async
 	assert.ok(
 		result.safeNotes.some((note) =>
 			/does not auto-run supervisor context/u.test(note),
+		),
+	);
+});
+
+test("automaticov1 cycle blocks when execution readiness supplier is missing", async () => {
+	const stateRoot = tempRoot();
+	let created = 0;
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadExecutionReadiness: undefined,
+			createTask: () => {
+				created += 1;
+				return { id: `created-${created}` };
+			},
+		}),
+	);
+
+	assert.equal(result.status, "blocked_readiness");
+	assert.equal(created, 0);
+	assert.equal(result.executionReadiness?.status, "missing_task_tree");
+	assert.ok(result.evidenceRefs.includes("automaticov1:readiness:missing_task_tree"));
+});
+
+test("automaticov1 cycle blocks when execution readiness is not satisfied", async () => {
+	const stateRoot = tempRoot();
+	let created = 0;
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadExecutionReadiness: () => ({
+				version: 1,
+				status: "not_ready",
+				coreStatus: "draft",
+				constitutionStatus: "draft",
+				taskTreeStatus: "ready",
+				mcpContextPackStaleness: "fresh",
+				blockingReasons: [
+					"Project Core must be confirmed; current=draft.",
+					"Constitution must be active; current=draft.",
+				],
+			}),
+			createTask: () => {
+				created += 1;
+				return { id: `created-${created}` };
+			},
+		}),
+	);
+
+	assert.equal(result.status, "blocked_readiness");
+	assert.equal(created, 0);
+	assert.equal(result.executionReadiness?.status, "not_ready");
+	assert.ok(result.evidenceRefs.includes("automaticov1:readiness:not_ready"));
+	assert.ok(
+		result.nextActions.some((action) =>
+			/execution readiness blockers/u.test(action),
 		),
 	);
 });
