@@ -63,7 +63,7 @@ export type CliHomeProjectStatus = {
 	projectCore: "confirmed" | "pending" | "missing" | "unknown";
 	constitution: "active" | "stale" | "draft" | "missing" | "unknown";
 	allowedRoot: boolean | "unknown";
-	recommendedNext: "enroll" | "bootstrap" | "idu" | "prepare";
+	recommendedNext: "enroll" | "bootstrap" | "confirm_core" | "idu" | "prepare";
 	warning?: string;
 };
 
@@ -644,8 +644,8 @@ function recommendedProjectNext(
 	projectCore: CliHomeProjectStatus["projectCore"],
 ): CliHomeProjectStatus["recommendedNext"] {
 	if (!registered) return "enroll";
-	if (projectCore === "missing" || projectCore === "pending")
-		return "bootstrap";
+	if (projectCore === "missing") return "bootstrap";
+	if (projectCore === "pending") return "confirm_core";
 	if (supervisor !== "active") return "idu";
 	return "prepare";
 }

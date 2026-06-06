@@ -44,6 +44,7 @@ import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
 import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
 import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
 import { runAutomaticov1AdvisoryCycle } from "./automaticov1-cycle.js";
+import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
 	appendAutonomousAlertDecision,
 	readAutonomousAlertEngineState,
@@ -1599,6 +1600,15 @@ function readRuntimeStructuredTasks(runtime: CliRuntime): {
 	}
 }
 
+function loadRuntimeAutomaticov1Plan(runtime: CliRuntime) {
+	if (!runtime.masterPlanReview) return undefined;
+	try {
+		return runtime.masterPlanReview("latest").plan;
+	} catch {
+		return undefined;
+	}
+}
+
 function buildRuntimeSelfMaintenanceReport(
 	runtime: CliRuntime,
 	stateRoot: string,
@@ -2896,6 +2906,8 @@ async function dispatchTool(
 					}
 				},
 				loadTasks: () => loadSelfMaintenance().taskRead.tasks,
+				loadTaskTree: () =>
+					buildMasterPlanTaskTree(loadRuntimeAutomaticov1Plan(runtime)),
 				loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
 				createTask: (draft) => {
 					const task = runtime.createTask(

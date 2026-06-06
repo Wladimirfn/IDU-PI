@@ -125,6 +125,7 @@ import {
 	type MasterPlanReview,
 	type MasterPlanStatusResult,
 } from "./master-plan.js";
+import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
 	formatIduProjectDashboard,
 	type IduProjectDashboardReport,
@@ -2117,6 +2118,15 @@ export async function runCliCommand(
 	}
 }
 
+function loadAutomaticov1Plan(runtime: CliRuntime) {
+	if (!runtime.masterPlanReview) return undefined;
+	try {
+		return runtime.masterPlanReview("latest").plan;
+	} catch {
+		return undefined;
+	}
+}
+
 async function runCliAutomaticov1Cycle(
 	runtime: CliRuntime,
 	parts: string[],
@@ -2175,6 +2185,7 @@ async function runCliAutomaticov1Cycle(
 			}
 		},
 		loadTasks: () => loadSelfMaintenance().tasks,
+		loadTaskTree: () => buildMasterPlanTaskTree(loadAutomaticov1Plan(runtime)),
 		loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
 		createTask: (draft) => {
 			const task = runtime.createTask(

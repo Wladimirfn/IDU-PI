@@ -187,6 +187,77 @@ test("automaticov1 cycle injects stale MCP context pack refresh advisory", async
 	);
 });
 
+test("automaticov1 cycle blocks when Master Plan task tree is not ready", async () => {
+	const stateRoot = tempRoot();
+	let created = 0;
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadTaskTree: () => ({
+				version: 1,
+				status: "empty",
+				projectId: "idu-pi",
+				objective: "Idu-pi supervises execution",
+				hitos: [],
+				blockingReasons: ["Approved Master Plan has no executable task tree."],
+			}),
+			createTask: () => {
+				created += 1;
+				return { id: `created-${created}` };
+			},
+		}),
+	);
+
+	assert.equal(result.status, "blocked_task_tree");
+	assert.equal(created, 0);
+	assert.equal(result.taskTree?.status, "empty");
+	assert.ok(result.evidenceRefs.includes("automaticov1:task-tree:empty"));
+	assert.ok(
+		result.nextActions.some((action) => /Master Plan task tree/u.test(action)),
+	);
+});
+
+test("automaticov1 cycle blocks when supervisor friction requires systemic repair", async () => {
+	const stateRoot = tempRoot();
+	let created = 0;
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadSelfMaintenanceSignals: () => [
+				{
+					id: "supervisor-activity-pressure",
+					category: "supervisor_activity_pressure",
+					severity: "high",
+					confidence: 0.9,
+					evidenceRefs: [
+						"idu-usage-events:notAllowed=40",
+						"idu-usage-events:requiresHuman=28",
+					],
+					summary: "Supervisor friction is high",
+					recommendedActions: [
+						"Create systemic improvement task before continuing automation.",
+					],
+				},
+			],
+			createTask: () => {
+				created += 1;
+				return { id: `created-${created}` };
+			},
+		}),
+	);
+
+	assert.equal(result.status, "blocked_systemic_maintenance");
+	assert.equal(created, 0);
+	assert.ok(
+		result.evidenceRefs.includes("automaticov1:systemic-maintenance:block"),
+	);
+	assert.ok(
+		result.nextActions.some((action) =>
+			/systemic improvement task/u.test(action),
+		),
+	);
+});
+
 test("automaticov1 cycle delegates bounded task creation to scheduled alert executor", async () => {
 	const stateRoot = tempRoot();
 	let created = 0;

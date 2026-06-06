@@ -312,6 +312,56 @@ test("self-maintenance advisory separates skipped and throttled supervisor press
 	);
 });
 
+test("self-maintenance advisory turns repeated systemic failures into actionable improvement tasks", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "director-1",
+			text: "Bug: Idu-pi remains MCP passive instead of execution director",
+			status: "done" as const,
+		},
+		{
+			...baseTask,
+			id: "director-2",
+			text: "Bug: automaticov1 MCP passive no task tree repeated",
+			status: "pending" as const,
+		},
+		{
+			...baseTask,
+			id: "director-3",
+			text: "Bug: supervisor direction lost, MCP blocked human-required loop",
+			status: "pending" as const,
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+		usageNotAllowed: 40,
+		usageRequiresHuman: 28,
+	});
+
+	assertTopLevelContract(report);
+	assert.ok(report.systemicActions.length > 0);
+	const action = report.systemicActions.find(
+		(item) => item.id === "systemic-supervisor-friction",
+	);
+	assert.ok(action);
+	assert.equal(action.blocksAutomaticCycle, true);
+	assert.equal(action.kind, "create_task");
+	assert.match(action.title, /supervisor friction/u);
+	assert.ok(
+		action.acceptanceCriteria.some((criterion) =>
+			/task tree|blocked|requiresHuman/u.test(criterion),
+		),
+	);
+	assert.ok(
+		report.recommendedActions.some((item) =>
+			/systemic improvement task/u.test(item),
+		),
+	);
+});
+
 test("self-maintenance advisory emits richer domain signals conservatively", () => {
 	const tasks = [
 		{

@@ -1733,10 +1733,19 @@ test("CLI automaticov1 cycle composes engines without authorizing work", async (
 				markdown: "# Plan Maestro Idu-pi\n",
 				plan: {
 					status: "approved",
+					projectId: runtime.projectId,
 					inferredObjective:
 						"Idu-pi supervises the Pi orchestrator with evidence.",
 					executiveSummary: "Supervisor/auditor summary",
 					criticalRisks: [],
+					workMilestones: [
+						{
+							name: "Hito supervisor",
+							goal: "Keep supervisor execution aligned",
+							actions: ["Run bounded supervisor cycle"],
+							exitCriteria: ["cycle report reviewed"],
+						},
+					],
 				},
 			}) as any;
 		const result = await runCliCommand(["automaticov1", "cycle"], runtime);
