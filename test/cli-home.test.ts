@@ -7,6 +7,7 @@ import {
 	readdirSync,
 	realpathSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -149,6 +150,52 @@ test("home shows MCP installed and missing states", () => {
 		stdinInteractive: false,
 	});
 	assert.equal(installed.mcpInstalled, true);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("home warns when configured MCP runtime build may be stale", () => {
+	const root = tempDir();
+	const agentDir = join(root, "agent");
+	const packageRoot = join(root, "pkg");
+	const sourcePath = join(packageRoot, "src", "mcp-server.ts");
+	const serverPath = join(packageRoot, "dist", "src", "mcp-server.js");
+	mkdirSync(join(packageRoot, "src"), { recursive: true });
+	mkdirSync(join(packageRoot, "dist", "src"), { recursive: true });
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(sourcePath, "source", "utf8");
+	writeFileSync(serverPath, "dist", "utf8");
+	utimesSync(
+		serverPath,
+		new Date("2026-06-05T00:00:00.000Z"),
+		new Date("2026-06-05T00:00:00.000Z"),
+	);
+	utimesSync(
+		sourcePath,
+		new Date("2026-06-05T00:10:00.000Z"),
+		new Date("2026-06-05T00:10:00.000Z"),
+	);
+	writeFileSync(
+		join(agentDir, "mcp.json"),
+		JSON.stringify({
+			mcpServers: {
+				"idu-pi": { command: "node", args: [serverPath] },
+			},
+		}),
+		"utf8",
+	);
+
+	const status = buildCliHomeStatus({
+		env: { PI_CODING_AGENT_DIR: agentDir, PATH: "" },
+		runner: () => undefined,
+		stdinInteractive: false,
+	});
+
+	assert.equal(status.mcpInstalled, true);
+	assert.equal(status.mcpRuntime.status, "source_newer");
+	assert.match(
+		formatCliSystemStatus(status),
+		/MCP runtime: source newer; run corepack pnpm build and reload MCP in Pi/u,
+	);
 	rmSync(root, { recursive: true, force: true });
 });
 

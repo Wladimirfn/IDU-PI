@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -67,6 +67,20 @@ export type CliHomeProjectStatus = {
 	warning?: string;
 };
 
+export type CliMcpRuntimeStatus =
+	| "absent"
+	| "fresh"
+	| "source_newer"
+	| "missing"
+	| "unknown";
+
+export type CliMcpRuntimeDiagnostic = {
+	installed: boolean;
+	status: CliMcpRuntimeStatus;
+	serverPath?: string;
+	recommendedAction?: string;
+};
+
 export type CliHomeStatus = {
 	version: string;
 	cwd: string;
@@ -78,6 +92,7 @@ export type CliHomeStatus = {
 	nodeFound: boolean;
 	gitFound: boolean;
 	mcpInstalled: boolean;
+	mcpRuntime: CliMcpRuntimeDiagnostic;
 	commandExtensionInstalled: boolean;
 	globalInstall: GlobalIduInstallStatus;
 	agentProfiles: AgentProfile[];
@@ -93,7 +108,8 @@ export function buildCliHomeStatus(
 	const cwd = resolve(options.cwd ?? process.cwd());
 	const tools = detectTools({ env, runner: options.runner });
 	const agentDir = resolvePiAgentDir({ env });
-	const mcpInstalled = mcpConfigHasIdu(join(agentDir, "mcp.json"), exists);
+	const mcpRuntime = inspectMcpRuntime(join(agentDir, "mcp.json"), exists);
+	const mcpInstalled = mcpRuntime.installed;
 	const commandExtensionInstalled = exists(
 		join(agentDir, "extensions", "idu-pi-commands.ts"),
 	);
@@ -113,6 +129,7 @@ export function buildCliHomeStatus(
 		nodeFound: tools.node.found,
 		gitFound: tools.git.found,
 		mcpInstalled,
+		mcpRuntime,
 		commandExtensionInstalled,
 		globalInstall,
 		agentProfiles: safeParseAgentProfiles(env.PI_AGENT_PROFILES),
@@ -212,6 +229,7 @@ export function formatCliSystemStatus(status: CliHomeStatus): string {
 		`pnpm: ${formatTool(status.pnpm)}`,
 		`Pi agent dir: ${status.agentDir}`,
 		`MCP idu-pi: ${status.mcpInstalled ? "presente" : "ausente"}`,
+		formatMcpRuntimeLine(status.mcpRuntime),
 		`Extensión Pi: ${status.commandExtensionInstalled ? "presente" : "ausente"}`,
 		`pnpm global bin en PATH: ${status.globalInstall.pnpmGlobalBinInPath ? "sí" : "no"}`,
 		`recommended action: ${status.globalInstall.recommendedAction ?? "ninguna"}`,
@@ -229,6 +247,7 @@ export function formatCliConfigurationStatus(status: CliHomeStatus): string {
 		`Registry proyectos: ${resolveIduRegistryPath()}`,
 		`Shim idu-pi recomendado: ${status.globalInstall.pnpmGlobalBin ?? "unknown"}`,
 		`MCP idu-pi: ${status.mcpInstalled ? "presente" : "ausente"}`,
+		formatMcpRuntimeLine(status.mcpRuntime),
 		`Extensión Pi: ${status.commandExtensionInstalled ? "presente" : "ausente"}`,
 		"",
 		"Comandos de configuración:",
@@ -715,19 +734,68 @@ function readSupervisorStatus(
 	}
 }
 
-function mcpConfigHasIdu(
+function inspectMcpRuntime(
 	path: string,
 	exists: (path: string) => boolean,
-): boolean {
-	if (!exists(path)) return false;
+): CliMcpRuntimeDiagnostic {
+	if (!exists(path)) return { installed: false, status: "absent" };
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as {
-			mcpServers?: Record<string, unknown>;
+			mcpServers?: Record<string, { args?: unknown }>;
 		};
-		return Boolean(parsed.mcpServers?.["idu-pi"]);
+		const server = parsed.mcpServers?.["idu-pi"];
+		if (!server) return { installed: false, status: "absent" };
+		const serverPath =
+			Array.isArray(server.args) && typeof server.args[0] === "string"
+				? server.args[0]
+				: undefined;
+		if (!serverPath) return { installed: true, status: "unknown" };
+		if (!exists(serverPath)) {
+			return {
+				installed: true,
+				status: "missing",
+				serverPath,
+				recommendedAction: "run corepack pnpm build and reload MCP in Pi",
+			};
+		}
+		const sourcePath = sourcePathForMcpServer(serverPath);
+		if (!sourcePath || !exists(sourcePath)) {
+			return { installed: true, status: "unknown", serverPath };
+		}
+		const source = statSync(sourcePath);
+		const built = statSync(serverPath);
+		if (source.mtimeMs > built.mtimeMs + 1000) {
+			return {
+				installed: true,
+				status: "source_newer",
+				serverPath,
+				recommendedAction: "run corepack pnpm build and reload MCP in Pi",
+			};
+		}
+		return { installed: true, status: "fresh", serverPath };
 	} catch {
-		return false;
+		return { installed: false, status: "unknown" };
 	}
+}
+
+function sourcePathForMcpServer(serverPath: string): string | undefined {
+	const normalized = serverPath.replace(/\\/gu, "/");
+	const marker = "/dist/src/mcp-server.js";
+	if (!normalized.endsWith(marker)) return undefined;
+	const separator = serverPath.includes("\\") ? "\\" : "/";
+	return `${serverPath.slice(0, -marker.length)}${separator}src${separator}mcp-server.ts`;
+}
+
+function formatMcpRuntimeLine(runtime: CliMcpRuntimeDiagnostic): string {
+	if (runtime.status === "source_newer") {
+		return "MCP runtime: source newer; run corepack pnpm build and reload MCP in Pi";
+	}
+	if (runtime.status === "missing") {
+		return "MCP runtime: missing dist target; run corepack pnpm build and reload MCP in Pi";
+	}
+	if (runtime.status === "fresh") return "MCP runtime: fresh";
+	if (runtime.status === "absent") return "MCP runtime: ausente";
+	return "MCP runtime: unknown";
 }
 
 function readPackageVersion(): string {
@@ -742,7 +810,9 @@ function readPackageVersion(): string {
 	}
 }
 
-export function applyPackageEnvDefaults(options: { envPath?: string } = {}): void {
+export function applyPackageEnvDefaults(
+	options: { envPath?: string } = {},
+): void {
 	for (const [key, value] of Object.entries(readPackageEnv(options.envPath))) {
 		if (value !== undefined && process.env[key] === undefined) {
 			process.env[key] = value;
@@ -767,7 +837,9 @@ function mergedPackageEnv(): Record<string, string | undefined> {
 	return { ...readPackageEnv(), ...process.env };
 }
 
-function readPackageEnv(envPath = join(resolveCliPackageRoot(), ".env")): Record<string, string | undefined> {
+function readPackageEnv(
+	envPath = join(resolveCliPackageRoot(), ".env"),
+): Record<string, string | undefined> {
 	if (!existsSync(envPath)) return {};
 	const values: Record<string, string | undefined> = {};
 	try {
