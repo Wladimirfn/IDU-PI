@@ -134,6 +134,35 @@ test("repeated bug alert ignores completed runtime tasks with full gate and revi
 	);
 });
 
+test("repeated bug alert ignores completed runtime tasks with noisy preamble", () => {
+	const runtimeEvidence = [
+		"Fixed idu_postflight local-only noise bug. Root cause: buildPostflightTaskTrace compared report.changedFiles against expectedFiles without call-scoped ignored/local-only inputs, so context.md caused misleading needs_evidence. Added call-scoped ignoredFiles to idu_postflight and task trace; exact matches or slash-suffixed prefixes are removed from unexpected detection and included in trace.ignoredFiles; real unexpected files still fail. Commit 225f05f fix(idu): allow postflight local-only ignores pushed to origin/feat/idu-context-pressure. Evidence: RED tests failed before ignoredFiles support; GREEN full gate corepack pnpm build && corepack pnpm test && git diff --check => 1089 pass / 0 fail / 1 skipped; LSP 0; reviewer 4a941d68 PASS.",
+		"Resolved repeated-failure learning blocker with regression evidence: covered completed repeated failures no longer emit systemic-repeated-failure-learning; uncovered and mixed uncovered failures still block. Evidence: focused automaticov1/mcp/self-maintenance tests passed; full gate corepack pnpm build && corepack pnpm test && git diff --check passed with 1194 pass / 0 fail / 1 skipped; LSP 0 diagnostics; fresh reviewer ece3c046 PASS.",
+		"Resolved systemic-supervisor-friction automaticov1 slice: advisory-only supervisor pressure no longer hard-blocks when readiness/task tree are green and hard pressure evidence is zero; hard supervisor evidence, repeated failures, external-security, readiness, and task-tree gates still block. Evidence: RED test reproduced blocked_systemic_maintenance; focused tests passed; full gate corepack pnpm build && corepack pnpm test && git diff --check passed with 1202 pass / 0 fail / 1 skipped; LSP 0 diagnostics; fresh reviewer c0c25b48 PASS.",
+		"Implemented repeated_bug:context alert fix: autonomous alert engine now ignores completed repeated-bug tasks only when completionEvidence has positive regression/review coverage, while negative/insufficient evidence (tests skipped, no regression, checklist not updated, no postflight evidence, postflight failed, needs evidence, did not pass, no coverage) still counts. Verification: RED reproduced covered historical tasks still alerted; RED reproduced insufficient evidence was incorrectly suppressed; GREEN focused autonomous-alert-engine 9 pass / 0 fail; LSP 0; full gate corepack pnpm build && corepack pnpm test && git diff --check => 1225 pass / 0 fail / 1 skipped; fresh reviewer final PASS.",
+	];
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: runtimeEvidence.map((completionEvidence, index) => ({
+			...task(
+				`runtime-noisy-${index + 1}`,
+				"Bug: postflight context repeated failure learning regression",
+				"done",
+			),
+			completionEvidence,
+		})),
+		selfMaintenanceSignals: [],
+		allowTaskCreation: true,
+	});
+
+	assert.equal(
+		report.decisions.some((decision) => decision.domain === "repeated_bug"),
+		false,
+	);
+});
+
 test("repeated bug alert still counts completed tasks with insufficient evidence", () => {
 	const insufficientEvidence = [
 		"Tests skipped; no regression coverage added.",
@@ -152,6 +181,30 @@ test("repeated bug alert still counts completed tasks with insufficient evidence
 				"done",
 			),
 			completionEvidence,
+		})),
+		selfMaintenanceSignals: [],
+		allowTaskCreation: true,
+	});
+
+	const decision = report.decisions.find(
+		(item) => item.domain === "repeated_bug",
+	);
+	assert.ok(decision);
+	assert.equal(decision.recommendedAction, "create_task");
+});
+
+test("repeated bug alert still counts colon-form negated evidence", () => {
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: Array.from({ length: 4 }, (_, index) => ({
+			...task(
+				`negated-evidence-colon-${index + 1}`,
+				"Bug: postflight context repeated regression",
+				"done",
+			),
+			completionEvidence: "No postflight evidence: reviewer PASS.",
 		})),
 		selfMaintenanceSignals: [],
 		allowTaskCreation: true,

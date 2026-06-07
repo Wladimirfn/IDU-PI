@@ -283,9 +283,19 @@ function repeatedBugDecision(
 
 function hasCoveredRepeatedBugEvidence(task: StructuredTask): boolean {
 	if (task.status !== "done") return false;
-	const evidence = (task.completionEvidence ?? "").toLowerCase();
+	const evidence = coverageEvidenceSegment(
+		(task.completionEvidence ?? "").toLowerCase(),
+	);
 	if (hasNegativeCoverageEvidence(evidence)) return false;
 	return hasPositiveCoverageEvidence(evidence);
+}
+
+function coverageEvidenceSegment(evidence: string): string {
+	const markerPattern = /(^|[.!?]\s+)(verification|evidence):/gu;
+	const matches = [...evidence.matchAll(markerPattern)];
+	const lastMatch = matches.at(-1);
+	if (!lastMatch?.index) return evidence;
+	return evidence.slice(lastMatch.index + lastMatch[1].length);
 }
 
 function hasNegativeCoverageEvidence(evidence: string): boolean {
