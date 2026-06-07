@@ -209,6 +209,7 @@ function repeatedBugDecision(
 	);
 	const counts = new Map<string, StructuredTask[]>();
 	for (const task of projectTasks) {
+		if (hasCoveredRepeatedBugEvidence(task)) continue;
 		const text = task.text.toLowerCase();
 		if (!/\b(bug|fail|failure|error|regression|repeated)\b/u.test(text)) {
 			continue;
@@ -278,6 +279,25 @@ function repeatedBugDecision(
 		requiresHuman: highRisk,
 		forbiddenActions: [...FORBIDDEN_ACTIONS],
 	};
+}
+
+function hasCoveredRepeatedBugEvidence(task: StructuredTask): boolean {
+	if (task.status !== "done") return false;
+	const evidence = (task.completionEvidence ?? "").toLowerCase();
+	if (hasNegativeCoverageEvidence(evidence)) return false;
+	return hasPositiveCoverageEvidence(evidence);
+}
+
+function hasNegativeCoverageEvidence(evidence: string): boolean {
+	return /no regression|tests? skipped|postflight failed|needs evidence|needs_evidence|did not pass|no coverage|not updated|no postflight evidence|no .*evidence/u.test(
+		evidence,
+	);
+}
+
+function hasPositiveCoverageEvidence(evidence: string): boolean {
+	return /regression (test|coverage)|review checklist|checklist updated|focused tests passed|full build\/test|postflight evidence|reviewer pass/u.test(
+		evidence,
+	);
 }
 
 function decisionFromSelfMaintenanceSignal(

@@ -75,6 +75,66 @@ test("repeated bug threshold creates low risk task draft", () => {
 	assert.ok(decision.uncomfortableTruths.length > 0);
 });
 
+test("repeated bug alert ignores completed tasks with regression evidence", () => {
+	const covered = [
+		"Fixed with regression test; focused tests passed; reviewer PASS.",
+		"Review checklist updated; full build/test/diff-check passed.",
+		"Regression coverage recorded in postflight tests and reviewer PASS.",
+		"Completed with explicit postflight evidence and fresh reviewer PASS.",
+	];
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: covered.map((completionEvidence, index) => ({
+			...task(
+				`covered-${index + 1}`,
+				"Bug: postflight context.md repeated regression",
+				"done",
+			),
+			completionEvidence,
+		})),
+		selfMaintenanceSignals: [],
+		allowTaskCreation: true,
+	});
+
+	assert.equal(
+		report.decisions.some((decision) => decision.domain === "repeated_bug"),
+		false,
+	);
+	assert.equal(report.humanEscalations.length, 0);
+});
+
+test("repeated bug alert still counts completed tasks with insufficient evidence", () => {
+	const insufficientEvidence = [
+		"Tests skipped; no regression coverage added.",
+		"No regression test exists; postflight failed.",
+		"Review checklist not updated.",
+		"No postflight evidence recorded.",
+	];
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: insufficientEvidence.map((completionEvidence, index) => ({
+			...task(
+				`uncovered-${index + 1}`,
+				"Bug: postflight context.md repeated regression",
+				"done",
+			),
+			completionEvidence,
+		})),
+		selfMaintenanceSignals: [],
+		allowTaskCreation: true,
+	});
+
+	const decision = report.decisions.find(
+		(item) => item.domain === "repeated_bug",
+	);
+	assert.ok(decision);
+	assert.equal(decision.recommendedAction, "create_task");
+});
+
 test("security and db repeated bugs escalate to human without task draft", () => {
 	const report = buildAutonomousAlertEngineReport({
 		projectId: "idu-pi",
