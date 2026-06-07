@@ -332,13 +332,19 @@ import {
 } from "./structured-task-queue.js";
 import {
 	buildSupervisorSelfMaintenanceAdvisory,
+	SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
 	type SupervisorSelfMaintenanceAdvisory,
 } from "./supervisor-self-maintenance-advisory.js";
 import {
+	filterRecentSupervisorActivityEvents,
 	readSupervisorActivityEvents,
 	summarizeSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
-import { buildIduUsageReport, readIduUsageEvents } from "./usage-events.js";
+import {
+	buildIduUsageReport,
+	filterRecentIduUsageEvents,
+	readIduUsageEvents,
+} from "./usage-events.js";
 import {
 	buildAgentLabEffectivenessReport,
 	readAgentLabEffectivenessEvents,
@@ -1461,10 +1467,22 @@ function buildTelegramSelfMaintenanceReport(stateRoot: string): {
 	report: SupervisorSelfMaintenanceAdvisory;
 } {
 	const tasks = structuredTaskQueue.listTasks();
+	const now = new Date();
 	const supervisorActivity = summarizeSupervisorActivityEvents(
-		readSupervisorActivityEvents(stateRoot),
+		filterRecentSupervisorActivityEvents(
+			readSupervisorActivityEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
 	);
-	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const usageReport = buildIduUsageReport(
+		filterRecentIduUsageEvents(
+			readIduUsageEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
+		{ now },
+	);
 	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
 		readAgentLabEffectivenessEvents(stateRoot),
 	);
@@ -1488,7 +1506,7 @@ function buildTelegramSelfMaintenanceReport(stateRoot: string): {
 		tasks,
 		report: buildSupervisorSelfMaintenanceAdvisory({
 			projectId: currentProjectId(),
-			now: new Date(),
+			now,
 			tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:

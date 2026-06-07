@@ -143,6 +143,18 @@ export function readIduUsageEvents(
 	}
 }
 
+export function filterRecentIduUsageEvents(
+	events: readonly IduUsageEvent[],
+	now: Date,
+	windowMs: number,
+): IduUsageEvent[] {
+	const cutoffMs = now.getTime() - Math.max(0, windowMs);
+	return events.filter((event) => {
+		const eventMs = Date.parse(event.timestamp);
+		return Number.isFinite(eventMs) && eventMs >= cutoffMs;
+	});
+}
+
 export function summarizeIduUsageEvents(
 	events: IduUsageEvent[],
 ): IduUsageSummary {

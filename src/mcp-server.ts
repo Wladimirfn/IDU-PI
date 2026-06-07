@@ -51,7 +51,10 @@ import {
 	readAutonomousAlertEngineState,
 	updateAutonomousAlertControlState,
 } from "./autonomous-alert-engine-state.js";
-import { buildSupervisorSelfMaintenanceAdvisory } from "./supervisor-self-maintenance-advisory.js";
+import {
+	buildSupervisorSelfMaintenanceAdvisory,
+	SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+} from "./supervisor-self-maintenance-advisory.js";
 import {
 	buildExternalIntelligenceReport,
 	writeExternalIntelligenceReport,
@@ -77,6 +80,7 @@ import { loadProjectCore } from "./project-core.js";
 import { loadProjectConstitution } from "./project-constitution.js";
 import {
 	buildIduUsageReport,
+	filterRecentIduUsageEvents,
 	readIduUsageEvents,
 	recordIduUsageEvent,
 } from "./usage-events.js";
@@ -93,6 +97,7 @@ import {
 	recordContextQualityEventDeferred,
 } from "./context-quality-events.js";
 import {
+	filterRecentSupervisorActivityEvents,
 	readSupervisorActivityEvents,
 	recordSupervisorActivityEventDeferred,
 	summarizeSupervisorActivityEvents,
@@ -1651,10 +1656,22 @@ function buildRuntimeSelfMaintenanceReport(
 	report: ReturnType<typeof buildSupervisorSelfMaintenanceAdvisory>;
 } {
 	const taskRead = readRuntimeStructuredTasks(runtime);
+	const now = new Date();
 	const supervisorActivity = summarizeSupervisorActivityEvents(
-		readSupervisorActivityEvents(stateRoot),
+		filterRecentSupervisorActivityEvents(
+			readSupervisorActivityEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
 	);
-	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const usageReport = buildIduUsageReport(
+		filterRecentIduUsageEvents(
+			readIduUsageEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
+		{ now },
+	);
 	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
 		readAgentLabEffectivenessEvents(stateRoot),
 	);
@@ -1675,7 +1692,7 @@ function buildRuntimeSelfMaintenanceReport(
 		taskRead,
 		report: buildSupervisorSelfMaintenanceAdvisory({
 			projectId: runtime.projectId,
-			now: new Date(),
+			now,
 			tasks: taskRead.tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:

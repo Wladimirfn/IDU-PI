@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	buildIduUsageReport,
+	filterRecentIduUsageEvents,
 	formatIduUsagePanel,
 	formatIduUsageSummary,
 	readIduUsageEvents,
@@ -143,6 +144,50 @@ test("usage event reader ignores malformed and bounds by limit", async () => {
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("usage events can be filtered to a recent pressure window", () => {
+	const events = [
+		{
+			version: 1 as const,
+			id: "old",
+			timestamp: "2026-06-04T23:59:59.999Z",
+			projectId: "idu-pi",
+			surface: "mcp" as const,
+			action: "old_blocked",
+			allowedToProceed: false,
+			requiresHuman: true,
+		},
+		{
+			version: 1 as const,
+			id: "cutoff",
+			timestamp: "2026-06-05T00:00:00.000Z",
+			projectId: "idu-pi",
+			surface: "mcp" as const,
+			action: "cutoff_blocked",
+			allowedToProceed: false,
+			requiresHuman: true,
+		},
+		{
+			version: 1 as const,
+			id: "recent",
+			timestamp: "2026-06-05T12:00:00.000Z",
+			projectId: "idu-pi",
+			surface: "cli" as const,
+			action: "recent_status",
+		},
+	];
+
+	const recent = filterRecentIduUsageEvents(
+		events,
+		new Date("2026-06-06T00:00:00.000Z"),
+		24 * 60 * 60 * 1000,
+	);
+
+	assert.deepEqual(
+		recent.map((event) => event.id),
+		["cutoff", "recent"],
+	);
 });
 
 test("usage summary counts surfaces actions recommendations and tri-state fields", async () => {

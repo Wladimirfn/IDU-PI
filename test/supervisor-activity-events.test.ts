@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import {
 	buildSupervisorActivityReport,
+	filterRecentSupervisorActivityEvents,
 	formatSupervisorActivityPanel,
 	readSupervisorActivityEvents,
 	recordSupervisorActivityEvent,
@@ -87,6 +88,54 @@ test("supervisor activity reader ignores malformed and bounds recent events", as
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("supervisor activity events can be filtered to a recent pressure window", () => {
+	const events = [
+		{
+			version: 1 as const,
+			id: "old",
+			timestamp: "2026-06-04T23:59:59.999Z",
+			projectId: "idu-pi",
+			eventType: "supervisor_tick" as const,
+			origin: "orchestrator_requested" as const,
+			trigger: "cron_planning" as const,
+			status: "skipped" as const,
+			reason: "throttled" as const,
+		},
+		{
+			version: 1 as const,
+			id: "cutoff",
+			timestamp: "2026-06-05T00:00:00.000Z",
+			projectId: "idu-pi",
+			eventType: "supervisor_tick" as const,
+			origin: "orchestrator_requested" as const,
+			trigger: "cron_planning" as const,
+			status: "skipped" as const,
+			reason: "throttled" as const,
+		},
+		{
+			version: 1 as const,
+			id: "recent",
+			timestamp: "2026-06-05T12:00:00.000Z",
+			projectId: "idu-pi",
+			eventType: "supervisor_tick" as const,
+			origin: "orchestrator_requested" as const,
+			trigger: "manual" as const,
+			status: "completed" as const,
+		},
+	];
+
+	const recent = filterRecentSupervisorActivityEvents(
+		events,
+		new Date("2026-06-06T00:00:00.000Z"),
+		24 * 60 * 60 * 1000,
+	);
+
+	assert.deepEqual(
+		recent.map((event) => event.id),
+		["cutoff", "recent"],
+	);
 });
 
 test("supervisor activity summary counts origins triggers statuses and artifacts", async () => {

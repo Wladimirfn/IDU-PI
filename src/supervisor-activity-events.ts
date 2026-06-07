@@ -182,6 +182,18 @@ export function readSupervisorActivityEvents(
 	}
 }
 
+export function filterRecentSupervisorActivityEvents(
+	events: readonly SupervisorActivityEvent[],
+	now: Date,
+	windowMs: number,
+): SupervisorActivityEvent[] {
+	const cutoffMs = now.getTime() - Math.max(0, windowMs);
+	return events.filter((event) => {
+		const eventMs = Date.parse(event.timestamp);
+		return Number.isFinite(eventMs) && eventMs >= cutoffMs;
+	});
+}
+
 export function summarizeSupervisorActivityEvents(
 	events: SupervisorActivityEvent[],
 ): SupervisorActivitySummary {

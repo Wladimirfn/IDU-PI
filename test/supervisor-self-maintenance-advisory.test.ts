@@ -312,6 +312,34 @@ test("self-maintenance advisory separates skipped and throttled supervisor press
 	);
 });
 
+test("self-maintenance advisory does not turn historical human gates into active systemic friction", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: [],
+		supervisorEvents: 74,
+		usageFailures: 0,
+		usageNotAllowed: 71,
+		usageRequiresHuman: 66,
+		supervisorActivitySkipped: 0,
+		supervisorActivityThrottled: 0,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(
+		report.signals.some(
+			(signal) => signal.category === "supervisor_activity_pressure",
+		),
+		false,
+	);
+	assert.equal(
+		report.systemicActions.some(
+			(action) => action.id === "systemic-supervisor-friction",
+		),
+		false,
+	);
+});
+
 test("self-maintenance advisory turns repeated systemic failures into actionable improvement tasks", () => {
 	const tasks = [
 		{

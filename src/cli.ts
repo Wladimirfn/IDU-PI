@@ -377,6 +377,7 @@ import {
 } from "./model-catalog.js";
 import {
 	buildIduUsageReport,
+	filterRecentIduUsageEvents,
 	flushIduUsageEvents,
 	formatIduUsageSummary,
 	readIduUsageEvents,
@@ -384,6 +385,7 @@ import {
 	summarizeIduUsageEvents,
 } from "./usage-events.js";
 import {
+	filterRecentSupervisorActivityEvents,
 	readSupervisorActivityEvents,
 	recordSupervisorActivityEventDeferred,
 	summarizeSupervisorActivityEvents,
@@ -418,6 +420,7 @@ import {
 } from "./external-source-registry.js";
 import {
 	buildSupervisorSelfMaintenanceAdvisory,
+	SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
 	type SupervisorSelfMaintenanceAdvisory,
 } from "./supervisor-self-maintenance-advisory.js";
 
@@ -2503,10 +2506,22 @@ function buildCliSelfMaintenanceReport(
 	stateRoot: string,
 ): { tasks: StructuredTask[]; report: SupervisorSelfMaintenanceAdvisory } {
 	const tasks = runtime.listTasks?.() ?? [];
+	const now = new Date();
 	const supervisorActivity = summarizeSupervisorActivityEvents(
-		readSupervisorActivityEvents(stateRoot),
+		filterRecentSupervisorActivityEvents(
+			readSupervisorActivityEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
 	);
-	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot));
+	const usageReport = buildIduUsageReport(
+		filterRecentIduUsageEvents(
+			readIduUsageEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
+		{ now },
+	);
 	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
 		readAgentLabEffectivenessEvents(stateRoot),
 	);
@@ -2527,7 +2542,7 @@ function buildCliSelfMaintenanceReport(
 		tasks,
 		report: buildSupervisorSelfMaintenanceAdvisory({
 			projectId: runtime.projectId,
-			now: new Date(),
+			now,
 			tasks,
 			supervisorEvents: supervisorActivity.totalEvents,
 			supervisorActivitySkipped:

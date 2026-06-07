@@ -85,6 +85,7 @@ export type BuildSupervisorSelfMaintenanceAdvisoryInput = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+export const SELF_MAINTENANCE_PRESSURE_WINDOW_MS = DAY_MS;
 const REPEATED_PATTERN_KEYWORDS = [
 	"postflight",
 	"context",

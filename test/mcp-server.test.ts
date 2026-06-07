@@ -3233,12 +3233,13 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
 	mkdirSync(join(stateRoot, "reports"), { recursive: true });
+	const recentTelemetryTimestamp = new Date().toISOString();
 	writeFileSync(
 		join(stateRoot, "reports", "idu-usage-events.jsonl"),
 		`${JSON.stringify({
 			version: 1,
 			id: "usage-1",
-			timestamp: "2026-06-05T00:00:00.000Z",
+			timestamp: recentTelemetryTimestamp,
 			projectId: "sistema_de_mantencion",
 			surface: "mcp",
 			action: "idu_postflight",
@@ -3267,7 +3268,7 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 			JSON.stringify({
 				version: 1,
 				id: `supervisor-${index}`,
-				timestamp: "2026-06-05T00:00:00.000Z",
+				timestamp: recentTelemetryTimestamp,
 				projectId: "sistema_de_mantencion",
 				eventType: "supervisor_hook",
 				origin: "supervisor_auto_hook",
