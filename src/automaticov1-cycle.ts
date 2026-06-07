@@ -465,7 +465,6 @@ function hasHardSupervisorPressureEvidence(
 		const value = numericEvidenceValue(ref);
 		if (value === undefined || value <= 0) return false;
 		return (
-			ref.startsWith("structured-task-queue:open=") ||
 			ref.startsWith("structured-task-queue:stale=") ||
 			ref.startsWith("structured-task-queue:failed=") ||
 			ref.startsWith("idu-usage-events:failures=") ||

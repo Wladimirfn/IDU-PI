@@ -360,7 +360,6 @@ test("automaticov1 cycle blocks when hard supervisor friction requires systemic 
 });
 
 for (const hardEvidenceRef of [
-	"structured-task-queue:open=1",
 	"structured-task-queue:stale=1",
 	"structured-task-queue:failed=1",
 	"idu-usage-events:failures=1",
@@ -477,6 +476,45 @@ test("automaticov1 cycle does not block on advisory-only supervisor pressure", a
 		),
 		false,
 	);
+});
+
+test("automaticov1 cycle does not hard-block on pending open tasks alone", async () => {
+	const stateRoot = tempRoot();
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadSelfMaintenanceSignals: () => [
+				{
+					id: "supervisor-activity-pressure",
+					category: "supervisor_activity_pressure",
+					severity: "high",
+					confidence: 0.85,
+					evidenceRefs: [
+						"supervisor-activity:events=30",
+						"structured-task-queue:open=3",
+						"structured-task-queue:stale=0",
+						"structured-task-queue:failed=0",
+						"idu-usage-events:failures=0",
+						"agentlab-review-requests:stale=0",
+						"supervisor-activity:skipped=16",
+					],
+					summary:
+						"Supervisor activity is skipped while bounded work remains pending",
+					recommendedActions: [
+						"Review pending work before increasing automation scope.",
+					],
+				},
+			],
+		}),
+	);
+
+	assert.equal(result.status, "ran");
+	assert.equal(
+		result.evidenceRefs.includes("automaticov1:systemic-maintenance:block"),
+		false,
+	);
+	assert.equal(result.allowedToProceed, false);
+	assert.equal(result.repoWritesAllowed, false);
 });
 
 test("automaticov1 cycle delegates bounded task creation to scheduled alert executor", async () => {
