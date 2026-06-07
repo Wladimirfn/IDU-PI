@@ -33,6 +33,16 @@ export type Automaticov1CycleStatus =
 	| "blocked_task_tree"
 	| "blocked_readiness";
 
+export type Automaticov1RecoveryAction = {
+	id: string;
+	owner: "orchestrator";
+	action: string;
+	reason: string;
+	blocking: boolean;
+	tool: string;
+	cliCommand: string;
+};
+
 export type Automaticov1CycleInput = {
 	projectId: string;
 	projectPath: string;
@@ -83,6 +93,7 @@ export type Automaticov1CycleResult = {
 	externalIntelligenceReport?: ExternalIntelligenceReport | UnknownJson;
 	skillDraftFromLessons?: SkillDraftFromLessonsResult | UnknownJson;
 	evidenceRefs: string[];
+	recoveryActions: Automaticov1RecoveryAction[];
 	nextActions: string[];
 	safeNotes: string[];
 };
@@ -260,6 +271,7 @@ function baseResult(input: {
 			? { skillDraftFromLessons: input.skillDraftFromLessons }
 			: {}),
 		evidenceRefs: evidenceRefs(input),
+		recoveryActions: recoveryActions(input),
 		nextActions: nextActions(input),
 		safeNotes: safeNotes(input),
 	};
@@ -304,6 +316,26 @@ function evidenceRefs(input: {
 		input.executionReadiness.status !== "execution_ready"
 			? [`automaticov1:readiness:${input.executionReadiness.status}`]
 			: []),
+	];
+}
+
+function recoveryActions(input: {
+	executionReadiness?: IduExecutionReadiness;
+}): Automaticov1RecoveryAction[] {
+	if (input.executionReadiness?.status !== "stale_context") {
+		return [];
+	}
+	const state = input.executionReadiness.mcpContextPackStaleness;
+	return [
+		{
+			id: "refresh-mcp-supervisor-context-pack",
+			owner: "orchestrator",
+			action: "run_idu_supervisor_context_pack",
+			reason: `MCP supervisor context pack is ${state}; refresh context before continuing automaticov1.`,
+			blocking: true,
+			tool: "idu_supervisor_context_pack",
+			cliCommand: "corepack pnpm cli -- idu-supervisor-context-pack",
+		},
 	];
 }
 

@@ -92,6 +92,112 @@ test("proposal outbox loads existing JSONL proposals", () => {
 	assert.equal(reloaded.getProposal(created.id)?.title, "Persisted proposal");
 });
 
+test("proposal outbox reuses unresolved proposals for identical evidence", () => {
+	const stateRoot = tempRoot();
+	const store = new ProposalOutboxStore({
+		stateRoot,
+		now: () => new Date("2026-06-07T00:00:00.000Z"),
+	});
+	const input = {
+		projectId: "idu-pi",
+		sourceTrigger: "execution-director-tick",
+		sourceEngine: "supervisor" as const,
+		title: "Convert learning pressure into bounded project work",
+		summary: "Learning loop has unresolved evidence pressure",
+		hitoId: "hito-1",
+		specId: "spec-supervisor-learning-loop",
+		flowId: "supervisor-learning-loop",
+		contractIds: ["agent"],
+		evidenceRefs: [
+			"structured-task-queue:learning-mentions=8",
+			"structured-task-queue:failed=0",
+		],
+		risk: "low" as const,
+		policyDecision: "auto" as const,
+		recommendedAction: "create_task" as const,
+	};
+
+	const first = store.createProposal(input);
+	const second = store.createProposal({
+		...input,
+		contractIds: [" agent ", "agent"],
+		evidenceRefs: [
+			" structured-task-queue:failed=0 ",
+			"structured-task-queue:learning-mentions=8",
+		],
+	});
+
+	assert.equal(second.id, first.id);
+	assert.equal(store.listProposals().length, 1);
+	assert.equal(
+		readFileSync(proposalOutboxPath(stateRoot), "utf8").trim().split("\n")
+			.length,
+		1,
+	);
+});
+
+test("proposal outbox keeps distinct unresolved proposals with different risk", () => {
+	const store = new ProposalOutboxStore({
+		stateRoot: tempRoot(),
+		now: () => new Date("2026-06-07T00:00:00.000Z"),
+	});
+	const input = {
+		projectId: "idu-pi",
+		sourceTrigger: "execution-director-tick",
+		sourceEngine: "supervisor" as const,
+		title: "Convert learning pressure into bounded project work",
+		summary: "Learning loop has unresolved evidence pressure",
+		hitoId: "hito-1",
+		specId: "spec-supervisor-learning-loop",
+		flowId: "supervisor-learning-loop",
+		contractIds: ["agent"],
+		evidenceRefs: ["structured-task-queue:learning-mentions=8"],
+		risk: "low" as const,
+		policyDecision: "auto" as const,
+		recommendedAction: "create_task" as const,
+	};
+
+	const low = store.createProposal(input);
+	const blocker = store.createProposal({
+		...input,
+		risk: "blocker",
+	});
+
+	assert.notEqual(blocker.id, low.id);
+	assert.equal(store.listProposals().length, 2);
+});
+
+test("proposal outbox keeps distinct unresolved proposals with different policy", () => {
+	const store = new ProposalOutboxStore({
+		stateRoot: tempRoot(),
+		now: () => new Date("2026-06-07T00:00:00.000Z"),
+	});
+	const input = {
+		projectId: "idu-pi",
+		sourceTrigger: "execution-director-tick",
+		sourceEngine: "supervisor" as const,
+		title: "Convert learning pressure into bounded project work",
+		summary: "Learning loop has unresolved evidence pressure",
+		hitoId: "hito-1",
+		specId: "spec-supervisor-learning-loop",
+		flowId: "supervisor-learning-loop",
+		contractIds: ["agent"],
+		evidenceRefs: ["structured-task-queue:learning-mentions=8"],
+		risk: "low" as const,
+		policyDecision: "auto" as const,
+		recommendedAction: "create_task" as const,
+	};
+
+	const auto = store.createProposal(input);
+	const askHuman = store.createProposal({
+		...input,
+		policyDecision: "ask_human",
+	});
+
+	assert.notEqual(askHuman.id, auto.id);
+	assert.equal(store.listProposals().length, 2);
+});
+
 test("proposal outbox rejects missing lifecycle binding", () => {
 	const store = new ProposalOutboxStore({ stateRoot: tempRoot() });
 	assert.throws(

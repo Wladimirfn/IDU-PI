@@ -3160,6 +3160,17 @@ async function dispatchTool(
 				evidenceRefs: result.evidenceRefs,
 				nextActions: result.nextActions,
 				requiredActions: [
+					...result.recoveryActions.map((action) => ({
+						id: action.id,
+						owner: action.owner,
+						action: action.action,
+						reason: action.reason,
+						blocking: action.blocking,
+						data: {
+							tool: action.tool,
+							cliCommand: action.cliCommand,
+						},
+					})),
 					{
 						id: "automaticov1-orchestrator-review",
 						owner: "orchestrator",

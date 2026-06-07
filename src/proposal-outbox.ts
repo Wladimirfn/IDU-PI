@@ -78,19 +78,29 @@ export class ProposalOutboxStore {
 			throw new Error("Lifecycle binding is incomplete.");
 		}
 
-		const timestamp = this.now().toISOString();
-		const proposal: FlowBoundProposal = {
+		const canonicalInput: FlowBoundProposalInput = {
 			...input,
-			version: 1,
-			id: this.nextId(timestamp),
-			status: "proposed",
-			createdAt: timestamp,
-			updatedAt: timestamp,
 			hitoId,
 			specId,
 			flowId,
 			contractIds: binding.contractIds,
 			evidenceRefs: binding.evidenceRefs,
+		};
+		const existing = this.proposals.find(
+			(proposal) =>
+				proposal.status === "proposed" &&
+				proposalKey(proposal) === proposalKey(canonicalInput),
+		);
+		if (existing) return cloneProposal(existing);
+
+		const timestamp = this.now().toISOString();
+		const proposal: FlowBoundProposal = {
+			...canonicalInput,
+			version: 1,
+			id: this.nextId(timestamp),
+			status: "proposed",
+			createdAt: timestamp,
+			updatedAt: timestamp,
 		};
 		this.proposals.push(proposal);
 		this.persist();
@@ -135,4 +145,20 @@ function cloneProposal(proposal: FlowBoundProposal): FlowBoundProposal {
 		contractIds: [...proposal.contractIds],
 		evidenceRefs: [...proposal.evidenceRefs],
 	};
+}
+
+function proposalKey(proposal: FlowBoundProposalInput): string {
+	return JSON.stringify({
+		projectId: proposal.projectId,
+		sourceTrigger: proposal.sourceTrigger,
+		sourceEngine: proposal.sourceEngine,
+		hitoId: proposal.hitoId,
+		specId: proposal.specId,
+		flowId: proposal.flowId,
+		contractIds: [...proposal.contractIds].sort(),
+		evidenceRefs: [...proposal.evidenceRefs].sort(),
+		risk: proposal.risk,
+		policyDecision: proposal.policyDecision,
+		recommendedAction: proposal.recommendedAction,
+	});
 }

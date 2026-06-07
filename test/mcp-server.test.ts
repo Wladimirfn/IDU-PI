@@ -3106,6 +3106,75 @@ test("idu_automaticov1_cycle blocks when execution readiness is missing", async 
 	}
 });
 
+test("idu_automaticov1_cycle exposes context-pack recovery action in decision envelope", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-automaticov1-stale-mcp-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "idu-pi");
+		mkdirSync(join(stateRoot, "reports"), { recursive: true });
+		writeFileSync(
+			join(stateRoot, "reports", "idu-usage-events.jsonl"),
+			[
+				JSON.stringify({
+					version: 1,
+					id: "context-pack-old",
+					timestamp: "2026-06-04T23:45:00.000Z",
+					projectId: "sistema_de_mantencion",
+					surface: "mcp",
+					action: "idu_supervisor_context_pack",
+				}),
+				JSON.stringify({
+					version: 1,
+					id: "recent-automaticov1",
+					timestamp: "2026-06-04T23:59:00.000Z",
+					projectId: "sistema_de_mantencion",
+					surface: "mcp",
+					action: "idu_automaticov1_cycle",
+				}),
+			].join("\n") + "\n",
+			"utf8",
+		);
+		const runtime = fakeRuntime(process.cwd());
+		runtime.supervisorOnIduActivation();
+		await callIduMcpTool(
+			"idu_activate",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(process.cwd()), stateRoot }),
+			},
+		);
+		const result = await callIduMcpTool(
+			"idu_automaticov1_cycle",
+			{},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => ({ ...registered(process.cwd()), stateRoot }),
+			},
+		);
+
+		assert.equal(result.ok, true);
+		const envelope = result.data.decisionEnvelope as DecisionEnvelope;
+		assert.ok(
+			envelope.requiredActions.some(
+				(action) =>
+					action.id === "refresh-mcp-supervisor-context-pack" &&
+					action.data?.tool === "idu_supervisor_context_pack" &&
+					action.data?.cliCommand ===
+						"corepack pnpm cli -- idu-supervisor-context-pack" &&
+					action.blocking === true,
+			),
+		);
+		const cycle = result.data.result as {
+			status: string;
+			recoveryActions: unknown[];
+		};
+		assert.equal(cycle.status, "blocked_readiness");
+		assert.equal(cycle.recoveryActions.length, 1);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("autonomous alert status is read-only and raw honest", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-alert-status-mcp-"));
 	try {

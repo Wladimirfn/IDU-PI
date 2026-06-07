@@ -254,6 +254,39 @@ test("automaticov1 cycle blocks when execution readiness is not satisfied", asyn
 	);
 });
 
+test("automaticov1 cycle exposes context-pack recovery action when readiness is stale", async () => {
+	const stateRoot = tempRoot();
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			loadExecutionReadiness: () => ({
+				version: 1,
+				status: "stale_context",
+				coreStatus: "confirmed",
+				constitutionStatus: "active",
+				taskTreeStatus: "ready",
+				mcpContextPackStaleness: "stale",
+				blockingReasons: [
+					"MCP supervisor context pack must be fresh; current=stale.",
+				],
+			}),
+		}),
+	);
+
+	assert.equal(result.status, "blocked_readiness");
+	assert.deepEqual(result.recoveryActions, [
+		{
+			id: "refresh-mcp-supervisor-context-pack",
+			owner: "orchestrator",
+			action: "run_idu_supervisor_context_pack",
+			reason:
+				"MCP supervisor context pack is stale; refresh context before continuing automaticov1.",
+			blocking: true,
+			tool: "idu_supervisor_context_pack",
+			cliCommand: "corepack pnpm cli -- idu-supervisor-context-pack",
+		},
+	]);
+});
+
 test("automaticov1 cycle blocks when Master Plan task tree is not ready", async () => {
 	const stateRoot = tempRoot();
 	let created = 0;
