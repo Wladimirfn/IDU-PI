@@ -28,6 +28,16 @@ export type SupervisorSelfMaintenanceSignal = {
 	skillLearningInputs?: string[];
 };
 
+export type SupervisorSystemicAction = {
+	id: string;
+	kind: "create_task" | "block_cycle" | "refresh_context";
+	title: string;
+	reason: string;
+	evidenceRefs: string[];
+	acceptanceCriteria: string[];
+	blocksAutomaticCycle: boolean;
+};
+
 export type SupervisorSelfMaintenanceTotals = {
 	pendingTasks: number;
 	runningTasks: number;
@@ -54,6 +64,7 @@ export type SupervisorSelfMaintenanceAdvisory = {
 	skillsModified: false;
 	totals: SupervisorSelfMaintenanceTotals;
 	signals: SupervisorSelfMaintenanceSignal[];
+	systemicActions: SupervisorSystemicAction[];
 	recommendedActions: string[];
 	safeNotes: string[];
 };
@@ -74,6 +85,7 @@ export type BuildSupervisorSelfMaintenanceAdvisoryInput = {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+export const SELF_MAINTENANCE_PRESSURE_WINDOW_MS = DAY_MS;
 const REPEATED_PATTERN_KEYWORDS = [
 	"postflight",
 	"context",
@@ -198,6 +210,8 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		signals.push(domainSignal);
 	}
 
+	const systemicActions = systemicActionsFor(signals, totals);
+
 	return {
 		version: 1,
 		authority: "advisory",
@@ -210,7 +224,8 @@ export function buildSupervisorSelfMaintenanceAdvisory(
 		skillsModified: false,
 		totals,
 		signals,
-		recommendedActions: recommendedActionsFor(signals),
+		systemicActions,
+		recommendedActions: recommendedActionsFor(signals, systemicActions),
 		safeNotes: [
 			"Advisory-only report: no files, tasks, rules, skills, or contracts were written.",
 			"AgentLabs was not executed by this builder.",
@@ -279,6 +294,7 @@ function buildRepeatedFailureSignal(
 	const grouped = new Map<string, StructuredTask[]>();
 	for (const task of tasks) {
 		const text = searchableText(task);
+		if (hasCoveredLearningEvidence(task, text)) continue;
 		if (!isFailureLike(task, text)) continue;
 		for (const keyword of REPEATED_PATTERN_KEYWORDS) {
 			if (text.includes(keyword)) {
@@ -611,10 +627,81 @@ function domainMatches(
 	};
 }
 
+function systemicActionsFor(
+	signals: readonly SupervisorSelfMaintenanceSignal[],
+	totals: SupervisorSelfMaintenanceTotals,
+): SupervisorSystemicAction[] {
+	const actions: SupervisorSystemicAction[] = [];
+	const supervisorFriction = signals.find(
+		(signal) => signal.category === "supervisor_activity_pressure",
+	);
+	const repeatedFailures = signals.find(
+		(signal) => signal.category === "repeated_failure_patterns",
+	);
+	if (
+		supervisorFriction &&
+		(totals.usageNotAllowed + totals.usageRequiresHuman >= 20 ||
+			supervisorFriction.severity === "high")
+	) {
+		actions.push({
+			id: "systemic-supervisor-friction",
+			kind: "create_task",
+			title: "Fix supervisor friction and execution direction",
+			reason:
+				"Idu-pi is producing blocked/requiresHuman pressure without converting repeated failures into executable work.",
+			evidenceRefs: supervisorFriction.evidenceRefs,
+			acceptanceCriteria: [
+				"automaticov1 blocks or pauses when blocked/requiresHuman pressure crosses the friction threshold.",
+				"Master Plan progress is represented as a task tree before autonomous execution continues.",
+				"Repeated systemic failures become bounded tasks with tests, owner, and postflight evidence.",
+			],
+			blocksAutomaticCycle: true,
+		});
+	}
+	if (repeatedFailures) {
+		actions.push({
+			id: "systemic-repeated-failure-learning",
+			kind: "create_task",
+			title: "Convert repeated failures into regression tests",
+			reason:
+				"Repeated failure signals must become explicit tests/checklist evidence instead of advisory-only memory.",
+			evidenceRefs: repeatedFailures.evidenceRefs,
+			acceptanceCriteria: [
+				"A regression test or review checklist exists for each confirmed repeated pattern.",
+				"The next automatic cycle references the generated evidence before proceeding.",
+			],
+			blocksAutomaticCycle: repeatedFailures.severity === "high",
+		});
+	}
+	return actions;
+}
+
 function recommendedActionsFor(
 	signals: readonly SupervisorSelfMaintenanceSignal[],
+	systemicActions: readonly SupervisorSystemicAction[],
 ): string[] {
-	return [...new Set(signals.flatMap((signal) => signal.recommendedActions))];
+	return [
+		...new Set([
+			...signals.flatMap((signal) => signal.recommendedActions),
+			...systemicActions.map(
+				(action) =>
+					`Create systemic improvement task: ${action.title} (${action.id}).`,
+			),
+		]),
+	];
+}
+
+function hasCoveredLearningEvidence(
+	task: StructuredTask,
+	_text: string,
+): boolean {
+	const evidence = (task.completionEvidence ?? "").toLowerCase();
+	return (
+		task.status === "done" &&
+		/regression|checklist|test|tests|postflight|reviewer pass|full build/u.test(
+			evidence,
+		)
+	);
 }
 
 function isFailureLike(task: StructuredTask, text: string): boolean {

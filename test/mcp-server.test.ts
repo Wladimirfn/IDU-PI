@@ -38,7 +38,7 @@ process.env.IDU_PI_REGISTRY_PATH = join(
 );
 delete process.env.TELEGRAM_BOT_TOKEN;
 delete process.env.ALLOWED_USER_ID;
-import type { CliRuntime } from "../src/cli.js";
+import type { CliRuntime, ExecutionDirectorCliResult } from "../src/cli.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
@@ -79,6 +79,7 @@ import type {
 } from "../src/source-library.js";
 import type { ExternalIntelligenceReport } from "../src/external-intelligence.js";
 import type { ExternalSourceRecommendationReport } from "../src/external-source-registry.js";
+import type { FlowBoundProposal } from "../src/proposal-outbox.js";
 import type {
 	SourceSkillCandidateCreationResult,
 	SourceSkillCandidateReview,
@@ -199,6 +200,7 @@ function fakeTask(text: string, active: boolean): StructuredTask {
 function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 	let active = false;
 	const tasks: StructuredTask[] = [];
+	const proposals: FlowBoundProposal[] = [];
 	const runtime = {
 		projectId: "sistema_de_mantencion",
 		projectPath,
@@ -595,6 +597,48 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			};
 		},
 		formatSupervisorTick: () => "tick",
+		executionDirectorTick: (): ExecutionDirectorCliResult => {
+			const proposal: FlowBoundProposal = {
+				version: 1,
+				id: `proposal-test-${proposals.length + 1}`,
+				status: "proposed",
+				createdAt: "2026-06-07T00:00:00.000Z",
+				updatedAt: "2026-06-07T00:00:00.000Z",
+				projectId: "sistema_de_mantencion",
+				sourceTrigger: "execution-director-tick",
+				sourceEngine: "supervisor",
+				title: "Convert learning pressure into bounded project work",
+				summary: "Learning loop has unresolved evidence pressure",
+				hitoId: "hito-1",
+				specId: "spec-supervisor-learning-loop",
+				flowId: "supervisor-learning-loop",
+				contractIds: ["agent"],
+				evidenceRefs: ["structured-task-queue:learning-mentions=7"],
+				risk: "low",
+				policyDecision: "auto",
+				recommendedAction: "create_task",
+			};
+			proposals.push(proposal);
+			return {
+				version: 1,
+				authority: "advisory",
+				projectId: "sistema_de_mantencion",
+				generatedAt: "2026-06-07T00:00:00.000Z",
+				status: "proposal_created",
+				proposals: [proposal],
+				savedProposals: [proposal],
+				blockingReasons: [],
+				evidenceRefs: ["structured-task-queue:learning-mentions=7"],
+				safeNotes: [
+					"Execution director tick is advisory and does not implement code.",
+				],
+			};
+		},
+		formatExecutionDirectorTick: () => "execution director tick",
+		proposalOutbox: () => proposals.map((proposal) => ({ ...proposal })),
+		formatProposalOutbox: () => "proposal outbox",
+		proposalDetail: (id) => proposals.find((proposal) => proposal.id === id),
+		formatProposalDetail: () => "proposal detail",
 		supervisorOnIduActivation: () => {
 			active = true;
 			return undefined;
@@ -1021,6 +1065,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
+	assert.ok(tools.some((tool) => tool.name === "idu_execution_director_tick"));
+	assert.ok(tools.some((tool) => tool.name === "idu_proposal_outbox"));
+	assert.ok(tools.some((tool) => tool.name === "idu_proposal_detail"));
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
 	);
@@ -1040,7 +1087,39 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 59);
+	assert.equal(tools.length, 62);
+});
+
+test("execution director MCP tick saves proposals and outbox reads them", async () => {
+	const runtime = fakeRuntime();
+	const options = {
+		runtimeFactory: () => runtime,
+		projectResolver: () => registered(),
+	};
+	const tick = await callIduMcpTool("idu_execution_director_tick", {}, options);
+
+	assert.equal(tick.ok, true);
+	assert.equal(tick.data.status, "proposal_created");
+	assert.equal((tick.data.savedProposals as unknown[]).length, 1);
+	assert.match(tick.safeNotes.join("\n"), /does not implement code/iu);
+	assert.match(tick.safeNotes.join("\n"), /No AgentLabs/iu);
+
+	const outbox = await callIduMcpTool("idu_proposal_outbox", {}, options);
+	assert.equal(outbox.ok, true);
+	const proposals = outbox.data.proposals as FlowBoundProposal[];
+	assert.equal(proposals.length, 1);
+	assert.equal(proposals[0]?.flowId, "supervisor-learning-loop");
+
+	const detail = await callIduMcpTool(
+		"idu_proposal_detail",
+		{ id: proposals[0]?.id },
+		options,
+	);
+	assert.equal(detail.ok, true);
+	assert.equal(
+		(detail.data.proposal as FlowBoundProposal).specId,
+		"spec-supervisor-learning-loop",
+	);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
@@ -2969,7 +3048,7 @@ test("autonomous alert MCP tools are listed", () => {
 	assert.ok(tools.includes("idu_automaticov1_cycle"));
 });
 
-test("idu_automaticov1_cycle composes existing engines without authorizing work", async () => {
+test("idu_automaticov1_cycle blocks when execution readiness is missing", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-automaticov1-mcp-"));
 	try {
 		const stateRoot = join(root, "state", "projects", "idu-pi");
@@ -3003,24 +3082,23 @@ test("idu_automaticov1_cycle composes existing engines without authorizing work"
 			externalFetchExecuted: boolean;
 			skillProposalExecuted: boolean;
 			alertScheduledTick: { status: string; tasksCreated: unknown[] };
-			bibliotecarioSnapshot?: unknown;
-			supervisorCronPlan?: unknown;
+			executionReadiness?: { status: string };
 		};
-		assert.equal(cycle.status, "ran");
+		assert.equal(cycle.status, "blocked_readiness");
 		assert.equal(cycle.allowedToProceed, false);
 		assert.equal(cycle.externalFetchExecuted, false);
 		assert.equal(cycle.skillProposalExecuted, false);
-		assert.equal(cycle.alertScheduledTick.status, "ran");
+		assert.equal(cycle.alertScheduledTick.status, "skipped_inactive");
 		assert.equal(cycle.alertScheduledTick.tasksCreated.length, 0);
-		assert.ok(cycle.bibliotecarioSnapshot);
-		assert.ok(cycle.supervisorCronPlan);
+		assert.ok(cycle.executionReadiness);
+		assert.notEqual(cycle.executionReadiness.status, "execution_ready");
 		await flushSupervisorActivityEvents();
 		const supervisorEvents = readSupervisorActivityEvents(stateRoot);
 		assert.equal(supervisorEvents.length, 1);
 		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
 		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
 		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
-		assert.equal(supervisorEvents[0]?.status, "completed");
+		assert.equal(supervisorEvents[0]?.status, "skipped");
 		assert.equal(supervisorEvents[0]?.active, true);
 		assert.match(result.safeNotes.join("\n"), /no autoriza implementación/u);
 	} finally {
@@ -3234,12 +3312,13 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
 	mkdirSync(join(stateRoot, "reports"), { recursive: true });
+	const recentTelemetryTimestamp = new Date().toISOString();
 	writeFileSync(
 		join(stateRoot, "reports", "idu-usage-events.jsonl"),
 		`${JSON.stringify({
 			version: 1,
 			id: "usage-1",
-			timestamp: "2026-06-05T00:00:00.000Z",
+			timestamp: recentTelemetryTimestamp,
 			projectId: "sistema_de_mantencion",
 			surface: "mcp",
 			action: "idu_postflight",
@@ -3268,7 +3347,7 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 			JSON.stringify({
 				version: 1,
 				id: `supervisor-${index}`,
-				timestamp: "2026-06-05T00:00:00.000Z",
+				timestamp: recentTelemetryTimestamp,
 				projectId: "sistema_de_mantencion",
 				eventType: "supervisor_hook",
 				origin: "supervisor_auto_hook",

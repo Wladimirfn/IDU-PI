@@ -369,6 +369,62 @@ test("project status renderer shows enrolled and unregistered project states", (
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("current project panel recommends core confirmation for draft project core", () => {
+	const root = tempDir("idu-cli-home-core-confirm-");
+	try {
+		const projectPath = join(root, "project");
+		const configPath = join(projectPath, "config");
+		mkdirSync(configPath, { recursive: true });
+		writeFileSync(
+			join(configPath, "project-core.json"),
+			JSON.stringify({ status: "draft" }),
+			"utf8",
+		);
+		writeFileSync(
+			join(configPath, "project-constitution.json"),
+			JSON.stringify({ sourceCoreStatus: "draft" }),
+			"utf8",
+		);
+		const workspaceRoot = join(root, "workspace");
+		const registryPath = join(root, "projects.json");
+		writeFileSync(
+			registryPath,
+			JSON.stringify({
+				activeProjectId: "project",
+				projects: [
+					{
+						id: "project",
+						name: "project",
+						path: projectPath,
+						stateRoot: join(workspaceRoot, "projects", "project"),
+					},
+				],
+			}),
+			"utf8",
+		);
+		const status = buildCliHomeStatus({
+			cwd: projectPath,
+			gitRoot: projectPath,
+			registryPath,
+			env: {
+				DEFAULT_CWD: projectPath,
+				ALLOWED_ROOTS: root,
+				AGENT_WORKSPACE_ROOT: workspaceRoot,
+				PATH: "",
+			},
+			runner: () => undefined,
+			stdinInteractive: false,
+		});
+		const output = formatCliProjectStatus(status);
+		assert.match(output, /Project Core: pending/u);
+		assert.match(output, /Constitution: draft/u);
+		assert.match(output, /recommended next: confirm_core/u);
+		assert.doesNotMatch(output, /recommended next: bootstrap/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("current project panel shows active Constitution status", () => {
 	const root = tempDir("idu-cli-home-constitution-");
 	try {

@@ -140,6 +140,103 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 	);
 });
 
+test("self-maintenance advisory does not block on repeated failures covered by regression evidence", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "covered-1",
+			text: "Bug: postflight context.md unexpected delta",
+			status: "done" as const,
+			completionEvidence:
+				"Fixed with regression test; focused tests passed; reviewer PASS.",
+		},
+		{
+			...baseTask,
+			id: "covered-2",
+			text: "Bug: postflight context.md needs_evidence repeated",
+			status: "done" as const,
+			completionEvidence:
+				"Review checklist updated; full build/test/diff-check passed.",
+		},
+		{
+			...baseTask,
+			id: "covered-3",
+			text: "Bug: postflight local-only context.md",
+			status: "done" as const,
+			completionEvidence:
+				"Regression coverage recorded in postflight tests and reviewer PASS.",
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(
+		report.signals.some(
+			(signal) => signal.category === "repeated_failure_patterns",
+		),
+		false,
+	);
+	assert.equal(
+		report.systemicActions.some(
+			(action) => action.id === "systemic-repeated-failure-learning",
+		),
+		false,
+	);
+});
+
+test("self-maintenance advisory still blocks on uncovered failures when mixed with covered evidence", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "covered-1",
+			text: "Bug: postflight context.md unexpected delta",
+			status: "done" as const,
+			completionEvidence:
+				"Fixed with regression test; focused tests passed; reviewer PASS.",
+		},
+		{
+			...baseTask,
+			id: "uncovered-1",
+			text: "Bug: postflight context.md needs_evidence repeated",
+			status: "done" as const,
+		},
+		{
+			...baseTask,
+			id: "uncovered-2",
+			text: "Bug: postflight local-only context.md",
+			status: "pending" as const,
+		},
+		{
+			...baseTask,
+			id: "uncovered-3",
+			text: "Bug: postflight generated context.md drift",
+			status: "pending" as const,
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	assertTopLevelContract(report);
+	const repeated = report.signals.find(
+		(signal) => signal.category === "repeated_failure_patterns",
+	);
+	assert.ok(repeated);
+	assertSignalContract(repeated);
+	assert.equal(
+		report.systemicActions.some(
+			(action) => action.id === "systemic-repeated-failure-learning",
+		),
+		true,
+	);
+});
+
 test("self-maintenance advisory detects neglected areas conservatively", () => {
 	const tasks = [
 		{
@@ -308,6 +405,84 @@ test("self-maintenance advisory separates skipped and throttled supervisor press
 	assert.ok(
 		activity.evidenceRefs.some(
 			(ref) => ref === "supervisor-activity:throttled=4",
+		),
+	);
+});
+
+test("self-maintenance advisory does not turn historical human gates into active systemic friction", () => {
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks: [],
+		supervisorEvents: 74,
+		usageFailures: 0,
+		usageNotAllowed: 71,
+		usageRequiresHuman: 66,
+		supervisorActivitySkipped: 0,
+		supervisorActivityThrottled: 0,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(
+		report.signals.some(
+			(signal) => signal.category === "supervisor_activity_pressure",
+		),
+		false,
+	);
+	assert.equal(
+		report.systemicActions.some(
+			(action) => action.id === "systemic-supervisor-friction",
+		),
+		false,
+	);
+});
+
+test("self-maintenance advisory turns repeated systemic failures into actionable improvement tasks", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "director-1",
+			text: "Bug: Idu-pi remains MCP passive instead of execution director",
+			status: "done" as const,
+		},
+		{
+			...baseTask,
+			id: "director-2",
+			text: "Bug: automaticov1 MCP passive no task tree repeated",
+			status: "pending" as const,
+		},
+		{
+			...baseTask,
+			id: "director-3",
+			text: "Bug: supervisor direction lost, MCP blocked human-required loop",
+			status: "pending" as const,
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+		usageNotAllowed: 40,
+		usageRequiresHuman: 28,
+	});
+
+	assertTopLevelContract(report);
+	assert.ok(report.systemicActions.length > 0);
+	const action = report.systemicActions.find(
+		(item) => item.id === "systemic-supervisor-friction",
+	);
+	assert.ok(action);
+	assert.equal(action.blocksAutomaticCycle, true);
+	assert.equal(action.kind, "create_task");
+	assert.match(action.title, /supervisor friction/u);
+	assert.ok(
+		action.acceptanceCriteria.some((criterion) =>
+			/task tree|blocked|requiresHuman/u.test(criterion),
+		),
+	);
+	assert.ok(
+		report.recommendedActions.some((item) =>
+			/systemic improvement task/u.test(item),
 		),
 	);
 });

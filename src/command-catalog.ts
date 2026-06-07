@@ -821,6 +821,18 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-supervisor-tick",
 	},
 	{
+		label: "Idu execution director tick",
+		command: "corepack pnpm cli -- idu-execution-director-tick",
+	},
+	{
+		label: "Idu proposal outbox",
+		command: "corepack pnpm cli -- idu-proposal-outbox",
+	},
+	{
+		label: "Idu proposal detail",
+		command: "corepack pnpm cli -- idu-proposal-detail <proposal-id>",
+	},
+	{
 		label: "Idu alerts status",
 		command: "corepack pnpm cli -- alerts status",
 	},

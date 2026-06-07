@@ -134,6 +134,9 @@ test("formatCommandCatalog includes argument examples and local command surfaces
 	);
 	assert.doesNotMatch(text, /corepack pnpm cli -- supervisor-tick/);
 	assert.match(text, /corepack pnpm cli -- idu-supervisor-tick/);
+	assert.match(text, /corepack pnpm cli -- idu-execution-director-tick/);
+	assert.match(text, /corepack pnpm cli -- idu-proposal-outbox/);
+	assert.match(text, /corepack pnpm cli -- idu-proposal-detail <proposal-id>/);
 	assert.match(text, /corepack pnpm cli -- alerts status/);
 	assert.match(text, /corepack pnpm cli -- alerts tick/);
 	assert.match(text, /corepack pnpm cli -- alerts scheduled-tick/);
