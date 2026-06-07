@@ -126,7 +126,16 @@ import {
 	type MasterPlanStatusResult,
 } from "./master-plan.js";
 import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
+import {
+	buildExecutionDirectorTick,
+	type ExecutionDirectorTickInput,
+	type ExecutionDirectorTickResult,
+} from "./execution-director-tick.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
+import {
+	ProposalOutboxStore,
+	type FlowBoundProposal,
+} from "./proposal-outbox.js";
 import {
 	formatIduProjectDashboard,
 	type IduProjectDashboardReport,
@@ -441,6 +450,10 @@ export type CliAutonomousAlertControlResult = {
 	state: AutonomousAlertEngineState;
 };
 
+export type ExecutionDirectorCliResult = ExecutionDirectorTickResult & {
+	savedProposals: FlowBoundProposal[];
+};
+
 export type CliRuntime = {
 	projectId: string;
 	projectPath: string;
@@ -547,6 +560,15 @@ export type CliRuntime = {
 	}) => IduSupervisorLoopResult;
 	supervisorCronPlan: () => IduSupervisorCronPlanResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
+	executionDirectorTick?: () => ExecutionDirectorCliResult;
+	formatExecutionDirectorTick?: (result: ExecutionDirectorCliResult) => string;
+	proposalOutbox?: () => FlowBoundProposal[];
+	formatProposalOutbox?: (proposals: FlowBoundProposal[]) => string;
+	proposalDetail?: (id: string) => FlowBoundProposal | undefined;
+	formatProposalDetail?: (
+		proposal: FlowBoundProposal | undefined,
+		id: string,
+	) => string;
 	supervisorOnIduActivation: () => IduSupervisorHookResult | undefined;
 	supervisorImprovementPlan: (
 		pathOrLatest: string,
@@ -1098,6 +1120,79 @@ export function createCliRuntime(
 				queue: structuredTaskQueue,
 			}),
 		formatSupervisorTick: formatIduSupervisorLoopResult,
+		executionDirectorTick: () => {
+			const now = new Date();
+			const supervisorActivity = summarizeSupervisorActivityEvents(
+				filterRecentSupervisorActivityEvents(
+					readSupervisorActivityEvents(masterPlanStateRoot),
+					now,
+					SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+				),
+			);
+			const usageReport = buildIduUsageReport(
+				filterRecentIduUsageEvents(
+					readIduUsageEvents(masterPlanStateRoot),
+					now,
+					SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+				),
+				{ now },
+			);
+			const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+				readAgentLabEffectivenessEvents(masterPlanStateRoot),
+			);
+			const semanticDelta = buildSemanticAuditStatus({
+				projectId: activeProject.id,
+				repository: labDbRepository,
+			}).newEvents;
+			const selfMaintenance = buildSupervisorSelfMaintenanceAdvisory({
+				projectId: activeProject.id,
+				now,
+				tasks: structuredTaskQueue.listTasks(),
+				supervisorEvents: supervisorActivity.totalEvents,
+				supervisorActivitySkipped:
+					(supervisorActivity.byReason.idu_inactive ?? 0) +
+					(supervisorActivity.byReason.no_new_events ?? 0) +
+					(supervisorActivity.byReason.not_enough_data ?? 0),
+				supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
+				usageFailures: usageReport.failed,
+				usageNotAllowed: usageReport.notAllowed,
+				usageRequiresHuman: usageReport.requiresHuman,
+				agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+				semanticNewEvents:
+					semanticDelta.labRuns +
+					semanticDelta.findings +
+					semanticDelta.proposals +
+					semanticDelta.tasks +
+					semanticDelta.userSignals +
+					semanticDelta.memoryItems,
+			});
+			let currentPlan: ReturnType<typeof reviewMasterPlan>["plan"] | undefined;
+			try {
+				currentPlan = reviewMasterPlan({
+					stateRoot: masterPlanStateRoot,
+					pathOrLatest: "latest",
+				}).plan;
+			} catch {
+				currentPlan = undefined;
+			}
+			return runCliExecutionDirectorTick({
+				projectId: activeProject.id,
+				stateRoot: masterPlanStateRoot,
+				taskTree: buildMasterPlanTaskTree(currentPlan),
+				selfMaintenanceSignals: selfMaintenance.signals,
+			});
+		},
+		formatExecutionDirectorTick,
+		proposalOutbox: () =>
+			new ProposalOutboxStore({
+				stateRoot: masterPlanStateRoot,
+			}).listProposals(),
+		formatProposalOutbox,
+		proposalDetail: (id) =>
+			new ProposalOutboxStore({ stateRoot: masterPlanStateRoot }).getProposal(
+				id,
+			),
+		formatProposalDetail,
 		supervisorOnIduActivation: () => {
 			return maybeRunSupervisorOnIduActivation({
 				projectId: activeProject.id,
@@ -1862,6 +1957,46 @@ export async function runCliCommand(
 				return ok(
 					activeRuntime.formatSupervisorTick(activeRuntime.supervisorTick()),
 				);
+			case "idu-execution-director-tick":
+			case "execution-director-tick":
+				if (
+					!activeRuntime.executionDirectorTick ||
+					!activeRuntime.formatExecutionDirectorTick
+				) {
+					return fail("Execution director no disponible en este runtime.");
+				}
+				return ok(
+					activeRuntime.formatExecutionDirectorTick(
+						activeRuntime.executionDirectorTick(),
+					),
+				);
+			case "idu-proposal-outbox":
+			case "proposal-outbox":
+				if (
+					!activeRuntime.proposalOutbox ||
+					!activeRuntime.formatProposalOutbox
+				) {
+					return fail("Proposal outbox no disponible en este runtime.");
+				}
+				return ok(
+					activeRuntime.formatProposalOutbox(activeRuntime.proposalOutbox()),
+				);
+			case "idu-proposal-detail":
+			case "proposal-detail": {
+				if (
+					!activeRuntime.proposalDetail ||
+					!activeRuntime.formatProposalDetail
+				) {
+					return fail("Proposal outbox no disponible en este runtime.");
+				}
+				const id = requiredText(rest);
+				return ok(
+					activeRuntime.formatProposalDetail(
+						activeRuntime.proposalDetail(id),
+						id,
+					),
+				);
+			}
 			case "idu-supervisor-improvements-review":
 			case "supervisor-improvements-review":
 				return ok(
@@ -2158,6 +2293,51 @@ function safeProjectConstitutionStatus(projectPath: string) {
 	} catch {
 		return "unknown" as const;
 	}
+}
+
+function runCliExecutionDirectorTick(
+	input: ExecutionDirectorTickInput & { stateRoot: string },
+): ExecutionDirectorCliResult {
+	const tick = buildExecutionDirectorTick(input);
+	const store = new ProposalOutboxStore({ stateRoot: input.stateRoot });
+	const savedProposals = tick.proposals.map((proposal) =>
+		store.createProposal(proposal),
+	);
+	return { ...tick, savedProposals };
+}
+
+function formatExecutionDirectorTick(
+	result: ExecutionDirectorCliResult,
+): string {
+	return [
+		"Execution Director Tick",
+		`status: ${result.status}`,
+		`authority: ${result.authority}`,
+		`proposals: ${result.proposals.length}`,
+		`savedProposals: ${result.savedProposals.length}`,
+		"",
+		"Safe notes:",
+		...result.safeNotes.map((note) => `- ${note}`),
+	].join("\n");
+}
+
+function formatProposalOutbox(proposals: FlowBoundProposal[]): string {
+	if (!proposals.length) return "Proposal outbox is empty.";
+	return [
+		`Proposal outbox (${proposals.length})`,
+		...proposals.map(
+			(proposal) =>
+				`- ${proposal.id}: ${proposal.title} [${proposal.status}] hito=${proposal.hitoId} flow=${proposal.flowId}`,
+		),
+	].join("\n");
+}
+
+function formatProposalDetail(
+	proposal: FlowBoundProposal | undefined,
+	id: string,
+): string {
+	if (!proposal) return `Proposal not found: ${id}`;
+	return JSON.stringify(proposal, null, 2);
 }
 
 async function runCliAutomaticov1Cycle(

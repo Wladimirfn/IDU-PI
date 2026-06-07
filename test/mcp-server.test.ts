@@ -38,7 +38,7 @@ process.env.IDU_PI_REGISTRY_PATH = join(
 );
 delete process.env.TELEGRAM_BOT_TOKEN;
 delete process.env.ALLOWED_USER_ID;
-import type { CliRuntime } from "../src/cli.js";
+import type { CliRuntime, ExecutionDirectorCliResult } from "../src/cli.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
@@ -79,6 +79,7 @@ import type {
 } from "../src/source-library.js";
 import type { ExternalIntelligenceReport } from "../src/external-intelligence.js";
 import type { ExternalSourceRecommendationReport } from "../src/external-source-registry.js";
+import type { FlowBoundProposal } from "../src/proposal-outbox.js";
 import type {
 	SourceSkillCandidateCreationResult,
 	SourceSkillCandidateReview,
@@ -199,6 +200,7 @@ function fakeTask(text: string, active: boolean): StructuredTask {
 function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 	let active = false;
 	const tasks: StructuredTask[] = [];
+	const proposals: FlowBoundProposal[] = [];
 	const runtime = {
 		projectId: "sistema_de_mantencion",
 		projectPath,
@@ -595,6 +597,48 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			};
 		},
 		formatSupervisorTick: () => "tick",
+		executionDirectorTick: (): ExecutionDirectorCliResult => {
+			const proposal: FlowBoundProposal = {
+				version: 1,
+				id: `proposal-test-${proposals.length + 1}`,
+				status: "proposed",
+				createdAt: "2026-06-07T00:00:00.000Z",
+				updatedAt: "2026-06-07T00:00:00.000Z",
+				projectId: "sistema_de_mantencion",
+				sourceTrigger: "execution-director-tick",
+				sourceEngine: "supervisor",
+				title: "Convert learning pressure into bounded project work",
+				summary: "Learning loop has unresolved evidence pressure",
+				hitoId: "hito-1",
+				specId: "spec-supervisor-learning-loop",
+				flowId: "supervisor-learning-loop",
+				contractIds: ["agent"],
+				evidenceRefs: ["structured-task-queue:learning-mentions=7"],
+				risk: "low",
+				policyDecision: "auto",
+				recommendedAction: "create_task",
+			};
+			proposals.push(proposal);
+			return {
+				version: 1,
+				authority: "advisory",
+				projectId: "sistema_de_mantencion",
+				generatedAt: "2026-06-07T00:00:00.000Z",
+				status: "proposal_created",
+				proposals: [proposal],
+				savedProposals: [proposal],
+				blockingReasons: [],
+				evidenceRefs: ["structured-task-queue:learning-mentions=7"],
+				safeNotes: [
+					"Execution director tick is advisory and does not implement code.",
+				],
+			};
+		},
+		formatExecutionDirectorTick: () => "execution director tick",
+		proposalOutbox: () => proposals.map((proposal) => ({ ...proposal })),
+		formatProposalOutbox: () => "proposal outbox",
+		proposalDetail: (id) => proposals.find((proposal) => proposal.id === id),
+		formatProposalDetail: () => "proposal detail",
 		supervisorOnIduActivation: () => {
 			active = true;
 			return undefined;
@@ -1021,6 +1065,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
+	assert.ok(tools.some((tool) => tool.name === "idu_execution_director_tick"));
+	assert.ok(tools.some((tool) => tool.name === "idu_proposal_outbox"));
+	assert.ok(tools.some((tool) => tool.name === "idu_proposal_detail"));
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_architectural_pruning_plan"),
 	);
@@ -1040,7 +1087,39 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 59);
+	assert.equal(tools.length, 62);
+});
+
+test("execution director MCP tick saves proposals and outbox reads them", async () => {
+	const runtime = fakeRuntime();
+	const options = {
+		runtimeFactory: () => runtime,
+		projectResolver: () => registered(),
+	};
+	const tick = await callIduMcpTool("idu_execution_director_tick", {}, options);
+
+	assert.equal(tick.ok, true);
+	assert.equal(tick.data.status, "proposal_created");
+	assert.equal((tick.data.savedProposals as unknown[]).length, 1);
+	assert.match(tick.safeNotes.join("\n"), /does not implement code/iu);
+	assert.match(tick.safeNotes.join("\n"), /No AgentLabs/iu);
+
+	const outbox = await callIduMcpTool("idu_proposal_outbox", {}, options);
+	assert.equal(outbox.ok, true);
+	const proposals = outbox.data.proposals as FlowBoundProposal[];
+	assert.equal(proposals.length, 1);
+	assert.equal(proposals[0]?.flowId, "supervisor-learning-loop");
+
+	const detail = await callIduMcpTool(
+		"idu_proposal_detail",
+		{ id: proposals[0]?.id },
+		options,
+	);
+	assert.equal(detail.ok, true);
+	assert.equal(
+		(detail.data.proposal as FlowBoundProposal).specId,
+		"spec-supervisor-learning-loop",
+	);
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {

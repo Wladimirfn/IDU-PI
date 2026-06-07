@@ -149,6 +149,9 @@ export type IduMcpToolName =
 	| "idu_postflight"
 	| "idu_supervisor_tick"
 	| "idu_supervisor_cron_plan"
+	| "idu_execution_director_tick"
+	| "idu_proposal_outbox"
+	| "idu_proposal_detail"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
 	| "idu_supervisor_self_maintenance_advisory"
@@ -477,6 +480,28 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Propone un tick cron advisory-only del supervisor; no escribe, no crea drafts, no ejecuta AgentLabs.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_execution_director_tick",
+		"Ejecuta un tick manual advisory-only del execution director y persiste propuestas flow-bound en stateRoot; no implementa ni ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_proposal_outbox",
+		"Lista propuestas flow-bound guardadas en stateRoot; sólo lectura, no toca el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_proposal_detail",
+		"Lee detalle de una propuesta flow-bound desde stateRoot.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			id: requiredString("ID de propuesta."),
 		},
 	),
 	tool(
@@ -2533,6 +2558,124 @@ async function dispatchTool(
 					"Supervisor tick no ejecuta AgentLabs.",
 					"No aplica reglas ni modifica Project Core/Constitution.",
 				],
+			});
+		}
+		case "idu_execution_director_tick": {
+			if (!runtime.executionDirectorTick) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Execution director no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Execution director no disponible en este runtime."],
+				});
+			}
+			const result = runtime.executionDirectorTick();
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: result.status === "proposal_created" ? "warn" : "allow",
+				severity:
+					result.status === "blocked_missing_lifecycle_binding"
+						? "warning"
+						: "info",
+				confidence: 0.78,
+				summary: `Execution director tick: ${result.status}`,
+				requiresHuman: result.savedProposals.length > 0,
+				orchestratorDecisionRequired: result.savedProposals.length > 0,
+				allowedToProceed: result.status !== "blocked_missing_lifecycle_binding",
+				evidenceRefs: result.evidenceRefs,
+				nextActions: result.savedProposals.length
+					? ["Review proposal outbox; Idu-pi does not implement proposals."]
+					: ["No proposal action required from this tick."],
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Execution director tick: ${result.status}; saved=${result.savedProposals.length}`,
+				data: {
+					decisionEnvelope,
+					status: result.status,
+					authority: result.authority,
+					generatedAt: result.generatedAt,
+					proposals: result.proposals,
+					savedProposals: result.savedProposals,
+					blockingReasons: result.blockingReasons,
+					evidenceRefs: result.evidenceRefs,
+					governanceConfig: governanceConfigData(),
+					workerBoundary: workerBoundaryData(),
+					result,
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					...result.safeNotes,
+					"Tick only persists proposal JSONL under stateRoot; it does not implement code.",
+					"No AgentLabs were executed or scheduled automatically.",
+				],
+			});
+		}
+		case "idu_proposal_outbox": {
+			if (!runtime.proposalOutbox) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Proposal outbox no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Proposal outbox no disponible en este runtime."],
+				});
+			}
+			const proposals = runtime.proposalOutbox();
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `Proposal outbox: ${proposals.length}`,
+				data: { proposals },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Read proposal outbox from stateRoot only; no repo files were touched.",
+					"Proposals are advisory and require orchestrator/human decision before work.",
+				],
+			});
+		}
+		case "idu_proposal_detail": {
+			if (!runtime.proposalDetail) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Proposal outbox no disponible en este runtime.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["Proposal outbox no disponible en este runtime."],
+				});
+			}
+			const id = requiredText(args, "id");
+			const proposal = runtime.proposalDetail(id);
+			return envelope({
+				ok: Boolean(proposal),
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: proposal
+					? `Proposal detail: ${id}`
+					: `Proposal not found: ${id}`,
+				data: { id, proposal: proposal ?? null },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Read proposal detail from stateRoot only; no repo files were touched.",
+					"Proposal detail is advisory; Idu-pi does not implement it.",
+				],
+				errors: proposal ? [] : [`Proposal not found: ${id}`],
 			});
 		}
 		case "idu_supervisor_cron_plan": {
