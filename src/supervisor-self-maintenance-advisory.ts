@@ -294,6 +294,7 @@ function buildRepeatedFailureSignal(
 	const grouped = new Map<string, StructuredTask[]>();
 	for (const task of tasks) {
 		const text = searchableText(task);
+		if (hasCoveredLearningEvidence(task, text)) continue;
 		if (!isFailureLike(task, text)) continue;
 		for (const keyword of REPEATED_PATTERN_KEYWORDS) {
 			if (text.includes(keyword)) {
@@ -688,6 +689,19 @@ function recommendedActionsFor(
 			),
 		]),
 	];
+}
+
+function hasCoveredLearningEvidence(
+	task: StructuredTask,
+	_text: string,
+): boolean {
+	const evidence = (task.completionEvidence ?? "").toLowerCase();
+	return (
+		task.status === "done" &&
+		/regression|checklist|test|tests|postflight|reviewer pass|full build/u.test(
+			evidence,
+		)
+	);
 }
 
 function isFailureLike(task: StructuredTask, text: string): boolean {

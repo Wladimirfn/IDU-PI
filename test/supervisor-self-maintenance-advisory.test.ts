@@ -140,6 +140,103 @@ test("self-maintenance advisory detects repeated failure without hiding safety",
 	);
 });
 
+test("self-maintenance advisory does not block on repeated failures covered by regression evidence", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "covered-1",
+			text: "Bug: postflight context.md unexpected delta",
+			status: "done" as const,
+			completionEvidence:
+				"Fixed with regression test; focused tests passed; reviewer PASS.",
+		},
+		{
+			...baseTask,
+			id: "covered-2",
+			text: "Bug: postflight context.md needs_evidence repeated",
+			status: "done" as const,
+			completionEvidence:
+				"Review checklist updated; full build/test/diff-check passed.",
+		},
+		{
+			...baseTask,
+			id: "covered-3",
+			text: "Bug: postflight local-only context.md",
+			status: "done" as const,
+			completionEvidence:
+				"Regression coverage recorded in postflight tests and reviewer PASS.",
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	assertTopLevelContract(report);
+	assert.equal(
+		report.signals.some(
+			(signal) => signal.category === "repeated_failure_patterns",
+		),
+		false,
+	);
+	assert.equal(
+		report.systemicActions.some(
+			(action) => action.id === "systemic-repeated-failure-learning",
+		),
+		false,
+	);
+});
+
+test("self-maintenance advisory still blocks on uncovered failures when mixed with covered evidence", () => {
+	const tasks = [
+		{
+			...baseTask,
+			id: "covered-1",
+			text: "Bug: postflight context.md unexpected delta",
+			status: "done" as const,
+			completionEvidence:
+				"Fixed with regression test; focused tests passed; reviewer PASS.",
+		},
+		{
+			...baseTask,
+			id: "uncovered-1",
+			text: "Bug: postflight context.md needs_evidence repeated",
+			status: "done" as const,
+		},
+		{
+			...baseTask,
+			id: "uncovered-2",
+			text: "Bug: postflight local-only context.md",
+			status: "pending" as const,
+		},
+		{
+			...baseTask,
+			id: "uncovered-3",
+			text: "Bug: postflight generated context.md drift",
+			status: "pending" as const,
+		},
+	];
+	const report = buildSupervisorSelfMaintenanceAdvisory({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		tasks,
+	});
+
+	assertTopLevelContract(report);
+	const repeated = report.signals.find(
+		(signal) => signal.category === "repeated_failure_patterns",
+	);
+	assert.ok(repeated);
+	assertSignalContract(repeated);
+	assert.equal(
+		report.systemicActions.some(
+			(action) => action.id === "systemic-repeated-failure-learning",
+		),
+		true,
+	);
+});
+
 test("self-maintenance advisory detects neglected areas conservatively", () => {
 	const tasks = [
 		{
