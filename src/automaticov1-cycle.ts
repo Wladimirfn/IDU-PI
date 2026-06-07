@@ -408,13 +408,43 @@ function safeNotes(input: {
 function systemicMaintenanceBlock(
 	signals: readonly SupervisorSelfMaintenanceSignal[],
 ): boolean {
-	return signals.some(
-		(signal) =>
-			signal.severity === "high" &&
-			(signal.category === "supervisor_activity_pressure" ||
-				signal.category === "repeated_failure_patterns" ||
-				signal.category === "external_security_coverage_gap"),
-	);
+	return signals.some((signal) => isHardSystemicMaintenanceBlock(signal));
+}
+
+function isHardSystemicMaintenanceBlock(
+	signal: SupervisorSelfMaintenanceSignal,
+): boolean {
+	if (signal.severity !== "high") return false;
+	if (
+		signal.category === "repeated_failure_patterns" ||
+		signal.category === "external_security_coverage_gap"
+	) {
+		return true;
+	}
+	if (signal.category !== "supervisor_activity_pressure") return false;
+	return hasHardSupervisorPressureEvidence(signal.evidenceRefs);
+}
+
+function hasHardSupervisorPressureEvidence(
+	evidenceRefs: readonly string[],
+): boolean {
+	if (evidenceRefs.length === 0) return true;
+	return evidenceRefs.some((ref) => {
+		const value = numericEvidenceValue(ref);
+		if (value === undefined || value <= 0) return false;
+		return (
+			ref.startsWith("structured-task-queue:open=") ||
+			ref.startsWith("structured-task-queue:stale=") ||
+			ref.startsWith("structured-task-queue:failed=") ||
+			ref.startsWith("idu-usage-events:failures=") ||
+			ref.startsWith("agentlab-review-requests:stale=")
+		);
+	});
+}
+
+function numericEvidenceValue(ref: string): number | undefined {
+	const value = /=(\d+)$/u.exec(ref)?.[1];
+	return value === undefined ? undefined : Number(value);
 }
 
 function automaticov1UsageReport(input: Automaticov1CycleInput, now: Date) {
