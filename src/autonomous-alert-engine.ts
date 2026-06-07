@@ -289,13 +289,13 @@ function hasCoveredRepeatedBugEvidence(task: StructuredTask): boolean {
 }
 
 function hasNegativeCoverageEvidence(evidence: string): boolean {
-	return /no regression|tests? skipped|postflight failed|needs evidence|needs_evidence|did not pass|no coverage|not updated|no postflight evidence|no .*evidence/u.test(
+	return /no regression|tests? skipped|not all tests passed|no tests passed|postflight failed|needs evidence|needs_evidence|did not pass|no coverage|not updated|no postflight evidence|no .*evidence/u.test(
 		evidence,
 	);
 }
 
 function hasPositiveCoverageEvidence(evidence: string): boolean {
-	return /regression (test|coverage)|review checklist|checklist updated|focused tests passed|full build\/test|postflight evidence|reviewer pass/u.test(
+	return /regression (test|coverage|evidence)|review checklist|checklist updated|focused tests passed|tests passed|full build\/test|full gate[^.]*pass|postflight evidence|(?:fresh )?reviewer(?: [a-z0-9]+)? pass/u.test(
 		evidence,
 	);
 }

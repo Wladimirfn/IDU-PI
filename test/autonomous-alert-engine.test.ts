@@ -105,6 +105,35 @@ test("repeated bug alert ignores completed tasks with regression evidence", () =
 	assert.equal(report.humanEscalations.length, 0);
 });
 
+test("repeated bug alert ignores completed runtime tasks with full gate and reviewer evidence", () => {
+	const runtimeEvidence = [
+		"Fixed idu_postflight local-only noise bug. Evidence: RED tests failed before ignoredFiles support; GREEN full gate corepack pnpm build && corepack pnpm test && git diff --check => 1089 pass / 0 fail / 1 skipped; LSP 0; reviewer 4a941d68 PASS.",
+		"Implemented and pushed Idu-pi Autonomous Alert Engine v1. Verification: LSP diagnostics 0; full gate corepack pnpm build && corepack pnpm test && git diff --check => 1110 pass / 0 fail / 1 skipped; fresh reviewer 0403b50f PASS.",
+		"Resolved by commit af652b5 fix(idu): bound self-maintenance pressure window. Evidence: focused tests 170 pass / 0 fail; LSP 0 diagnostics; full gate corepack pnpm build && corepack pnpm test && git diff --check => 1192 pass / 0 fail / 1 skipped; fresh reviewer c7a63f7d PASS.",
+		"Resolved repeated-failure learning blocker with regression evidence: covered completed repeated failures no longer emit systemic-repeated-failure-learning; focused automaticov1/mcp/self-maintenance tests passed; full gate corepack pnpm build && corepack pnpm test && git diff --check passed with 1194 pass / 0 fail / 1 skipped; LSP 0 diagnostics; fresh reviewer ece3c046 PASS.",
+	];
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: runtimeEvidence.map((completionEvidence, index) => ({
+			...task(
+				`runtime-covered-${index + 1}`,
+				"Bug: postflight context repeated failure learning regression",
+				"done",
+			),
+			completionEvidence,
+		})),
+		selfMaintenanceSignals: [],
+		allowTaskCreation: true,
+	});
+
+	assert.equal(
+		report.decisions.some((decision) => decision.domain === "repeated_bug"),
+		false,
+	);
+});
+
 test("repeated bug alert still counts completed tasks with insufficient evidence", () => {
 	const insufficientEvidence = [
 		"Tests skipped; no regression coverage added.",
@@ -120,6 +149,35 @@ test("repeated bug alert still counts completed tasks with insufficient evidence
 			...task(
 				`uncovered-${index + 1}`,
 				"Bug: postflight context.md repeated regression",
+				"done",
+			),
+			completionEvidence,
+		})),
+		selfMaintenanceSignals: [],
+		allowTaskCreation: true,
+	});
+
+	const decision = report.decisions.find(
+		(item) => item.domain === "repeated_bug",
+	);
+	assert.ok(decision);
+	assert.equal(decision.recommendedAction, "create_task");
+});
+
+test("repeated bug alert still counts negated test pass wording", () => {
+	const report = buildAutonomousAlertEngineReport({
+		projectId: "idu-pi",
+		now: new Date("2026-06-05T00:00:00.000Z"),
+		control: activeControl,
+		tasks: [
+			"Not all tests passed; reviewer PASS.",
+			"No tests passed; reviewer PASS.",
+			"Not all tests passed; reviewer PASS.",
+			"No tests passed; reviewer PASS.",
+		].map((completionEvidence, index) => ({
+			...task(
+				`negated-pass-${index + 1}`,
+				"Bug: postflight context repeated regression",
 				"done",
 			),
 			completionEvidence,
