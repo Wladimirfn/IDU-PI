@@ -141,6 +141,7 @@ import {
 } from "./birth-runtime.js";
 import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
 import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
+import { runMcpContextPackAutoRefreshTick } from "./mcp-context-pack-auto-refresh-invocation.js";
 import { readPendingInjections, markInjectionAcked, type Injection } from "./injection-store.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
@@ -2797,6 +2798,18 @@ function runCliAutonomousAlertScheduledTick(
 		projectId: runtime.projectId,
 		isProjectActive: () => getIduSessionStatus(runtime.projectId).active,
 	});
+	// MCP context pack auto-refresh: if staleness != fresh and we are ready,
+	// emit a regeneration event and write a fresh pack snapshot.
+	const mcpContextPackAutoRefresh = runMcpContextPackAutoRefreshTick({
+		stateRoot: runtime.workspaceRoot,
+		projectId: runtime.projectId,
+		iduActive: getIduSessionStatus(runtime.projectId).active,
+		planApproved: alertTickResult.objective.planApproved,
+		now: new Date(),
+	});
+	(
+		alertTickResult as unknown as { mcpContextPackAutoRefresh?: unknown }
+	).mcpContextPackAutoRefresh = mcpContextPackAutoRefresh;
 	return alertTickResult;
 }
 
@@ -2936,6 +2949,29 @@ function formatCliAutonomousAlertScheduledTick(
 	result: AutonomousAlertScheduledTickResult,
 ): string {
 	const topTruth = result.report?.uncomfortableTruths[0];
+	const refresh = (
+		result as unknown as {
+			mcpContextPackAutoRefresh?: {
+				ran: boolean;
+				shouldRefresh: boolean;
+				reason: string;
+				elapsedMs?: number;
+				cooldownRemainingMs?: number;
+				packPath?: string;
+			};
+		}
+	).mcpContextPackAutoRefresh;
+	const refreshLine = refresh
+		? `mcpContextPackAutoRefresh: ran=${refresh.ran} shouldRefresh=${refresh.shouldRefresh} reason=${refresh.reason}${
+				refresh.elapsedMs !== undefined
+					? ` elapsedMs=${Math.round(refresh.elapsedMs / 60_000)}min`
+					: ""
+			}${
+				refresh.cooldownRemainingMs !== undefined
+					? ` cooldownRemainingMs=${Math.round(refresh.cooldownRemainingMs / 60_000)}min`
+					: ""
+			}`
+		: "mcpContextPackAutoRefresh: not run";
 	return [
 		"Autonomous Alerts Scheduled Tick",
 		"",
@@ -2944,6 +2980,7 @@ function formatCliAutonomousAlertScheduledTick(
 		`planStatus: ${result.objective.planStatus}`,
 		`allowTaskCreation: ${result.allowTaskCreation}`,
 		`Tareas creadas: ${result.tasksCreated.length}`,
+		refreshLine,
 		"",
 		"Objetivo Idu-pi:",
 		result.objective.objective,
