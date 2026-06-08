@@ -143,6 +143,10 @@ import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from ".
 import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
 import { runMcpContextPackAutoRefreshTick } from "./mcp-context-pack-auto-refresh-invocation.js";
 import { formatScheduledTickSkippedDetail } from "./alerts-scheduled-tick-skipped-detail.js";
+import {
+	formatInspectEventsReport,
+	inspectEvents,
+} from "./events-inspector.js";
 import { readPendingInjections, markInjectionAcked, type Injection } from "./injection-store.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
@@ -1598,6 +1602,9 @@ export async function runCliCommand(
 			case "alerts":
 			case "idu-alerts":
 				return handleCliAlertCommand(activeRuntime, rest);
+			case "events":
+			case "idu-events":
+				return handleCliEventsInspectCommand(activeRuntime, rest);
 			case "idu-alerts-status":
 			case "alerts-status":
 				return ok(
@@ -2620,6 +2627,32 @@ function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
 	lines.push("Safe notes:");
 	lines.push(...result.safeNotes.map((note) => `- ${note}`));
 	return lines.join("\n");
+}
+
+function handleCliEventsInspectCommand(
+	runtime: CliRuntime,
+	parts: string[],
+): CliResult {
+	const projectId = parts.find((p) => p.startsWith("--project="))?.slice("--project=".length) ?? runtime.projectId;
+	const kindsArg = parts.find((p) => p.startsWith("--kinds="))?.slice("--kinds=".length);
+	const kinds = kindsArg ? kindsArg.split(",").map((k) => k.trim()).filter(Boolean) : undefined;
+	const since = parts.find((p) => p.startsWith("--since="))?.slice("--since=".length);
+	const until = parts.find((p) => p.startsWith("--until="))?.slice("--until=".length);
+	const limitArg = parts.find((p) => p.startsWith("--limit="))?.slice("--limit=".length);
+	const limit = limitArg ? Number.parseInt(limitArg, 10) : undefined;
+	if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+		return ok(`Events: limit inválido "${limitArg}"`);
+	}
+	const result = inspectEvents({
+		stateRoot: runtime.workspaceRoot,
+		projectId,
+		kinds,
+		since: since ? new Date(since) : undefined,
+		until: until ? new Date(until) : undefined,
+		limit,
+		now: new Date(),
+	});
+	return ok(formatInspectEventsReport(result));
 }
 
 function handleCliAlertCommand(
