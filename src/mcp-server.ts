@@ -53,6 +53,7 @@ import {
 	handleBirthRepoPlan,
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
+import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
@@ -166,6 +167,7 @@ export type IduMcpToolName =
 	| "idu_birth_bibliotecario_discovery"
 	| "idu_birth_validate"
 	| "idu_birth_repo_plan"
+	| "idu_birth_prototype_master"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
 	| "idu_supervisor_self_maintenance_advisory"
@@ -552,6 +554,16 @@ const TOOLS: IduMcpToolDefinition[] = [
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 			repoPlan: optionalObject("Plan de repo con repoName, visibility, owner, license, initialReadmePolicy, remoteProvider, pushApproved, branchPolicy, ciExpectation."),
+		},
+	),
+	tool(
+		"idu_birth_prototype_master",
+		"Crea, revisa o aprueba el Master Prototype / Pilot House. Persiste sólo en stateRoot/birth/prototype-master.json.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: optionalString("Acción: 'draft' | 'review' | 'approve'. Default 'review'."),
+			draft: optionalObject("Payload del prototype (sólo para action='draft')."),
+			approvedBy: optionalString("Identificador del aprobador humano (sólo para action='approve')."),
 		},
 	),
 	tool(
@@ -3179,6 +3191,35 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Bibliotecario ideas are idea_only; no automatic decision or contract is created.",
 					"External fetch requires explicit human permission.",
+				],
+			});
+		}
+		case "idu_birth_prototype_master": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as {
+				action?: "draft" | "review" | "approve";
+				draft?: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
+				approvedBy?: string;
+			};
+			const action = params.action ?? "review";
+			const env = handleBirthPrototypeMaster({
+				action,
+				projectId: runtime.projectId,
+				stateRoot,
+				...(params.draft ? { draft: params.draft } : {}),
+				...(params.approvedBy ? { approvedBy: params.approvedBy } : {}),
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_prototype_status=${env.prototype.status}`,
+				data: { birth: env },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Master Prototype is approved only by explicit human action.",
+					"Only stateRoot/birth/prototype-master.json is written.",
 				],
 			});
 		}

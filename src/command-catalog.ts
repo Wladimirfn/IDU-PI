@@ -1049,6 +1049,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-birth-validate",
 	},
 	{
+		label: "Birth prototype master",
+		command: "corepack pnpm cli -- idu-birth-prototype-master '{\"action\":\"review\"}'",
+	},
+	{
 		label: "Birth repo plan",
 		command:
 			"corepack pnpm cli -- idu-birth-repo-plan '{\"repoName\":\"demo\",\"visibility\":\"private\",\"owner\":\"elmas\",\"license\":\"MIT\",\"initialReadmePolicy\":\"minimal\",\"remoteProvider\":\"github\",\"pushApproved\":true,\"branchPolicy\":\"main\",\"ciExpectation\":\"pnpm test\"}'",

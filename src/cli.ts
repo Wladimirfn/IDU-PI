@@ -139,6 +139,7 @@ import {
 	type BirthRepoPlanEnvelope,
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
+import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import {
 	buildExecutionDirectorTick,
@@ -2305,6 +2306,44 @@ export async function runCliCommand(
 					projectPath: activeRuntime.projectPath,
 				});
 				return ok(formatBirthValidate(result));
+			}
+			case "idu-birth-prototype-master":
+			case "birth-prototype-master": {
+				const json = rest.join(" ").trim();
+				let action: "draft" | "review" | "approve" = "review";
+				let draft: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
+				let approvedBy: string | undefined;
+				if (json) {
+					let parsedUnknown: unknown;
+					try {
+						parsedUnknown = JSON.parse(json);
+					} catch (e) {
+						return fail(`JSON inválido: ${(e as Error).message}`);
+					}
+					if (
+						typeof parsedUnknown === "object" &&
+						parsedUnknown !== null
+					) {
+						const p = parsedUnknown as {
+							action?: string;
+							draft?: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
+							approvedBy?: string;
+						};
+						if (p.action === "draft" || p.action === "review" || p.action === "approve") {
+							action = p.action;
+						}
+						draft = p.draft;
+						approvedBy = p.approvedBy;
+					}
+				}
+				const result = handleBirthPrototypeMaster({
+					action,
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					...(draft ? { draft } : {}),
+					...(approvedBy ? { approvedBy } : {}),
+				});
+				return ok(formatBirthPrototype(result));
 			}
 			case "idu-birth-repo-plan":
 			case "birth-repo-plan": {
@@ -5222,6 +5261,24 @@ function formatBirthRepoPlan(env: BirthRepoPlanEnvelope): string {
 		for (const r of d.blockingReasons) lines.push(`  - ${r}`);
 	}
 	lines.push(`nextRequiredAction: ${d.nextRequiredAction}`);
+	return lines.join("\n");
+}
+
+function formatBirthPrototype(env: BirthPrototypeMasterEnvelope): string {
+	const p = env.prototype;
+	const lines: string[] = [];
+	lines.push(`Birth Master Prototype — ${env.projectId}`);
+	lines.push(`status: ${p.status}`);
+	if (p.approvedBy) lines.push(`approvedBy: ${p.approvedBy}`);
+	if (p.approvedAt) lines.push(`approvedAt: ${p.approvedAt}`);
+	lines.push(`productIntent: ${p.productIntent}`);
+	lines.push(`visualStyle: ${p.visualStyle}`);
+	lines.push(`layoutBase: ${p.layoutBase}`);
+	lines.push(
+		`stackRecommendation: ${p.stackRecommendation.packageManager} / ${p.stackRecommendation.runtime}`,
+	);
+	lines.push(`forbiddenPatterns: ${p.forbiddenPatterns.join(", ")}`);
+	lines.push(`scalingRules: ${p.scalingRules.join(", ")}`);
 	return lines.join("\n");
 }
 

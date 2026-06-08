@@ -12,6 +12,7 @@ const cases = [
 	"idu-birth-bibliotecario-discovery",
 	"idu-birth-validate",
 	"idu-birth-repo-plan",
+	"idu-birth-prototype-master",
 ];
 
 for (const c of cases) {
@@ -47,6 +48,7 @@ for (const t of [
 	"idu_birth_bibliotecario_discovery",
 	"idu_birth_validate",
 	"idu_birth_repo_plan",
+	"idu_birth_prototype_master",
 ]) {
 	test(`mcp-server.ts registers tool ${t}`, () => {
 		assert.match(
