@@ -1087,7 +1087,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 68);
+	assert.equal(tools.length, 70);
 });
 
 test("execution director MCP tick saves proposals and outbox reads them", async () => {

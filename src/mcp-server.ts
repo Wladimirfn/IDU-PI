@@ -54,6 +54,8 @@ import {
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
+import { readPendingInjections, markInjectionAcked } from "./injection-store.js";
+import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
@@ -168,6 +170,8 @@ export type IduMcpToolName =
 	| "idu_birth_validate"
 	| "idu_birth_repo_plan"
 	| "idu_birth_prototype_master"
+	| "idu_pending_injections"
+	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
 	| "idu_supervisor_self_maintenance_advisory"
@@ -564,6 +568,21 @@ const TOOLS: IduMcpToolDefinition[] = [
 			action: optionalString("Acción: 'draft' | 'review' | 'approve'. Default 'review'."),
 			draft: optionalObject("Payload del prototype (sólo para action='draft')."),
 			approvedBy: optionalString("Identificador del aprobador humano (sólo para action='approve')."),
+		},
+	),
+	tool(
+		"idu_pending_injections",
+		"Lee inyecciones pendientes del stateRoot. Opcionalmente las marca como acked.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			ack: optionalBoolean("Si true (default), marca las inyecciones devueltas como acked."),
+		},
+	),
+	tool(
+		"idu_subscribe_triggers",
+		"Describe los disparadores disponibles y su contrato. Read-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 		},
 	),
 	tool(
@@ -3295,6 +3314,65 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Repo plan is evaluated only; no git init/push is executed by Idu-pi.",
 					"Human push approval is required and recorded before any repoWritesAllowed=true.",
+				],
+			});
+		}
+		case "idu_pending_injections": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as { ack?: boolean };
+			const ack = params.ack !== false;
+			const pending = readPendingInjections(stateRoot, {});
+			if (ack && pending.length > 0) {
+				for (const inj of pending) {
+					markInjectionAcked(stateRoot, inj.injectionId);
+				}
+			}
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `pending=${pending.length} acked=${ack ? pending.length : 0}`,
+				data: {
+					birth: {
+						pendingInjections: pending,
+						ackedCount: ack ? pending.length : 0,
+					},
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Read pending injections from stateRoot only; no repo files were touched.",
+					ack
+						? "Side effect: mark-as-acked happened on disk."
+						: "Side effect: read-only, no disk write.",
+				],
+			});
+		}
+		case "idu_subscribe_triggers": {
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `triggers=${TRIGGER_DEFINITIONS.length}`,
+				data: {
+					birth: {
+						triggers: TRIGGER_DEFINITIONS.map((d) => ({
+							id: d.id,
+							description: d.description,
+							kinds: d.kinds,
+							signature: d.signature,
+							contract: {
+								decisionRequired: d.contract.decisionRequired,
+								severity: d.contract.severity,
+								options: d.contract.options,
+							},
+						})),
+					},
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Read-only; describe los disparadores y su contrato. No escribe.",
 				],
 			});
 		}

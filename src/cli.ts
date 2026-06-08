@@ -140,6 +140,8 @@ import {
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
 import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
+import { readPendingInjections, markInjectionAcked, type Injection } from "./injection-store.js";
+import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import {
 	buildExecutionDirectorTick,
@@ -2345,6 +2347,24 @@ export async function runCliCommand(
 				});
 				return ok(formatBirthPrototype(result));
 			}
+			case "idu-pending-injections":
+			case "pending-injections": {
+				const params = rest.join(" ").trim();
+				const ack = !/ack\s*:\s*false/.test(params);
+				const pending = readPendingInjections(
+					activeRuntime.workspaceRoot,
+					{},
+				);
+				if (ack && pending.length > 0) {
+					for (const inj of pending) {
+						markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
+					}
+				}
+				return ok(formatPendingInjections(pending, ack));
+			}
+			case "idu-subscribe-triggers":
+			case "subscribe-triggers":
+				return ok(formatTriggerSubscription());
 			case "idu-birth-repo-plan":
 			case "birth-repo-plan": {
 				const json = rest.join(" ").trim();
@@ -5279,6 +5299,30 @@ function formatBirthPrototype(env: BirthPrototypeMasterEnvelope): string {
 	);
 	lines.push(`forbiddenPatterns: ${p.forbiddenPatterns.join(", ")}`);
 	lines.push(`scalingRules: ${p.scalingRules.join(", ")}`);
+	return lines.join("\n");
+}
+
+function formatPendingInjections(pending: Injection[], ack: boolean): string {
+	const lines: string[] = [];
+	lines.push(`Pending Injections — count=${pending.length} ack=${ack}`);
+	if (pending.length > 0) {
+		for (const inj of pending) {
+			lines.push(
+				`  - ${inj.triggerId} severity=${inj.decisionEnvelope.severity} summary="${inj.decisionEnvelope.summary}"`,
+			);
+		}
+	}
+	return lines.join("\n");
+}
+
+function formatTriggerSubscription(): string {
+	const lines: string[] = [];
+	lines.push(`Trigger Subscription — ${TRIGGER_DEFINITIONS.length} disparadores`);
+	for (const def of TRIGGER_DEFINITIONS) {
+		lines.push(
+			`  - ${def.id} severity=${def.contract.severity} decisionRequired=${def.contract.decisionRequired} kinds=[${def.kinds.join(",")}]`,
+		);
+	}
 	return lines.join("\n");
 }
 
