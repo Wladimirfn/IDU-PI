@@ -140,6 +140,7 @@ import {
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
 import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
+import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
 import { readPendingInjections, markInjectionAcked, type Injection } from "./injection-store.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
@@ -2746,7 +2747,7 @@ function runCliAutonomousAlertScheduledTick(
 		);
 		return selfMaintenance;
 	};
-	return runAutonomousAlertScheduledTick({
+	const alertTickResult = runAutonomousAlertScheduledTick({
 		projectId: runtime.projectId,
 		projectPath: runtime.projectPath,
 		stateRoot: runtime.workspaceRoot,
@@ -2790,6 +2791,13 @@ function runCliAutonomousAlertScheduledTick(
 			return { id: task.id };
 		},
 	});
+	// Trigger engine integration: opt-in via IDU_PI_TRIGGER_ENGINE=1
+	runTriggerEngineTickOptIn({
+		stateRoot: runtime.workspaceRoot,
+		projectId: runtime.projectId,
+		isProjectActive: () => getIduSessionStatus(runtime.projectId).active,
+	});
+	return alertTickResult;
 }
 
 function runCliAutonomousAlertControl(
