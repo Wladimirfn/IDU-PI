@@ -254,6 +254,18 @@ function loadMasterPlanSnapshot(stateRoot: string): MasterPlan | undefined {
 function loadConstitutionStatus(
 	stateRoot: string,
 ): "active" | "missing" | "unknown" {
+	// First, check the constitution config directly (canonical source).
+	try {
+		const path = join(stateRoot, "config", "project-constitution.json");
+		if (existsSync(path)) {
+			const raw = readFileSync(path, "utf8");
+			const parsed = JSON.parse(raw) as { status?: string };
+			if (parsed.status === "active") return "active";
+		}
+	} catch {
+		// ignore; fall through
+	}
+	// Second, check the birth status for advanced pipeline state.
 	const status = readBirthArtifact<{ status?: string }>(stateRoot, "status");
 	if (
 		status?.status === "implementation_ready" ||
