@@ -48,7 +48,7 @@ export function readBirthArtifact<T = unknown>(
 	}
 }
 
-function assertSafeArtifactName(name: string): void {
+export function assertSafeArtifactName(name: string): void {
 	if (typeof name !== "string" || name.length === 0) {
 		throw new Error(`invalid artifact name: ${JSON.stringify(name)}`);
 	}
