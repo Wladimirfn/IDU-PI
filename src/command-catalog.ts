@@ -1032,6 +1032,27 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command:
 			"corepack pnpm cli -- idu-supervisor-learning-rules-rollback latest",
 	},
+	{
+		label: "Birth Pipeline status",
+		command: "corepack pnpm cli -- idu-birth-status",
+	},
+	{
+		label: "Birth existing scan",
+		command: "corepack pnpm cli -- idu-birth-existing-scan",
+	},
+	{
+		label: "Birth bibliotecario discovery",
+		command: "corepack pnpm cli -- idu-birth-bibliotecario-discovery",
+	},
+	{
+		label: "Birth validate",
+		command: "corepack pnpm cli -- idu-birth-validate",
+	},
+	{
+		label: "Birth repo plan",
+		command:
+			"corepack pnpm cli -- idu-birth-repo-plan '{\"repoName\":\"demo\",\"visibility\":\"private\",\"owner\":\"elmas\",\"license\":\"MIT\",\"initialReadmePolicy\":\"minimal\",\"remoteProvider\":\"github\",\"pushApproved\":true,\"branchPolicy\":\"main\",\"ciExpectation\":\"pnpm test\"}'",
+	},
 ];
 
 export const BATCH_COMMANDS: LocalCommandEntry[] = [

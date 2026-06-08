@@ -45,6 +45,15 @@ import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js
 import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
 import { runAutomaticov1AdvisoryCycle } from "./automaticov1-cycle.js";
 import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
+import {
+	handleBirthStatus,
+	handleBirthExistingScan,
+	handleBirthBibliotecarioDiscovery,
+	handleBirthValidate,
+	handleBirthRepoPlan,
+	type BirthRepoPlan,
+} from "./birth-runtime.js";
+import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
 	appendAutonomousAlertDecision,
@@ -152,6 +161,11 @@ export type IduMcpToolName =
 	| "idu_execution_director_tick"
 	| "idu_proposal_outbox"
 	| "idu_proposal_detail"
+	| "idu_birth_status"
+	| "idu_birth_existing_scan"
+	| "idu_birth_bibliotecario_discovery"
+	| "idu_birth_validate"
+	| "idu_birth_repo_plan"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
 	| "idu_supervisor_self_maintenance_advisory"
@@ -502,6 +516,42 @@ const TOOLS: IduMcpToolDefinition[] = [
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 			id: requiredString("ID de propuesta."),
+		},
+	),
+	tool(
+		"idu_birth_status",
+		"Lee el estado del Birth Pipeline desde stateRoot; readiness calculado a partir de contratos existentes (Project Core, Master Plan, Constitution, Bibliotecario, Prototype, General Spec).",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_existing_scan",
+		"Ejecuta un scan read-only del proyecto existente y persiste birth/existing-scan.json + birth/detected-specs.json en stateRoot. No marca Project Core ni Master Plan como aprobados.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_bibliotecario_discovery",
+		"Evalúa la postura Bibliotecario con base en fuentes locales detectadas y categorías externas pedidas. Ideas siempre idea_only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_validate",
+		"Corre scan + Bibliotecario + readiness en una sola pasada y devuelve el envelope agregado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_repo_plan",
+		"Evalúa un plan de repo y otorga repoWritesAllowed solo si Project Core está confirmado, Master Plan aprobado y pushApproved=true. No ejecuta git.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			repoPlan: optionalObject("Plan de repo con repoName, visibility, owner, license, initialReadmePolicy, remoteProvider, pushApproved, branchPolicy, ciExpectation."),
 		},
 	),
 	tool(
@@ -3048,6 +3098,165 @@ async function dispatchTool(
 				safeNotes,
 			});
 		}
+		case "idu_birth_status": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const env = handleBirthStatus({
+				projectId: runtime.projectId,
+				stateRoot,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_state=${env.state} allowed=${env.allowedToImplement} repo=${env.repoWritesAllowed}`,
+				data: { birth: env },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Birth status is advisory; readiness is derived from existing Idu-pi contracts.",
+					"repoWritesAllowed remains false until Project Core + Master Plan are confirmed/approved AND a human push approval is recorded.",
+				],
+			});
+		}
+		case "idu_birth_existing_scan": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			if (!runtime.projectPath) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Existing project scan requires an active project path.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["active project path is missing"],
+				});
+			}
+			const env = handleBirthExistingScan({
+				projectId: runtime.projectId,
+				stateRoot,
+				projectPath: runtime.projectPath,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_scan=${env.scan.scanId} pkg=${env.scan.observed.packageManager}`,
+				data: { birth: env },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Scan is read-only; artifacts written only under stateRoot/birth/.",
+					"Detected specs stay in status=draft until human approval.",
+				],
+			});
+		}
+		case "idu_birth_bibliotecario_discovery": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const scan = readBirthArtifact<{ observed?: { docs?: string[] } }>(
+				stateRoot,
+				"existing-scan",
+			);
+			const localRefs = (scan?.observed?.docs ?? []).slice(0, 5).map(
+				(p) => ({ path: p, quality: "secondary" as const }),
+			);
+			const env = handleBirthBibliotecarioDiscovery({
+				projectId: runtime.projectId,
+				stateRoot,
+				localSourceRefs: localRefs,
+				requestedExternalCategories: [],
+				externalPermission: "not_requested",
+				masterPlanSummary: "",
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_bibliotecario_status=${env.discovery.status} ideas=${env.discovery.ideas.length}`,
+				data: { birth: env },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Bibliotecario ideas are idea_only; no automatic decision or contract is created.",
+					"External fetch requires explicit human permission.",
+				],
+			});
+		}
+		case "idu_birth_validate": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			if (!runtime.projectPath) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Birth validate requires an active project path.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["active project path is missing"],
+				});
+			}
+			const env = handleBirthValidate({
+				projectId: runtime.projectId,
+				stateRoot,
+				projectPath: runtime.projectPath,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_validate state=${env.readiness.state}`,
+				data: { birth: env },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Birth validate runs read-only scan + Bibliotecario + readiness; nothing is written except under stateRoot/birth/.",
+				],
+			});
+		}
+		case "idu_birth_repo_plan": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as {
+				repoPlan?: Partial<BirthRepoPlan>;
+			};
+			const plan: BirthRepoPlan = {
+				repoName: String(params.repoPlan?.repoName ?? runtime.projectId),
+				visibility:
+					params.repoPlan?.visibility === "public" ? "public" : "private",
+				owner: String(params.repoPlan?.owner ?? ""),
+				license: String(params.repoPlan?.license ?? "MIT"),
+				initialReadmePolicy: String(
+					params.repoPlan?.initialReadmePolicy ?? "minimal",
+				),
+				remoteProvider:
+					(params.repoPlan?.remoteProvider as
+						| "github"
+						| "gitlab"
+						| "other"
+						| undefined) ?? "github",
+				pushApproved: Boolean(params.repoPlan?.pushApproved),
+				branchPolicy: String(params.repoPlan?.branchPolicy ?? "main"),
+				ciExpectation: String(params.repoPlan?.ciExpectation ?? ""),
+			};
+			const env = handleBirthRepoPlan({
+				projectId: runtime.projectId,
+				stateRoot,
+				repoPlan: plan,
+			});
+			return envelope({
+				ok: env.decision.repoWritesAllowed,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_repo_plan repoWritesAllowed=${env.decision.repoWritesAllowed}`,
+				data: { birth: env },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Repo plan is evaluated only; no git init/push is executed by Idu-pi.",
+					"Human push approval is required and recorded before any repoWritesAllowed=true.",
+				],
+			});
+		}
 		case "idu_automaticov1_cycle": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			let selfMaintenance:
@@ -5563,6 +5772,10 @@ function optionalBoolean(description: string): JsonObject {
 
 function optionalStringArray(description: string): JsonObject {
 	return { type: "array", items: { type: "string" }, description };
+}
+
+function optionalObject(description: string): JsonObject {
+	return { type: "object", description, additionalProperties: true };
 }
 
 function optionalEnum(description: string, values: string[]): JsonObject {

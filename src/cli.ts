@@ -127,6 +127,20 @@ import {
 } from "./master-plan.js";
 import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
 import {
+	handleBirthStatus,
+	handleBirthExistingScan,
+	handleBirthBibliotecarioDiscovery,
+	handleBirthValidate,
+	handleBirthRepoPlan,
+	type BirthStatusEnvelope,
+	type BirthExistingScanEnvelope,
+	type BirthBibliotecarioEnvelope,
+	type BirthValidateEnvelope,
+	type BirthRepoPlanEnvelope,
+	type BirthRepoPlan,
+} from "./birth-runtime.js";
+import { readBirthArtifact } from "./birth-artifacts.js";
+import {
 	buildExecutionDirectorTick,
 	type ExecutionDirectorTickInput,
 	type ExecutionDirectorTickResult,
@@ -2244,6 +2258,70 @@ export async function runCliCommand(
 				const task = activeRuntime.queueComplete?.(id, evidence);
 				if (!task) return fail("Uso: idu-pi queue-complete <id> <evidence>");
 				return ok(`Tarea completada: ${task.id}. Evidencia registrada.`);
+			}
+			case "idu-birth-status":
+			case "birth-status":
+				return ok(
+					formatBirthStatus(
+						handleBirthStatus({
+							projectId: activeRuntime.projectId,
+							stateRoot: activeRuntime.workspaceRoot,
+						}),
+					),
+				);
+			case "idu-birth-existing-scan":
+			case "birth-existing-scan": {
+				const result = handleBirthExistingScan({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					projectPath: activeRuntime.projectPath,
+				});
+				return ok(formatBirthExistingScan(result));
+			}
+			case "idu-birth-bibliotecario-discovery":
+			case "birth-bibliotecario-discovery": {
+				const scan = readBirthArtifact<{ observed?: { docs?: string[] } }>(
+					activeRuntime.workspaceRoot,
+					"existing-scan",
+				);
+				const localRefs = (scan?.observed?.docs ?? []).slice(0, 5).map(
+					(p) => ({ path: p, quality: "secondary" as const }),
+				);
+				const result = handleBirthBibliotecarioDiscovery({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					localSourceRefs: localRefs,
+					requestedExternalCategories: [],
+					externalPermission: "not_requested",
+					masterPlanSummary: "",
+				});
+				return ok(formatBirthBibliotecario(result));
+			}
+			case "idu-birth-validate":
+			case "birth-validate": {
+				const result = handleBirthValidate({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					projectPath: activeRuntime.projectPath,
+				});
+				return ok(formatBirthValidate(result));
+			}
+			case "idu-birth-repo-plan":
+			case "birth-repo-plan": {
+				const json = rest.join(" ").trim();
+				if (!json) return fail("Uso: idu-pi idu-birth-repo-plan <json-plan>");
+				let parsed: BirthRepoPlan;
+				try {
+					parsed = JSON.parse(json) as BirthRepoPlan;
+				} catch (e) {
+					return fail(`JSON inválido: ${(e as Error).message}`);
+				}
+				const result = handleBirthRepoPlan({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					repoPlan: parsed,
+				});
+				return ok(formatBirthRepoPlan(result));
 			}
 			default:
 				return {
@@ -5028,6 +5106,91 @@ async function confirmAction(
 		answer === "si" ||
 		answer === "sí"
 	);
+}
+
+function formatBirthStatus(env: BirthStatusEnvelope): string {
+	const lines: string[] = [];
+	lines.push(`Birth Pipeline Status — ${env.projectId} (${env.mode})`);
+	lines.push(`state: ${env.state}`);
+	lines.push(`allowedToImplement: ${env.allowedToImplement}`);
+	lines.push(`repoWritesAllowed: ${env.repoWritesAllowed}`);
+	lines.push(`nextRequiredAction: ${env.nextRequiredAction}`);
+	if (env.scopeLimit) lines.push(`scopeLimit: ${env.scopeLimit}`);
+	if (env.blockingReasons.length > 0) {
+		lines.push("blockingReasons:");
+		for (const r of env.blockingReasons) lines.push(`  - ${r}`);
+	}
+	return lines.join("\n");
+}
+
+function formatBirthExistingScan(env: BirthExistingScanEnvelope): string {
+	const lines: string[] = [];
+	lines.push(`Birth Existing Scan — ${env.projectId}`);
+	const o = env.scan.observed;
+	lines.push(`packageManager: ${o.packageManager}`);
+	lines.push(`languages: ${o.languages.join(", ") || "(none)"}`);
+	lines.push(`frameworks: ${o.frameworks.join(", ") || "(none)"}`);
+	lines.push(`tests: ${o.tests.length} file(s)`);
+	lines.push(`docs: ${o.docs.length} file(s)`);
+	lines.push(`assets: ${o.assets.length} file(s)`);
+	if (env.scan.risks.length > 0) {
+		lines.push("risks:");
+		for (const r of env.scan.risks) lines.push(`  - ${r}`);
+	}
+	lines.push(`detectedSpecs.status: ${env.detectedSpecs.status}`);
+	lines.push(`detectedSpecs.approval.status: ${env.detectedSpecs.approval.status}`);
+	return lines.join("\n");
+}
+
+function formatBirthBibliotecario(env: BirthBibliotecarioEnvelope): string {
+	const d = env.discovery;
+	const lines: string[] = [];
+	lines.push(`Birth Bibliotecario Discovery — ${env.projectId}`);
+	lines.push(`status: ${d.status}`);
+	lines.push(`localSources: ${d.localSources.length}`);
+	lines.push(`externalPermission: ${d.externalPermission}`);
+	lines.push(`externalCategoriesNeeded: ${d.externalCategoriesNeeded.join(", ") || "(none)"}`);
+	lines.push(`ideas: ${d.ideas.length}`);
+	if (d.ideas.length > 0) {
+		for (const idea of d.ideas) {
+			lines.push(`  - ${idea.sourcePath}: ${idea.compatibility} (${idea.decisionStatus})`);
+		}
+	}
+	if (d.limitations.length > 0) {
+		lines.push("limitations:");
+		for (const l of d.limitations) lines.push(`  - ${l}`);
+	}
+	lines.push(`nextRequiredAction: ${d.nextRequiredAction}`);
+	return lines.join("\n");
+}
+
+function formatBirthValidate(env: BirthValidateEnvelope): string {
+	const lines: string[] = [];
+	lines.push(formatBirthExistingScan({
+		version: 1,
+		kind: "birth_existing_scan",
+		projectId: env.projectId,
+		scan: env.scan,
+		detectedSpecs: env.detectedSpecs,
+	}));
+	lines.push("");
+	lines.push(formatBirthBibliotecario(env.bibliotecario));
+	lines.push("");
+	lines.push(formatBirthStatus({ ...env.readiness, version: 1, kind: "birth_status" }));
+	return lines.join("\n");
+}
+
+function formatBirthRepoPlan(env: BirthRepoPlanEnvelope): string {
+	const d = env.decision;
+	const lines: string[] = [];
+	lines.push(`Birth Repo Plan — ${env.projectId}`);
+	lines.push(`repoWritesAllowed: ${d.repoWritesAllowed}`);
+	if (d.blockingReasons.length > 0) {
+		lines.push("blockingReasons:");
+		for (const r of d.blockingReasons) lines.push(`  - ${r}`);
+	}
+	lines.push(`nextRequiredAction: ${d.nextRequiredAction}`);
+	return lines.join("\n");
 }
 
 if (

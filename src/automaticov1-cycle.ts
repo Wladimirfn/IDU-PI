@@ -9,6 +9,7 @@ import {
 	buildIduExecutionReadiness,
 	type IduExecutionReadiness,
 } from "./idu-execution-readiness.js";
+import { handleBirthStatus } from "./birth-runtime.js";
 import type { MasterPlanTaskTree } from "./master-plan-task-tree.js";
 import type { SkillDraftFromLessonsResult } from "./skill-draft-from-lessons.js";
 import type { StructuredTask } from "./structured-task-queue.js";
@@ -237,6 +238,7 @@ function baseResult(input: {
 }): Automaticov1CycleResult {
 	const externalFetchExecuted = Boolean(input.externalIntelligenceReport);
 	const skillProposalExecuted = Boolean(input.skillDraftFromLessons);
+	const birth = computeBirthStatus(input);
 	return {
 		version: 1,
 		authority: "advisory",
@@ -258,6 +260,7 @@ function baseResult(input: {
 		...(input.executionReadiness
 			? { executionReadiness: input.executionReadiness }
 			: {}),
+		...(birth ? { birth } : {}),
 		...(input.supervisorCronPlan
 			? { supervisorCronPlan: input.supervisorCronPlan }
 			: {}),
@@ -275,6 +278,19 @@ function baseResult(input: {
 		nextActions: nextActions(input),
 		safeNotes: safeNotes(input),
 	};
+}
+
+function computeBirthStatus(
+	input: Parameters<typeof baseResult>[0],
+): ReturnType<typeof handleBirthStatus> | undefined {
+	try {
+		return handleBirthStatus({
+			projectId: input.input.projectId,
+			stateRoot: input.input.stateRoot,
+		});
+	} catch {
+		return undefined;
+	}
 }
 
 function evidenceRefs(input: {
