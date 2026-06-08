@@ -2284,9 +2284,9 @@ export async function runCliCommand(
 					activeRuntime.workspaceRoot,
 					"existing-scan",
 				);
-				const localRefs = (scan?.observed?.docs ?? []).slice(0, 5).map(
-					(p) => ({ path: p, quality: "secondary" as const }),
-				);
+				const localRefs = (scan?.observed?.docs ?? [])
+					.slice(0, 5)
+					.map((p) => ({ path: p, quality: "secondary" as const }));
 				const result = handleBirthBibliotecarioDiscovery({
 					projectId: activeRuntime.projectId,
 					stateRoot: activeRuntime.workspaceRoot,
@@ -2321,7 +2321,7 @@ export async function runCliCommand(
 					typeof parsedUnknown === "object" &&
 					parsedUnknown !== null &&
 					"repoPlan" in parsedUnknown
-						? ((parsedUnknown as { repoPlan: BirthRepoPlan }).repoPlan)
+						? (parsedUnknown as { repoPlan: BirthRepoPlan }).repoPlan
 						: (parsedUnknown as BirthRepoPlan);
 				const result = handleBirthRepoPlan({
 					projectId: activeRuntime.projectId,
@@ -2522,7 +2522,7 @@ async function runCliAutomaticov1Cycle(
 }
 
 function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
-	return [
+	const lines: string[] = [
 		"🤖 automaticov1 cycle",
 		`status: ${result.status}`,
 		`authority: ${result.authority}`,
@@ -2533,16 +2533,31 @@ function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
 		`alertTick: ${result.alertScheduledTick.status}`,
 		`alertDecisions: ${result.alertScheduledTick.report?.decisions.length ?? 0}`,
 		`tasksCreated: ${result.alertScheduledTick.tasksCreated.length}`,
-		"",
-		"Evidence:",
-		...result.evidenceRefs.map((ref) => `- ${ref}`),
-		"",
-		"Next:",
-		...result.nextActions.map((action) => `- ${action}`),
-		"",
-		"Safe notes:",
-		...result.safeNotes.map((note) => `- ${note}`),
-	].join("\n");
+	];
+	if (result.birth) {
+		const b = result.birth;
+		lines.push("");
+		lines.push("Birth:");
+		lines.push(`- state: ${b.state}`);
+		lines.push(`- allowedToImplement: ${b.allowedToImplement}`);
+		lines.push(`- repoWritesAllowed: ${b.repoWritesAllowed}`);
+		lines.push(`- nextRequiredAction: ${b.nextRequiredAction}`);
+		if (b.scopeLimit) lines.push(`- scopeLimit: ${b.scopeLimit}`);
+		if (b.blockingReasons.length > 0) {
+			lines.push("- blockingReasons:");
+			for (const r of b.blockingReasons) lines.push(`  - ${r}`);
+		}
+	}
+	lines.push("");
+	lines.push("Evidence:");
+	lines.push(...result.evidenceRefs.map((ref) => `- ${ref}`));
+	lines.push("");
+	lines.push("Next:");
+	lines.push(...result.nextActions.map((action) => `- ${action}`));
+	lines.push("");
+	lines.push("Safe notes:");
+	lines.push(...result.safeNotes.map((note) => `- ${note}`));
+	return lines.join("\n");
 }
 
 function handleCliAlertCommand(
@@ -5145,7 +5160,9 @@ function formatBirthExistingScan(env: BirthExistingScanEnvelope): string {
 		for (const r of env.scan.risks) lines.push(`  - ${r}`);
 	}
 	lines.push(`detectedSpecs.status: ${env.detectedSpecs.status}`);
-	lines.push(`detectedSpecs.approval.status: ${env.detectedSpecs.approval.status}`);
+	lines.push(
+		`detectedSpecs.approval.status: ${env.detectedSpecs.approval.status}`,
+	);
 	return lines.join("\n");
 }
 
@@ -5156,11 +5173,15 @@ function formatBirthBibliotecario(env: BirthBibliotecarioEnvelope): string {
 	lines.push(`status: ${d.status}`);
 	lines.push(`localSources: ${d.localSources.length}`);
 	lines.push(`externalPermission: ${d.externalPermission}`);
-	lines.push(`externalCategoriesNeeded: ${d.externalCategoriesNeeded.join(", ") || "(none)"}`);
+	lines.push(
+		`externalCategoriesNeeded: ${d.externalCategoriesNeeded.join(", ") || "(none)"}`,
+	);
 	lines.push(`ideas: ${d.ideas.length}`);
 	if (d.ideas.length > 0) {
 		for (const idea of d.ideas) {
-			lines.push(`  - ${idea.sourcePath}: ${idea.compatibility} (${idea.decisionStatus})`);
+			lines.push(
+				`  - ${idea.sourcePath}: ${idea.compatibility} (${idea.decisionStatus})`,
+			);
 		}
 	}
 	if (d.limitations.length > 0) {
@@ -5173,17 +5194,21 @@ function formatBirthBibliotecario(env: BirthBibliotecarioEnvelope): string {
 
 function formatBirthValidate(env: BirthValidateEnvelope): string {
 	const lines: string[] = [];
-	lines.push(formatBirthExistingScan({
-		version: 1,
-		kind: "birth_existing_scan",
-		projectId: env.projectId,
-		scan: env.scan,
-		detectedSpecs: env.detectedSpecs,
-	}));
+	lines.push(
+		formatBirthExistingScan({
+			version: 1,
+			kind: "birth_existing_scan",
+			projectId: env.projectId,
+			scan: env.scan,
+			detectedSpecs: env.detectedSpecs,
+		}),
+	);
 	lines.push("");
 	lines.push(formatBirthBibliotecario(env.bibliotecario));
 	lines.push("");
-	lines.push(formatBirthStatus({ ...env.readiness, version: 1, kind: "birth_status" }));
+	lines.push(
+		formatBirthStatus({ ...env.readiness, version: 1, kind: "birth_status" }),
+	);
 	return lines.join("\n");
 }
 

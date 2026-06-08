@@ -1,16 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-	readBirthArtifact,
-	writeBirthArtifact,
-} from "./birth-artifacts.js";
+import { readBirthArtifact, writeBirthArtifact } from "./birth-artifacts.js";
 import {
 	evaluateBibliotecarioAcquisition,
 	type BibliotecarioSourceRef,
 	type BibliotecarioExternalPermission,
 } from "./birth-bibliotecario.js";
 import { scanExistingProject } from "./birth-existing-scan.js";
-import { evaluateBirthReadiness, type BirthReadiness } from "./birth-pipeline.js";
+import {
+	evaluateBirthReadiness,
+	type BirthReadiness,
+} from "./birth-pipeline.js";
 import type { ProjectCore } from "./project-core.js";
 import type { MasterPlan } from "./master-plan.js";
 
@@ -144,7 +144,10 @@ export function handleBirthValidate(input: {
 	const bibliotecario = handleBirthBibliotecarioDiscovery({
 		projectId: input.projectId,
 		stateRoot: input.stateRoot,
-		localSourceRefs: scan.observed.docs.map((p) => ({ path: p, quality: "secondary" as const })),
+		localSourceRefs: scan.observed.docs.slice(0, 5).map((p) => ({
+			path: p,
+			quality: "secondary" as const,
+		})),
 		requestedExternalCategories: [],
 		externalPermission: "not_requested",
 		masterPlanSummary: planSummary,
@@ -252,7 +255,10 @@ function loadConstitutionStatus(
 	stateRoot: string,
 ): "active" | "missing" | "unknown" {
 	const status = readBirthArtifact<{ status?: string }>(stateRoot, "status");
-	if (status?.status === "implementation_ready" || status?.status === "repo_ready") {
+	if (
+		status?.status === "implementation_ready" ||
+		status?.status === "repo_ready"
+	) {
 		// Best-effort signal: status advanced implies constitution is at least active.
 		return "active";
 	}
@@ -303,7 +309,10 @@ function deriveBibliotecarioStatus(
 function derivePrototypeStatus(
 	stateRoot: string,
 ): "missing" | "draft" | "reviewed" | "approved" | "stale" {
-	const p = readBirthArtifact<{ status?: string }>(stateRoot, "prototype-master");
+	const p = readBirthArtifact<{ status?: string }>(
+		stateRoot,
+		"prototype-master",
+	);
 	const s = p?.status;
 	if (s === "draft" || s === "reviewed" || s === "approved" || s === "stale") {
 		return s;

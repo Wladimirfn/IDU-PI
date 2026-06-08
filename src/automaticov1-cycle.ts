@@ -93,6 +93,7 @@ export type Automaticov1CycleResult = {
 	bibliotecarioSnapshot?: UnknownJson;
 	externalIntelligenceReport?: ExternalIntelligenceReport | UnknownJson;
 	skillDraftFromLessons?: SkillDraftFromLessonsResult | UnknownJson;
+	birth?: ReturnType<typeof handleBirthStatus>;
 	evidenceRefs: string[];
 	recoveryActions: Automaticov1RecoveryAction[];
 	nextActions: string[];
