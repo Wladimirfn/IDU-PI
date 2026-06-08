@@ -6,7 +6,6 @@ export type McpContextPackStaleness = "fresh" | "stale" | "missing";
 export interface ShouldAutoRefreshInput {
 	staleness: McpContextPackStaleness;
 	iduActive: boolean;
-	planApproved: boolean;
 	now: Date;
 	lastRefreshMs: number | undefined;
 	minStaleMs: number;
@@ -29,9 +28,6 @@ export function shouldAutoRefreshMcpContextPack(
 	if (!input.iduActive) {
 		return { shouldRefresh: false, reason: "idu_inactive" };
 	}
-	if (!input.planApproved) {
-		return { shouldRefresh: false, reason: "plan_not_approved" };
-	}
 	const nowMs = input.now.getTime();
 	const lastMs = input.lastRefreshMs;
 	if (lastMs !== undefined) {
@@ -48,7 +44,8 @@ export function shouldAutoRefreshMcpContextPack(
 		}
 		return {
 			shouldRefresh: true,
-			reason: input.staleness === "missing" ? "missing_and_ready" : "stale_and_ready",
+			reason:
+				input.staleness === "missing" ? "missing_and_ready" : "stale_and_ready",
 			elapsedMs,
 		};
 	}
@@ -102,7 +99,8 @@ export function readAutoRefreshPack(
 	stateRoot: string,
 	logPath?: string,
 ): Record<string, unknown> | undefined {
-	const path = logPath ?? join(stateRoot, "events", "mcp-context-pack-auto-refresh.json");
+	const path =
+		logPath ?? join(stateRoot, "events", "mcp-context-pack-auto-refresh.json");
 	if (!existsSync(path)) return undefined;
 	try {
 		return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;

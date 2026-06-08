@@ -2838,7 +2838,6 @@ function runCliAutonomousAlertScheduledTick(
 		stateRoot: runtime.workspaceRoot,
 		projectId: runtime.projectId,
 		iduActive: getIduSessionStatus(runtime.projectId).active,
-		planApproved: alertTickResult.objective.planApproved,
 		now: new Date(),
 	});
 	(

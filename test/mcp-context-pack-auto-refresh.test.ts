@@ -9,7 +9,6 @@ test("shouldAutoRefreshMcpContextPack retorna false si staleness=fresh", () => {
 	const r = shouldAutoRefreshMcpContextPack({
 		staleness: "fresh",
 		iduActive: true,
-		planApproved: true,
 		now: new Date("2026-06-08T12:00:00Z"),
 		lastRefreshMs: Date.parse("2026-06-08T11:55:00Z"),
 		minStaleMs: 10 * 60_000,
@@ -23,7 +22,6 @@ test("shouldAutoRefreshMcpContextPack retorna false si iduActive=false", () => {
 	const r = shouldAutoRefreshMcpContextPack({
 		staleness: "stale",
 		iduActive: false,
-		planApproved: true,
 		now: new Date("2026-06-08T12:00:00Z"),
 		lastRefreshMs: Date.parse("2026-06-08T11:30:00Z"),
 		minStaleMs: 10 * 60_000,
@@ -33,25 +31,23 @@ test("shouldAutoRefreshMcpContextPack retorna false si iduActive=false", () => {
 	assert.equal(r.reason, "idu_inactive");
 });
 
-test("shouldAutoRefreshMcpContextPack retorna false si planApproved=false", () => {
+test("shouldAutoRefreshMcpContextPack refresca aunque plan no esté aprobado (infraestructura)", () => {
 	const r = shouldAutoRefreshMcpContextPack({
 		staleness: "stale",
 		iduActive: true,
-		planApproved: false,
 		now: new Date("2026-06-08T12:00:00Z"),
 		lastRefreshMs: Date.parse("2026-06-08T11:30:00Z"),
 		minStaleMs: 10 * 60_000,
 		cooldownMs: 10 * 60_000,
 	});
-	assert.equal(r.shouldRefresh, false);
-	assert.equal(r.reason, "plan_not_approved");
+	assert.equal(r.shouldRefresh, true);
+	assert.equal(r.reason, "stale_and_ready");
 });
 
 test("shouldAutoRefreshMcpContextPack retorna true cuando stale + iduActive + planApproved", () => {
 	const r = shouldAutoRefreshMcpContextPack({
 		staleness: "stale",
 		iduActive: true,
-		planApproved: true,
 		now: new Date("2026-06-08T12:00:00Z"),
 		lastRefreshMs: Date.parse("2026-06-08T11:30:00Z"),
 		minStaleMs: 10 * 60_000,
@@ -66,7 +62,6 @@ test("shouldAutoRefreshMcpContextPack respeta cooldown", () => {
 	const r = shouldAutoRefreshMcpContextPack({
 		staleness: "stale",
 		iduActive: true,
-		planApproved: true,
 		now: new Date("2026-06-08T12:00:00Z"),
 		lastRefreshMs: Date.parse("2026-06-08T11:55:00Z"),
 		minStaleMs: 5 * 60_000,
@@ -81,7 +76,6 @@ test("shouldAutoRefreshMcpContextPack maneja staleness=missing", () => {
 	const r = shouldAutoRefreshMcpContextPack({
 		staleness: "missing",
 		iduActive: true,
-		planApproved: true,
 		now: new Date("2026-06-08T12:00:00Z"),
 		lastRefreshMs: undefined,
 		minStaleMs: 10 * 60_000,

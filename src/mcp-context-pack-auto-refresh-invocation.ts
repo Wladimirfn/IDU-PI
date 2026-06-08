@@ -12,7 +12,6 @@ export type RunMcpContextPackAutoRefreshInput = {
 	stateRoot: string;
 	projectId: string;
 	iduActive: boolean;
-	planApproved: boolean;
 	now?: Date;
 };
 
@@ -31,7 +30,8 @@ export function classifyMcpContextPackStalenessFromEvents(
 ): "fresh" | "stale" | "missing" {
 	const pack = readAutoRefreshPack(stateRoot);
 	if (!pack) return "missing";
-	const refreshedAt = typeof pack.refreshedAt === "string" ? pack.refreshedAt : undefined;
+	const refreshedAt =
+		typeof pack.refreshedAt === "string" ? pack.refreshedAt : undefined;
 	if (!refreshedAt) return "missing";
 	const ms = Date.parse(refreshedAt);
 	if (!Number.isFinite(ms)) return "missing";
@@ -43,7 +43,10 @@ export function runMcpContextPackAutoRefreshTick(
 	input: RunMcpContextPackAutoRefreshInput,
 ): RunMcpContextPackAutoRefreshResult {
 	const now = input.now ?? new Date();
-	const staleness = classifyMcpContextPackStalenessFromEvents(input.stateRoot, now);
+	const staleness = classifyMcpContextPackStalenessFromEvents(
+		input.stateRoot,
+		now,
+	);
 	const lastRefreshMs = (() => {
 		const pack = readAutoRefreshPack(input.stateRoot);
 		const refreshedAt =
@@ -53,7 +56,6 @@ export function runMcpContextPackAutoRefreshTick(
 	const decision = shouldAutoRefreshMcpContextPack({
 		staleness,
 		iduActive: input.iduActive,
-		planApproved: input.planApproved,
 		now,
 		lastRefreshMs: Number.isFinite(lastRefreshMs) ? lastRefreshMs : undefined,
 		minStaleMs: MIN_STALE_MS,
