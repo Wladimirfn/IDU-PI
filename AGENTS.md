@@ -4,11 +4,14 @@
 
 ## Load the parent protocol skill
 
-Before starting any work in this project, **load the skill**:
+Before starting any work in this project, **load the skill**. It is available at three locations (use whichever you find first):
 
 ```
-.pi/skills/idu-pi-parent-protocol/SKILL.md
+.pi/skills/idu-pi-parent-protocol/SKILL.md                    (project-local)
+~/.pi/agent/skills/idu-pi-parent-protocol/SKILL.md            (global, shared)
 ```
+
+In a Pi session: type `/skills` and pick **idu-pi-parent-protocol** from the list, or the skill auto-loads when you mention idu-pi, Proyecto actual, preflight, postflight, or any idu-pi MCP tool.
 
 It contains the mandatory `mcp__idu-pi__*` procedure: which tools to call, in which order, and the anti-patterns to avoid.
 
