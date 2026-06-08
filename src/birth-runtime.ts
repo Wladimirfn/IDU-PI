@@ -184,7 +184,7 @@ export function handleBirthRepoPlan(input: {
 	}
 	if (!input.repoPlan.pushApproved) {
 		blockingReasons.push(
-			"Human push approval is required before any repo write.",
+			"Human push approval is required before any repo write (pushApproved=false).",
 		);
 	}
 	const readiness = handleBirthStatus({

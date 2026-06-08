@@ -2310,12 +2310,19 @@ export async function runCliCommand(
 			case "birth-repo-plan": {
 				const json = rest.join(" ").trim();
 				if (!json) return fail("Uso: idu-pi idu-birth-repo-plan <json-plan>");
-				let parsed: BirthRepoPlan;
+				let parsedUnknown: unknown;
 				try {
-					parsed = JSON.parse(json) as BirthRepoPlan;
+					parsedUnknown = JSON.parse(json);
 				} catch (e) {
 					return fail(`JSON inválido: ${(e as Error).message}`);
 				}
+				// Accept both { repoPlan: {...} } envelope and raw { ... } body.
+				const parsed: BirthRepoPlan =
+					typeof parsedUnknown === "object" &&
+					parsedUnknown !== null &&
+					"repoPlan" in parsedUnknown
+						? ((parsedUnknown as { repoPlan: BirthRepoPlan }).repoPlan)
+						: (parsedUnknown as BirthRepoPlan);
 				const result = handleBirthRepoPlan({
 					projectId: activeRuntime.projectId,
 					stateRoot: activeRuntime.workspaceRoot,
