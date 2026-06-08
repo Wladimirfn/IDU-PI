@@ -24,6 +24,7 @@ import { loadProjectFlows } from "./project-flows.js";
 import type { AgentLabSpecialty } from "./agentlab-supervisor-contract.js";
 import type { AgentLabReviewRunResult } from "./agentlab-review-runner.js";
 import { getSourceLibraryStatus } from "./source-library.js";
+import { invalidateMasterPlanObjectiveCache } from "./master-plan-objective-cache.js";
 
 export type MasterPlanStatus =
 	| "draft"
@@ -2756,6 +2757,9 @@ function updatePlanDecision(
 	const jsonPath = resolvePlanPath(stateRoot, pathOrLatest, current);
 	const plan = update(requirePlan(jsonPath));
 	writeFileSync(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+	// Invalidate the cached objective snapshot so the next read picks up
+	// the new status (e.g. approved after a prior draft/incompatible cache).
+	invalidateMasterPlanObjectiveCache(stateRoot);
 	writeSupervisorProjectIndex(stateRoot, plan);
 	const markdownPath =
 		current?.currentPlanJson === relativeFromState(stateRoot, jsonPath)

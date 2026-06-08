@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type MasterPlanObjectiveSnapshot = {
@@ -96,6 +96,27 @@ function readSnapshot(
 		return isSnapshot(parsed) ? parsed : undefined;
 	} catch {
 		return undefined;
+	}
+}
+
+export function invalidateMasterPlanObjectiveCache(
+	stateRoot: string,
+): { invalidated: boolean } {
+	if (typeof stateRoot !== "string" || stateRoot.length === 0) {
+		throw new Error("stateRoot inválido: vacío");
+	}
+	if (stateRoot.includes("..") || stateRoot.includes("\0")) {
+		throw new Error("stateRoot inválido: contiene '..' o null byte");
+	}
+	const path = resolveMasterPlanObjectiveCachePath(stateRoot);
+	if (!existsSync(path)) {
+		return { invalidated: false };
+	}
+	try {
+		unlinkSync(path);
+		return { invalidated: true };
+	} catch {
+		return { invalidated: false };
 	}
 }
 
