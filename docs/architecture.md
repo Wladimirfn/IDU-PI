@@ -278,6 +278,22 @@ Los hooks reaccionan a eventos como activación de `/idu`, postflight de alto ri
 
 No deben aplicar cambios críticos automáticamente.
 
+## Living Loop Triggers
+
+Módulos:
+
+```text
+src/event-bus.ts                    — append/read JSONL en <stateRoot>/events.jsonl
+src/injection-store.ts              — append/read/ack en <stateRoot>/injections.jsonl
+src/trigger-engine.ts               — 3 disparadores: stuck_tasks_1h,
+                                      objective_reminder_hourly, intention_decision_pending
+src/trigger-engine-invocation.ts    — wrapper opt-in con env IDU_PI_TRIGGER_ENGINE=1
+src/autonomous-alert-engine-event-bridge.ts
+src/project-preflight-event-bridge.ts
+```
+
+El bus de eventos es append-only y aislado por `stateRoot` (no DB nueva). El trigger engine matchea eventos y construye envelopes de inyección. La invocación es opt-in y se hace desde el scheduler existente del bridge runtime (CLI: `runCliAutonomousAlertTick`); sin `setInterval` en el código del trigger engine. El orchestrator consume las inyecciones con `idu_pending_injections` y la metadata de los disparadores con `idu_subscribe_triggers`. Ver [`docs/living-loop-triggers.md`](living-loop-triggers.md).
+
 ## Semantic Audit y Compaction
 
 Módulos:

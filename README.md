@@ -281,6 +281,20 @@ En CLI y Pi slash, `idu-pi idu` / `idu-pi idu start` / `/idu` es el flujo cómod
 
 `/idu_off` apaga esos guardrails automáticos. Los comandos manuales siguen disponibles.
 
+### Living Loop Triggers (opt-in)
+
+El trigger engine inyecta envelopes al orchestrator cuando se cumplen condiciones (tareas colgadas, recordatorio del objetivo, intenciones pendientes de decisión humana). Es opt-in:
+
+```bash
+# Activar
+IDU_PI_TRIGGER_ENGINE=1
+
+# O en Windows (en el .env o en la Task Scheduler del bridge):
+setx IDU_PI_TRIGGER_ENGINE 1
+```
+
+Sin el flag, el trigger engine no se invoca desde el bridge runtime. Ver [`docs/living-loop-triggers.md`](docs/living-loop-triggers.md) para el bus de eventos, los disparadores, las tools MCP (`idu_pending_injections`, `idu_subscribe_triggers`) y los flows end-to-end.
+
 ## Conceptos principales
 
 ### Project Core
@@ -401,6 +415,9 @@ corepack pnpm test
 - [`docs/cli-commands.md`](docs/cli-commands.md) — comandos CLI por grupo.
 - [`docs/telegram-commands.md`](docs/telegram-commands.md) — comandos Telegram por grupo.
 - [`docs/supervisor-model.md`](docs/supervisor-model.md) — modelo conceptual del supervisor.
+- [`docs/superpowers/specs/2026-06-07-birth-pipeline-universal-design.md`](docs/superpowers/specs/2026-06-07-birth-pipeline-universal-design.md) — Birth Pipeline Universal: Project Core → Plan Maestro → Prototipo → Spec General → Repo/Git gate.
+- [`docs/superpowers/specs/2026-06-08-supervisor-autoresurrect-exploration.md`](docs/superpowers/specs/2026-06-08-supervisor-autoresurrect-exploration.md) — exploración de causa raíz y opciones para resucitar el supervisor automático.
 - [`docs/architecture.md`](docs/architecture.md) — arquitectura técnica y módulos core.
 - [`docs/project-map-workflow.md`](docs/project-map-workflow.md) — workflow de Project Core, blueprint y flows.
 - [`docs/lab-agent-best-practices.md`](docs/lab-agent-best-practices.md) — checklist operativo para AgentLabs.
+- [`docs/living-loop-triggers.md`](docs/living-loop-triggers.md) — bus de eventos, inyecciones, disparadores y activación (`IDU_PI_TRIGGER_ENGINE=1`).
