@@ -11,7 +11,7 @@ description: |
   mcp__idu-pi__* tool surface.
 ---
 
-# idu-pi Parent Protocol (v2)
+# idu-pi Parent Protocol (v3)
 
 > **Audience**: parent/orchestrator model (MiniMax, Claude, Qwen, KM5) in a Pi session.
 > **Path**: this file lives at `C:\Users\elmas\pi-telegram-bridge\.pi\skills\idu-pi-parent-protocol\SKILL.md` and at `C:\Users\elmas\.pi\agent\skills\idu-pi-parent-protocol\SKILL.md` (global).
@@ -64,11 +64,41 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 - ❌ Calling idu-pi from a worker subagent. The worker does not have the MCP tool surface.
 - ❌ Treating `node dist/src/cli.js idu-postflight` as equivalent to `mcp__idu-pi__idu_postflight`. CLI does not register in "Proyecto actual".
 - ❌ Inventing tool names like `idu_status_check`, `idu_get_context`, `mcp_idu_status`. Use exact names.
-- ❌ Treating AgentLabs as workers. AgentLabs are audit-only.
+- ❌ Treating AgentLabs as workers. AgentLabs are audit-only. They are **white-hat hackers** that write tests to find vulnerabilities, NOT workers that implement.
 - ❌ Saying "idu-pi says X" without having actually called the tool.
 - ❌ Skipping `idu_supervisor_context_pack` because you "already know the project".
-- ❌ Proceeding when `requiresHuman: true`. Stop and ask.
+- ❌ **Escalating to the owner on every `requiresHuman: true`**. The proper escalation gate is severity of impact, not the flag. See the **Escalation rules** section below.
 - ❌ **Calling `idu_status` without `projectPath` after switching projects**: it will silently fall back to the default project (idu-pi) even if the active project is different. Always pass `projectPath` when not working on the default.
+
+## Escalation rules (refined v3)
+
+idu-pi returns `requiresHuman: true` for many things — **do not blindly escalate every one of them**. Apply this gate:
+
+**Escalate to the owner (elmas) ONLY when the change touches**:
+
+1. **Core of the system** (e.g. `src/idu-session.ts`, `src/mcp-server.ts`, `src/cli.ts` core flows, anything marked `core` in the project map).
+2. **Plan Maestro** (`config/project-core.json`, `master-plan.json`, `master-plan.flows.json`).
+3. **Global spec / contracts** (`config/project-constitution.json`, `config/project-blueprint.json`).
+4. **A bug that is a critical security vulnerability** (CVSS >= high, exploitable in production, or auth/authn broken).
+5. **Bibliotecario reports a critical risk** in a language, framework, or library version (e.g. "node 18 has CVE-2024-XXXX, RCE in <module>").
+
+**Everything else the gerente (you, the orchestrator) resolves autonomously**, including:
+- New features that don't touch core/master-plan/spec.
+- Refactors within a module.
+- Tests, docs, examples.
+- Skill improvements with score >= 7/10.
+- New proposals where `recommendedAction: create_task` and risk <= medium.
+
+**Owner behavior** (id 2274):
+- Reads code, observes behavior, intervenes with course-corrections when work drags.
+- Contributes new ideas.
+- Does NOT approve every single `requiresHuman: true` — that's what gerente is for.
+
+**Supervisor (idu-pi) alerts** that the gerente MUST relay upward:
+- Objective drift (work no longer aligned to planObjective).
+- Global spec drift (work no longer aligned to spec global).
+- Security failures (any finding from a security AgentLab).
+- Data analysis surprises (métricas fuera de rango, drift en adoption, etc.).
 
 ## Common pitfalls (learned from real sessions)
 
@@ -167,5 +197,6 @@ This skill is available at:
 
 ## Version
 
+- v3, 2026-06-08: refined **Escalation rules** — owner is needed only for core/master-plan/spec/security-critical, not every `requiresHuman: true`. Recorded in idu-pi postflight + memory 2274.
 - v2, 2026-06-08: added "Common pitfalls" + "Setup checklist" sections, learned from real session with project `bitacora-digital-con-idu-pi`.
 - v1, 2026-06-08: initial protocol aligned with idu-pi `idu_orchestrator_procedure` and `mustConsult` list.
