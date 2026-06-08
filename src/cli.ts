@@ -142,6 +142,7 @@ import {
 import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
 import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
 import { runMcpContextPackAutoRefreshTick } from "./mcp-context-pack-auto-refresh-invocation.js";
+import { formatScheduledTickSkippedDetail } from "./alerts-scheduled-tick-skipped-detail.js";
 import { readPendingInjections, markInjectionAcked, type Injection } from "./injection-store.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
@@ -2810,6 +2811,9 @@ function runCliAutonomousAlertScheduledTick(
 	(
 		alertTickResult as unknown as { mcpContextPackAutoRefresh?: unknown }
 	).mcpContextPackAutoRefresh = mcpContextPackAutoRefresh;
+	(
+		alertTickResult as unknown as { _stateRoot?: string }
+	)._stateRoot = runtime.workspaceRoot;
 	return alertTickResult;
 }
 
@@ -2972,6 +2976,15 @@ function formatCliAutonomousAlertScheduledTick(
 					: ""
 			}`
 		: "mcpContextPackAutoRefresh: not run";
+	const skippedDetail =
+		result.status === "skipped_locked" || result.status === "skipped_inactive"
+			? formatScheduledTickSkippedDetail({
+					stateRoot: (
+						result as unknown as { _stateRoot?: string }
+					)._stateRoot ?? "",
+					now: new Date(result.generatedAt),
+				})
+			: "";
 	return [
 		"Autonomous Alerts Scheduled Tick",
 		"",
@@ -2981,6 +2994,7 @@ function formatCliAutonomousAlertScheduledTick(
 		`allowTaskCreation: ${result.allowTaskCreation}`,
 		`Tareas creadas: ${result.tasksCreated.length}`,
 		refreshLine,
+		skippedDetail,
 		"",
 		"Objetivo Idu-pi:",
 		result.objective.objective,
