@@ -3093,7 +3093,7 @@ function runCliAutonomousAlertControl(
 	return { action, state };
 }
 
-function buildCliSelfMaintenanceReport(
+export function buildCliSelfMaintenanceReport(
 	runtime: CliRuntime,
 	stateRoot: string,
 ): { tasks: StructuredTask[]; report: SupervisorSelfMaintenanceAdvisory } {

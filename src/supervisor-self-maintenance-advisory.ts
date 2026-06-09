@@ -706,7 +706,7 @@ function hasCoveredLearningEvidence(
 
 function isFailureLike(task: StructuredTask, text: string): boolean {
 	return (
-		task.category.toLowerCase() === "bug" ||
+		task.category?.toLowerCase() === "bug" ||
 		task.status === "failed" ||
 		/fail|bug|error|unexpected|needs_evidence|regression|repeated/u.test(text)
 	);
