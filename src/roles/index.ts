@@ -19,6 +19,7 @@ import type { Event, EventKind } from "../event-bus.js";
 import type { LabDbRepository } from "../lab-db-repository.js";
 import type { IduModelRoleId } from "../model-assignments.js";
 import { createSupervisorMainRole } from "./supervisor-main.js";
+import { createSupervisorSemanticRole } from "./supervisor-semantic.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -126,11 +127,7 @@ function createStubRole(
 
 export const ROLE_REGISTRY: Record<RoleId, Role> = {
 	"supervisor-main": createSupervisorMainRole(),
-	"supervisor-semantic": createStubRole("supervisor-semantic", {
-		priority: 80,
-		cooldownMs: 10_000,
-		subscribesTo: ["orchestrator_turn"],
-	}),
+	"supervisor-semantic": createSupervisorSemanticRole(),
 	"supervisor-compaction": createStubRole("supervisor-compaction", {
 		priority: 70,
 		cooldownMs: 60_000,
