@@ -21,6 +21,7 @@ import type { IduModelRoleId } from "../model-assignments.js";
 import { createSupervisorMainRole } from "./supervisor-main.js";
 import { createSupervisorSemanticRole } from "./supervisor-semantic.js";
 import { createSupervisorCompactionRole } from "./supervisor-compaction.js";
+import { createAgentLabSecurityRole } from "./agentlab-security.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -168,11 +169,7 @@ export const ROLE_REGISTRY: Record<RoleId, Role> = {
 			subscribesTo: ["project_map_changed", "blueprint_edited"],
 		},
 	),
-	"agentlab-security": createStubRole("agentlab-security", {
-		priority: 95,
-		cooldownMs: 300_000,
-		subscribesTo: ["file_changed", "dependency_bumped"],
-	}),
+	"agentlab-security": createAgentLabSecurityRole(),
 	"agentlab-architecture": createStubRole("agentlab-architecture", {
 		priority: 60,
 		cooldownMs: 300_000,
