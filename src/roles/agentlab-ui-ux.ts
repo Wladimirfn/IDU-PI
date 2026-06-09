@@ -89,10 +89,7 @@ function capArray<T>(items: T[] | undefined, max: number): T[] {
 	return items.slice(0, max);
 }
 
-function buildAgentLabUiUxPrompt(
-	input: RoleInput,
-	_ctx: RoleContext,
-): string {
+function buildAgentLabUiUxPrompt(input: RoleInput, _ctx: RoleContext): string {
 	const lines: string[] = [
 		"You are the UI/UX analyst for the IDU orchestrator.",
 		"Your role is to review UI changes and identify accessibility, consistency, and design token issues.",
@@ -107,7 +104,9 @@ function buildAgentLabUiUxPrompt(
 		lines.push(`  Path: ${path}`);
 		lines.push("");
 		lines.push("Analyze the change for UI issues:");
-		lines.push("  - Accessibility (WCAG compliance, ARIA attributes, contrast)");
+		lines.push(
+			"  - Accessibility (WCAG compliance, ARIA attributes, contrast)",
+		);
 		lines.push("  - Consistency (spacing, typography, component patterns)");
 		lines.push("  - Design tokens (use of theme variables, color palette)");
 	} else if (event.kind === "design_token_drift") {
@@ -193,17 +192,13 @@ export function createAgentLabUiUxRole(): Role {
 		async invoke(input: RoleInput, ctx: RoleContext): Promise<RoleAdvisory> {
 			const prompt = buildAgentLabUiUxPrompt(input, ctx);
 
-			const result = await ctx.router.promptForRole(
-				"agentlab-ui-ux",
-				prompt,
-				{
-					projectId: ctx.projectId,
-					stateRoot: ctx.stateRoot,
-					invocationSink: (record) => {
-						ctx.repository.appendInvocation(record);
-					},
+			const result = await ctx.router.promptForRole("agentlab-ui-ux", prompt, {
+				projectId: ctx.projectId,
+				stateRoot: ctx.stateRoot,
+				invocationSink: (record) => {
+					ctx.repository.appendInvocation(record);
 				},
-			);
+			});
 
 			const { parsed, error: parseError } = parseLLMResponse(result.output);
 
@@ -241,9 +236,7 @@ export function createAgentLabUiUxRole(): Role {
 			const a11y: A11yIssue[] = capArray(rawA11y, MAX_ISSUES_PER_CATEGORY)
 				.filter(
 					(a) =>
-						a &&
-						typeof a === "object" &&
-						typeof a.description === "string",
+						a && typeof a === "object" && typeof a.description === "string",
 				)
 				.map((a) => ({
 					description: a.description || "",
@@ -259,9 +252,7 @@ export function createAgentLabUiUxRole(): Role {
 			)
 				.filter(
 					(c) =>
-						c &&
-						typeof c === "object" &&
-						typeof c.description === "string",
+						c && typeof c === "object" && typeof c.description === "string",
 				)
 				.map((c) => ({
 					description: c.description || "",
@@ -270,12 +261,13 @@ export function createAgentLabUiUxRole(): Role {
 
 			// Parse and normalize token violations
 			const rawTokens = parsed.tokens || [];
-			const tokens: TokenViolation[] = capArray(rawTokens, MAX_ISSUES_PER_CATEGORY)
+			const tokens: TokenViolation[] = capArray(
+				rawTokens,
+				MAX_ISSUES_PER_CATEGORY,
+			)
 				.filter(
 					(t) =>
-						t &&
-						typeof t === "object" &&
-						typeof t.description === "string",
+						t && typeof t === "object" && typeof t.description === "string",
 				)
 				.map((t) => ({
 					description: t.description || "",

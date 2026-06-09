@@ -152,19 +152,27 @@ test("shouldFire returns true for file_changed with .prisma path", () => {
 
 test("shouldFire returns true for file_changed with migrations/ in path", () => {
 	const role = createAgentLabDatabaseRole();
-	const event = makeEvent("file_changed", { path: "db/migrations/add-users.ts" });
+	const event = makeEvent("file_changed", {
+		path: "db/migrations/add-users.ts",
+	});
 	const input = makeInput(event, "sig-db-migpath-1");
 	const result = role.shouldFire(
 		input,
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for paths containing migrations/");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for paths containing migrations/",
+	);
 });
 
 test("shouldFire returns true for migration_added", () => {
 	const role = createAgentLabDatabaseRole();
-	const event = makeEvent("migration_added", { path: "migrations/002_add_table.sql" });
+	const event = makeEvent("migration_added", {
+		path: "migrations/002_add_table.sql",
+	});
 	const input = makeInput(event, "sig-db-mig-1");
 	const result = role.shouldFire(
 		input,
@@ -223,7 +231,9 @@ test("invoke calls agentRouter.promptForRole with role='agentlab-database'", asy
 	const { router, calls } = makeFakeAgentRouter(llmResponse);
 	const { repository } = makeFakeRepository();
 
-	const event = makeEvent("migration_added", { path: "migrations/001_init.sql" });
+	const event = makeEvent("migration_added", {
+		path: "migrations/001_init.sql",
+	});
 	const input: RoleInput = {
 		event,
 		inputSignature: "sig-invoke-db",
@@ -264,7 +274,9 @@ test("invoke parses LLM response into RoleAdvisory with integrityRisks, migratio
 	const { router } = makeFakeAgentRouter(llmResponse);
 	const { repository } = makeFakeRepository();
 
-	const event = makeEvent("migration_added", { path: "migrations/002_orders.sql" });
+	const event = makeEvent("migration_added", {
+		path: "migrations/002_orders.sql",
+	});
 	const input: RoleInput = {
 		event,
 		inputSignature: "sig-parse-db",
@@ -285,7 +297,10 @@ test("invoke parses LLM response into RoleAdvisory with integrityRisks, migratio
 	assert.ok(typeof advisory.advisory === "string");
 	assert.ok(Array.isArray(advisory.evidenceRefs));
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.integrityRisks), "integrityRisks must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.integrityRisks),
+		"integrityRisks must be an array",
+	);
 	assert.equal(advisory.meta!.integrityRisks.length, 1);
 	assert.equal(advisory.meta!.migrationSafety, "caution");
 	assert.ok(typeof advisory.meta!.summary === "string");
@@ -318,9 +333,20 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.roleId, "agentlab-database");
 	assert.equal(advisory.priority, 60);
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.integrityRisks), "integrityRisks must be an array");
-	assert.equal(advisory.meta!.integrityRisks.length, 0, "integrityRisks must be empty for malformed response");
-	assert.equal(advisory.meta!.migrationSafety, "caution", "malformed response defaults to caution");
+	assert.ok(
+		Array.isArray(advisory.meta!.integrityRisks),
+		"integrityRisks must be an array",
+	);
+	assert.equal(
+		advisory.meta!.integrityRisks.length,
+		0,
+		"integrityRisks must be empty for malformed response",
+	);
+	assert.equal(
+		advisory.meta!.migrationSafety,
+		"caution",
+		"malformed response defaults to caution",
+	);
 	assert.ok(typeof advisory.meta!.summary === "string");
 });
 
@@ -330,16 +356,26 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 
 test("shouldFire respects the cooldown (same event within 5 min → skip)", () => {
 	const role = createAgentLabDatabaseRole();
-	const event = makeEvent("migration_added", { path: "migrations/003_test.sql" });
+	const event = makeEvent("migration_added", {
+		path: "migrations/003_test.sql",
+	});
 	const input = makeInput(event, "sig-cooldown-db");
 
 	const lastFireAt = new Date("2026-01-01T00:00:00.000Z");
 	const now = new Date("2026-01-01T00:04:00.000Z"); // 4 min later, within 5 min cooldown
 
 	const result = role.shouldFire(input, lastFireAt, now);
-	assert.equal(result, false, "shouldFire must return false within cooldown window");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false within cooldown window",
+	);
 
 	const afterCooldown = new Date("2026-01-01T00:06:00.000Z"); // 6 min later
 	const resultAfter = role.shouldFire(input, lastFireAt, afterCooldown);
-	assert.equal(resultAfter, true, "shouldFire must return true after cooldown expires");
+	assert.equal(
+		resultAfter,
+		true,
+		"shouldFire must return true after cooldown expires",
+	);
 });

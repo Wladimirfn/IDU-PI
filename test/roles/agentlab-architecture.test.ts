@@ -15,7 +15,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Event, EventKind } from "../../src/event-bus.js";
 import type { RoleInput, RoleContext } from "../../src/roles/index.js";
-import { createAgentLabArchitectureRole, ARCH_ADDED_LINES_THRESHOLD } from "../../src/roles/agentlab-architecture.js";
+import {
+	createAgentLabArchitectureRole,
+	ARCH_ADDED_LINES_THRESHOLD,
+} from "../../src/roles/agentlab-architecture.js";
 import type { AgentRouter } from "../../src/agent-router.js";
 import type { LabDbRepository } from "../../src/lab-db-repository.js";
 
@@ -127,14 +130,21 @@ test("agentlab-architecture has cooldownMs 300000", () => {
 
 test("shouldFire returns true for file_changed with addedLines > threshold", () => {
 	const role = createAgentLabArchitectureRole();
-	const event = makeEvent("file_changed", { path: "src/engine.ts", addedLines: 250 });
+	const event = makeEvent("file_changed", {
+		path: "src/engine.ts",
+		addedLines: 250,
+	});
 	const input = makeInput(event, "sig-arch-big-1");
 	const result = role.shouldFire(
 		input,
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true when addedLines > threshold");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true when addedLines > threshold",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -143,14 +153,21 @@ test("shouldFire returns true for file_changed with addedLines > threshold", () 
 
 test("shouldFire returns false for file_changed with addedLines <= threshold", () => {
 	const role = createAgentLabArchitectureRole();
-	const event = makeEvent("file_changed", { path: "src/small.ts", addedLines: 50 });
+	const event = makeEvent("file_changed", {
+		path: "src/small.ts",
+		addedLines: 50,
+	});
 	const input = makeInput(event, "sig-arch-small-1");
 	const result = role.shouldFire(
 		input,
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, false, "shouldFire must return false when addedLines <= threshold");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false when addedLines <= threshold",
+	);
 });
 
 test("shouldFire returns true for module_added", () => {
@@ -243,7 +260,9 @@ test("invoke parses LLM response into RoleAdvisory with drifts, summary, priorit
 	const { router } = makeFakeAgentRouter(llmResponse);
 	const { repository } = makeFakeRepository();
 
-	const event = makeEvent("breaking_change", { description: "API shape changed" });
+	const event = makeEvent("breaking_change", {
+		description: "API shape changed",
+	});
 	const input: RoleInput = {
 		event,
 		inputSignature: "sig-parse-arch",
@@ -299,7 +318,11 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.priority, 60);
 	assert.ok(advisory.meta, "meta must be present");
 	assert.ok(Array.isArray(advisory.meta!.drifts), "drifts must be an array");
-	assert.equal(advisory.meta!.drifts.length, 0, "drifts must be empty for malformed response");
+	assert.equal(
+		advisory.meta!.drifts.length,
+		0,
+		"drifts must be empty for malformed response",
+	);
 	assert.ok(typeof advisory.meta!.summary === "string");
 });
 
@@ -316,11 +339,19 @@ test("shouldFire respects the cooldown (same event within 5 min → skip)", () =
 	const now = new Date("2026-01-01T00:03:00.000Z"); // 3 min later, within 5 min cooldown
 
 	const result = role.shouldFire(input, lastFireAt, now);
-	assert.equal(result, false, "shouldFire must return false within cooldown window");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false within cooldown window",
+	);
 
 	const afterCooldown = new Date("2026-01-01T00:06:00.000Z"); // 6 min later
 	const resultAfter = role.shouldFire(input, lastFireAt, afterCooldown);
-	assert.equal(resultAfter, true, "shouldFire must return true after cooldown expires");
+	assert.equal(
+		resultAfter,
+		true,
+		"shouldFire must return true after cooldown expires",
+	);
 });
 
 // ---------------------------------------------------------------------------

@@ -127,7 +127,9 @@ test("agentlab-ui-ux has cooldownMs 300000", () => {
 
 test("shouldFire returns true for file_changed with .tsx path", () => {
 	const role = createAgentLabUiUxRole();
-	const event = makeEvent("file_changed", { path: "src/components/Button.tsx" });
+	const event = makeEvent("file_changed", {
+		path: "src/components/Button.tsx",
+	});
 	const input = makeInput(event, "sig-ui-tsx-1");
 	const result = role.shouldFire(
 		input,
@@ -182,7 +184,11 @@ test("shouldFire returns true for design_token_drift", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for design_token_drift");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for design_token_drift",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -230,7 +236,9 @@ test("invoke calls agentRouter.promptForRole with role='agentlab-ui-ux'", async 
 	const { router, calls } = makeFakeAgentRouter(llmResponse);
 	const { repository } = makeFakeRepository();
 
-	const event = makeEvent("file_changed", { path: "src/components/Button.tsx" });
+	const event = makeEvent("file_changed", {
+		path: "src/components/Button.tsx",
+	});
 	const input: RoleInput = {
 		event,
 		inputSignature: "sig-invoke-ui",
@@ -284,7 +292,11 @@ test("invoke parses LLM response into RoleAdvisory with a11y, consistency, token
 	const { router } = makeFakeAgentRouter(llmResponse);
 	const { repository } = makeFakeRepository();
 
-	const event = makeEvent("design_token_drift", { token: "color-primary", oldValue: "#007bff", newValue: "#0056b3" });
+	const event = makeEvent("design_token_drift", {
+		token: "color-primary",
+		oldValue: "#007bff",
+		newValue: "#0056b3",
+	});
 	const input: RoleInput = {
 		event,
 		inputSignature: "sig-parse-ui",
@@ -307,7 +319,10 @@ test("invoke parses LLM response into RoleAdvisory with a11y, consistency, token
 	assert.ok(advisory.meta, "meta must be present");
 	assert.ok(Array.isArray(advisory.meta!.a11y), "a11y must be an array");
 	assert.equal(advisory.meta!.a11y.length, 1);
-	assert.ok(Array.isArray(advisory.meta!.consistency), "consistency must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.consistency),
+		"consistency must be an array",
+	);
 	assert.equal(advisory.meta!.consistency.length, 1);
 	assert.ok(Array.isArray(advisory.meta!.tokens), "tokens must be an array");
 	assert.equal(advisory.meta!.tokens.length, 1);
@@ -342,11 +357,26 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.priority, 40);
 	assert.ok(advisory.meta, "meta must be present");
 	assert.ok(Array.isArray(advisory.meta!.a11y), "a11y must be an array");
-	assert.equal(advisory.meta!.a11y.length, 0, "a11y must be empty for malformed response");
-	assert.ok(Array.isArray(advisory.meta!.consistency), "consistency must be an array");
-	assert.equal(advisory.meta!.consistency.length, 0, "consistency must be empty for malformed response");
+	assert.equal(
+		advisory.meta!.a11y.length,
+		0,
+		"a11y must be empty for malformed response",
+	);
+	assert.ok(
+		Array.isArray(advisory.meta!.consistency),
+		"consistency must be an array",
+	);
+	assert.equal(
+		advisory.meta!.consistency.length,
+		0,
+		"consistency must be empty for malformed response",
+	);
 	assert.ok(Array.isArray(advisory.meta!.tokens), "tokens must be an array");
-	assert.equal(advisory.meta!.tokens.length, 0, "tokens must be empty for malformed response");
+	assert.equal(
+		advisory.meta!.tokens.length,
+		0,
+		"tokens must be empty for malformed response",
+	);
 	assert.ok(typeof advisory.meta!.summary === "string");
 });
 
@@ -363,9 +393,17 @@ test("shouldFire respects the cooldown (same event within 5 min → skip)", () =
 	const now = new Date("2026-01-01T00:02:00.000Z"); // 2 min later, within 5 min cooldown
 
 	const result = role.shouldFire(input, lastFireAt, now);
-	assert.equal(result, false, "shouldFire must return false within cooldown window");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false within cooldown window",
+	);
 
 	const afterCooldown = new Date("2026-01-01T00:06:00.000Z"); // 6 min later
 	const resultAfter = role.shouldFire(input, lastFireAt, afterCooldown);
-	assert.equal(resultAfter, true, "shouldFire must return true after cooldown expires");
+	assert.equal(
+		resultAfter,
+		true,
+		"shouldFire must return true after cooldown expires",
+	);
 });

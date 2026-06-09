@@ -114,7 +114,9 @@ function buildAgentLabArchitecturePrompt(
 	lines.push("{");
 	lines.push('  "drifts": [');
 	lines.push("    {");
-	lines.push('      "kind": "<layering|contract-violation|boundary|circular|other>",');
+	lines.push(
+		'      "kind": "<layering|contract-violation|boundary|circular|other>",',
+	);
 	lines.push('      "contract": "<affected contract or module path>",');
 	lines.push('      "description": "<detailed description>",');
 	lines.push('      "evidence": "<file:line or reference>"');

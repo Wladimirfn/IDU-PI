@@ -66,9 +66,7 @@ function parseLLMResponse(raw: string): {
 	}
 }
 
-function normalizeMigrationSafety(
-	safety: string | undefined,
-): MigrationSafety {
+function normalizeMigrationSafety(safety: string | undefined): MigrationSafety {
 	if (!safety) return "caution";
 	const lower = safety.toLowerCase();
 	if (lower === "safe") return "safe";
@@ -140,7 +138,9 @@ function buildAgentLabDatabasePrompt(
 	lines.push('  "summary": "<one-line summary>"');
 	lines.push("}");
 	lines.push("");
-	lines.push("Cap integrityRisks at 6 items. Respond with a single JSON object.");
+	lines.push(
+		"Cap integrityRisks at 6 items. Respond with a single JSON object.",
+	);
 
 	return lines.join("\n");
 }
@@ -229,12 +229,13 @@ export function createAgentLabDatabaseRole(): Role {
 
 			// Parse and normalize integrity risks
 			const rawRisks = parsed.integrityRisks || [];
-			const integrityRisks: IntegrityRisk[] = capArray(rawRisks, MAX_INTEGRITY_RISKS)
+			const integrityRisks: IntegrityRisk[] = capArray(
+				rawRisks,
+				MAX_INTEGRITY_RISKS,
+			)
 				.filter(
 					(r) =>
-						r &&
-						typeof r === "object" &&
-						typeof r.description === "string",
+						r && typeof r === "object" && typeof r.description === "string",
 				)
 				.map((r) => ({
 					description: r.description || "",
@@ -243,7 +244,8 @@ export function createAgentLabDatabaseRole(): Role {
 				}));
 
 			const migrationSafety = normalizeMigrationSafety(parsed.migrationSafety);
-			const recommendedAction = parsed.recommendedAction || parsed.recommended_action;
+			const recommendedAction =
+				parsed.recommendedAction || parsed.recommended_action;
 			const summary = parsed.summary || "Database review completed";
 
 			const meta: DatabaseMeta = {
