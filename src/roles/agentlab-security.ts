@@ -100,9 +100,7 @@ function buildAgentLabSecurityPrompt(
 		lines.push(`  Path: ${path}`);
 		lines.push("");
 		lines.push("Analyze the file change for security issues:");
-		lines.push(
-			"  - Hardcoded credentials or secrets",
-		);
+		lines.push("  - Hardcoded credentials or secrets");
 		lines.push("  - SQL injection vulnerabilities");
 		lines.push("  - Insecure authentication/authorization");
 		lines.push("  - Missing input validation");
@@ -117,9 +115,7 @@ function buildAgentLabSecurityPrompt(
 		lines.push(`  New version: ${newVersion}`);
 		lines.push("");
 		lines.push("Analyze the dependency change for security issues:");
-		lines.push(
-			"  - Known vulnerabilities in old version",
-		);
+		lines.push("  - Known vulnerabilities in old version");
 		lines.push("  - Security improvements in new version");
 		lines.push("  - Breaking changes affecting security");
 	}
@@ -226,7 +222,9 @@ export function createAgentLabSecurityRole(): Role {
 			const findings: SecurityFinding[] = capArray(rawFindings, MAX_FINDINGS)
 				.filter(
 					(f) =>
-						f && typeof f === "object" && typeof f.recommendedFix === "string" ||
+						(f &&
+							typeof f === "object" &&
+							typeof f.recommendedFix === "string") ||
 						typeof f.recommended_fix === "string",
 				)
 				.map((f) => ({

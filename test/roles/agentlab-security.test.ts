@@ -291,17 +291,14 @@ test("invoke parses the LLM response into a RoleAdvisory with findings array, su
 	assert.ok(typeof advisory.advisory === "string");
 	assert.ok(Array.isArray(advisory.evidenceRefs));
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(advisory.meta!.findings.length, 1);
 	assert.equal(advisory.meta!.findings[0].severity, "critical");
-	assert.equal(
-		advisory.meta!.findings[0].title,
-		"SQL injection vulnerability",
-	);
-	assert.ok(
-		advisory.meta!.summary,
-		"summary must be present",
-	);
+	assert.equal(advisory.meta!.findings[0].title, "SQL injection vulnerability");
+	assert.ok(advisory.meta!.summary, "summary must be present");
 });
 
 // ---------------------------------------------------------------------------
@@ -332,8 +329,15 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.roleId, "agentlab-security");
 	assert.equal(advisory.priority, 95);
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
-	assert.equal(advisory.meta!.findings.length, 0, "findings must be empty for malformed response");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
+	assert.equal(
+		advisory.meta!.findings.length,
+		0,
+		"findings must be empty for malformed response",
+	);
 	assert.ok(
 		advisory.meta!.summary,
 		"summary must be present even for malformed response",
@@ -348,17 +352,17 @@ test("shouldFire respects the cooldown (same event hash within 5 min → skip)",
 	const role = createAgentLabSecurityRole();
 	const event = makeEvent("file_changed", { path: "src/auth.ts" });
 	const input = makeInput(event, "sig-cooldown-test");
-	
+
 	const lastFireAt = new Date("2026-01-01T00:00:00.000Z");
 	const now = new Date("2026-01-01T00:02:00.000Z"); // 2 minutes later, within 5 min cooldown
-	
+
 	const result = role.shouldFire(input, lastFireAt, now);
 	assert.equal(
 		result,
 		false,
 		"shouldFire must return false within cooldown window",
 	);
-	
+
 	// Now test after cooldown expires
 	const afterCooldown = new Date("2026-01-01T00:06:00.000Z"); // 6 minutes later
 	const resultAfter = role.shouldFire(input, lastFireAt, afterCooldown);
