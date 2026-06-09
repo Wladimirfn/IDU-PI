@@ -28,6 +28,9 @@ import { createAgentLabUiUxRole } from "./agentlab-ui-ux.js";
 import { createAgentLabPerformanceRole } from "./agentlab-performance.js";
 import { createAgentLabCodeQualityRole } from "./agentlab-code-quality.js";
 import { createAgentLabDocsRole } from "./agentlab-docs.js";
+import { createAgentLabProjectUnderstandingRole } from "./agentlab-project-understanding.js";
+import { createAgentLabGeneralRole } from "./agentlab-general.js";
+import { createAgentLabLibrarianRole } from "./agentlab-librarian.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -136,45 +139,8 @@ export const ROLE_REGISTRY: Record<RoleId, Role> = {
 	"supervisor-main": createSupervisorMainRole(),
 	"supervisor-semantic": createSupervisorSemanticRole(),
 	"supervisor-compaction": createSupervisorCompactionRole(),
-	"agentlab-general": createStubRole("agentlab-general", {
-		priority: 20,
-		cooldownMs: 600_000,
-		// Fallback role: subscribes to every spec kind. Real
-		// implementation in PR 3 computes the union at construction
-		// time; the stub is a static list to keep the contract
-		// honest.
-		subscribesTo: [
-			"orchestrator_turn",
-			"alerts_scheduled_tick",
-			"context_budget_grew",
-			"file_changed",
-			"dependency_bumped",
-			"module_added",
-			"breaking_change",
-			"migration_added",
-			"raw_sql_seen",
-			"design_token_drift",
-			"bundle_size_grew",
-			"complexity_threshold",
-			"lint_regression",
-			"dead_code",
-			"public_api_added",
-			"broken_link",
-			"project_map_changed",
-			"blueprint_edited",
-			"source_added",
-			"source_digest_drift",
-			"lab_write",
-		],
-	}),
-	"agentlab-project-understanding": createStubRole(
-		"agentlab-project-understanding",
-		{
-			priority: 35,
-			cooldownMs: 600_000,
-			subscribesTo: ["project_map_changed", "blueprint_edited"],
-		},
-	),
+	"agentlab-general": createAgentLabGeneralRole(),
+	"agentlab-project-understanding": createAgentLabProjectUnderstandingRole(),
 	"agentlab-security": createAgentLabSecurityRole(),
 	"agentlab-architecture": createAgentLabArchitectureRole(),
 	"agentlab-database": createAgentLabDatabaseRole(),
@@ -182,11 +148,7 @@ export const ROLE_REGISTRY: Record<RoleId, Role> = {
 	"agentlab-performance": createAgentLabPerformanceRole(),
 	"agentlab-code-quality": createAgentLabCodeQualityRole(),
 	"agentlab-docs": createAgentLabDocsRole(),
-	"agentlab-librarian": createStubRole("agentlab-librarian", {
-		priority: 25,
-		cooldownMs: 600_000,
-		subscribesTo: ["source_added", "source_digest_drift"],
-	}),
+	"agentlab-librarian": createAgentLabLibrarianRole(),
 };
 
 /**
