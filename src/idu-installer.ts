@@ -72,9 +72,23 @@ export type IduMcpServerConfig = {
 	directTools: true;
 };
 
+export type IduMcpTarget = "pi" | "opencode";
+
+export type OpenCodeMcpServerConfig = {
+	type: "local";
+	command: ["node", string];
+	enabled: true;
+};
+
+export type OpenCodeConfig = {
+	$schema?: string;
+	mcp: Record<string, unknown>;
+};
+
 export type InstallIduMcpConfigInput = {
 	agentDir: string;
 	mcpServerPath: string;
+	target?: IduMcpTarget;
 	extensionSourcePath?: string;
 	force?: boolean;
 	dryRun?: boolean;
@@ -92,7 +106,7 @@ export type InstallIduMcpConfigResult = {
 		| "dry_run"
 		| "missing_source";
 	commandExtensionBackupPath?: string;
-	config: { mcpServers: Record<string, unknown> };
+	config: { mcpServers: Record<string, unknown> } | OpenCodeConfig;
 	summary: string;
 };
 
@@ -219,9 +233,20 @@ export function buildIduMcpConfig(mcpServerPath: string): IduMcpServerConfig {
 	};
 }
 
+export function buildOpenCodeIduMcpConfig(
+	mcpServerPath: string,
+): OpenCodeMcpServerConfig {
+	return {
+		type: "local",
+		command: ["node", resolve(mcpServerPath)],
+		enabled: true,
+	};
+}
+
 export function installIduMcpConfig(
 	input: InstallIduMcpConfigInput,
 ): InstallIduMcpConfigResult {
+	if (input.target === "opencode") return installOpenCodeIduMcpConfig(input);
 	const agentDir = resolve(input.agentDir);
 	const mcpConfigPath = join(agentDir, "mcp.json");
 	const existing = readMcpConfig(mcpConfigPath);
@@ -280,7 +305,60 @@ export function installIduMcpConfig(
 	};
 }
 
-export function printIduMcpConfig(input: { mcpServerPath: string }): string {
+function installOpenCodeIduMcpConfig(
+	input: InstallIduMcpConfigInput,
+): InstallIduMcpConfigResult {
+	const configDir = resolve(input.agentDir);
+	const mcpConfigPath = join(configDir, "opencode.json");
+	const existing = readOpenCodeConfig(mcpConfigPath);
+	const iduConfig = buildOpenCodeIduMcpConfig(input.mcpServerPath);
+	const hasExistingIdu = Boolean(existing.mcp["idu-pi"]);
+	const next = {
+		...existing,
+		mcp: {
+			...existing.mcp,
+			...(hasExistingIdu && !input.force ? {} : { "idu-pi": iduConfig }),
+		},
+	};
+	if (input.dryRun) {
+		return {
+			status: "dry_run",
+			mcpConfigPath,
+			config: next,
+			summary: "Dry-run: no escribí opencode.json.",
+		};
+	}
+	if (hasExistingIdu && !input.force) {
+		return {
+			status: "exists",
+			mcpConfigPath,
+			config: existing,
+			summary: "idu-pi ya existe en opencode.json.",
+		};
+	}
+	mkdirSync(configDir, { recursive: true });
+	const backupPath = backupAgentConfigFile(mcpConfigPath, input.now);
+	writeFileSync(mcpConfigPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+	return {
+		status: "installed",
+		mcpConfigPath,
+		backupPath,
+		config: next,
+		summary: "MCP idu-pi configurado para OpenCode.",
+	};
+}
+
+export function printIduMcpConfig(input: {
+	mcpServerPath: string;
+	target?: IduMcpTarget;
+}): string {
+	if (input.target === "opencode") {
+		return `${JSON.stringify(
+			{ mcp: { "idu-pi": buildOpenCodeIduMcpConfig(input.mcpServerPath) } },
+			null,
+			2,
+		)}\n`;
+	}
 	return `${JSON.stringify(
 		{ mcpServers: { "idu-pi": buildIduMcpConfig(input.mcpServerPath) } },
 		null,
@@ -638,6 +716,28 @@ function readMcpConfig(path: string): { mcpServers: Record<string, unknown> } {
 		// Invalid existing config is preserved via backup before writing a valid one.
 	}
 	return { mcpServers: {} };
+}
+
+function readOpenCodeConfig(path: string): OpenCodeConfig {
+	if (!existsSync(path)) {
+		return { $schema: "https://opencode.ai/config.json", mcp: {} };
+	}
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+		if (isRecord(parsed)) {
+			return {
+				...parsed,
+				$schema:
+					typeof parsed.$schema === "string"
+						? parsed.$schema
+						: "https://opencode.ai/config.json",
+				mcp: isRecord(parsed.mcp) ? parsed.mcp : {},
+			} as OpenCodeConfig;
+		}
+	} catch {
+		// Invalid existing config is preserved via backup before writing a valid one.
+	}
+	return { $schema: "https://opencode.ai/config.json", mcp: {} };
 }
 
 function detectCommand(

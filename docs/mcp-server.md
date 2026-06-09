@@ -41,6 +41,16 @@ Para imprimir la configuración sin escribir:
 idu-pi setup mcp-print
 ```
 
+Para OpenCode, usá el target explícito:
+
+```bash
+idu-pi setup mcp-print --target opencode
+idu-pi setup mcp-init --target opencode
+```
+
+`--target pi` es el default para mantener compatibilidad con el CLI de Pi.
+`--target opencode` escribe/actualiza `~/.config/opencode/opencode.json` con la clave `mcp` que OpenCode espera. Después de cambiar `opencode.json`, cerrá y reiniciá OpenCode: la configuración MCP se carga al iniciar.
+
 Desde el repo Idu-pi:
 
 ```bash
@@ -84,7 +94,7 @@ y después recargá/reiniciá MCP en Pi/orquestador. Idu-pi sólo avisa; no reco
 
 ## Configuración conceptual del orquestador
 
-Ejemplo conceptual:
+Ejemplo conceptual para Pi:
 
 ```json
 {
@@ -95,6 +105,21 @@ Ejemplo conceptual:
       "cwd": "C:\\Users\\elmas\\pi-telegram-bridge",
       "lifecycle": "lazy",
       "directTools": true
+    }
+  }
+}
+```
+
+Ejemplo conceptual para OpenCode:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "idu-pi": {
+      "type": "local",
+      "command": ["node", "C:\\Users\\elmas\\pi-telegram-bridge\\dist\\src\\mcp-server.js"],
+      "enabled": true
     }
   }
 }

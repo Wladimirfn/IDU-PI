@@ -70,6 +70,10 @@ idu-pi
 # 3) Configurar MCP para que Pi vea las tools de Idu-pi
 idu-pi setup mcp-init
 
+# Opcional: configurar MCP para OpenCode
+idu-pi setup mcp-init --target opencode
+# Reiniciá OpenCode después de modificar opencode.json
+
 # 4) Registrar un proyecto real
 idu-pi project enroll "C:\ruta\a\tu-proyecto" mi-proyecto
 

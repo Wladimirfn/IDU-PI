@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -242,6 +243,7 @@ import {
 	projectEnroll,
 	projectInstallStatus,
 	resolvePiAgentDir,
+	type IduMcpTarget,
 } from "./idu-installer.js";
 import {
 	buildSemanticAuditStatus,
@@ -3302,7 +3304,11 @@ async function runBootstrapIduCommand(): Promise<string> {
 
 function handleSetupCommand(rest: string[]): string {
 	const subcommand = rest[0] ?? "status";
-	const agentDir = resolvePiAgentDir();
+	const target = parseMcpTarget(rest);
+	const agentDir =
+		target === "opencode"
+			? join(homedir(), ".config", "opencode")
+			: resolvePiAgentDir();
 	const packageRoot = resolveCliPackageRoot();
 	const mcpServerPath = join(
 		dirname(fileURLToPath(import.meta.url)),
@@ -3335,7 +3341,7 @@ function handleSetupCommand(rest: string[]): string {
 		return formatSetupPathHelp();
 	}
 	if (subcommand === "mcp-print") {
-		return printIduMcpConfig({ mcpServerPath });
+		return printIduMcpConfig({ mcpServerPath, target });
 	}
 	if (subcommand === "mcp-init") {
 		const force = rest.includes("--force");
@@ -3343,6 +3349,7 @@ function handleSetupCommand(rest: string[]): string {
 		const result = installIduMcpConfig({
 			agentDir,
 			mcpServerPath,
+			target,
 			extensionSourcePath,
 			force,
 			dryRun,
@@ -3350,8 +3357,19 @@ function handleSetupCommand(rest: string[]): string {
 		return formatInstallIduMcpConfigResult(result);
 	}
 	throw new Error(
-		"Uso: idu-pi setup [status|wizard|path-help|mcp-init|mcp-print] [--force] [--dry-run]",
+		"Uso: idu-pi setup [status|wizard|path-help|mcp-init|mcp-print] [--target pi|opencode] [--force] [--dry-run]",
 	);
+}
+
+function parseMcpTarget(args: string[]): IduMcpTarget {
+	const targetFlag = args.find((arg) => arg.startsWith("--target="));
+	const targetIndex = args.indexOf("--target");
+	const target =
+		targetFlag?.split("=")[1] ??
+		(targetIndex >= 0 ? args[targetIndex + 1] : undefined);
+	if (!target) return "pi";
+	if (target === "pi" || target === "opencode") return target;
+	throw new Error("Uso: --target pi|opencode");
 }
 
 function handleProjectCommand(rest: string[]): string {

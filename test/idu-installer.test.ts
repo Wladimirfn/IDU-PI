@@ -384,6 +384,56 @@ test("mcp-print and dry-run do not write files", () => {
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("mcp-print can emit OpenCode local MCP config", () => {
+	const root = tempDir();
+	const mcpServerPath = join(root, "dist", "src", "mcp-server.js");
+	const printed = printIduMcpConfig({
+		mcpServerPath,
+		target: "opencode",
+	});
+	const parsed = JSON.parse(printed) as {
+		mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
+	};
+	assert.deepEqual(parsed, {
+		mcp: {
+			"idu-pi": {
+				type: "local",
+				command: ["node", mcpServerPath],
+				enabled: true,
+			},
+		},
+	});
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("mcp-init can install OpenCode config without Pi slash extension", () => {
+	const root = tempDir();
+	const mcpServerPath = join(root, "dist", "src", "mcp-server.js");
+	const result = installIduMcpConfig({
+		agentDir: root,
+		mcpServerPath,
+		target: "opencode",
+	});
+	assert.equal(result.status, "installed");
+	assert.equal(result.commandExtensionPath, undefined);
+	assert.equal(result.commandExtensionStatus, undefined);
+	assert.equal(existsSync(join(root, "opencode.json")), true);
+	assert.equal(existsSync(join(root, "mcp.json")), false);
+	assert.equal(
+		existsSync(join(root, "extensions", "idu-pi-commands.ts")),
+		false,
+	);
+	const parsed = JSON.parse(readFileSync(join(root, "opencode.json"), "utf8")) as {
+		mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
+	};
+	assert.deepEqual(parsed.mcp["idu-pi"], {
+		type: "local",
+		command: ["node", mcpServerPath],
+		enabled: true,
+	});
+	rmSync(root, { recursive: true, force: true });
+});
+
 test("backupAgentConfigFile returns undefined for missing config", () => {
 	const root = tempDir();
 	assert.equal(backupAgentConfigFile(join(root, "mcp.json")), undefined);
@@ -524,6 +574,49 @@ test("CLI setup mcp-init works in temp agent dir", async () => {
 			true,
 		);
 	} finally {
+		process.chdir(previousCwd);
+		restoreEnv(previous);
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("CLI setup mcp-init --target opencode writes OpenCode config only", async () => {
+	const root = tempDir();
+	const projectPath = join(root, "project");
+	const workspaceRoot = join(root, "workspace");
+	const agentDir = join(root, "pi-agent");
+	mkdirSync(projectPath, { recursive: true });
+	const previous = snapshotEnv();
+	const previousCwd = process.cwd();
+	const previousHome = process.env.USERPROFILE;
+	try {
+		process.chdir(root);
+		process.env.USERPROFILE = root;
+		setCliEnv({ projectPath, workspaceRoot, agentDir, allowedRoot: root });
+		const result = await runCliCommand([
+			"setup",
+			"mcp-init",
+			"--target",
+			"opencode",
+		]);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /MCP idu-pi configurado para OpenCode/u);
+		const opencodeConfigPath = join(root, ".config", "opencode", "opencode.json");
+		assert.equal(existsSync(opencodeConfigPath), true);
+		assert.equal(existsSync(join(agentDir, "mcp.json")), false);
+		assert.equal(
+			existsSync(join(agentDir, "extensions", "idu-pi-commands.ts")),
+			false,
+		);
+		const parsed = JSON.parse(readFileSync(opencodeConfigPath, "utf8")) as {
+			mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
+		};
+		assert.equal(parsed.mcp["idu-pi"].type, "local");
+		assert.equal(parsed.mcp["idu-pi"].command[0], "node");
+		assert.match(parsed.mcp["idu-pi"].command[1], /mcp-server\.js$/u);
+		assert.equal(parsed.mcp["idu-pi"].enabled, true);
+	} finally {
+		process.env.USERPROFILE = previousHome;
 		process.chdir(previousCwd);
 		restoreEnv(previous);
 		rmSync(root, { recursive: true, force: true });
@@ -687,6 +780,31 @@ test("setup mcp-print does not require project env", async () => {
 		const result = await runCliCommand(["setup", "mcp-print"]);
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /idu-pi/u);
+	} finally {
+		restoreEnv(previous);
+	}
+});
+
+test("setup mcp-print --target opencode emits OpenCode config", async () => {
+	const previous = snapshotEnv();
+	try {
+		delete process.env.DEFAULT_CWD;
+		delete process.env.ALLOWED_ROOTS;
+		delete process.env.AGENT_WORKSPACE_ROOT;
+		const result = await runCliCommand([
+			"setup",
+			"mcp-print",
+			"--target",
+			"opencode",
+		]);
+		assert.equal(result.exitCode, 0);
+		const parsed = JSON.parse(result.stdout) as {
+			mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
+		};
+		assert.equal(parsed.mcp["idu-pi"].type, "local");
+		assert.equal(parsed.mcp["idu-pi"].command[0], "node");
+		assert.match(parsed.mcp["idu-pi"].command[1], /mcp-server\.js$/u);
+		assert.equal(parsed.mcp["idu-pi"].enabled, true);
 	} finally {
 		restoreEnv(previous);
 	}
