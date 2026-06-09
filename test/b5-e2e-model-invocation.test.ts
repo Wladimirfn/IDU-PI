@@ -97,12 +97,9 @@ function seedEnv(): {
 			{
 				version: 1,
 				assignments: {
-					"agentlab-security":
-						"opencode-go/deepseek-v4-pro",
-					"agentlab-architecture":
-						"opencode-go/qwen3.7-plus",
-					"supervisor-main":
-						"opencode-go/deepseek-v4-pro",
+					"agentlab-security": "opencode-go/deepseek-v4-pro",
+					"agentlab-architecture": "opencode-go/qwen3.7-plus",
+					"supervisor-main": "opencode-go/deepseek-v4-pro",
 				},
 				updatedAt: "2026-06-09T00:00:00.000Z",
 			},
@@ -132,7 +129,11 @@ function profiles(): AgentProfile[] {
 	];
 }
 
-function makeRouter(projectPath: string, workspaceRoot: string, output: string): {
+function makeRouter(
+	projectPath: string,
+	workspaceRoot: string,
+	output: string,
+): {
 	router: AgentRouter;
 	created: Array<{ options: PiRpcOptions; session: FakeSession }>;
 } {
@@ -217,7 +218,11 @@ test("B5 E2E — agentRouter.promptForRole records a real invocation in lab.db",
 		const result = await router.promptForRole(
 			"agentlab-security",
 			"audit auth",
-			{ projectId: "idu-pi", stateRoot, invocationSink: repository.appendInvocation.bind(repository) },
+			{
+				projectId: "idu-pi",
+				stateRoot,
+				invocationSink: repository.appendInvocation.bind(repository),
+			},
 		);
 		assert.equal(result.ok, true, "promptForRole should succeed");
 
@@ -305,14 +310,8 @@ test("B5 E2E — model-assignments.json in the real stateRoot is intact (skips i
 	const text = readFileSync(realPath, "utf8");
 	const json = JSON.parse(text);
 	const assignments = json.assignments as Record<string, string>;
-	assert.equal(
-		assignments["supervisor-main"],
-		"opencode-go/deepseek-v4-pro",
-	);
-	assert.equal(
-		assignments["agentlab-security"],
-		"opencode-go/deepseek-v4-pro",
-	);
+	assert.equal(assignments["supervisor-main"], "opencode-go/deepseek-v4-pro");
+	assert.equal(assignments["agentlab-security"], "opencode-go/deepseek-v4-pro");
 	assert.equal(
 		assignments["agentlab-architecture"],
 		"opencode-go/qwen3.7-plus",
