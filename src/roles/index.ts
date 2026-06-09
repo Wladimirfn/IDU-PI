@@ -69,7 +69,8 @@ export type Role = {
  * advisory.
  */
 export function computeInputSignature(event: Event): string {
-	return createHash("sha1").update(stableStringify(event.payload))
+	return createHash("sha1")
+		.update(stableStringify(event.payload))
 		.digest("hex")
 		.slice(0, 16);
 }
@@ -118,9 +119,7 @@ function createStubRole(
 		subscribesTo: () => opts.subscribesTo,
 		shouldFire: () => false,
 		invoke: async () => {
-			throw new Error(
-				`role ${id} not yet implemented (pending PR 2 / PR 3)`,
-			);
+			throw new Error(`role ${id} not yet implemented (pending PR 2 / PR 3)`);
 		},
 	};
 }

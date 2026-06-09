@@ -8,12 +8,7 @@
  */
 
 import type { EventKind } from "../event-bus.js";
-import type {
-	Role,
-	RoleInput,
-	RoleContext,
-	RoleAdvisory,
-} from "./index.js";
+import type { Role, RoleInput, RoleContext, RoleAdvisory } from "./index.js";
 import { getOrchestratorAdvisoryStream } from "../orchestrator-advisory-stream.js";
 
 const SUPERVISOR_SEMANTIC_PRIORITY = 80;
@@ -25,8 +20,8 @@ const SUPERVISOR_SEMANTIC_SUBSCRIBES: readonly EventKind[] = [
 const VALID_INTENTS = ["audit", "plan", "ask", "fix", "chat"] as const;
 const VALID_ACTION_TYPES = ["review", "execute", "respond", "clarify"] as const;
 
-type ValidIntent = typeof VALID_INTENTS[number];
-type ValidActionType = typeof VALID_ACTION_TYPES[number];
+type ValidIntent = (typeof VALID_INTENTS)[number];
+type ValidActionType = (typeof VALID_ACTION_TYPES)[number];
 
 type SemanticMeta = {
 	intentClass: ValidIntent;
@@ -79,13 +74,18 @@ function parseLLMResponse(raw: string): {
 	}
 }
 
-function buildSupervisorSemanticPrompt(input: RoleInput, ctx: RoleContext): string {
+function buildSupervisorSemanticPrompt(
+	input: RoleInput,
+	ctx: RoleContext,
+): string {
 	// Get recent advisories from the stream
 	const stream = getOrchestratorAdvisoryStream(ctx.stateRoot);
 	const recentAdvisories = stream.getAdvisories({ limit: 5 });
 
 	// Extract user turns from the event payload
-	const userTurns = (input.event.payload.userTurns as Array<{ ts: string; text: string }>) || [];
+	const userTurns =
+		(input.event.payload.userTurns as Array<{ ts: string; text: string }>) ||
+		[];
 	const lastFiveTurns = userTurns.slice(-5);
 
 	const lines: string[] = [
@@ -116,12 +116,16 @@ function buildSupervisorSemanticPrompt(input: RoleInput, ctx: RoleContext): stri
 
 	lines.push("");
 	lines.push("Current request:");
-	lines.push(`  ${JSON.stringify(input.event.payload.request || input.event.payload)}`);
+	lines.push(
+		`  ${JSON.stringify(input.event.payload.request || input.event.payload)}`,
+	);
 	lines.push("");
 	lines.push("Classify the intent and respond with a JSON object:");
 	lines.push("{");
 	lines.push('  "intent": "audit" | "plan" | "ask" | "fix" | "chat",');
-	lines.push('  "routing_hint": "<short string suggesting which role should handle this>",');
+	lines.push(
+		'  "routing_hint": "<short string suggesting which role should handle this>",',
+	);
 	lines.push('  "action_type": "review" | "execute" | "respond" | "clarify"');
 	lines.push("}");
 	lines.push("");
