@@ -20,7 +20,32 @@ export type EventKind =
 	| "agentlab_finding_ready"
 	| "queue_proposal_added"
 	| "master_plan_drift"
-	| "lab_write";
+	| "lab_write"
+	// living-roles-v2 (REQ-LRV2-2, REQ-LRV2-6): the engine and its
+	// producers synthesize these event kinds. Producers are external
+	// (postflight, alerts scheduler, source library, etc.); the engine
+	// only consumes and emits the cap warning.
+	| "orchestrator_turn"
+	| "alerts_scheduled_tick"
+	| "context_budget_grew"
+	| "file_changed"
+	| "dependency_bumped"
+	| "module_added"
+	| "breaking_change"
+	| "migration_added"
+	| "raw_sql_seen"
+	| "design_token_drift"
+	| "bundle_size_grew"
+	| "complexity_threshold"
+	| "lint_regression"
+	| "dead_code"
+	| "public_api_added"
+	| "broken_link"
+	| "project_map_changed"
+	| "blueprint_edited"
+	| "source_added"
+	| "source_digest_drift"
+	| "role_engine_cap_warning";
 
 export type Event = {
 	ts: string;
@@ -50,6 +75,54 @@ const DEFAULT_EVENTS_MAX_LINES = 10_000;
 // (key: {ts}|{kind}|{stableStringify(payload)}).
 const seenHashesByRoot = new Map<string, Set<string>>();
 
+// Module-level pub/sub registry for in-process listeners (e.g. the
+// role engine). Listeners are keyed by `EventKind`; one listener
+// per `subscribeToEventKind` call gets its own unsubscribe handle.
+// Throwing listeners are caught and logged so they never block the
+// JSONL write — events are an audit trail and must not be lost
+// because a role failed.
+export type EventListener = (event: Event) => void | Promise<void>;
+
+const listenersByKind = new Map<EventKind, Set<EventListener>>();
+
+export function subscribeToEventKind(
+	kind: EventKind,
+	listener: EventListener,
+): () => void {
+	let set = listenersByKind.get(kind);
+	if (!set) {
+		set = new Set<EventListener>();
+		listenersByKind.set(kind, set);
+	}
+	set.add(listener);
+	return () => {
+		const current = listenersByKind.get(kind);
+		if (!current) return;
+		current.delete(listener);
+		if (current.size === 0) listenersByKind.delete(kind);
+	};
+}
+
+async function notifyListeners(event: Event): Promise<void> {
+	const set = listenersByKind.get(event.kind as EventKind);
+	if (!set || set.size === 0) return;
+	// Snapshot the listener set so unsubscribes during dispatch
+	// don't mutate the iteration.
+	for (const listener of [...set]) {
+		try {
+			await listener(event);
+		} catch (error) {
+			// best-effort logging: never let a listener throw
+			// block the JSONL write or the next listener.
+			const message =
+				error instanceof Error ? error.message : String(error);
+			process.stderr.write(
+				`[event-bus] listener for ${event.kind} threw: ${message}\n`,
+			);
+		}
+	}
+}
+
 export function resolveEventsPath(stateRoot: string): string {
 	return join(stateRoot, "events.jsonl");
 }
@@ -77,6 +150,12 @@ export function appendEvent(
 	}
 	if (seen.has(hash)) return;
 	seen.add(hash);
+	// living-roles-v2: notify in-process listeners before writing JSONL.
+	// We deliberately do not await the notification: the JSONL write
+	// is synchronous and audit-grade; listeners that need async work
+	// can schedule it themselves. Throwing listeners are caught
+	// inside `notifyListeners`.
+	void notifyListeners(enriched);
 	const filePath = resolveEventsPath(stateRoot);
 	if (!existsSync(filePath)) {
 		mkdirSync(dirname(filePath), { recursive: true });
@@ -122,9 +201,17 @@ export function readEvents(
 }
 
 function computeEventHash(event: Event): string {
-	const payload = `${event.ts}|${event.kind}|${stableStringify(event.payload)}`;
+	const payload = `${event.ts}|${event.kind}|${event.sourceRef}|${stableStringify(event.payload)}`;
 	return createHash("sha1").update(payload).digest("hex").slice(0, 16);
 }
+
+/**
+ * Public hash helper. Exported so the role engine can compute the
+ * exact same hash the audit trail uses (REQ-LRV2-3 — the engine's
+ * `(role, eventHash)` cooldown key MUST agree with the events.jsonl
+ * dedup key).
+ */
+export { computeEventHash };
 
 function stableStringify(value: unknown): string {
 	if (value === null || typeof value !== "object") {
