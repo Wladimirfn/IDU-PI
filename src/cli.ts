@@ -106,6 +106,8 @@ import {
 	runIdRoleEngineStatusCommand,
 	type RoleEngineStatusReport,
 } from "./cli-role-engine.js";
+import { getOrchestratorAdvisoryStream } from "./orchestrator-advisory-stream.js";
+import { resolveRoleEngineConfig } from "./role-engine-config.js";
 import type { RoleAdvisory } from "./roles/index.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -1525,9 +1527,6 @@ export function createCliRuntime(
 		},
 		formatModelInvocationStatus,
 		getOrchestratorAdvisory: (options) => {
-			const {
-				getOrchestratorAdvisoryStream,
-			} = require("./orchestrator-advisory-stream.js");
 			const stream = getOrchestratorAdvisoryStream(masterPlanStateRoot);
 			return stream.getAdvisories({
 				roleId: options?.roleId,
@@ -1537,12 +1536,8 @@ export function createCliRuntime(
 		},
 		formatOrchestratorAdvisory,
 		getRoleEngineStatus: () => {
-			const { resolveRoleEngineConfig } = require("./role-engine-config.js");
-			const {
-				getOrchestratorAdvisoryStream,
-			} = require("./orchestrator-advisory-stream.js");
-			const config = resolveRoleEngineConfig(masterPlanStateRoot);
 			const stream = getOrchestratorAdvisoryStream(masterPlanStateRoot);
+			const config = resolveRoleEngineConfig(masterPlanStateRoot);
 			const advisories = stream.getAdvisories();
 
 			// Extract last fire per role from advisories
