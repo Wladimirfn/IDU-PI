@@ -24,6 +24,7 @@ import type { IduModelRoleId } from "./model-assignments.js";
 import type { RoleEngineConfig } from "./role-engine-config.js";
 import {
 	computeInputSignature,
+	ROLE_REGISTRY,
 	type Role,
 	type RoleAdvisory,
 	type RoleContext,
@@ -69,7 +70,7 @@ export class RoleEngine {
 		this.deps = deps;
 		// Use injected registry or fall back to the module-level ROLE_REGISTRY
 		// (imported dynamically to avoid circular dependency issues in tests)
-		this.registry = deps.registry ?? {};
+		this.registry = deps.registry ?? ROLE_REGISTRY;
 		this.state = this.loadState();
 	}
 
@@ -137,7 +138,10 @@ export class RoleEngine {
 				const cooldownMs =
 					this.deps.config.roleCooldownMs[roleId as IduModelRoleId] ??
 					role.cooldownMs;
-				if (Number.isFinite(lastFireMs) && now.getTime() - lastFireMs < cooldownMs) {
+				if (
+					Number.isFinite(lastFireMs) &&
+					now.getTime() - lastFireMs < cooldownMs
+				) {
 					result.skippedByCooldown++;
 					continue;
 				}

@@ -108,9 +108,7 @@ function loadRawConfig(stateRoot: string): Partial<RoleEngineConfig> | null {
  * Prefer `resolveRoleEngineConfig` for runtime use.
  */
 export function loadRoleEngineConfig(stateRoot: string): RoleEngineConfig {
-	const raw = loadRawConfig(stateRoot);
-	if (!raw) return cloneDefaults();
-	return cloneDefaults();
+	return resolveRoleEngineConfig(stateRoot);
 }
 
 function cloneDefaults(): RoleEngineConfig {
@@ -142,10 +140,7 @@ export function resolveRoleEngineConfig(stateRoot: string): RoleEngineConfig {
 	}
 	if (isRecord(raw.roleEnabled)) {
 		for (const [roleId, value] of Object.entries(raw.roleEnabled)) {
-			if (
-				roleId in cfg.roleEnabled &&
-				typeof value === "boolean"
-			) {
+			if (roleId in cfg.roleEnabled && typeof value === "boolean") {
 				(cfg.roleEnabled as Record<string, boolean>)[roleId] = value;
 			}
 		}
@@ -195,10 +190,7 @@ export function saveRoleEngineConfig(
 	};
 	if (patch.roleEnabled) {
 		for (const [roleId, value] of Object.entries(patch.roleEnabled)) {
-			if (
-				roleId in next.roleEnabled &&
-				typeof value === "boolean"
-			) {
+			if (roleId in next.roleEnabled && typeof value === "boolean") {
 				next.roleEnabled[roleId as IduModelRoleId] = value;
 			}
 		}
@@ -263,9 +255,5 @@ export function runRoleEngineMigration(stateRoot: string): void {
 		maxRoleInvocationsPerTurn: DEFAULT_MAX_ROLE_INVOCATIONS_PER_TURN,
 		roleEnabled: { ...DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled },
 	};
-	writeFileSync(
-		path,
-		`${JSON.stringify(migrationConfig, null, 2)}\n`,
-		"utf8",
-	);
+	writeFileSync(path, `${JSON.stringify(migrationConfig, null, 2)}\n`, "utf8");
 }
