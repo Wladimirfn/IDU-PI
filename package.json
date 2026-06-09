@@ -18,8 +18,8 @@
     "cli": "tsc -p tsconfig.json && node dist/src/cli.js",
     "mcp": "tsc -p tsconfig.json && node dist/src/mcp-server.js",
     "start": "node dist/src/index.js",
-    "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js"
+    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
+    "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js"
   },
   "dependencies": {
     "dotenv": "17.4.2",

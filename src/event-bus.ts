@@ -19,7 +19,8 @@ export type EventKind =
 	| "bibliotecario_research_requested"
 	| "agentlab_finding_ready"
 	| "queue_proposal_added"
-	| "master_plan_drift";
+	| "master_plan_drift"
+	| "lab_write";
 
 export type Event = {
 	ts: string;
@@ -145,4 +146,36 @@ function enforceCap(filePath: string, maxLines: number): void {
 	if (lines.length <= maxLines) return;
 	const kept = lines.slice(-maxLines);
 	writeFileSync(filePath, `${kept.join("\n")}\n`, "utf8");
+}
+
+export type LabWriteOperation = "insert" | "update" | "delete";
+
+export type LabWriteEventPayload = {
+	table: string;
+	operation: LabWriteOperation;
+	rowId: string;
+	role?: string;
+};
+
+/**
+ * Audit-trail helper for `lab.db` writes. Wraps `appendEvent` and
+ * stamps the event with `kind: "lab_write"`, `sourceRef: "lab-db"`,
+ * and the caller-supplied `projectId`.
+ *
+ * The payload contract is regression-pinned by tests:
+ * `{ table, operation, rowId, role? }`.
+ */
+export function appendLabWriteEvent(
+	stateRoot: string,
+	payload: LabWriteEventPayload,
+	projectId: string,
+): void {
+	appendEvent(stateRoot, {
+		ts: new Date().toISOString(),
+		kind: "lab_write",
+		projectId,
+		payload: { ...payload },
+		sourceRef: "lab-db",
+		evidenceRefs: [],
+	});
 }
