@@ -19,6 +19,9 @@ import type { Event, EventKind } from "../event-bus.js";
 import type { LabDbRepository } from "../lab-db-repository.js";
 import type { IduModelRoleId } from "../model-assignments.js";
 import { createSupervisorMainRole } from "./supervisor-main.js";
+import { createSupervisorSemanticRole } from "./supervisor-semantic.js";
+import { createSupervisorCompactionRole } from "./supervisor-compaction.js";
+import { createAgentLabSecurityRole } from "./agentlab-security.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -68,7 +71,8 @@ export type Role = {
  * advisory.
  */
 export function computeInputSignature(event: Event): string {
-	return createHash("sha1").update(stableStringify(event.payload))
+	return createHash("sha1")
+		.update(stableStringify(event.payload))
 		.digest("hex")
 		.slice(0, 16);
 }
@@ -117,25 +121,15 @@ function createStubRole(
 		subscribesTo: () => opts.subscribesTo,
 		shouldFire: () => false,
 		invoke: async () => {
-			throw new Error(
-				`role ${id} not yet implemented (pending PR 2 / PR 3)`,
-			);
+			throw new Error(`role ${id} not yet implemented (pending PR 2 / PR 3)`);
 		},
 	};
 }
 
 export const ROLE_REGISTRY: Record<RoleId, Role> = {
 	"supervisor-main": createSupervisorMainRole(),
-	"supervisor-semantic": createStubRole("supervisor-semantic", {
-		priority: 80,
-		cooldownMs: 10_000,
-		subscribesTo: ["orchestrator_turn"],
-	}),
-	"supervisor-compaction": createStubRole("supervisor-compaction", {
-		priority: 70,
-		cooldownMs: 60_000,
-		subscribesTo: ["context_budget_grew", "orchestrator_turn"],
-	}),
+	"supervisor-semantic": createSupervisorSemanticRole(),
+	"supervisor-compaction": createSupervisorCompactionRole(),
 	"agentlab-general": createStubRole("agentlab-general", {
 		priority: 20,
 		cooldownMs: 600_000,
@@ -175,11 +169,7 @@ export const ROLE_REGISTRY: Record<RoleId, Role> = {
 			subscribesTo: ["project_map_changed", "blueprint_edited"],
 		},
 	),
-	"agentlab-security": createStubRole("agentlab-security", {
-		priority: 95,
-		cooldownMs: 300_000,
-		subscribesTo: ["file_changed", "dependency_bumped"],
-	}),
+	"agentlab-security": createAgentLabSecurityRole(),
 	"agentlab-architecture": createStubRole("agentlab-architecture", {
 		priority: 60,
 		cooldownMs: 300_000,
