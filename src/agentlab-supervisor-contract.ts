@@ -158,6 +158,15 @@ export type AgentLabReviewRequest = {
 	expectedOutputs: string[];
 	requiresHumanApproval: boolean;
 	createdAt: string;
+	/**
+	 * B5 wiring (REQ-B5-5). Optional canonical model id
+	 * (`<provider>/<model>`) that the orchestrator committed to for
+	 * this request. When set, the AgentLab runner routes through
+	 * `agentRouter.promptForRole(role, message)` so the invocation
+	 * lands in `model_invocation_log`. When absent, the runner falls
+	 * back to the existing profile heuristic.
+	 */
+	model?: string;
 };
 
 export type AgentLabReviewStatus = "completed" | "skipped" | "failed";
@@ -268,6 +277,12 @@ export type BuildAgentLabReviewRequestInput = {
 	requiresHumanApproval?: boolean;
 	contextBudget?: ContextBudgetUsage;
 	createdAt?: string;
+	/**
+	 * Optional canonical model id (`<provider>/<model>`). When set,
+	 * it is copied verbatim into `AgentLabReviewRequest.model` so the
+	 * runner can route through `promptForRole`.
+	 */
+	model?: string;
 };
 
 export type AgentLabSpecialtyMappingInput = {
@@ -531,6 +546,7 @@ export function buildAgentLabReviewRequest(
 		expectedOutputs: expectedOutputs.items,
 		requiresHumanApproval: true,
 		createdAt: input.createdAt ?? new Date().toISOString(),
+		...(input.model ? { model: input.model } : {}),
 	};
 }
 
@@ -642,6 +658,7 @@ export function validateAgentLabReviewRequest(
 		errors,
 	);
 	const createdAt = requiredString(request.createdAt, "createdAt", errors);
+	const model = optionalString(request.model, "model", errors);
 
 	if (forbiddenActions) validateForbiddenActions(forbiddenActions, errors);
 	if (allowedActions) {
@@ -743,8 +760,9 @@ export function validateAgentLabReviewRequest(
 			expectedOutputs,
 			requiresHumanApproval,
 			createdAt,
+			...(model ? { model } : {}),
 		},
-	};
+};
 }
 
 export function validateAgentLabReviewReport(
