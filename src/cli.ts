@@ -99,6 +99,14 @@ import {
 	type BuildModelInvocationStatusResult,
 	type ModelInvocationStatusReport,
 } from "./cli-model-invocation-status.js";
+import {
+	formatOrchestratorAdvisory,
+	formatRoleEngineStatus,
+	runIdOrchestratorAdvisoryCommand,
+	runIdRoleEngineStatusCommand,
+	type RoleEngineStatusReport,
+} from "./cli-role-engine.js";
+import type { RoleAdvisory } from "./roles/index.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
 	activateIduSession,
@@ -759,6 +767,14 @@ export type CliRuntime = {
 		limit?: number;
 	}) => BuildModelInvocationStatusResult;
 	formatModelInvocationStatus: (report: ModelInvocationStatusReport) => string;
+	getOrchestratorAdvisory: (options?: {
+		roleId?: string;
+		sinceMs?: number;
+		limit?: number;
+	}) => RoleAdvisory[];
+	formatOrchestratorAdvisory: (rows: RoleAdvisory[]) => string;
+	getRoleEngineStatus: () => RoleEngineStatusReport;
+	formatRoleEngineStatus: (report: RoleEngineStatusReport) => string;
 	activeProfileId?: () => string;
 };
 
@@ -1508,6 +1524,44 @@ export function createCliRuntime(
 			});
 		},
 		formatModelInvocationStatus,
+		getOrchestratorAdvisory: (options) => {
+			const { getOrchestratorAdvisoryStream } = require("./orchestrator-advisory-stream.js");
+			const stream = getOrchestratorAdvisoryStream(masterPlanStateRoot);
+			return stream.getAdvisories({
+				roleId: options?.roleId,
+				sinceMs: options?.sinceMs,
+				limit: options?.limit,
+			});
+		},
+		formatOrchestratorAdvisory,
+		getRoleEngineStatus: () => {
+			const { resolveRoleEngineConfig } = require("./role-engine-config.js");
+			const { getOrchestratorAdvisoryStream } = require("./orchestrator-advisory-stream.js");
+			const config = resolveRoleEngineConfig(masterPlanStateRoot);
+			const stream = getOrchestratorAdvisoryStream(masterPlanStateRoot);
+			const advisories = stream.getAdvisories();
+			
+			// Extract last fire per role from advisories
+			const lastFiresMap = new Map<string, string>();
+			for (const adv of advisories) {
+				lastFiresMap.set(adv.roleId, adv.ts);
+			}
+			const lastFires = Array.from(lastFiresMap.entries()).map(([roleId, lastFireAt]) => ({
+				roleId,
+				lastFireAt,
+			}));
+			
+			return {
+				config,
+				lastFires,
+				lastCapWarning: undefined, // Cap warning tracking not yet implemented in engine state
+				advisoryStreamSummary: {
+					totalAdvisories: advisories.length,
+					lastAdvisory: advisories.length > 0 ? advisories[advisories.length - 1].ts : undefined,
+				},
+			};
+		},
+		formatRoleEngineStatus,
 		activeProfileId: () => agentRouter.activeProfile().id,
 	};
 }
@@ -1999,6 +2053,12 @@ export async function runCliCommand(
 				}
 				return ok(activeRuntime.formatModelInvocationStatus(result.report));
 			}
+			case "idu-orchestrator-advisory":
+			case "orchestrator-advisory":
+				return ok(runIdOrchestratorAdvisoryCommand(rest, activeRuntime));
+			case "idu-role-engine-status":
+			case "role-engine-status":
+				return ok(runIdRoleEngineStatusCommand(rest, activeRuntime));
 			case "idu-agentlab-request-create":
 			case "agentlab-request-create": {
 				const { source, selector, model, stateRoot } =

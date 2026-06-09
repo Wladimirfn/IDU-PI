@@ -920,6 +920,18 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-model-invocation-status agentlab-security 20",
 	},
 	{
+		label: "Orchestrator advisory",
+		command: "corepack pnpm cli -- idu-orchestrator-advisory",
+	},
+	{
+		label: "Orchestrator advisory (role filter)",
+		command: "corepack pnpm cli -- idu-orchestrator-advisory --role supervisor-main --limit 5",
+	},
+	{
+		label: "Role engine status",
+		command: "corepack pnpm cli -- idu-role-engine-status",
+	},
+	{
 		label: "Semantic audit status",
 		command: "corepack pnpm cli -- idu-semantic-audit-status",
 	},

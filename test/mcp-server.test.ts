@@ -1007,6 +1007,23 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			},
 		}),
 		formatModelInvocationStatus: () => "no invocations yet",
+		getOrchestratorAdvisory: () => [],
+		formatOrchestratorAdvisory: () => "no advisories yet",
+		getRoleEngineStatus: () => ({
+			config: {
+				enabled: false,
+				maxRoleInvocationsPerTurn: 50,
+				roleEnabled: {},
+				roleCooldownMs: {},
+			},
+			lastFires: [],
+			lastCapWarning: undefined,
+			advisoryStreamSummary: {
+				totalAdvisories: 0,
+				lastAdvisory: undefined,
+			},
+		}),
+		formatRoleEngineStatus: () => "role engine status unavailable",
 	} satisfies CliRuntime & {
 		listTasks: () => StructuredTask[];
 		queueComplete: (

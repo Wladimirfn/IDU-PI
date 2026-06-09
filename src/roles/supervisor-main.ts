@@ -10,7 +10,13 @@
  */
 
 import type { Event, EventKind } from "../event-bus.js";
-import type { Role, RoleId, RoleInput, RoleContext, RoleAdvisory } from "./index.js";
+import type {
+	Role,
+	RoleId,
+	RoleInput,
+	RoleContext,
+	RoleAdvisory,
+} from "./index.js";
 import { buildStateSummary } from "./prompt-helpers.js";
 import { getOrchestratorAdvisoryStream } from "../orchestrator-advisory-stream.js";
 import { existsSync, readFileSync } from "node:fs";
@@ -69,7 +75,11 @@ function buildSupervisorMainPrompt(input: RoleInput, ctx: RoleContext): string {
 		try {
 			const lines = readFileSync(eventsPath, "utf8").trim().split("\n");
 			// Read backwards to find the most recent events
-			for (let i = lines.length - 1; i >= 0 && (!lastAlertsTick || !lastLabWrite); i--) {
+			for (
+				let i = lines.length - 1;
+				i >= 0 && (!lastAlertsTick || !lastLabWrite);
+				i--
+			) {
 				try {
 					const event = JSON.parse(lines[i]!);
 					if (!lastAlertsTick && event.kind === "alerts_scheduled_tick") {
@@ -86,7 +96,11 @@ function buildSupervisorMainPrompt(input: RoleInput, ctx: RoleContext): string {
 		}
 	}
 
-	const stateSummary = buildStateSummary(recentAdvisories, lastAlertsTick, lastLabWrite);
+	const stateSummary = buildStateSummary(
+		recentAdvisories,
+		lastAlertsTick,
+		lastLabWrite,
+	);
 
 	const systemPrompt = [
 		"You are the principal supervisor for the IDU orchestrator.",
@@ -117,10 +131,14 @@ export function createSupervisorMainRole(): Role {
 		priority: SUPERVISOR_MAIN_PRIORITY,
 		cooldownMs: SUPERVISOR_MAIN_COOLDOWN_MS,
 		subscribesTo: () => SUPERVISOR_MAIN_SUBSCRIBES,
-		shouldFire(input: RoleInput, lastFireAt: Date | undefined, now: Date): boolean {
+		shouldFire(
+			input: RoleInput,
+			lastFireAt: Date | undefined,
+			now: Date,
+		): boolean {
 			// First time firing or heartbeat/new data events
-			const isHeartbeatOrNewData = 
-				input.event.kind === "alerts_scheduled_tick" || 
+			const isHeartbeatOrNewData =
+				input.event.kind === "alerts_scheduled_tick" ||
 				input.event.kind === "lab_write";
 			return !lastFireAt || isHeartbeatOrNewData;
 		},
