@@ -294,6 +294,10 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.ok(Array.isArray(advisory.meta!.summarizeItems));
 	assert.equal(advisory.meta!.keepItems.length, 0, "keepItems must be empty");
 	assert.equal(advisory.meta!.dropItems.length, 0, "dropItems must be empty");
-	assert.equal(advisory.meta!.summarizeItems.length, 0, "summarizeItems must be empty");
+	assert.equal(
+		advisory.meta!.summarizeItems.length,
+		0,
+		"summarizeItems must be empty",
+	);
 	assert.equal(advisory.meta!.tokenEstimate, 0, "tokenEstimate must be 0");
 });

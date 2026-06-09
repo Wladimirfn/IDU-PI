@@ -114,7 +114,9 @@ function buildSupervisorCompactionPrompt(
 	lines.push("");
 	lines.push("Produce a compaction plan by categorizing context items into:");
 	lines.push("  - keep: items that must be preserved (critical context)");
-	lines.push("  - drop: items that can be safely removed (obsolete, redundant)");
+	lines.push(
+		"  - drop: items that can be safely removed (obsolete, redundant)",
+	);
 	lines.push(
 		"  - summarize: items that can be condensed (verbose logs, detailed histories)",
 	);
@@ -153,7 +155,10 @@ export function createSupervisorCompactionRole(): Role {
 				const budgetRatio = input.event.payload.budgetRatio as
 					| number
 					| undefined;
-				if (budgetRatio !== undefined && budgetRatio > COMPACTION_THRESHOLD_RATIO) {
+				if (
+					budgetRatio !== undefined &&
+					budgetRatio > COMPACTION_THRESHOLD_RATIO
+				) {
 					return !lastFireAt;
 				}
 			}
@@ -210,7 +215,8 @@ export function createSupervisorCompactionRole(): Role {
 				tokenEstimate,
 			};
 
-			const totalItems = keepItems.length + dropItems.length + summarizeItems.length;
+			const totalItems =
+				keepItems.length + dropItems.length + summarizeItems.length;
 
 			return {
 				roleId: "supervisor-compaction",
