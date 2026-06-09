@@ -9,6 +9,7 @@
  */
 import assert from "node:assert/strict";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -293,9 +294,14 @@ test("B5 E2E — idu-model-invocation-status reads back the recorded invocation"
 	}
 });
 
-test("B5 E2E — model-assignments.json in the real stateRoot is intact", () => {
+test("B5 E2E — model-assignments.json in the real stateRoot is intact (skips in CI)", () => {
 	const realPath =
 		"C:/Users/elmas/Documents/bridge-agents/projects/idu-pi/model-assignments.json";
+	if (!existsSync(realPath)) {
+		// In CI the local stateRoot does not exist; this test is a
+		// developer-local smoke only.
+		return;
+	}
 	const text = readFileSync(realPath, "utf8");
 	const json = JSON.parse(text);
 	const assignments = json.assignments as Record<string, string>;
