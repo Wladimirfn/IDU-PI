@@ -29,7 +29,7 @@ process.env.IDU_PI_REGISTRY_PATH = join(
 	"registry",
 	"projects.json",
 );
-delete process.env.TELEGRAM_BOT_TOKEN;
+process.env.TELEGRAM_BOT_TOKEN = "cli-model-invocation-status-test-token";
 delete process.env.ALLOWED_USER_ID;
 
 type SeedRow = {
