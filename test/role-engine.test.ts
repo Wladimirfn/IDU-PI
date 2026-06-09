@@ -11,12 +11,7 @@
  */
 
 import assert from "node:assert/strict";
-import {
-	existsSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -182,10 +177,7 @@ test("dispatch() finds roles that subscribe to a kind and calls them", async () 
 
 	assert.equal(result.fired.length, 1, "exactly one role fires");
 	assert.deepEqual(invokeLog, ["supervisor-main"]);
-	assert.equal(
-		result.fired[0]?.roleId,
-		"supervisor-main",
-	);
+	assert.equal(result.fired[0]?.roleId, "supervisor-main");
 });
 
 // ---------------------------------------------------------------------------
@@ -224,7 +216,11 @@ test("dispatch() honors shouldFire returning false (skips invoke)", async () => 
 
 	const result = await engine.onEvent(makeEvent("orchestrator_turn"));
 
-	assert.equal(invokeCalled, false, "invoke must not be called when shouldFire returns false");
+	assert.equal(
+		invokeCalled,
+		false,
+		"invoke must not be called when shouldFire returns false",
+	);
 	assert.equal(result.fired.length, 0);
 	assert.equal(result.skippedByIdempotency, 1);
 });
@@ -330,11 +326,17 @@ test("dispatch() honors MAX_ROLE_INVOCATIONS_PER_TURN and emits exactly one cap 
 		(event) => event.kind === "role_engine_cap_warning",
 	);
 	assert.equal(capWarnings.length, 1, "exactly one cap warning event");
-	assert.equal(capWarnings[0]?.payload.turnId, undefined, "no turnId yet (onTurnStart not called)");
+	assert.equal(
+		capWarnings[0]?.payload.turnId,
+		undefined,
+		"no turnId yet (onTurnStart not called)",
+	);
 
 	// Second dispatch in the same turn: no additional cap warning
 	capturedEvents.length = 0;
-	const result2 = await engine.onEvent(makeEvent("orchestrator_turn", { request: "other" }));
+	const result2 = await engine.onEvent(
+		makeEvent("orchestrator_turn", { request: "other" }),
+	);
 	const capWarnings2 = capturedEvents.filter(
 		(event) => event.kind === "role_engine_cap_warning",
 	);
@@ -344,7 +346,10 @@ test("dispatch() honors MAX_ROLE_INVOCATIONS_PER_TURN and emits exactly one cap 
 		"no second cap warning in the same turn",
 	);
 	// The remaining roles are still skipped by cap
-	assert.ok(result2.skippedByCap >= 0, "subsequent dispatches also respect cap");
+	assert.ok(
+		result2.skippedByCap >= 0,
+		"subsequent dispatches also respect cap",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -434,15 +439,31 @@ test("dispatch() emits orchestrator_advisory events with priority-ordered adviso
 	assert.equal(result.fired.length, 3);
 
 	// The fired array is priority-ordered (DESC)
-	assert.equal(result.fired[0]?.roleId, "supervisor-main", "highest priority first");
-	assert.equal(result.fired[1]?.roleId, "supervisor-semantic", "medium priority second");
-	assert.equal(result.fired[2]?.roleId, "agentlab-general", "lowest priority last");
+	assert.equal(
+		result.fired[0]?.roleId,
+		"supervisor-main",
+		"highest priority first",
+	);
+	assert.equal(
+		result.fired[1]?.roleId,
+		"supervisor-semantic",
+		"medium priority second",
+	);
+	assert.equal(
+		result.fired[2]?.roleId,
+		"agentlab-general",
+		"lowest priority last",
+	);
 
 	// The engine emits orchestrator_advisory events for each advisory
 	const advisoryEvents = capturedEvents.filter(
 		(event) => event.kind === "orchestrator_advisory",
 	);
-	assert.equal(advisoryEvents.length, 3, "three orchestrator_advisory events emitted");
+	assert.equal(
+		advisoryEvents.length,
+		3,
+		"three orchestrator_advisory events emitted",
+	);
 	// They are emitted in priority order (the engine processes roles in priority order)
 	assert.equal(advisoryEvents[0]?.payload.roleId, "supervisor-main");
 	assert.equal(advisoryEvents[1]?.payload.roleId, "supervisor-semantic");
@@ -495,7 +516,11 @@ test("onTurnStart() resets the per-turn counter and returns the highest-priority
 	// onTurnStart returns the highest-priority advisory
 	const next = engine.onTurnStart("turn-001");
 	assert.ok(next, "nextAdvisory is defined");
-	assert.equal(next.roleId, "supervisor-main", "highest-priority advisory returned");
+	assert.equal(
+		next.roleId,
+		"supervisor-main",
+		"highest-priority advisory returned",
+	);
 	assert.equal(next.priority, 90);
 
 	// After onTurnStart, the per-turn counter is reset.
