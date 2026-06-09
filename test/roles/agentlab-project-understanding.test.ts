@@ -38,7 +38,10 @@ function makeEvent(
 	};
 }
 
-function makeInput(event: Event, signature = "sig-proj-understanding-123"): RoleInput {
+function makeInput(
+	event: Event,
+	signature = "sig-proj-understanding-123",
+): RoleInput {
 	return {
 		event,
 		inputSignature: signature,
@@ -136,7 +139,11 @@ test("shouldFire returns true for project_map_changed", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for project_map_changed");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for project_map_changed",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -155,7 +162,11 @@ test("shouldFire returns true for blueprint_edited", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for blueprint_edited");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for blueprint_edited",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -171,7 +182,11 @@ test("shouldFire returns false for file_changed", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, false, "shouldFire must return false for non-subscribed events");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false for non-subscribed events",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -193,7 +208,9 @@ test("invoke calls agentRouter.promptForRole with role='agentlab-project-underst
 	const { router, calls } = makeFakeAgentRouter(llmResponse);
 	const { repository } = makeFakeRepository();
 
-	const event = makeEvent("project_map_changed", { delta: { added: ["new.ts"] } });
+	const event = makeEvent("project_map_changed", {
+		delta: { added: ["new.ts"] },
+	});
 	const input: RoleInput = {
 		event,
 		inputSignature: "sig-invoke-proj-understanding",
@@ -261,7 +278,10 @@ test("invoke parses LLM response into RoleAdvisory with findings, summary, prior
 	assert.ok(typeof advisory.advisory === "string");
 	assert.ok(Array.isArray(advisory.evidenceRefs));
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(advisory.meta!.findings.length, 2);
 	assert.equal(advisory.meta!.findings[0].type, "missing-doc");
 	assert.ok(typeof advisory.meta!.summary === "string");
@@ -294,7 +314,10 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.roleId, "agentlab-project-understanding");
 	assert.equal(advisory.priority, 35);
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(
 		advisory.meta!.findings.length,
 		0,
@@ -309,7 +332,9 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 
 test("shouldFire respects the cooldown (same event within 10 min → skip)", () => {
 	const role = createAgentLabProjectUnderstandingRole();
-	const event = makeEvent("project_map_changed", { delta: { added: ["test.ts"] } });
+	const event = makeEvent("project_map_changed", {
+		delta: { added: ["test.ts"] },
+	});
 	const input = makeInput(event, "sig-cooldown-proj-understanding");
 
 	const lastFireAt = new Date("2026-01-01T00:00:00.000Z");

@@ -140,7 +140,11 @@ test("shouldFire returns true for orchestrator_turn", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for orchestrator_turn");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for orchestrator_turn",
+	);
 });
 
 test("shouldFire returns true for file_changed", () => {
@@ -246,7 +250,10 @@ test("invoke parses LLM response into RoleAdvisory with findings, summary, prior
 	assert.ok(typeof advisory.advisory === "string");
 	assert.ok(Array.isArray(advisory.evidenceRefs));
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(advisory.meta!.findings.length, 1);
 	assert.ok(typeof advisory.meta!.summary === "string");
 });
@@ -278,7 +285,10 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.roleId, "agentlab-general");
 	assert.equal(advisory.priority, 20);
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(
 		advisory.meta!.findings.length,
 		0,

@@ -107,7 +107,9 @@ function buildAgentLabLibrarianPrompt(
 	lines.push("{");
 	lines.push('  "findings": [');
 	lines.push("    {");
-	lines.push('      "type": "<source-freshness|missing-digest|broken-source-link|duplicate-source|other>",');
+	lines.push(
+		'      "type": "<source-freshness|missing-digest|broken-source-link|duplicate-source|other>",',
+	);
 	lines.push('      "description": "<detailed description>",');
 	lines.push('      "severity": "<low|medium|high>"');
 	lines.push("    }");

@@ -157,7 +157,11 @@ test("shouldFire returns true for source_digest_drift", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for source_digest_drift");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for source_digest_drift",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -173,7 +177,11 @@ test("shouldFire returns false for file_changed", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, false, "shouldFire must return false for non-subscribed events");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false for non-subscribed events",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -267,7 +275,10 @@ test("invoke parses LLM response into RoleAdvisory with findings, summary, prior
 	assert.ok(typeof advisory.advisory === "string");
 	assert.ok(Array.isArray(advisory.evidenceRefs));
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(advisory.meta!.findings.length, 2);
 	assert.equal(advisory.meta!.findings[0].type, "missing-digest");
 	assert.ok(typeof advisory.meta!.summary === "string");
@@ -303,7 +314,10 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.roleId, "agentlab-librarian");
 	assert.equal(advisory.priority, 25);
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.findings), "findings must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.findings),
+		"findings must be an array",
+	);
 	assert.equal(
 		advisory.meta!.findings.length,
 		0,

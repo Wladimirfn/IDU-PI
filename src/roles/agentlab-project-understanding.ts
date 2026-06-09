@@ -99,7 +99,9 @@ function buildAgentLabProjectUnderstandingPrompt(
 		lines.push("");
 		lines.push("Analyze the blueprint edit:");
 		lines.push("  - Are the changes consistent with the project map?");
-		lines.push("  - Do any modules referenced in the blueprint no longer exist?");
+		lines.push(
+			"  - Do any modules referenced in the blueprint no longer exist?",
+		);
 		lines.push("  - Are there missing documentation links?");
 	}
 
@@ -108,7 +110,9 @@ function buildAgentLabProjectUnderstandingPrompt(
 	lines.push("{");
 	lines.push('  "findings": [');
 	lines.push("    {");
-	lines.push('      "type": "<project-shape-drift|missing-doc|blueprint-inconsistency|other>",');
+	lines.push(
+		'      "type": "<project-shape-drift|missing-doc|blueprint-inconsistency|other>",',
+	);
 	lines.push('      "description": "<detailed description>",');
 	lines.push('      "severity": "<low|medium|high>"');
 	lines.push("    }");
@@ -209,7 +213,8 @@ export function createAgentLabProjectUnderstandingRole(): Role {
 					severity: f.severity || "low",
 				}));
 
-			const summary = parsed.summary || "Project understanding review completed";
+			const summary =
+				parsed.summary || "Project understanding review completed";
 
 			const meta: ProjectUnderstandingMeta = {
 				findings,
