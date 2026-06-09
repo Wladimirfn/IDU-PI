@@ -202,7 +202,11 @@ test("shouldFire returns true for bundle_size_grew", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for bundle_size_grew");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for bundle_size_grew",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -299,7 +303,10 @@ test("invoke parses LLM response into RoleAdvisory with regressions, p50Estimate
 	assert.ok(typeof advisory.advisory === "string");
 	assert.ok(Array.isArray(advisory.evidenceRefs));
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.regressions), "regressions must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.regressions),
+		"regressions must be an array",
+	);
 	assert.equal(advisory.meta!.regressions.length, 2);
 	assert.equal(advisory.meta!.regressions[0].p50Estimate, 150);
 	assert.equal(advisory.meta!.regressions[0].p95Estimate, 450);
@@ -335,7 +342,10 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 	assert.equal(advisory.roleId, "agentlab-performance");
 	assert.equal(advisory.priority, 50);
 	assert.ok(advisory.meta, "meta must be present");
-	assert.ok(Array.isArray(advisory.meta!.regressions), "regressions must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.regressions),
+		"regressions must be an array",
+	);
 	assert.equal(
 		advisory.meta!.regressions.length,
 		0,

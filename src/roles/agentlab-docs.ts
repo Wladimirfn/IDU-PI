@@ -75,10 +75,7 @@ function capArray<T>(items: T[] | undefined, max: number): T[] {
 	return items.slice(0, max);
 }
 
-function buildAgentLabDocsPrompt(
-	input: RoleInput,
-	_ctx: RoleContext,
-): string {
+function buildAgentLabDocsPrompt(input: RoleInput, _ctx: RoleContext): string {
 	const lines: string[] = [
 		"You are the documentation analyst for the IDU orchestrator.",
 		"Your role is to review documentation gaps and broken links.",
@@ -133,7 +130,9 @@ function buildAgentLabDocsPrompt(
 	lines.push('  "summary": "<one-line summary>"');
 	lines.push("}");
 	lines.push("");
-	lines.push("Cap docGaps at 6 items. Cap brokenLinks at 6 items. Respond with a single JSON object.");
+	lines.push(
+		"Cap docGaps at 6 items. Cap brokenLinks at 6 items. Respond with a single JSON object.",
+	);
 
 	return lines.join("\n");
 }
@@ -173,17 +172,13 @@ export function createAgentLabDocsRole(): Role {
 		async invoke(input: RoleInput, ctx: RoleContext): Promise<RoleAdvisory> {
 			const prompt = buildAgentLabDocsPrompt(input, ctx);
 
-			const result = await ctx.router.promptForRole(
-				"agentlab-docs",
-				prompt,
-				{
-					projectId: ctx.projectId,
-					stateRoot: ctx.stateRoot,
-					invocationSink: (record) => {
-						ctx.repository.appendInvocation(record);
-					},
+			const result = await ctx.router.promptForRole("agentlab-docs", prompt, {
+				projectId: ctx.projectId,
+				stateRoot: ctx.stateRoot,
+				invocationSink: (record) => {
+					ctx.repository.appendInvocation(record);
 				},
-			);
+			});
 
 			const { parsed, error: parseError } = parseLLMResponse(result.output);
 
@@ -218,12 +213,7 @@ export function createAgentLabDocsRole(): Role {
 			// Parse and normalize doc gaps
 			const rawDocGaps = parsed.docGaps || [];
 			const gaps: DocGap[] = capArray(rawDocGaps, MAX_DOC_GAPS)
-				.filter(
-					(g) =>
-						g &&
-						typeof g === "object" &&
-						typeof g.path === "string",
-				)
+				.filter((g) => g && typeof g === "object" && typeof g.path === "string")
 				.map((g) => ({
 					path: g.path || "unknown",
 					exportName: g.exportName || "",
@@ -232,13 +222,11 @@ export function createAgentLabDocsRole(): Role {
 
 			// Parse and normalize broken links
 			const rawBrokenLinks = parsed.brokenLinks || [];
-			const brokenLinks: BrokenLink[] = capArray(rawBrokenLinks, MAX_BROKEN_LINKS)
-				.filter(
-					(l) =>
-						l &&
-						typeof l === "object" &&
-						typeof l.url === "string",
-				)
+			const brokenLinks: BrokenLink[] = capArray(
+				rawBrokenLinks,
+				MAX_BROKEN_LINKS,
+			)
+				.filter((l) => l && typeof l === "object" && typeof l.url === "string")
 				.map((l) => ({
 					url: l.url || "",
 					referencedFrom: l.referencedFrom || l.referenced_from || "",
@@ -259,8 +247,10 @@ export function createAgentLabDocsRole(): Role {
 			let advisoryText = summary;
 			if (gapCount > 0 || brokenCount > 0) {
 				const parts: string[] = [];
-				if (gapCount > 0) parts.push(`${gapCount} doc gap${gapCount > 1 ? "s" : ""}`);
-				if (brokenCount > 0) parts.push(`${brokenCount} broken link${brokenCount > 1 ? "s" : ""}`);
+				if (gapCount > 0)
+					parts.push(`${gapCount} doc gap${gapCount > 1 ? "s" : ""}`);
+				if (brokenCount > 0)
+					parts.push(`${brokenCount} broken link${brokenCount > 1 ? "s" : ""}`);
 				advisoryText = `${parts.join(" and ")}: ${summary}`;
 			} else {
 				advisoryText = `No documentation issues: ${summary}`;

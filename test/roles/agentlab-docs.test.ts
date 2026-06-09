@@ -303,7 +303,10 @@ test("invoke parses LLM response into RoleAdvisory with gaps and brokenLinks", a
 	assert.ok(advisory.meta, "meta must be present");
 	assert.ok(Array.isArray(advisory.meta!.gaps), "gaps must be an array");
 	assert.equal(advisory.meta!.gaps.length, 1);
-	assert.ok(Array.isArray(advisory.meta!.brokenLinks), "brokenLinks must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.brokenLinks),
+		"brokenLinks must be an array",
+	);
 	assert.equal(advisory.meta!.brokenLinks.length, 1);
 	assert.ok(typeof advisory.meta!.summary === "string");
 });
@@ -344,7 +347,10 @@ test("invoke handles a malformed LLM response by returning a fallback advisory w
 		0,
 		"gaps must be empty for malformed response",
 	);
-	assert.ok(Array.isArray(advisory.meta!.brokenLinks), "brokenLinks must be an array");
+	assert.ok(
+		Array.isArray(advisory.meta!.brokenLinks),
+		"brokenLinks must be an array",
+	);
 	assert.equal(
 		advisory.meta!.brokenLinks.length,
 		0,

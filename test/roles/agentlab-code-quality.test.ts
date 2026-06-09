@@ -138,7 +138,11 @@ test("shouldFire returns true for complexity_threshold", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, true, "shouldFire must return true for complexity_threshold");
+	assert.equal(
+		result,
+		true,
+		"shouldFire must return true for complexity_threshold",
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -194,7 +198,11 @@ test("shouldFire returns false for file_changed (not subscribed)", () => {
 		undefined,
 		new Date("2026-01-01T00:00:00.000Z"),
 	);
-	assert.equal(result, false, "shouldFire must return false for non-subscribed kinds");
+	assert.equal(
+		result,
+		false,
+		"shouldFire must return false for non-subscribed kinds",
+	);
 });
 
 // ---------------------------------------------------------------------------

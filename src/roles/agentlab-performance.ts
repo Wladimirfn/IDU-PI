@@ -102,7 +102,9 @@ function buildAgentLabPerformancePrompt(
 		lines.push(`  Bundle: ${bundlePath}`);
 		lines.push(`  Old size: ${oldSize} bytes`);
 		lines.push(`  New size: ${newSize} bytes`);
-		lines.push(`  Growth: ${newSize - oldSize} bytes (${((newSize - oldSize) / oldSize * 100).toFixed(2)}%)`);
+		lines.push(
+			`  Growth: ${newSize - oldSize} bytes (${(((newSize - oldSize) / oldSize) * 100).toFixed(2)}%)`,
+		);
 		lines.push("");
 		lines.push("Analyze the bundle growth for performance impact:");
 		lines.push("  - New dependencies added");
@@ -118,14 +120,18 @@ function buildAgentLabPerformancePrompt(
 	lines.push("    {");
 	lines.push('      "path": "<file or bundle path>",');
 	lines.push('      "p50Estimate": <median latency in ms (positive integer)>,');
-	lines.push('      "p95Estimate": <95th percentile latency in ms (positive integer)>,');
+	lines.push(
+		'      "p95Estimate": <95th percentile latency in ms (positive integer)>,',
+	);
 	lines.push('      "evidence": "<explanation of the regression>"');
 	lines.push("    }");
 	lines.push("  ],");
 	lines.push('  "summary": "<one-line summary>"');
 	lines.push("}");
 	lines.push("");
-	lines.push("Cap regressions at 4 items. p50Estimate and p95Estimate must be positive integers. Respond with a single JSON object.");
+	lines.push(
+		"Cap regressions at 4 items. p50Estimate and p95Estimate must be positive integers. Respond with a single JSON object.",
+	);
 
 	return lines.join("\n");
 }
@@ -208,7 +214,10 @@ export function createAgentLabPerformanceRole(): Role {
 
 			// Parse and normalize regressions
 			const rawRegressions = parsed.regressions || [];
-			const regressions: PerformanceRegression[] = capArray(rawRegressions, MAX_REGRESSIONS)
+			const regressions: PerformanceRegression[] = capArray(
+				rawRegressions,
+				MAX_REGRESSIONS,
+			)
 				.filter(
 					(r) =>
 						r &&
