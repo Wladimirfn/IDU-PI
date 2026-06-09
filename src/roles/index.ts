@@ -20,6 +20,7 @@ import type { LabDbRepository } from "../lab-db-repository.js";
 import type { IduModelRoleId } from "../model-assignments.js";
 import { createSupervisorMainRole } from "./supervisor-main.js";
 import { createSupervisorSemanticRole } from "./supervisor-semantic.js";
+import { createSupervisorCompactionRole } from "./supervisor-compaction.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -127,11 +128,7 @@ function createStubRole(
 export const ROLE_REGISTRY: Record<RoleId, Role> = {
 	"supervisor-main": createSupervisorMainRole(),
 	"supervisor-semantic": createSupervisorSemanticRole(),
-	"supervisor-compaction": createStubRole("supervisor-compaction", {
-		priority: 70,
-		cooldownMs: 60_000,
-		subscribesTo: ["context_budget_grew", "orchestrator_turn"],
-	}),
+	"supervisor-compaction": createSupervisorCompactionRole(),
 	"agentlab-general": createStubRole("agentlab-general", {
 		priority: 20,
 		cooldownMs: 600_000,
