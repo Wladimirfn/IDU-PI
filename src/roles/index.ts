@@ -25,6 +25,9 @@ import { createAgentLabSecurityRole } from "./agentlab-security.js";
 import { createAgentLabArchitectureRole } from "./agentlab-architecture.js";
 import { createAgentLabDatabaseRole } from "./agentlab-database.js";
 import { createAgentLabUiUxRole } from "./agentlab-ui-ux.js";
+import { createAgentLabPerformanceRole } from "./agentlab-performance.js";
+import { createAgentLabCodeQualityRole } from "./agentlab-code-quality.js";
+import { createAgentLabDocsRole } from "./agentlab-docs.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -176,21 +179,9 @@ export const ROLE_REGISTRY: Record<RoleId, Role> = {
 	"agentlab-architecture": createAgentLabArchitectureRole(),
 	"agentlab-database": createAgentLabDatabaseRole(),
 	"agentlab-ui-ux": createAgentLabUiUxRole(),
-	"agentlab-performance": createStubRole("agentlab-performance", {
-		priority: 50,
-		cooldownMs: 300_000,
-		subscribesTo: ["file_changed", "bundle_size_grew"],
-	}),
-	"agentlab-code-quality": createStubRole("agentlab-code-quality", {
-		priority: 30,
-		cooldownMs: 600_000,
-		subscribesTo: ["complexity_threshold", "lint_regression", "dead_code"],
-	}),
-	"agentlab-docs": createStubRole("agentlab-docs", {
-		priority: 30,
-		cooldownMs: 600_000,
-		subscribesTo: ["public_api_added", "broken_link"],
-	}),
+	"agentlab-performance": createAgentLabPerformanceRole(),
+	"agentlab-code-quality": createAgentLabCodeQualityRole(),
+	"agentlab-docs": createAgentLabDocsRole(),
 	"agentlab-librarian": createStubRole("agentlab-librarian", {
 		priority: 25,
 		cooldownMs: 600_000,
