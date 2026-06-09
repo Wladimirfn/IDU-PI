@@ -1525,7 +1525,9 @@ export function createCliRuntime(
 		},
 		formatModelInvocationStatus,
 		getOrchestratorAdvisory: (options) => {
-			const { getOrchestratorAdvisoryStream } = require("./orchestrator-advisory-stream.js");
+			const {
+				getOrchestratorAdvisoryStream,
+			} = require("./orchestrator-advisory-stream.js");
 			const stream = getOrchestratorAdvisoryStream(masterPlanStateRoot);
 			return stream.getAdvisories({
 				roleId: options?.roleId,
@@ -1536,28 +1538,35 @@ export function createCliRuntime(
 		formatOrchestratorAdvisory,
 		getRoleEngineStatus: () => {
 			const { resolveRoleEngineConfig } = require("./role-engine-config.js");
-			const { getOrchestratorAdvisoryStream } = require("./orchestrator-advisory-stream.js");
+			const {
+				getOrchestratorAdvisoryStream,
+			} = require("./orchestrator-advisory-stream.js");
 			const config = resolveRoleEngineConfig(masterPlanStateRoot);
 			const stream = getOrchestratorAdvisoryStream(masterPlanStateRoot);
 			const advisories = stream.getAdvisories();
-			
+
 			// Extract last fire per role from advisories
 			const lastFiresMap = new Map<string, string>();
 			for (const adv of advisories) {
 				lastFiresMap.set(adv.roleId, adv.ts);
 			}
-			const lastFires = Array.from(lastFiresMap.entries()).map(([roleId, lastFireAt]) => ({
-				roleId,
-				lastFireAt,
-			}));
-			
+			const lastFires = Array.from(lastFiresMap.entries()).map(
+				([roleId, lastFireAt]) => ({
+					roleId,
+					lastFireAt,
+				}),
+			);
+
 			return {
 				config,
 				lastFires,
 				lastCapWarning: undefined, // Cap warning tracking not yet implemented in engine state
 				advisoryStreamSummary: {
 					totalAdvisories: advisories.length,
-					lastAdvisory: advisories.length > 0 ? advisories[advisories.length - 1].ts : undefined,
+					lastAdvisory:
+						advisories.length > 0
+							? advisories[advisories.length - 1].ts
+							: undefined,
 				},
 			};
 		},

@@ -45,8 +45,15 @@ function createMockRuntime(
 		},
 		formatOrchestratorAdvisory: (rows: RoleAdvisory[]) => {
 			if (rows.length === 0) return "No orchestrator advisories found.";
-			return `Found ${rows.length} advisories:\n` +
-				rows.map((a) => `  ${a.ts} | ${a.roleId} | priority ${a.priority} | ${a.advisory}`).join("\n");
+			return (
+				`Found ${rows.length} advisories:\n` +
+				rows
+					.map(
+						(a) =>
+							`  ${a.ts} | ${a.roleId} | priority ${a.priority} | ${a.advisory}`,
+					)
+					.join("\n")
+			);
 		},
 		getRoleEngineStatus: () => {
 			if (statusReport) return statusReport;
@@ -70,10 +77,12 @@ function createMockRuntime(
 			};
 		},
 		formatRoleEngineStatus: (report: RoleEngineStatusReport) => {
-			return `Role Engine Status:\n` +
+			return (
+				`Role Engine Status:\n` +
 				`  Enabled: ${report.config.enabled}\n` +
 				`  Max invocations per turn: ${report.config.maxRoleInvocationsPerTurn}\n` +
-				`  Total advisories: ${report.advisoryStreamSummary.totalAdvisories}`;
+				`  Total advisories: ${report.advisoryStreamSummary.totalAdvisories}`
+			);
 		},
 	} as unknown as CliRuntime;
 	return runtime;
@@ -142,10 +151,7 @@ test("runIdOrchestratorAdvisoryCommand --limit N caps the count", () => {
 		evidenceRefs: [],
 	}));
 	const runtime = createMockRuntime(advisories);
-	const result = runIdOrchestratorAdvisoryCommand(
-		["--limit", "3"],
-		runtime,
-	);
+	const result = runIdOrchestratorAdvisoryCommand(["--limit", "3"], runtime);
 	assert.ok(result.includes("3 advisories"));
 });
 
@@ -229,7 +235,10 @@ test("command-catalog.ts has entries for idu-orchestrator-advisory and idu-role-
 		cmd.command.includes("idu-role-engine-status"),
 	);
 
-	assert.ok(advisoryCommand, "idu-orchestrator-advisory should be in CLI_COMMANDS");
+	assert.ok(
+		advisoryCommand,
+		"idu-orchestrator-advisory should be in CLI_COMMANDS",
+	);
 	assert.ok(advisoryCommand.label);
 	assert.ok(advisoryCommand.command);
 

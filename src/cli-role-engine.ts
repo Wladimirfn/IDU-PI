@@ -147,7 +147,9 @@ export function formatRoleEngineStatus(report: RoleEngineStatusReport): string {
 
 	// Advisory stream summary
 	lines.push("Advisory stream summary:");
-	lines.push(`  Total advisories: ${report.advisoryStreamSummary.totalAdvisories}`);
+	lines.push(
+		`  Total advisories: ${report.advisoryStreamSummary.totalAdvisories}`,
+	);
 	if (report.advisoryStreamSummary.lastAdvisory) {
 		lines.push(`  Last advisory: ${report.advisoryStreamSummary.lastAdvisory}`);
 	}

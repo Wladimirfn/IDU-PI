@@ -917,7 +917,8 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	},
 	{
 		label: "Model invocation status (role filter)",
-		command: "corepack pnpm cli -- idu-model-invocation-status agentlab-security 20",
+		command:
+			"corepack pnpm cli -- idu-model-invocation-status agentlab-security 20",
 	},
 	{
 		label: "Orchestrator advisory",
@@ -925,7 +926,8 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	},
 	{
 		label: "Orchestrator advisory (role filter)",
-		command: "corepack pnpm cli -- idu-orchestrator-advisory --role supervisor-main --limit 5",
+		command:
+			"corepack pnpm cli -- idu-orchestrator-advisory --role supervisor-main --limit 5",
 	},
 	{
 		label: "Role engine status",
@@ -1070,7 +1072,8 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	},
 	{
 		label: "Birth prototype master",
-		command: "corepack pnpm cli -- idu-birth-prototype-master '{\"action\":\"review\"}'",
+		command:
+			'corepack pnpm cli -- idu-birth-prototype-master \'{"action":"review"}\'',
 	},
 	{
 		label: "Pending injections",
@@ -1083,7 +1086,7 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	{
 		label: "Birth repo plan",
 		command:
-			"corepack pnpm cli -- idu-birth-repo-plan '{\"repoName\":\"demo\",\"visibility\":\"private\",\"owner\":\"elmas\",\"license\":\"MIT\",\"initialReadmePolicy\":\"minimal\",\"remoteProvider\":\"github\",\"pushApproved\":true,\"branchPolicy\":\"main\",\"ciExpectation\":\"pnpm test\"}'",
+			'corepack pnpm cli -- idu-birth-repo-plan \'{"repoName":"demo","visibility":"private","owner":"elmas","license":"MIT","initialReadmePolicy":"minimal","remoteProvider":"github","pushApproved":true,"branchPolicy":"main","ciExpectation":"pnpm test"}\'',
 	},
 ];
 
