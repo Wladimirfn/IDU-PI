@@ -22,6 +22,9 @@ import { createSupervisorMainRole } from "./supervisor-main.js";
 import { createSupervisorSemanticRole } from "./supervisor-semantic.js";
 import { createSupervisorCompactionRole } from "./supervisor-compaction.js";
 import { createAgentLabSecurityRole } from "./agentlab-security.js";
+import { createAgentLabArchitectureRole } from "./agentlab-architecture.js";
+import { createAgentLabDatabaseRole } from "./agentlab-database.js";
+import { createAgentLabUiUxRole } from "./agentlab-ui-ux.js";
 
 export type RoleId = IduModelRoleId;
 
@@ -170,21 +173,9 @@ export const ROLE_REGISTRY: Record<RoleId, Role> = {
 		},
 	),
 	"agentlab-security": createAgentLabSecurityRole(),
-	"agentlab-architecture": createStubRole("agentlab-architecture", {
-		priority: 60,
-		cooldownMs: 300_000,
-		subscribesTo: ["file_changed", "module_added", "breaking_change"],
-	}),
-	"agentlab-database": createStubRole("agentlab-database", {
-		priority: 60,
-		cooldownMs: 300_000,
-		subscribesTo: ["file_changed", "migration_added", "raw_sql_seen"],
-	}),
-	"agentlab-ui-ux": createStubRole("agentlab-ui-ux", {
-		priority: 40,
-		cooldownMs: 300_000,
-		subscribesTo: ["file_changed", "design_token_drift"],
-	}),
+	"agentlab-architecture": createAgentLabArchitectureRole(),
+	"agentlab-database": createAgentLabDatabaseRole(),
+	"agentlab-ui-ux": createAgentLabUiUxRole(),
 	"agentlab-performance": createStubRole("agentlab-performance", {
 		priority: 50,
 		cooldownMs: 300_000,
