@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { applyMigrations } from "./lab-db/migrations/runner.js";
 import type { LabRunRecord } from "./lab-reports.js";
 
 export type FindingSeverity = "critical" | "high" | "medium" | "low" | "info";
@@ -250,6 +251,8 @@ function runSql(dbPath: string, sql: string): string {
 	});
 }
 
+export { runSql, sqlInteger, sqlOptionalString, sqlString };
+
 export function initLabDb(dbPath: string): InitLabDbResult {
 	const created = !existsSync(dbPath);
 	mkdirSync(dirname(dbPath), { recursive: true });
@@ -266,6 +269,10 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 		"last_high_finding_count",
 		"INTEGER NOT NULL DEFAULT 0",
 	);
+	// B5 PR1: apply pending SQL migrations (model_invocation_log + future
+	// tables). applyMigrations is idempotent and reads the SQL files
+	// from src/lab-db/migrations at runtime.
+	applyMigrations(dbPath);
 	return { dbPath, created };
 }
 

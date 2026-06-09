@@ -91,6 +91,13 @@ import {
 	type SourceSkillCandidateReview,
 } from "./source-skill-candidates.js";
 import { formatCommandCatalog } from "./command-catalog.js";
+import {
+	buildModelInvocationStatusOrError,
+	formatModelInvocationStatus,
+	parseModelInvocationStatusArgs,
+	type BuildModelInvocationStatusResult,
+	type ModelInvocationStatusReport,
+} from "./cli-model-invocation-status.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
 	activateIduSession,
@@ -139,7 +146,10 @@ import {
 	type BirthRepoPlanEnvelope,
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
-import { handleBirthPrototypeMaster, type BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
+import {
+	handleBirthPrototypeMaster,
+	type BirthPrototypeMasterEnvelope,
+} from "./birth-prototype-runtime.js";
 import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
 import { runMcpContextPackAutoRefreshTick } from "./mcp-context-pack-auto-refresh-invocation.js";
 import { formatScheduledTickSkippedDetail } from "./alerts-scheduled-tick-skipped-detail.js";
@@ -147,7 +157,11 @@ import {
 	formatInspectEventsReport,
 	inspectEvents,
 } from "./events-inspector.js";
-import { readPendingInjections, markInjectionAcked, type Injection } from "./injection-store.js";
+import {
+	readPendingInjections,
+	markInjectionAcked,
+	type Injection,
+} from "./injection-store.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import {
@@ -738,6 +752,11 @@ export type CliRuntime = {
 	) => StructuredTask | undefined;
 	projectStateReset: (confirmed: boolean) => ProjectStateResetResult;
 	formatProjectStateResetResult: (result: ProjectStateResetResult) => string;
+	modelInvocationStatus: (options?: {
+		role?: string;
+		limit?: number;
+	}) => BuildModelInvocationStatusResult;
+	formatModelInvocationStatus: (report: ModelInvocationStatusReport) => string;
 	activeProfileId?: () => string;
 };
 
@@ -1338,6 +1357,14 @@ export function createCliRuntime(
 			reviewSkillDraft(pathOrLatest, reportsPath),
 		formatSkillDraftReview,
 		agentLabRequestCreate: (source, pathOrLatest, options) => {
+			// B5 PR3 v2 (REQ-B5-5): thread `stateRoot` and `model` from
+			// the CLI/MCP surfaces into `createAgentLabReviewRequests` so
+			// the create-time auto-pick logic in
+			// `resolveCreateTimeModelErrors` actually fires.
+			const createOptions = {
+				model: options?.model,
+				stateRoot: options?.stateRoot ?? masterPlanStateRoot,
+			};
 			if (source === "postflight") {
 				return createAgentLabReviewRequests({
 					source: "postflight",
@@ -1345,6 +1372,7 @@ export function createCliRuntime(
 					projectId: activeProject.id,
 					projectPath: activeProject.path,
 					postflightReport: buildPostflightReport(context),
+					...createOptions,
 				});
 			}
 			if (source === "skill-draft") {
@@ -1354,6 +1382,7 @@ export function createCliRuntime(
 					projectId: activeProject.id,
 					projectPath: activeProject.path,
 					skillDraftPathOrLatest: pathOrLatest ?? "latest",
+					...createOptions,
 				});
 			}
 			if (source === "master-plan") {
@@ -1363,6 +1392,7 @@ export function createCliRuntime(
 					projectId: activeProject.id,
 					projectPath: activeProject.path,
 					masterPlanPathOrLatest: pathOrLatest ?? "latest",
+					...createOptions,
 				});
 			}
 			if (source === "external-source-intelligence") {
@@ -1398,6 +1428,7 @@ export function createCliRuntime(
 						limitations: sourceEvidence.limitations,
 						contractPromotionAllowed: false,
 					},
+					...createOptions,
 				});
 			}
 			if (source === "specialist-audit-plan") {
@@ -1409,6 +1440,7 @@ export function createCliRuntime(
 					manualObjective: options?.objective,
 					manualContext: options?.context,
 					specialties: options?.specialties,
+					...createOptions,
 				});
 			}
 			throw new Error(
@@ -1427,6 +1459,11 @@ export function createCliRuntime(
 				projectPath: activeProject.path,
 				router: agentRouter,
 				modelAssignments,
+				// B5 PR3 v2 (REQ-B5-5): thread `stateRoot` and
+				// `invocationSink` so the runner's `usePromptForRole`
+				// branch fires when `request.model` is set.
+				stateRoot: masterPlanStateRoot,
+				invocationSink: labDbRepository.appendInvocation.bind(labDbRepository),
 			}),
 		formatAgentLabReviewRunResult,
 		agentLabReviewStatus: (pathOrLatest) =>
@@ -1460,12 +1497,71 @@ export function createCliRuntime(
 		queueReject: (id) => rejectStructuredTaskById(structuredTaskQueue, id),
 		queueComplete: (id, evidence) =>
 			completeStructuredTaskById(structuredTaskQueue, id, evidence),
+		modelInvocationStatus: (options) => {
+			return buildModelInvocationStatusOrError({
+				projectId: activeProject.id,
+				stateRoot: masterPlanStateRoot,
+				labDbPath: labDbPath,
+				options,
+			});
+		},
+		formatModelInvocationStatus,
 		activeProfileId: () => agentRouter.activeProfile().id,
 	};
 }
 
 export function normalizeCliArgs(args: string[]): string[] {
 	return args[0] === "--" ? args.slice(1) : args;
+}
+
+/**
+ * Parse the rest-args of `idu-agentlab-request-create`. Mirrors
+ * `parseModelInvocationStatusArgs` style: first token is the source
+ * (defaults to `postflight`); the rest is the selector, with two
+ * optional flag pairs (`--model <id>` and `--state-root <path>`).
+ *
+ * Unknown flags throw so the CLI surfaces a clear error.
+ */
+export function parseAgentLabRequestCreateArgs(rawArgs: readonly string[]): {
+	source: string;
+	selector: string;
+	model?: string;
+	stateRoot?: string;
+} {
+	const args = [...rawArgs];
+	const source = args.shift() ?? "postflight";
+	let model: string | undefined;
+	let stateRoot: string | undefined;
+	const selectorTokens: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--model") {
+			const value = args[i + 1];
+			if (typeof value !== "string" || value.length === 0) {
+				throw new Error("--model requiere un valor");
+			}
+			model = value;
+			i++;
+			continue;
+		}
+		if (arg === "--state-root") {
+			const value = args[i + 1];
+			if (typeof value !== "string" || value.length === 0) {
+				throw new Error("--state-root requiere un valor");
+			}
+			stateRoot = value;
+			i++;
+			continue;
+		}
+		selectorTokens.push(arg);
+	}
+	const selector = selectorTokens.join(" ").trim() || "latest";
+	return {
+		source,
+		selector,
+		...(model !== undefined ? { model } : {}),
+		...(stateRoot !== undefined ? { stateRoot } : {}),
+	};
 }
 
 function recordCliUsage(
@@ -1882,13 +1978,35 @@ export async function runCliCommand(
 			case "review":
 			case "revisar":
 				return ok(await runMasterPlanDeepReview(activeRuntime, "simple"));
+			case "idu-model-invocation-status":
+			case "model-invocation-status": {
+				const { role, limit } = parseModelInvocationStatusArgs(rest);
+				const result = buildModelInvocationStatusOrError({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					labDbPath: join(
+						activeRuntime.workspaceRoot,
+						"projects",
+						activeRuntime.projectId,
+						"lab.db",
+					),
+					options: { role, limit },
+				});
+				if (!result.ok) {
+					return fail(result.error);
+				}
+				return ok(activeRuntime.formatModelInvocationStatus(result.report));
+			}
 			case "idu-agentlab-request-create":
 			case "agentlab-request-create": {
-				const source = rest[0] ?? "postflight";
-				const selector = rest.slice(1).join(" ").trim() || "latest";
+				const { source, selector, model, stateRoot } =
+					parseAgentLabRequestCreateArgs(rest);
 				return ok(
 					activeRuntime.formatAgentLabReviewRequestPlan(
-						activeRuntime.agentLabRequestCreate(source, selector),
+						activeRuntime.agentLabRequestCreate(source, selector, {
+							...(model !== undefined ? { model } : {}),
+							...(stateRoot !== undefined ? { stateRoot } : {}),
+						}),
 					),
 				);
 			}
@@ -2332,16 +2450,17 @@ export async function runCliCommand(
 					} catch (e) {
 						return fail(`JSON inválido: ${(e as Error).message}`);
 					}
-					if (
-						typeof parsedUnknown === "object" &&
-						parsedUnknown !== null
-					) {
+					if (typeof parsedUnknown === "object" && parsedUnknown !== null) {
 						const p = parsedUnknown as {
 							action?: string;
 							draft?: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
 							approvedBy?: string;
 						};
-						if (p.action === "draft" || p.action === "review" || p.action === "approve") {
+						if (
+							p.action === "draft" ||
+							p.action === "review" ||
+							p.action === "approve"
+						) {
 							action = p.action;
 						}
 						draft = p.draft;
@@ -2361,10 +2480,7 @@ export async function runCliCommand(
 			case "pending-injections": {
 				const params = rest.join(" ").trim();
 				const ack = !/ack\s*:\s*false/.test(params);
-				const pending = readPendingInjections(
-					activeRuntime.workspaceRoot,
-					{},
-				);
+				const pending = readPendingInjections(activeRuntime.workspaceRoot, {});
 				if (ack && pending.length > 0) {
 					for (const inj of pending) {
 						markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
@@ -2633,12 +2749,27 @@ function handleCliEventsInspectCommand(
 	runtime: CliRuntime,
 	parts: string[],
 ): CliResult {
-	const projectId = parts.find((p) => p.startsWith("--project="))?.slice("--project=".length) ?? runtime.projectId;
-	const kindsArg = parts.find((p) => p.startsWith("--kinds="))?.slice("--kinds=".length);
-	const kinds = kindsArg ? kindsArg.split(",").map((k) => k.trim()).filter(Boolean) : undefined;
-	const since = parts.find((p) => p.startsWith("--since="))?.slice("--since=".length);
-	const until = parts.find((p) => p.startsWith("--until="))?.slice("--until=".length);
-	const limitArg = parts.find((p) => p.startsWith("--limit="))?.slice("--limit=".length);
+	const projectId =
+		parts.find((p) => p.startsWith("--project="))?.slice("--project=".length) ??
+		runtime.projectId;
+	const kindsArg = parts
+		.find((p) => p.startsWith("--kinds="))
+		?.slice("--kinds=".length);
+	const kinds = kindsArg
+		? kindsArg
+				.split(",")
+				.map((k) => k.trim())
+				.filter(Boolean)
+		: undefined;
+	const since = parts
+		.find((p) => p.startsWith("--since="))
+		?.slice("--since=".length);
+	const until = parts
+		.find((p) => p.startsWith("--until="))
+		?.slice("--until=".length);
+	const limitArg = parts
+		.find((p) => p.startsWith("--limit="))
+		?.slice("--limit=".length);
 	const limit = limitArg ? Number.parseInt(limitArg, 10) : undefined;
 	if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
 		return ok(`Events: limit inválido "${limitArg}"`);
@@ -2843,9 +2974,8 @@ function runCliAutonomousAlertScheduledTick(
 	(
 		alertTickResult as unknown as { mcpContextPackAutoRefresh?: unknown }
 	).mcpContextPackAutoRefresh = mcpContextPackAutoRefresh;
-	(
-		alertTickResult as unknown as { _stateRoot?: string }
-	)._stateRoot = runtime.workspaceRoot;
+	(alertTickResult as unknown as { _stateRoot?: string })._stateRoot =
+		runtime.workspaceRoot;
 	return alertTickResult;
 }
 
@@ -3011,9 +3141,8 @@ function formatCliAutonomousAlertScheduledTick(
 	const skippedDetail =
 		result.status === "skipped_locked" || result.status === "skipped_inactive"
 			? formatScheduledTickSkippedDetail({
-					stateRoot: (
-						result as unknown as { _stateRoot?: string }
-					)._stateRoot ?? "",
+					stateRoot:
+						(result as unknown as { _stateRoot?: string })._stateRoot ?? "",
 					now: new Date(result.generatedAt),
 				})
 			: "";
@@ -5408,7 +5537,9 @@ function formatPendingInjections(pending: Injection[], ack: boolean): string {
 
 function formatTriggerSubscription(): string {
 	const lines: string[] = [];
-	lines.push(`Trigger Subscription — ${TRIGGER_DEFINITIONS.length} disparadores`);
+	lines.push(
+		`Trigger Subscription — ${TRIGGER_DEFINITIONS.length} disparadores`,
+	);
 	for (const def of TRIGGER_DEFINITIONS) {
 		lines.push(
 			`  - ${def.id} severity=${def.contract.severity} decisionRequired=${def.contract.decisionRequired} kinds=[${def.kinds.join(",")}]`,

@@ -3,6 +3,14 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentProfile, AgentWorkspaceMode } from "./config.js";
 import {
+	loadModelAssignments,
+	profileForModelRole,
+	IDU_MODEL_ROLES,
+	type IduModelRoleId,
+} from "./model-assignments.js";
+import { parseModelAssignment } from "./model-assignment-parser.js";
+import type { ModelInvocationRecord } from "./model-invocation-log.js";
+import {
 	PiRpcSession,
 	type PiRpcOptions,
 	type PiRpcProgressEvent,
@@ -265,6 +273,105 @@ export class AgentRouter {
 		return this.activeRuntime().session.prompt(message, onProgress);
 	}
 
+	/**
+	 * Resolve a model role (one of `IduModelRoleId`) to its assigned
+	 * provider/model from `<stateRoot>/model-assignments.json` and
+	 * invoke Pi with the per-role flags.
+	 *
+	 * B5 wiring (REQ-B5-1 + REQ-B5-2). Every successful or failed
+	 * invocation is reported to `options.invocationSink` so the CLI
+	 * can persist it to `model_invocation_log`. The sink is the only
+	 * persistence hook; the router itself stays free of side effects.
+	 *
+	 * Resolution order:
+	 *
+	 * 1. `loadModelAssignments(stateRoot)` reads the assignment file.
+	 * 2. `profileForModelRole(assignments, role, profiles)` resolves
+	 *    the role.
+	 * 3. `direct-model` → spawn a session with
+	 *    `["--provider", provider, "--model", model]`.
+	 * 4. `assigned` → reuse the profile's existing `piArgs` and resolve
+	 *    `provider`/`model` from the profile shape.
+	 * 5. `missing` or undefined → record a `skipped` invocation and
+	 *    return `{ ok: false, output: "" }` without spawning a session.
+	 *
+	 * @throws if `role` is not a known `IduModelRoleId`.
+	 */
+	async promptForRole(
+		role: IduModelRoleId,
+		message: string,
+		options: PromptForRoleOptions,
+	): Promise<PromptForRoleResult> {
+		assertValidModelRole(role);
+		const promptChars = message.length;
+		const assignments = loadModelAssignments(options.stateRoot);
+		const resolution = profileForModelRole(
+			assignments,
+			role,
+			this.options.profiles,
+		);
+		if (
+			!resolution ||
+			resolution.source === "missing" ||
+			resolution.source === "inherit"
+		) {
+			const errorMessage =
+				resolution?.source === "missing"
+					? `unknown model profile: ${resolution.profileId}`
+					: undefined;
+			options.invocationSink?.({
+				role,
+				provider: "",
+				model: "",
+				status: "skipped",
+				promptChars,
+				responseChars: 0,
+				...(errorMessage ? { errorMessage } : {}),
+			});
+			return {
+				ok: false,
+				output: "",
+				provider: "",
+				model: "",
+				role,
+			};
+		}
+		const resolved = resolveSessionForRole(resolution, this);
+		try {
+			const result = await resolved.runtime.session.prompt(
+				message,
+				options.onProgress,
+			);
+			options.invocationSink?.({
+				role,
+				provider: resolved.provider,
+				model: resolved.model,
+				status: "success",
+				promptChars,
+				responseChars: result.output.length,
+			});
+			return {
+				...result,
+				provider: resolved.provider,
+				model: resolved.model,
+				role,
+			};
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+			options.invocationSink?.({
+				role,
+				provider: resolved.provider,
+				model: resolved.model,
+				status: "failure",
+				promptChars,
+				responseChars: 0,
+				errorMessage,
+			});
+			throw error;
+		}
+	}
+
 	answerActiveUiRequest(value: unknown): boolean {
 		return this.activeRuntime().session.answerUiRequest(value);
 	}
@@ -368,6 +475,119 @@ export class AgentRouter {
 
 	private key(projectId: string, cwd: string, profileId: string): string {
 		return `${projectId}\u0000${cwd}\u0000${profileId}`;
+	}
+
+	/**
+	 * Internal helper used by `promptForRole` to spawn a session with
+	 * custom `piArgs` (e.g. `["--provider", provider, "--model", model]`)
+	 * when the resolved role points at a direct-model assignment.
+	 *
+	 * Unlike `activeRuntime()` this does **not** cache a runtime in
+	 * the `runtimes` map or share the active profile's session: the
+	 * role-based call is one-off and should not touch the active
+	 * runtime the user has selected via Telegram.
+	 */
+	private createRoleSession(piArgs: string[]): AgentSession {
+		const workspace = this.workspaceFor(
+			this.projectId,
+			this.cwd,
+			this.options.profiles[0]!,
+		);
+		return this.createSession({
+			piBin: this.options.piBin,
+			piArgs: [...this.options.basePiArgs, ...piArgs],
+			cwd: workspace.cwd,
+			modePrefix: "",
+		});
+	}
+}
+
+export type PromptForRoleOptions = {
+	projectId: string;
+	stateRoot: string;
+	invocationSink?: (record: ModelInvocationRecord) => void;
+	onProgress?: (event: PiRpcProgressEvent) => void;
+};
+
+export type PromptForRoleResult = PiRpcPromptResult & {
+	provider: string;
+	model: string;
+	role: IduModelRoleId;
+};
+
+type ResolvedRoleSession = {
+	runtime: AgentRuntime;
+	provider: string;
+	model: string;
+};
+
+type AssignedResolution = {
+	source: "assigned";
+	profile: AgentProfile;
+	profileId: string;
+};
+
+type DirectModelResolution = {
+	source: "direct-model";
+	profile: AgentProfile;
+	modelId: string;
+};
+
+function resolveSessionForRole(
+	resolution: AssignedResolution | DirectModelResolution,
+	router: AgentRouter,
+): ResolvedRoleSession {
+	if (resolution.source === "direct-model") {
+		const parsed = parseModelAssignment(resolution.modelId);
+		return {
+			runtime: createDirectModelRuntime(router, parsed.provider, parsed.model),
+			provider: parsed.provider,
+			model: parsed.model,
+		};
+	}
+	// source === "assigned": reuse the existing profile runtime.
+	return {
+		runtime: router.runtimeForProfile(resolution.profile.id),
+		provider: resolution.profile.provider,
+		model: profileModelLabel(resolution.profile),
+	};
+}
+
+function createDirectModelRuntime(
+	router: AgentRouter,
+	provider: string,
+	model: string,
+): AgentRuntime {
+	const session = router["createRoleSession"]([
+		"--provider",
+		provider,
+		"--model",
+		model,
+	]);
+	const workspace = router["workspaceFor"](
+		router["projectId"],
+		router["cwd"],
+		router["profiles"][0]!,
+	);
+	return {
+		projectId: router["projectId"],
+		targetCwd: router["cwd"],
+		cwd: workspace.cwd,
+		profile: {
+			id: "__agent_router_role_runtime__",
+			label: "agentRouter role runtime",
+			provider: "pi",
+			piArgs: ["--provider", provider, "--model", model],
+		},
+		modePrefix: "",
+		workspaceKind: workspace.kind,
+		session,
+	};
+}
+
+function assertValidModelRole(role: IduModelRoleId): void {
+	if (!IDU_MODEL_ROLES.some((candidate) => candidate.id === role)) {
+		throw new Error(`unknown model role: ${role}`);
 	}
 }
 

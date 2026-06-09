@@ -13,6 +13,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { AgentProfile } from "./config.js";
 import type { AgentRouter } from "./agent-router.js";
 import { loadLabProjectContext } from "./lab-context.js";
+import type { ModelInvocationRecord } from "./model-invocation-log.js";
 import {
 	buildAgentLabWorkloadEnvelope,
 	formatAgentLabReviewRequestForPrompt,
@@ -100,6 +101,8 @@ export type RunAgentLabReviewRequestFileInput = {
 	profileId?: string;
 	modelAssignments?: ModelAssignments;
 	now?: () => Date;
+	stateRoot?: string;
+	invocationSink?: (record: ModelInvocationRecord) => void;
 };
 
 export type RunAgentLabReviewRequestInput = {
@@ -109,6 +112,15 @@ export type RunAgentLabReviewRequestInput = {
 	profile?: AgentProfile;
 	modelAssignments?: ModelAssignments;
 	now?: () => Date;
+	/**
+	 * B5 PR2: when provided (along with `invocationSink`) the runner
+	 * routes through `router.promptForRole` instead of the profile's
+	 * session, so the request's `model` field is honored and a record
+	 * is appended to the invocation sink.
+	 */
+	stateRoot?: string;
+	invocationSink?: (record: ModelInvocationRecord) => void;
+	role?: import("./model-assignments.js").IduModelRoleId;
 };
 
 export type RealRepoSnapshot = {
@@ -188,6 +200,8 @@ export async function runAgentLabReviewRequestFile(
 			profileId: input.profileId,
 			modelAssignments: input.modelAssignments,
 			now: input.now,
+			stateRoot: input.stateRoot,
+			invocationSink: input.invocationSink,
 		});
 	}
 	const result = buildRunResult({
@@ -267,12 +281,41 @@ export async function runAgentLabReviewRequest(
 	let run: AgentLabReviewRunSummary;
 	try {
 		const prompt = buildReviewPrompt(input.request, profile, input.projectPath);
-		const result = await Promise.race([
-			runtime.session.prompt(prompt),
-			new Promise<never>((_, reject) =>
-				setTimeout(() => reject(new Error("LAB_TIMEOUT")), timeoutMs).unref(),
-			),
-		]);
+		// B5 PR2 wiring: when the caller passes stateRoot + invocationSink,
+		// honor request.model by routing through router.promptForRole. This
+		// spawns a session with --provider/--model and feeds the invocation
+		// sink. Otherwise we keep the existing profile path.
+		const usePromptForRole =
+			Boolean(input.request.model) &&
+			Boolean(input.stateRoot) &&
+			Boolean(input.invocationSink);
+		const result = usePromptForRole
+			? await Promise.race([
+					input.router.promptForRole(
+						input.role ?? mapSpecialtyToRole(input.request.specialty),
+						prompt,
+						{
+							projectId: input.request.projectId,
+							stateRoot: input.stateRoot!,
+							invocationSink: input.invocationSink,
+						},
+					),
+					new Promise<never>((_, reject) =>
+						setTimeout(
+							() => reject(new Error("LAB_TIMEOUT")),
+							timeoutMs,
+						).unref(),
+					),
+				])
+			: await Promise.race([
+					runtime.session.prompt(prompt),
+					new Promise<never>((_, reject) =>
+						setTimeout(
+							() => reject(new Error("LAB_TIMEOUT")),
+							timeoutMs,
+						).unref(),
+					),
+				]);
 		const parsed = extractAgentLabReviewReportFromOutput(
 			result.output,
 			input.request,
@@ -977,6 +1020,8 @@ async function runPlanRequests(input: {
 	profileId?: string;
 	modelAssignments?: ModelAssignments;
 	now?: () => Date;
+	stateRoot?: string;
+	invocationSink?: (record: ModelInvocationRecord) => void;
 }): Promise<AgentLabReviewRunSummary[]> {
 	const forcedProfile = input.profileId
 		? input.router
@@ -993,6 +1038,8 @@ async function runPlanRequests(input: {
 				profile: forcedProfile,
 				modelAssignments: input.modelAssignments,
 				now: input.now,
+				stateRoot: input.stateRoot,
+				invocationSink: input.invocationSink,
 			}),
 		);
 	}
@@ -1731,6 +1778,41 @@ function countRuns(
 
 export function sanitizeAgentLabSummary(output: string): string {
 	return summarizeOutput(cleanAgentOutput(output), 300);
+}
+
+/**
+ * Map an AgentLab review specialty to the corresponding `IduModelRoleId`
+ * for B5 PR2 wiring. Defaults to `agentlab-general` for unknown
+ * specialties so the runner never blocks on missing mappings.
+ */
+function mapSpecialtyToRole(
+	specialty: AgentLabReviewRequest["specialty"],
+): import("./model-assignments.js").IduModelRoleId {
+	switch (specialty) {
+		case "security":
+			return "agentlab-security";
+		case "database":
+			return "agentlab-database";
+		case "architecture":
+			return "agentlab-architecture";
+		case "code_quality":
+			return "agentlab-code-quality";
+		case "ui_ux":
+			return "agentlab-ui-ux";
+		case "performance":
+			return "agentlab-performance";
+		case "project_understanding":
+			return "agentlab-project-understanding";
+		case "docs":
+			return "agentlab-docs";
+		case "librarian":
+			return "agentlab-librarian";
+		case "general":
+		case "skill_review":
+		case "token_cost":
+		default:
+			return "agentlab-general";
+	}
 }
 
 function legacySummary(output: string): string {

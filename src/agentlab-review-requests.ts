@@ -16,6 +16,10 @@ import {
 	type AgentLabSpecialty,
 	type AgentLabWorkloadEnvelope,
 } from "./agentlab-supervisor-contract.js";
+import {
+	loadModelAssignments,
+	profileForModelRole,
+} from "./model-assignments.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
 import {
 	buildSemanticAgentTaskPlan,
@@ -92,6 +96,21 @@ export type AgentLabSpecialistAuditPlanOptions = {
 	context?: string;
 	specialties?: AgentLabSpecialty[];
 	externalSourceLibraryEvidence?: AgentLabSourceLibraryEvidence;
+	/**
+	 * B5 PR3 v2 (REQ-B5-5). Optional canonical model id
+	 * (`<provider>/<model>`) that the orchestrator committed to. When
+	 * set, it is copied verbatim into every `AgentLabReviewRequest`
+	 * produced by this call. When absent, the create-time logic
+	 * looks up the per-role assignment from
+	 * `<stateRoot>/model-assignments.json` and auto-picks a
+	 * direct-model assignment.
+	 */
+	model?: string;
+	/**
+	 * B5 PR3 v2 (REQ-B5-5). State root for the create-time auto-pick
+	 * logic. Only consulted when `model` is not provided.
+	 */
+	stateRoot?: string;
 };
 
 export type CreateAgentLabReviewRequestsInput = {
@@ -112,6 +131,23 @@ export type CreateAgentLabReviewRequestsInput = {
 	externalSourceLibraryEvidence?: AgentLabSourceLibraryEvidence;
 	specialties?: AgentLabSpecialty[];
 	now?: () => Date;
+	/**
+	 * B5 wiring (REQ-B5-5). Optional canonical model id
+	 * (`<provider>/<model>`) that the orchestrator committed to. When
+	 * set, it is copied verbatim into every `AgentLabReviewRequest`
+	 * produced by this call. When absent, the create-time logic
+	 * looks up the per-role assignment from
+	 * `<stateRoot>/model-assignments.json` and auto-picks a
+	 * direct-model assignment, or surfaces a structured error
+	 * (`agentlab_model_unresolved`) when no canonical id is
+	 * available.
+	 */
+	model?: string;
+	/**
+	 * State root for the create-time auto-pick logic. Only consulted
+	 * when `model` is not provided.
+	 */
+	stateRoot?: string;
 };
 
 const WARNING = "Solicitud AgentLab. No ejecuta revisión por sí sola." as const;
@@ -125,8 +161,10 @@ export function createAgentLabReviewRequests(
 	const now = input.now?.() ?? new Date();
 	const generatedAt = now.toISOString();
 	const requests = buildRequests(input, generatedAt);
+	const createTimeErrors = resolveCreateTimeModelErrors(input, requests);
 	const errors = [
 		...emptyRequestErrors(input, requests),
+		...createTimeErrors,
 		...validateRequests(requests),
 	];
 	const plan: AgentLabReviewRequestPlan = {
@@ -371,6 +409,7 @@ function requestsFromPostflight(
 				"recomendaciones para Idu-pi Supervisor",
 			],
 			createdAt,
+			...(input.model ? { model: input.model } : {}),
 		}),
 	);
 }
@@ -417,6 +456,7 @@ function requestsFromSkillDraft(
 			],
 			createdAt,
 			requiresHumanApproval: true,
+			...(input.model ? { model: input.model } : {}),
 		}),
 	];
 }
@@ -484,6 +524,7 @@ function requestsFromMasterPlan(
 				plan.autoDepth.mode === "deep_required" ||
 				specialty === "security" ||
 				specialty === "database",
+			...(input.model ? { model: input.model } : {}),
 		}),
 	);
 }
@@ -522,6 +563,7 @@ function requestsFromSemanticTasks(
 			requiresHumanApproval: candidates.some(
 				(candidate) => candidate.requiresHumanApproval,
 			),
+			...(input.model ? { model: input.model } : {}),
 		}),
 	);
 }
@@ -681,6 +723,7 @@ function requestsFromExternalSourceIntelligence(
 					],
 			createdAt,
 			requiresHumanApproval: true,
+			...(input.model ? { model: input.model } : {}),
 		}),
 	];
 }
@@ -735,6 +778,7 @@ function requestsFromSpecialistAuditPlan(
 			],
 			createdAt,
 			requiresHumanApproval: true,
+			...(input.model ? { model: input.model } : {}),
 		}),
 	);
 }
@@ -767,6 +811,7 @@ function requestsFromManual(
 			tokenBudgetHint: "bounded-manual",
 			expectedOutputs: ["reporte de revisión con evidencia"],
 			createdAt,
+			...(input.model ? { model: input.model } : {}),
 		}),
 	);
 }
@@ -1277,4 +1322,84 @@ function slug(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object";
+}
+
+/**
+ * Create-time auto-pick + structured error for the `model` field.
+ *
+ * When the caller passes an explicit `input.model`, it is threaded
+ * through `buildAgentLabReviewRequest` for every request and the
+ * function returns no errors.
+ *
+ * When `input.model` is absent and `input.stateRoot` is set, the
+ * function inspects `<stateRoot>/model-assignments.json` for each
+ * request's role. If the role's assignment is a direct-model
+ * canonical id (`<provider>/<model>`), it is set on the request
+ * verbatim. If the assignment is a profile id, or the role has no
+ * assignment, the request's `model` stays `undefined` and a
+ * structured error (`agentlab_model_unresolved: specialty=<x>`) is
+ * appended to the plan's `errors` array.
+ *
+ * When `input.model` and `input.stateRoot` are both absent, the
+ * function is a no-op (back-compat for callers that predate B5).
+ */
+function resolveCreateTimeModelErrors(
+	input: CreateAgentLabReviewRequestsInput,
+	requests: AgentLabReviewRequest[],
+): string[] {
+	if (input.model) return [];
+	if (!input.stateRoot) return [];
+	const assignments = loadModelAssignments(input.stateRoot);
+	const errors: string[] = [];
+	for (const request of requests) {
+		if (request.model) continue;
+		const role = agentLabRoleForSpecialty(request.specialty);
+		const resolution = profileForModelRole(
+			assignments,
+			role,
+			// profile list is not available here; we only need the
+			// assignment value, which the resolution already extracts.
+			// Passing an empty list is safe: the `assigned` branch
+			// falls through to the `direct-model` branch when no
+			// profile matches the assignment value.
+			[],
+		);
+		if (resolution?.source === "direct-model") {
+			request.model = resolution.modelId;
+			continue;
+		}
+		errors.push(
+			`agentlab_model_unresolved: specialty=${request.specialty} role=${role} has no canonical model assignment`,
+		);
+	}
+	return errors;
+}
+
+function agentLabRoleForSpecialty(
+	specialty: AgentLabSpecialty,
+): import("./model-assignments.js").IduModelRoleId {
+	switch (specialty) {
+		case "security":
+			return "agentlab-security";
+		case "project_understanding":
+			return "agentlab-project-understanding";
+		case "architecture":
+			return "agentlab-architecture";
+		case "database":
+			return "agentlab-database";
+		case "ui_ux":
+			return "agentlab-ui-ux";
+		case "performance":
+		case "token_cost":
+			return "agentlab-performance";
+		case "code_quality":
+		case "skill_review":
+			return "agentlab-code-quality";
+		case "docs":
+			return "agentlab-docs";
+		case "librarian":
+			return "agentlab-librarian";
+		case "general":
+			return "agentlab-general";
+	}
 }

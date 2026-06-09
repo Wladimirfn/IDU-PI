@@ -39,6 +39,7 @@ process.env.IDU_PI_REGISTRY_PATH = join(
 delete process.env.TELEGRAM_BOT_TOKEN;
 delete process.env.ALLOWED_USER_ID;
 import type { CliRuntime, ExecutionDirectorCliResult } from "../src/cli.js";
+import type { BuildModelInvocationStatusResult } from "../src/cli-model-invocation-status.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
@@ -992,6 +993,20 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			delete task.guardReason;
 			return task;
 		},
+		modelInvocationStatus: (): BuildModelInvocationStatusResult => ({
+			ok: true,
+			report: {
+				generatedAt: new Date().toISOString(),
+				projectId: runtime.projectId,
+				stateRoot: runtime.workspaceRoot,
+				labDbPath: `${runtime.workspaceRoot}/lab.db`,
+				limit: 50,
+				totalInvocations: 0,
+				roleCount: 0,
+				groups: [],
+			},
+		}),
+		formatModelInvocationStatus: () => "no invocations yet",
 	} satisfies CliRuntime & {
 		listTasks: () => StructuredTask[];
 		queueComplete: (
@@ -4616,4 +4631,71 @@ test("postflight request create remains request-only and review-run reports sand
 	assert.ok(
 		run.safeNotes.some((note) => /sandbox|review-only|clone/iu.test(note)),
 	);
+});
+
+test("MCP idu_agentlab_request_create threads the model arg through to the runtime and persists it on every request", async () => {
+	const reportsPath = mkdtempSync(join(tmpdir(), "idu-mcp-model-"));
+	try {
+		const runtime = fakeRuntime();
+		let capturedOptions:
+			| {
+					model?: string;
+					stateRoot?: string;
+					objective?: string;
+					context?: string;
+			  }
+			| undefined;
+		runtime.agentLabRequestCreate = (_source, _selector, options) => {
+			capturedOptions = options;
+			// Build a real plan via the production helper so we exercise
+			// the same persistence path the CLI takes (model flows into
+			// every request).
+			return createAgentLabReviewRequests({
+				source: "postflight",
+				reportsPath,
+				projectId: "sistema_de_mantencion",
+				projectPath: "C:/projects/sistema",
+				postflightReport: {
+					risk: "high",
+					changedFiles: ["src/auth.ts"],
+					impactedAreas: ["seguridad"],
+					warnings: [],
+					recommendedNext: "Revisar cambios.",
+					shouldRunAgentLab: true,
+					suggestedAgentLabs: ["security"],
+					requiresHumanConfirmation: false,
+					physicalGates: [],
+				},
+				model: options?.model,
+				stateRoot: options?.stateRoot,
+			});
+		};
+		const response = await callIduMcpTool(
+			"idu_agentlab_request_create",
+			{
+				source: "postflight",
+				selector: "latest",
+				model: "opencode-go/deepseek-v4-pro",
+			},
+			{
+				runtimeFactory: () => runtime,
+				projectResolver: () => registered(),
+			},
+		);
+		assert.equal(response.ok, true, `errors: ${response.errors.join("\n")}`);
+		assert.equal(capturedOptions?.model, "opencode-go/deepseek-v4-pro");
+		const plan = response.data.plan as {
+			requests: Array<{ model?: string; specialty: string }>;
+		};
+		assert.ok(plan.requests.length > 0, "expected at least one request");
+		for (const request of plan.requests) {
+			assert.equal(
+				request.model,
+				"opencode-go/deepseek-v4-pro",
+				`request ${request.specialty} must carry the model`,
+			);
+		}
+	} finally {
+		rmSync(reportsPath, { recursive: true, force: true });
+	}
 });
