@@ -244,3 +244,28 @@ export function saveRoleEngineConfig(
 	}
 	return next;
 }
+
+/**
+ * One-time migration for the role-engine config.
+ *
+ * If `stateRoot/role-engine.json` does NOT exist, write the
+ * default config with `maxRoleInvocationsPerTurn: 50` and all
+ * 13 role flags set to `false`. If the file already exists,
+ * this function does nothing (idempotent — never overwrites).
+ */
+export function runRoleEngineMigration(stateRoot: string): void {
+	const path = roleEngineConfigPath(stateRoot);
+	if (existsSync(path)) {
+		return;
+	}
+	mkdirSync(stateRoot, { recursive: true });
+	const migrationConfig = {
+		maxRoleInvocationsPerTurn: DEFAULT_MAX_ROLE_INVOCATIONS_PER_TURN,
+		roleEnabled: { ...DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled },
+	};
+	writeFileSync(
+		path,
+		`${JSON.stringify(migrationConfig, null, 2)}\n`,
+		"utf8",
+	);
+}

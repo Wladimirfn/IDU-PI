@@ -4875,6 +4875,7 @@ function buildSupervisorContextPack(
 	const embeddedPlanSnapshotUsage = embeddedPlanSnapshot
 		? budgetEmbeddedPlanSnapshotForContextPack(embeddedPlanSnapshot)
 		: undefined;
+	const orchestratorAdvisories = buildOrchestratorAdvisoriesSection(runtime);
 	const supervisorConsultation = buildSupervisorConsultation({
 		source: "idu_supervisor_context_pack",
 		planObjective: snapshot.objective,
@@ -4942,6 +4943,50 @@ function buildSupervisorContextPack(
 		]),
 		governanceConfig: governanceConfigData(),
 		workerBoundary: workerBoundaryData(),
+		orchestratorAdvisories,
+	};
+}
+
+export function buildOrchestratorAdvisoriesSection(runtime: CliRuntime): JsonObject {
+	// Get advisories from the runtime (last 500 to have enough data for grouping)
+	const advisories = runtime.getOrchestratorAdvisory
+		? runtime.getOrchestratorAdvisory({ limit: 500 })
+		: [];
+
+	// Group by roleId and cap at 5 per role
+	const byRole: Record<string, JsonObject[]> = {};
+	const roleAdvisoryMap = new Map<string, JsonObject[]>();
+
+	for (const advisory of advisories) {
+		const roleId = advisory.roleId;
+		if (!roleAdvisoryMap.has(roleId)) {
+			roleAdvisoryMap.set(roleId, []);
+		}
+		roleAdvisoryMap.get(roleId)!.push({
+			ts: advisory.ts,
+			priority: advisory.priority,
+			advisory: advisory.advisory,
+			evidenceRefs: advisory.evidenceRefs,
+		});
+	}
+
+	// Cap each role at 5 advisories (most recent first)
+	let total = 0;
+	for (const [roleId, roleAdvisories] of roleAdvisoryMap.entries()) {
+		// Sort by timestamp descending (most recent first)
+		const sorted = roleAdvisories.sort((a, b) => {
+			const tsA = String(a.ts);
+			const tsB = String(b.ts);
+			return tsB.localeCompare(tsA);
+		});
+		byRole[roleId] = sorted.slice(0, 5);
+		total += byRole[roleId]!.length;
+	}
+
+	return {
+		advisoryOnly: true,
+		byRole,
+		total,
 	};
 }
 
