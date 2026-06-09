@@ -4431,6 +4431,12 @@ async function dispatchTool(
 			}
 			const objective = stringArg(args, "objective");
 			const context = stringArg(args, "context");
+			// B5 PR3 v2 (REQ-B5-5): accept the optional `model` and
+			// `stateRoot` args so the CLI/MCP surfaces can pick a
+			// canonical model id or fall back to the create-time
+			// auto-pick.
+			const model = stringArg(args, "model");
+			const stateRoot = stringArg(args, "stateRoot");
 			const sourceLibraryEvidence =
 				source === "external-source-intelligence"
 					? compactSourceLibraryEvidence(
@@ -4442,6 +4448,8 @@ async function dispatchTool(
 				context,
 				specialties: specialties.values,
 				externalSourceLibraryEvidence: sourceLibraryEvidence,
+				...(model !== undefined ? { model } : {}),
+				...(stateRoot !== undefined ? { stateRoot } : {}),
 			});
 			const workloadEnvelope =
 				plan.workloadEnvelope ??

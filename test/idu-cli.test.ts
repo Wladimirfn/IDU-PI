@@ -30,6 +30,7 @@ import {
 	supervisorActivityInputFromLoopResult,
 } from "../src/supervisor-activity-events.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
+import type { BuildModelInvocationStatusResult } from "../src/cli-model-invocation-status.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { ProjectAdvisory } from "../src/project-advisory.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
@@ -1551,6 +1552,20 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		queueClearStructured: () => 1,
 		queueApprove: fakeTask,
 		queueReject: fakeTask,
+		modelInvocationStatus: (): BuildModelInvocationStatusResult => ({
+			ok: true,
+			report: {
+				generatedAt: new Date().toISOString(),
+				projectId: runtime.projectId,
+				stateRoot: runtime.workspaceRoot,
+				labDbPath: `${runtime.workspaceRoot}/lab.db`,
+				limit: 50,
+				totalInvocations: 0,
+				roleCount: 0,
+				groups: [],
+			},
+		}),
+		formatModelInvocationStatus: () => "no invocations yet",
 	};
 	return runtime;
 }

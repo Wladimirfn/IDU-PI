@@ -912,6 +912,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 			"corepack pnpm cli -- idu-agentlab-report-consolidation-status latest",
 	},
 	{
+		label: "Model invocation status",
+		command: "corepack pnpm cli -- idu-model-invocation-status",
+	},
+	{
+		label: "Model invocation status (role filter)",
+		command: "corepack pnpm cli -- idu-model-invocation-status agentlab-security 20",
+	},
+	{
 		label: "Semantic audit status",
 		command: "corepack pnpm cli -- idu-semantic-audit-status",
 	},

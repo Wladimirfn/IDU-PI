@@ -353,3 +353,30 @@ test("telegramCommandsForApi creates setMyCommands payload from catalog", () => 
 		assert.ok(entry.description.length <= 80);
 	}
 });
+
+test("CLI_COMMANDS exposes the model invocation status entries for the new REQ-B5-3 command", () => {
+	const labels = CLI_COMMANDS.map((entry) => entry.label);
+	assert.ok(
+		labels.includes("Model invocation status"),
+		"expected a CLI_COMMANDS entry labelled 'Model invocation status'",
+	);
+	assert.ok(
+		labels.includes("Model invocation status (role filter)"),
+		"expected a CLI_COMMANDS entry labelled 'Model invocation status (role filter)'",
+	);
+	const commands = CLI_COMMANDS.map((entry) => entry.command);
+	const defaultEntry = commands.find((cmd) =>
+		/corepack pnpm cli -- idu-model-invocation-status$/u.test(cmd),
+	);
+	assert.ok(
+		defaultEntry,
+		"expected a default idu-model-invocation-status command with no extra args",
+	);
+	const roleEntry = commands.find((cmd) =>
+		/corepack pnpm cli -- idu-model-invocation-status \S+ \d+/u.test(cmd),
+	);
+	assert.ok(
+		roleEntry,
+		"expected a role-filter idu-model-invocation-status command with a role + limit",
+	);
+});
