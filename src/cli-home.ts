@@ -197,10 +197,9 @@ export function formatMainMenu(status: CliHomeStatus): string {
 		"3. Telegram remoto",
 		"4. Modelos y perfiles",
 		"5. Supervisor",
-		"6. Tareas",
-		"7. Cola",
-		"8. Diagnóstico",
-		"9. Exit",
+		"6. Tareas y cola",
+		"7. Diagnóstico",
+		"8. Exit",
 	].join("\n");
 }
 
