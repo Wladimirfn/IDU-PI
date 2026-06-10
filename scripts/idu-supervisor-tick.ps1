@@ -35,6 +35,27 @@ $banner = 'Idu-pi supervisor tick — interval=' + $IntervalMinutes + 'min, trig
 Step $banner
 Log ('interval_minutes=' + $IntervalMinutes + ' trigger_engine=' + $EnvTriggerEngine)
 
+# Step 0: skip when an interactive CLI is open. The user is in a
+# session; do not interrupt them with a tick. Force the tick with
+# IDU_PI_TICK_FORCE=1 if you want it to run anyway.
+if (-not $env:IDU_PI_TICK_FORCE -or $env:IDU_PI_TICK_FORCE -ne '1') {
+	$cliNames = @('pi', 'opencode', 'opencode-go', 'opencode-zen', 'node')
+	$active = @()
+	foreach ($name in $cliNames) {
+		$processes = Get-Process -Name $name -ErrorAction SilentlyContinue
+		if ($processes) {
+			foreach ($p in $processes) { $active += $p.ProcessName }
+		}
+	}
+	if ($active.Count -gt 0) {
+		$reason = 'skipped: CLI active (' + ($active -join ', ') + ')'
+		Write-Host $reason -ForegroundColor DarkYellow
+		Log $reason
+		Step 'Step 0: skip because a pi/opencode CLI session is active. Set IDU_PI_TICK_FORCE=1 to override.'
+		exit 0
+	}
+}
+
 # Step 1: ensure project is in working state.
 try {
 	corepack pnpm tsc -p tsconfig.json 2>&1 | Out-Null
