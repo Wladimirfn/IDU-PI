@@ -4095,7 +4095,8 @@ async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	const normalizedArgs = normalizeCliArgs(args);
 	if (shouldRunInteractiveHome(normalizedArgs)) {
-		const output = await runInteractiveHome();
+		const taskQueueRuntime = buildHomeTaskQueueRuntime();
+		const output = await runInteractiveHome(taskQueueRuntime);
 		if (output) console.log(output);
 		return;
 	}
@@ -4103,6 +4104,30 @@ async function main(): Promise<void> {
 	if (result.stdout) console.log(result.stdout);
 	if (result.stderr) console.error(result.stderr);
 	process.exit(result.exitCode);
+}
+
+function buildHomeTaskQueueRuntime(): TaskQueuePanelDispatchRuntime {
+	const empty: TaskQueuePanelDispatchRuntime = {
+		queueApprove: () => undefined,
+		queueReject: () => undefined,
+		listTasks: () => [],
+	};
+	try {
+		const runtime = createCliRuntime({
+			createRegistryIfMissing: false,
+		});
+		return {
+			queueApprove: (id) => runtime.queueApprove(id),
+			queueReject: (id) => runtime.queueReject(id),
+			listTasks: () => runtime.listTasks?.() ?? [],
+		};
+	} catch {
+		// No project enrolled, Telegram config missing, or runtime
+		// factory failed. The home menu must still render; the
+		// "Tareas y cola" panel shows the empty-state message and
+		// approve/reject become no-ops until a project is enrolled.
+		return empty;
+	}
 }
 
 function shouldRunInteractiveHome(args: string[]): boolean {
@@ -4137,13 +4162,27 @@ const ANSI_DARK_PURPLE = "\x1b[35m";
 const ANSI_DIM = "\x1b[2m";
 const ANSI_PANEL_WIDTH = 72;
 
-export async function runInteractiveHome(): Promise<string> {
+type InteractiveHomeSelectMenu = (
+	title: string,
+	options: MenuOption[],
+	status?: ReturnType<typeof buildCliHomeStatus>,
+	content?: string,
+) => Promise<string>;
+
+export async function runInteractiveHome(
+	taskQueueRuntime: TaskQueuePanelDispatchRuntime = {
+		queueApprove: () => undefined,
+		queueReject: () => undefined,
+		listTasks: () => [],
+	},
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<string> {
 	while (true) {
 		const status = buildCliHomeStatus({
 			argvPath: process.argv[1],
 			stdinInteractive: true,
 		});
-		const choice = await selectMenu("", mainMenuOptions(), status);
+		const choice = await selectMenuImpl("", mainMenuOptions(), status);
 		if (choice === "exit") return "Salida sin cambios.";
 		if (choice === "config") {
 			const result = await runInstallationMenuTui();
@@ -4174,17 +4213,12 @@ export async function runInteractiveHome(): Promise<string> {
 			return "Salida sin cambios.";
 		}
 		if (choice === "tasks") {
-			// B2 follow-up: the structuredTaskQueue lives in
-			// createCliRuntime scope; wire the panel via a runtime
-			// hook in a follow-up commit. For now, the TUI menu
-			// lists the entry but the body falls back to a clean
-			// message.
-			await showTextView(
-				"Tareas y cola",
-				formatTareasYCola([], { now: () => new Date() }) +
-					"\n\nEl panel approve/reject se entrega en un commit de seguimiento (ver follow-up en apply-progress.md).",
+			const result = await runTaskQueuePanelTui(
+				taskQueueRuntime,
+				selectMenuImpl,
 			);
-			continue;
+			if (result === "__back") continue;
+			return result;
 		}
 		if (choice === "diagnostics") {
 			const result = await showTextView(
@@ -4427,15 +4461,16 @@ export function dispatchTaskQueuePanelChoice(
 	return { action: "exit" };
 }
 
-async function runTaskQueuePanelTui(
+export async function runTaskQueuePanelTui(
 	runtime: TaskQueuePanelDispatchRuntime,
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
 ): Promise<"__back" | string> {
 	while (true) {
 		const tasks = runtime.listTasks();
 		const content = formatTareasYCola(tasks, { now: () => new Date() });
 
 		if (!tasks.length) {
-			const choice = await selectMenu(
+			const choice = await selectMenuImpl(
 				"Tareas y cola",
 				[
 					{ label: "← Volver", value: "back" },
@@ -4461,7 +4496,7 @@ async function runTaskQueuePanelTui(
 			},
 		]);
 
-		const choice = await selectMenu(
+		const choice = await selectMenuImpl(
 			"Tareas y cola",
 			[
 				...taskOptions,
