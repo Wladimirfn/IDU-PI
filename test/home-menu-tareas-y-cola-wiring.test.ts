@@ -86,10 +86,11 @@ test("home menu tasks case shows the 3 tasks from the real queue in the panel co
 	);
 
 	// The panel content must contain the 3 task IDs (truncated to 12
-	// chars by formatTaskQueueRow) and the count header.
+	// chars by formatTaskQueueRow) and the new sub-panel headers.
 	const panelContent = capturedContents[1];
 	assert.ok(panelContent, "expected the panel to render content");
-	assert.match(panelContent, /Tareas y cola \(3\)/u);
+	assert.match(panelContent, /Lista de tareas \(3\)/u);
+	assert.match(panelContent, /Cola de acciones \(3\)/u);
 	for (const id of realTaskIds) {
 		assert.match(
 			panelContent,
@@ -153,7 +154,8 @@ test("runTaskQueuePanelTui renders the 3 real tasks from the queue runtime", asy
 	const result = await runTaskQueuePanelTui(runtime, shim);
 	assert.equal(result, "__back");
 	assert.ok(capturedContent, "expected the panel to render content");
-	assert.match(capturedContent!, /Tareas y cola \(3\)/u);
+	assert.match(capturedContent!, /Lista de tareas \(3\)/u);
+	assert.match(capturedContent!, /Cola de acciones \(3\)/u);
 	for (const id of realTaskIds) {
 		assert.match(
 			capturedContent!,

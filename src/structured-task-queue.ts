@@ -16,7 +16,12 @@ import {
 import type { ProjectPreflightRisk } from "./project-preflight.js";
 import { analyzeUserSignal, type UserEmotion } from "./user-signal.js";
 
-export type StructuredTaskStatus = "pending" | "running" | "done" | "failed";
+export type StructuredTaskStatus =
+	| "pending"
+	| "running"
+	| "done"
+	| "failed"
+	| "skipped";
 export type StructuredTaskGuardStatus =
 	| "clear"
 	| "needs_confirmation"
@@ -479,6 +484,88 @@ export function formatTareasYCola(
 	return `${header}\n\n${rows.join("\n")}`;
 }
 
+export function isActionableTask(task: StructuredTask): boolean {
+	if (task.status === "done") return false;
+	if (task.status === "skipped") return false;
+	const label = statusLabel(task);
+	return (
+		label === "proposed" ||
+		label === "paused" ||
+		label === "in_progress" ||
+		label === "blocked"
+	);
+}
+
+export function summarizeTaskQueueRow(
+	task: Pick<StructuredTask, "text" | "originalText">,
+	options: { maxLength?: number } = {},
+): string {
+	const maxLength = options.maxLength ?? TASK_QUEUE_OPTION_DETAILS_MAX;
+	if (maxLength <= 0) return "";
+	const details = (task.originalText ?? task.text)
+		.replace(/\s+/gu, " ")
+		.trim();
+	if (details.length <= maxLength) return details;
+	const sliceLength = Math.max(0, maxLength - 3);
+	return `${details.slice(0, sliceLength)}...`;
+}
+
+export function formatTaskListTable(
+	tasks: StructuredTask[],
+	options: TareasYColaRowOptions & { maxSummaryLength?: number } = {},
+): string {
+	if (tasks.length === 0) {
+		return "Lista de tareas (0):\n  (sin tareas)";
+	}
+	const header = `Lista de tareas (${tasks.length}):`;
+	const rows = tasks.map((task) => {
+		const baseRow = formatTaskQueueRow(task, options);
+		const summary = summarizeTaskQueueRow(task, {
+			maxLength: options.maxSummaryLength,
+		});
+		return `${baseRow} | ${summary}`;
+	});
+	return `${header}\n${rows.join("\n")}`;
+}
+
+export function formatActionQueueTable(
+	tasks: StructuredTask[],
+	options: TareasYColaRowOptions & {
+		maxSummaryLength?: number;
+		pageIndex?: number;
+		pageSize?: number;
+	} = {},
+): string {
+	const actionable = tasks.filter(isActionableTask);
+	if (actionable.length === 0) {
+		return "Cola de acciones (0):\n  (sin acciones pendientes)";
+	}
+	const pageSize =
+		options.pageSize !== undefined && options.pageSize > 0
+			? options.pageSize
+			: TASK_QUEUE_PAGE_SIZE_DEFAULT;
+	const pageIndex = options.pageIndex ?? 0;
+	const { tasks: pageTasks } = paginateStructuredTaskQueue(
+		actionable,
+		pageIndex,
+		pageSize,
+	);
+	const header = `Cola de acciones (${actionable.length}):`;
+	if (pageTasks.length === 0) {
+		return `${header}\n  (sin acciones en esta página)`;
+	}
+	const rows = pageTasks.map((task) => {
+		const truncatedId = task.id.slice(0, 12);
+		const status = statusLabel(task);
+		const priority = `P${task.priority}`;
+		const summary = summarizeTaskQueueRow(task, {
+			maxLength: options.maxSummaryLength,
+		});
+		return `${truncatedId} | ${status} | ${priority} | ${summary}`;
+	});
+	return `${header}\n${rows.join("\n")}`;
+}
+
 function formatPriorityLabel(task: StructuredTask): string {
 	const semanticPriority =
 		task.semanticPriority ?? semanticPriorityFromTaskText(task.text);
@@ -579,9 +666,7 @@ export function summarizeTaskQueueOptionDetails(
 ): string {
 	const maxLength = options.maxLength ?? TASK_QUEUE_OPTION_DETAILS_MAX;
 	if (maxLength <= 0) return "";
-	const details = (task.originalText ?? task.text)
-		.replace(/\s+/gu, " ")
-		.trim();
+	const details = (task.originalText ?? task.text).replace(/\s+/gu, " ").trim();
 	if (details.length <= maxLength) return details;
 	const sliceLength = Math.max(0, maxLength - 3);
 	return `${details.slice(0, sliceLength)}...`;
@@ -725,14 +810,28 @@ export function renderTaskQueuePanel(
 		};
 	}
 
-	// List mode: paginated view/approve/reject triple per task plus
-	// page navigation and back to the main menu.
+	// List mode: paginated view/approve/reject triple per actionable
+	// task plus page navigation and back to the main menu. The body
+	// is split into two sub-panels:
+	//   1. "Lista de tareas" — read-only, shows ALL tasks (including
+	//      done and skipped) with id | status | guard | priority |
+	//      age | category | summary.
+	//   2. "Cola de acciones" — actionable only, paginated, drives
+	//      the menu options.
+	const actionableTasks = state.tasks.filter(isActionableTask);
 	const { page, tasks: pageTasks } = paginateStructuredTaskQueue(
-		state.tasks,
+		actionableTasks,
 		state.pageIndex,
 		pageSize,
 	);
-	const content = formatTareasYCola(state.tasks, { now });
+	const listContent = formatTaskListTable(state.tasks, { now });
+	const actionContent = formatActionQueueTable(state.tasks, {
+		now,
+		pageIndex: state.pageIndex,
+		pageSize,
+	});
+	const separator = "─".repeat(60);
+	const content = `${listContent}\n\n${separator}\n\n${actionContent}`;
 
 	const taskOptions: TaskQueueMenuOption[] = pageTasks.flatMap((task) => [
 		{
