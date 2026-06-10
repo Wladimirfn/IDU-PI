@@ -197,9 +197,10 @@ export function formatMainMenu(status: CliHomeStatus): string {
 		"3. Telegram remoto",
 		"4. Modelos y perfiles",
 		"5. Supervisor",
-		"6. Tareas y cola",
-		"7. Diagnóstico",
-		"8. Exit",
+		"6. Tareas",
+		"7. Cola de acciones",
+		"8. Diagnóstico",
+		"9. Exit",
 	].join("\n");
 }
 
@@ -364,8 +365,9 @@ export function formatSupervisorStatus(status: CliHomeStatus): string {
 
 export function formatTaskQueueStatus(): string {
 	return [
-		"Tareas y cola",
+		"Tareas",
 		"",
+		"Vista de solo lectura del task list estructurado.",
 		"Acciones CLI:",
 		'- idu-pi idu-task "detalle"',
 		"- idu-pi idu-queue-detail",
@@ -373,7 +375,7 @@ export function formatTaskQueueStatus(): string {
 		"- idu-pi idu-queue-reject <id>",
 		"- idu-pi idu-queue-clear-structured",
 		"",
-		"MVP seguro: esta pantalla no lee ni modifica la cola.",
+		"MVP seguro: esta pantalla no ejecuta IA ni AgentLabs.",
 	].join("\n");
 }
 

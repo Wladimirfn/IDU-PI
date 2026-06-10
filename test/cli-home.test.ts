@@ -272,9 +272,10 @@ test("main and installation menus render unified control options", () => {
 	assert.match(menu, /3\. Telegram remoto/u);
 	assert.match(menu, /4\. Modelos y perfiles/u);
 	assert.match(menu, /5\. Supervisor/u);
-	assert.match(menu, /6\. Tareas y cola/u);
-	assert.match(menu, /7\. Diagnóstico/u);
-	assert.match(menu, /8\. Exit/u);
+	assert.match(menu, /6\. Tareas/u);
+	assert.match(menu, /7\. Cola de acciones/u);
+	assert.match(menu, /8\. Diagnóstico/u);
+	assert.match(menu, /9\. Exit/u);
 	assert.match(formatInstallationMenu(), /Instalar\/actualizar MCP en Pi/u);
 	assert.match(
 		formatInstallationMenu(),

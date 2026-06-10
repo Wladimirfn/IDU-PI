@@ -1,305 +1,385 @@
-# Apply progress — living-loop-harness-b2 (TUI panel pagination + summary + B3 split)
+# Apply progress — living-loop-harness-b2 (TUI panel pagination + summary + B3 split + B4 read-only Tareas + live Cola)
 
-## Status: complete (B2 + B3)
+## Status: complete (B2 + B3 + B4)
 
-## Scope (two focused fixes)
+## Scope (focused TUI fix in two sub-slices)
 
-The user reported that the `Tareas y cola` panel in the idu-pi CLI was
-unusable on a normal terminal and, after the B2 pagination fix, the
-panel still mixed two different concerns in one view.
+The TUI "Cola de acciones" panel in the idu-pi CLI was being used
+as a decision surface for the structured task queue (with `👁 Ver /
+✓ Aprobar / ✗ Rechazar` per task). The user clarified in Spanish
+(paraphrased):
 
-### B2: pagination + summary in the row
+> "I do not understand why you added the 3 options (👁 / ✓ / ✗)
+> because I only want in the queue to see what tasks or jobs some
+> supervisor or some agentlab is currently working on. That should
+> be for me Cola de acciones. ... when some trigger fires or a
+> supervisor model or agentlab worked and what was the output, and
+> obviously as it happens in Proyecto actual, this is refreshed or
+> shown when I am with the cola view open at the moment"
 
-1. With 27 tasks in the queue, the menu is 54+ entries (2 per task + nav),
-   the screen cannot fit them, and the user sees only the first ~10 rows.
-2. The row shows only id (truncated), status, guard, priority, age, and
-   category — the user cannot see WHAT the task is about and has to
-   approve/reject blindly.
-3. The body panel only shows the dense table. The user wants the same
-   detailed view that `idu-queue-detail` provides: a multi-line text per
-   task with intent and details.
+So the B4 fix splits the single "Tareas y cola" menu entry into
+two separate home-menu entries and re-purposes the "Cola de
+acciones" view as a live read-only feed of supervisor/agentlab/
+trigger activity, with auto-refresh while the view is open.
 
-The user explicitly said:
-> "deveriamos trabajarlas en paginas, lo otro esta bien por que ya me
-> muestra los datos pero necesito ver un resumen o la tarea escrita."
+### B2: pagination + summary in the row (already shipped)
 
-### B3: split the panel into a read-only task list + an actionable queue
+Done in the B2 commit (`9191014`). The user reported the panel
+was unusable on a normal terminal.
 
-After B2 the panel was paginated but the user was still confused: the
-read-only history of what happened and the live queue of what is
-happening now were piled up in the same menu. The user explicitly said:
+### B3: split the panel into read-only task list + actionable queue (already shipped)
 
-> "we should not have everything piled up like this. One thing is the
-> task list, another thing is the queue. I want a view of just the
-> tasks. Example: task-000mpv1 | done | — | P3 | 9d 10h | review. To
-> this you should add the content or an idea of what it says. Then on
-> the other side is the one that is actually in queue, currently I
-> only need to see what is really happening at the moment, not the
-> history of what happened."
+Done in the B3 commit (`9191014` and the follow-up
+`0a4f82f`). The B3 split put the read-only "Lista de tareas"
+and the actionable "Cola de acciones" in the same panel body,
+with the menu options built only from the actionable subset.
 
-So B3 splits the body into two stacked sub-panels:
+### B4: split into two home-menu entries — Tareas (read-only) and Cola de acciones (live feed, no decisions)
 
-1. **Lista de tareas (read-only)** — paginated-style table that shows
-   ALL tasks (including `done` and `skipped`) with
-   `id | status | guard | priority | age | category | summary` (the
-   first 80 chars of `details` or `description`, with ellipsis).
-2. **Cola de acciones (actionable)** — paginated list of ONLY the
-   tasks that need owner action: status in
-   `{proposed, paused, in_progress, blocked}`. EXCLUDE `done` and
-   `skipped`. The menu options are built only from this list and
-   each task gets the `👁 Ver` / `✓ Aprobar` / `✗ Rechazar` triple.
+The B3 sub-panels were still inside ONE panel with ONE menu (the
+"Cola de acciones" actions). The user explicitly asked for:
 
-A separator line of `─` (60 chars) sits between the two sub-panels
-inside the `selectMenu` body argument.
+- "Cola de acciones" = LIVE READ-ONLY VIEW, no menu options per
+  task. It must AUTO-REFRESH while open (similar to the existing
+  "Proyecto actual" panel which has autoRefresh support at
+  `src/cli.ts:4838-4848`).
+- The body of "Cola de acciones" must show the most recent
+  supervisor activity events + agentlab runs + trigger fires, with
+  their kind, summary, and timestamp, sorted by `ts` DESC.
+- "Tareas" = read-only task list, paginated, sorted by `createdAt`
+  DESC, body shows `id | status | guard | priority | age | category
+  | summary` (first 60 chars of details with ellipsis). Page
+  navigation only. NO per-task menu options.
 
-## Tasks
+The two views are now SEPARATE entries on the home menu (entries
+6 and 7). The "Tareas y cola" label is gone from the home menu,
+the `formatMainMenu` text, and the `formatTaskQueueStatus` helper
+text. The "Tareas" / "Cola de acciones" entries appear in the
+command catalog too so `/comandos` lists them.
 
-- [x] T1 — RED: tests for `summarizeTaskQueueOptionDetails` (truncates to
-  80 chars with ellipsis; normalizes whitespace; returns short text as-is).
-- [x] T2 — RED: tests for `formatTaskQueueOptionLabel` (prefix + status +
-  id + details; view/approve/reject prefixes).
-- [x] T3 — RED: tests for `paginateStructuredTaskQueue` (3 pages of
-  10/10/7 for 27 tasks; edge cases: empty, 1 task, exact page size, 11
-  tasks across 2 pages, out-of-range clamps).
-- [x] T4 — RED: tests for `renderTaskQueuePanel` (paginates 27 tasks into
-  3 pages of 10/10/7; body shows the multi-line detail for a viewed task;
-  falls back to list view when viewed task is missing).
-- [x] T5 — RED: tests for `dispatchTaskQueuePanelChoice` view/page
-  actions (view, page-next, page-prev, back-to-list).
-- [x] T6 — GREEN: add `summarizeTaskQueueOptionDetails`,
-  `formatTaskQueueOptionLabel`, `paginateStructuredTaskQueue`,
-  `renderTaskQueuePanel` to `src/structured-task-queue.ts`.
-- [x] T7 — GREEN: extend `dispatchTaskQueuePanelChoice` result type and
-  implementation to handle `view:`, `page:next`, `page:prev`,
-  `back-to-list` choices; preserve existing approve/reject/not-found/back/exit
-  behaviour so the existing tests in
-  `test/task-queue-panel-tui.test.ts` keep passing.
-- [x] T8 — GREEN: refactor `runTaskQueuePanelTui` to keep `pageIndex` and
-  `viewedTaskId` state across iterations, build content + options through
-  `renderTaskQueuePanel`, and dispatch the new actions (view, page
-  navigation, back-to-list).
-- [x] T9 — VERIFY: `corepack pnpm test` is green.
-  `tests 1745 · pass 1744 · fail 0 · skipped 1 · duration_ms ~48000`.
-- [x] T10 — RED (B3): tests for `isActionableTask` (true for
-  proposed/paused/in_progress/blocked, false for done/skipped).
-- [x] T11 — RED (B3): tests for `summarizeTaskQueueRow` (truncate to
-  80 chars, normalize whitespace, return short text verbatim).
-- [x] T12 — RED (B3): tests for `formatTaskListTable` (shows ALL tasks
-  including done with summary column; "Lista de tareas" header; empty
-  state).
-- [x] T13 — RED (B3): tests for `formatActionQueueTable` (filters out
-  done tasks, shows actionable only; "Cola de acciones" header; empty
-  state).
-- [x] T14 — RED (B3): tests for `renderTaskQueuePanel` B3 split:
-  body contains both headers, body shows ALL tasks in top sub-panel,
-  menu options only for actionable tasks, pagination works on the
-  action sub-panel, body summary is truncated to 80 chars.
-- [x] T15 — GREEN (B3): add `isActionableTask`, `summarizeTaskQueueRow`,
-  `formatTaskListTable`, `formatActionQueueTable` to
-  `src/structured-task-queue.ts`; add `"skipped"` to
-  `StructuredTaskStatus` so the future-status case is type-safe.
-- [x] T16 — GREEN (B3): rewrite `renderTaskQueuePanel` list-mode body
-  to build two stacked sub-panels separated by a `─` rule, and rebuild
-  the menu options to use only the actionable tasks filtered through
-  `isActionableTask`.
-- [x] T17 — GREEN (B3): update the wiring test
-  `test/home-menu-tareas-y-cola-wiring.test.ts` to expect the new
-  sub-panel headers (`Lista de tareas (N)` and `Cola de acciones (N)`)
-  in the panel body. The old expectation was `Tareas y cola (N)` which
-  no longer appears in the panel body (it still appears in the panel
-  title and in the legacy `formatTareasYCola` function for
-  CLI/detail callers).
-- [x] T18 — VERIFY (B3): `corepack pnpm test` is green.
-  `tests 1761 · pass 1760 · fail 0 · skipped 1 · duration_ms ~47000`.
-  N = 1760 ≥ 1744 ✓.
+## Tasks (B4)
+
+- [x] T1 — RED: tests for `sortTasksByCreatedAtDesc` (sorts by
+  createdAt DESC; deterministic tie-breaker on id).
+- [x] T2 — RED: tests for `formatTareasView`:
+  - shows ALL tasks including done and skipped (read-only);
+  - sorts by createdAt DESC;
+  - paginates 30 tasks into 2 pages of 15/15 (the new page size
+    is 15, not 10);
+  - truncates the summary to 60 chars with ellipsis
+    (`TAREAS_VIEW_SUMMARY_MAX = 60`, NOT 80);
+  - shows the empty-state marker for an empty list;
+  - clamps out-of-range page index to the last page.
+- [x] T3 — RED: tests for the new `cola-acciones-feed` module:
+  - `readColaDeAccionesFeed` returns an empty list when stateRoot
+    is undefined;
+  - includes supervisor activity events (`SupervisorActivityEvent`);
+  - includes idu usage events as "trigger fires" (excluding
+    `pi_compaction_detected` noise);
+  - includes agentlab runs from `stateRoot/agentlabs/runs/`;
+  - sorts the merged events by `ts` DESC;
+  - combines supervisor + agentlab + trigger into one sorted feed
+    (newest first).
+- [x] T4 — RED: tests for `formatColaDeAccionesFeed`:
+  - renders the empty-state marker for an empty list;
+  - renders the count header and rows with kind and ts;
+  - body NEVER contains per-task action labels
+    (`👁 Ver / ✓ Aprobar / ✗ Rechazar`) because the Cola de
+    acciones is a read-only live feed;
+  - handles a single-event feed.
+- [x] T5 — RED: tests for `paginateColaDeAccionesFeed`:
+  - paginates 50 events into 2 pages of 30/20;
+  - clamps out-of-range page index to the last page;
+  - `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT` is a positive number.
+- [x] T6 — RED: wiring tests for the new home-menu cases:
+  - "tareas-view" case shows the 3 tasks read-only with no
+    per-task options;
+  - "tareas-view" case shows the empty-state marker for an empty
+    queue;
+  - "cola-view" case renders the live feed with auto-refresh
+    enabled (intervalMs === 5000, getContent is a function);
+  - "cola-view" body never contains per-task action labels.
+- [x] T7 — GREEN: add `sortTasksByCreatedAtDesc`,
+  `formatTareasViewRow`, `formatTareasView`,
+  `TAREAS_VIEW_SUMMARY_MAX`, `TAREAS_VIEW_PAGE_SIZE_DEFAULT` to
+  `src/structured-task-queue.ts`. Pure functions, no behaviour
+  change for the existing `formatTareasYCola`,
+  `formatTaskListTable`, `formatActionQueueTable`, or
+  `renderTaskQueuePanel` helpers.
+- [x] T8 — GREEN: add `src/cola-acciones-feed.ts` with the
+  `ColaDeAccionesEvent` type, `readColaDeAccionesFeed`,
+  `formatColaDeAccionesFeed`, `paginateColaDeAccionesFeed`, and
+  `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT`. The feed reads from
+  `readSupervisorActivityEvents(stateRoot)`, the agentlab runs
+  directory (`stateRoot/agentlabs/runs/`), and
+  `readIduUsageEvents(stateRoot)`; sorts by `ts` DESC; never
+  throws and never writes.
+- [x] T9 — GREEN: add `runTareasViewTui` and
+  `runColaDeAccionesViewTui` to `src/cli.ts`; replace the single
+  `tasks` case in `runInteractiveHome` with two separate cases
+  (`tareas-view` and `cola-view`); add the two entries to
+  `mainMenuOptions`; add the `autoRefresh` setting to the cola
+  view's `selectMenuImpl` call (intervalMs 5000, mirroring the
+  "Proyecto actual" panel pattern at `src/cli.ts:4838-4848`).
+- [x] T10 — GREEN: extend the `InteractiveHomeSelectMenu` type
+  signature to accept the optional `settings.autoRefresh` arg so
+  the home-menu shim can capture the auto-refresh wiring in tests.
+- [x] T11 — GREEN: update `formatMainMenu` in `src/cli-home.ts`:
+  entry 6 is "Tareas", entry 7 is "Cola de acciones", entry 8 is
+  "Diagnóstico", entry 9 is "Exit". Update `formatTaskQueueStatus`
+  text accordingly. Update `runInteractiveHomeWithQuestion` to
+  match (option 7 is now the Cola de acciones snapshot, option 8
+  is Diagnóstico, option 9 is Exit).
+- [x] T12 — GREEN: update the command catalog in
+  `src/command-catalog.ts` to expose the two new entries
+  ("Tareas" targeting `corepack pnpm cli -- idu-queue-detail`
+  and "Cola de acciones" targeting
+  `corepack pnpm cli -- idu-supervisor-tick`) so `/comandos`
+  lists them.
+- [x] T13 — GREEN: update the wiring tests in
+  `test/home-menu-tareas-y-cola-wiring.test.ts` to drive the
+  new `tareas-view` and `cola-view` cases; update the
+  `test/command-catalog-tareas-y-cola.test.ts` to assert the
+  new labels; update `test/cli-home.test.ts` to match the new
+  9-entry home menu.
+- [x] T14 — VERIFY: `corepack pnpm test` is green.
+  `tests 1784 · pass 1783 · fail 0 · skipped 1 · duration_ms ~49000`.
+  N = 1783 ≥ 1760 ✓.
 
 ## TDD Cycle Evidence
 
 Strict-TDD cycle, recorded as RED → GREEN.
 
-### B2 cycle (recorded earlier)
+### B4 cycle (this commit)
 
 | Step | Phase | Evidence |
 |------|-------|----------|
-| 1 | RED | Wrote the 4 required test groups in `test/task-queue-panel-formatter.test.ts` (truncate to 80 chars with ellipsis; 3 pages of 10/10/7; body content for a single task shows the details) and `test/task-queue-panel-tui.test.ts` (dispatch handles "view" action). |
-| 2 | RED | Compiled and ran. 2 of the 4 new tests failed: (a) the 11-task pagination test because it paginated the first-page slice instead of the full 11-task list, and (b) the body-content test because `formatStructuredTaskQueueDetail` only includes the approve/reject commands in the body when the task has `guardStatus === "needs_confirmation"`. |
-| 3 | FIX | Fixed the 11-task test to paginate the full 11-task list (page 0 → 10 tasks, page 1 → 1 task). Fixed the body-content test to seed the task with `guardStatus: "needs_confirmation"` and `guardRisk: "high"` so the approve/reject commands are present in the body. |
-| 4 | GREEN | All 14 new tests pass: `summarizeTaskQueueOptionDetails` (3), `formatTaskQueueOptionLabel` (2), `paginateStructuredTaskQueue` (2 — 3 pages of 10/10/7 + edge cases), `renderTaskQueuePanel` (3 — 3 pages of 10/10/7, body for single task, fallback), `dispatchTaskQueuePanelChoice` view/page actions (4). |
-| 5 | VERIFY | Re-ran `corepack pnpm test`: 1745 tests, 1744 pass, 0 fail, 1 skipped. N = 1744 ≥ 1730 ✓. |
+| 1 | RED | Wrote 23 new tests in `test/tareas-view-formatter.test.ts` covering: `sortTasksByCreatedAtDesc` (1), `formatTareasView` (7 — all-tasks, sort, paginate 15, summary 60, empty, out-of-range clamp, `TAREAS_VIEW_PAGE_SIZE_DEFAULT === 15`), `readColaDeAccionesFeed` (6 — empty stateRoot, supervisor events, idu usage events, agentlab runs, sort by ts DESC, ignores pi_compaction_detected, combined feed), `formatColaDeAccionesFeed` (4 — empty, header + rows, no per-task action labels, single event), `paginateColaDeAccionesFeed` (3 — 30/20 split, out-of-range clamp, page size > 0). |
+| 2 | RED | Compiled: TS2305 + TS2552 errors for missing exports (`formatTareasView`, `readColaDeAccionesFeed`, etc.) and TS2554 for the `selectMenuImpl` 5th-arg mismatch. |
+| 3 | FIX 1 | Added the new exports to `src/structured-task-queue.ts` and `src/cola-acciones-feed.ts`. Updated the `InteractiveHomeSelectMenu` type to accept the 5th `settings` arg. |
+| 4 | RED | Ran tests: 5 failures. (a) `formatTareasView` clamps pageIndex 99 to the last page and the LAST task is the OLDEST, not the newest (id was the OLDEST id); (b) 4 tests had type errors (record APIs don't accept `timestamp` and reject the trigger names `"periodic"` / `"schedule"`); (c) the autoRefresh wiring test failed because the shim signature wasn't updated to capture the 5th arg. |
+| 5 | FIX 2 | Replaced `require("node:fs")` with the top-of-file `mkdirSync` import (the compiled JS doesn't have `require`). Replaced the invalid trigger names with valid ones from `IduSupervisorTrigger` (`"manual"`, `"after_task_registered"`, `"after_postflight"`). Removed the `timestamp` overrides and wrote JSONL files directly with controlled timestamps (so the DESC sort is deterministic). |
+| 6 | FIX 3 | Updated the home-menu wiring test 3 ("cola-view" case) to capture the 5th arg (`settings`) and assert `settings.autoRefresh.intervalMs === 5000` + `typeof settings.autoRefresh.getContent === "function"`. |
+| 7 | GREEN | All 1783 tests pass. 0 failures. 1 skipped (legacy). |
+| 8 | VERIFY | Re-ran `corepack pnpm test`: 1784 tests, 1783 pass, 0 fail, 1 skipped. N = 1783 ≥ 1760 ✓. |
 
-### B3 cycle (this commit)
+## What changed (delta over the B3 baseline)
 
-| Step | Phase | Evidence |
-|------|-------|----------|
-| 1 | RED | Wrote 16 new tests in `test/task-queue-panel-formatter.test.ts` covering: `isActionableTask` (2 tests: 4 actionable statuses + done/skipped exclusion), `summarizeTaskQueueRow` (3 tests: short/long/whitespace), `formatTaskListTable` (2 tests: all-tasks + empty), `formatActionQueueTable` (2 tests: filter + empty), `renderTaskQueuePanel` B3 split (7 tests: both headers, body shows done+skipped, menu only for actionable, pagination of action sub-panel, body summary truncated to 80 chars, separator between sub-panels, empty-queue state, "no actionable tasks" state). |
-| 2 | RED | Compiled: 4 expected TS2305 errors for the 4 new exports not yet in `structured-task-queue.ts` (`formatActionQueueTable`, `formatTaskListTable`, `isActionableTask`, `summarizeTaskQueueRow`). |
-| 3 | FIX 1 | Added the 4 exports to `src/structured-task-queue.ts`. Body of `formatTaskListTable` builds rows with `id | status | guard | priority | age | category | summary`. Body of `formatActionQueueTable` filters through `isActionableTask` and paginates through `paginateStructuredTaskQueue`. |
-| 4 | RED | Ran tests: 4 test failures. (a) `isActionableTask` was excluding the "skipped" task because `statusLabel` does not map `"skipped"` to `"skipped"` (it falls through to `"proposed"`); (b) several tests checked id substrings of 13 chars while the id is truncated to 12 chars; (c) the wiring test expected the old `Tareas y cola (N)` header. |
-| 5 | FIX 2 | Added `"skipped"` to `StructuredTaskStatus` and short-circuited the raw-status check in `isActionableTask` so the future-status case is type-safe. Renamed all test ids to use unique 12-char prefixes. Updated the wiring test to expect the two new sub-panel headers. |
-| 6 | GREEN | All 1760 tests pass. 0 failures. 1 skipped (legacy). |
-| 7 | VERIFY | Re-ran `corepack pnpm test`: 1761 tests, 1760 pass, 0 fail, 1 skipped. N = 1760 ≥ 1744 ✓. |
+### `src/structured-task-queue.ts` — added new read-only helpers
 
-## What changed (delta over the B2 baseline)
+- `sortTasksByCreatedAtDesc(tasks)` — sorts a `StructuredTask[]` by
+  `createdAt` DESC. Stable tie-breaker on `id` so the order is
+  deterministic when two tasks share a `createdAt`. Pure.
+- `formatTareasViewRow(task, options)` — single-row formatter for
+  the read-only "Tareas" TUI view. Mirrors `formatTaskQueueRow` and
+  appends the summary column truncated to
+  `TAREAS_VIEW_SUMMARY_MAX` (60) chars.
+- `formatTareasView(tasks, options)` — paginated read-only body for
+  the "Tareas" TUI view. ALL tasks (no actionable filter). Sorted
+  by `createdAt` DESC. Default page size 15. Pure.
+- `TAREAS_VIEW_SUMMARY_MAX = 60` — constant for the new view
+  (legacy `TASK_QUEUE_OPTION_DETAILS_MAX` stays at 80 for
+  backward compat with the actionable menu labels).
+- `TAREAS_VIEW_PAGE_SIZE_DEFAULT = 15` — constant for the new
+  view (legacy `TASK_QUEUE_PAGE_SIZE_DEFAULT` stays at 10 for
+  backward compat with the B3 panel).
 
-### `src/structured-task-queue.ts` — added new helpers
+The legacy `formatTareasYCola`, `formatTaskListTable`,
+`formatActionQueueTable`, `renderTaskQueuePanel`, and
+`paginateStructuredTaskQueue` are unchanged. The B3 wiring is
+preserved so the legacy `runTaskQueuePanelTui` /
+`dispatchTaskQueuePanelChoice` flows used by
+`idu-queue-detail` and other CLI surfaces keep working as
+before.
 
-- `isActionableTask(task)` — pure helper that returns `true` for
-  tasks whose `statusLabel` is in `{proposed, paused, in_progress,
-  blocked}`. Excludes `done` and the new forward-compat `skipped`
-  status. The raw `task.status` is short-circuited first so future
-  statuses are handled even if `statusLabel` is updated later.
-- `summarizeTaskQueueRow(task, options?)` — wraps
-  `summarizeTaskQueueOptionDetails` (80-char truncation + ellipsis)
-  for use inside the read-only table. Same behaviour; the separate
-  export gives the body-table summary a clear, stable API surface.
-- `formatTaskListTable(tasks, options?)` — renders the
-  `Lista de tareas (N):` header and a row per task with the
-  seven columns `id | status | guard | priority | age | category |
-  summary`. Empty input renders the empty-state marker
-  `Lista de tareas (0): (sin tareas)`.
-- `formatActionQueueTable(tasks, options?)` — filters the input
-  through `isActionableTask` internally, paginates through
-  `paginateStructuredTaskQueue`, and renders the
-  `Cola de acciones (M):` header with one row per actionable task
-  in the current page using the four columns
-  `id | status | priority | summary`. Empty input renders
-  `Cola de acciones (0): (sin acciones pendientes)`.
-- `StructuredTaskStatus` — extended from
-  `"pending" | "running" | "done" | "failed"` to add the
-  forward-compat `"skipped"` so `isActionableTask` can short-circuit
-  on the raw status with type safety.
+### `src/cola-acciones-feed.ts` — NEW FILE
 
-### `src/structured-task-queue.ts` — `renderTaskQueuePanel` body split
+- `ColaDeAccionesEvent` type — common shape for the live feed:
+  `{ kind: "supervisor" | "agentlab" | "trigger"; summary: string;
+  ts: string; source: string }`. Pure.
+- `readColaDeAccionesFeed(stateRoot, options)` — reads supervisor
+  activity events (`src/supervisor-activity-events.ts`), idu usage
+  events (`src/usage-events.ts`), and agentlab runs
+  (`stateRoot/agentlabs/runs/`); normalizes each into the common
+  shape; sorts by `ts` DESC; returns the merged feed. Pure
+  (read-only, never throws, never writes).
+- `formatColaDeAccionesFeed(events)` — renders the feed with a
+  `Cola de acciones (N):` header, rows of
+  `ts | kind | summary`. The body NEVER carries per-task action
+  labels (👁 / ✓ / ✗) because the Cola de acciones is a read-only
+  live feed.
+- `paginateColaDeAccionesFeed(events, pageIndex, pageSize)` —
+  pagination helper for the feed (default page size 30). Pure.
+- `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT = 30` — constant.
 
-In list mode (no `viewedTaskId`, non-empty queue), the body is now:
+### `src/cli.ts` — added two new TUI flows
 
-```text
-<formatTaskListTable output>
+- `runTareasViewTui(runtime, selectMenuImpl)` — paginated read-only
+  task list. Body is `formatTareasView` output. Menu options are
+  ONLY `← Prev`, `Next →`, `↻ Actualizar`, `← Volver`, `Exit`. No
+  per-task action labels. Page size 15.
+- `runColaDeAccionesViewTui(status, selectMenuImpl)` — live
+  read-only feed. Body is `formatColaDeAccionesFeed` output. Menu
+  options are ONLY `↻ Actualizar ahora`, `← Volver`, `Exit`. NO
+  per-task action labels. Wired with `autoRefresh` at
+  `intervalMs: COLA_DE_ACCIONES_AUTOREFRESH_MS = 5000` (mirrors
+  the existing "Proyecto actual" panel pattern at
+  `src/cli.ts:4838-4848`).
+- `runInteractiveHome` — the single `tasks` case was replaced by
+  two separate cases: `tareas-view` (calls `runTareasViewTui`) and
+  `cola-view` (calls `runColaDeAccionesViewTui`).
+- `mainMenuOptions` — replaced the `Tareas y cola` entry with
+  `Tareas` (value `tareas-view`) and `Cola de acciones` (value
+  `cola-view`).
+- `InteractiveHomeSelectMenu` type — extended to accept the
+  optional 5th `settings.autoRefresh` arg so the home-menu shim
+  used by tests can capture the auto-refresh wiring.
+- `runInteractiveHomeWithQuestion` — option numbers re-mapped: 6
+  is "Tareas", 7 is "Cola de acciones" (returns the formatted
+  feed snapshot, since the non-TUI surface has no auto-refresh),
+  8 is "Diagnóstico", 9 is Exit.
 
-────────────────────────────────────────────────────────────
+### `src/cli-home.ts` — updated menu text
 
-<formatActionQueueTable output>
-```
+- `formatMainMenu` — entry 6 is "Tareas", 7 is "Cola de
+  acciones", 8 is "Diagnóstico", 9 is Exit.
+- `formatTaskQueueStatus` — header is now "Tareas"; the legacy
+  "Tareas y cola" label is gone; text now reflects the read-only
+  intent ("Vista de solo lectura del task list estructurado" +
+  "MVP seguro: esta pantalla no ejecuta IA ni AgentLabs").
 
-The menu options are built from the same `actionableTasks` filter
-(`isActionableTask`) and the same page slice that the
-`Cola de acciones` sub-panel shows. Pagination nav entries
-(`← Prev` / `Next →`) and the `← Volver` back entry are appended
-after the task-action triples. The `back-to-list` action from
-view-mode is unchanged.
+### `src/command-catalog.ts` — added two entries
 
-View mode (a task is being viewed) and the empty-queue state are
-unchanged from B2.
-
-### `test/home-menu-tareas-y-cola-wiring.test.ts` — updated wiring tests
-
-The two wiring tests that asserted the panel body contains
-`Tareas y cola (N)` were updated to assert it contains both
-`Lista de tareas (N)` and `Cola de acciones (N)`. The rest of the
-wiring test (id substring check, no-placeholder check, empty-queue
-check) is unchanged.
+- `CLI_COMMANDS` — replaced the `Tareas y cola` entry with two
+  new entries: `Tareas` (targeting
+  `corepack pnpm cli -- idu-queue-detail`) and `Cola de acciones`
+  (targeting `corepack pnpm cli -- idu-supervisor-tick`). Both
+  appear in the `formatCommandCatalog` output so `/comandos` lists
+  them.
 
 ## Test summary
 
-`tests 1761 · pass 1760 · fail 0 · skipped 1 · duration_ms ~47000`
+`tests 1784 · pass 1783 · fail 0 · skipped 1 · duration_ms ~49000`
 
-(Before B2: 1731 tests, 1730 pass, 0 fail, 1 skipped. After B2: 1745
-tests, 1744 pass, 0 fail, 1 skipped. After B3: 1761 tests, 1760
-pass, 0 fail, 1 skipped. Added 16 new tests across
-`test/task-queue-panel-formatter.test.ts` and 2 wiring-test
-header updates in `test/home-menu-tareas-y-cola-wiring.test.ts`.
-Net +30 passes over the B1 baseline, 0 new failures, 0
-regressions.)
+(Before B4: 1761 tests, 1760 pass, 0 fail, 1 skipped. After B4:
+1784 tests, 1783 pass, 0 fail, 1 skipped. Added 23 new tests
+across `test/tareas-view-formatter.test.ts` and rewrote the
+wiring/header assertions in
+`test/home-menu-tareas-y-cola-wiring.test.ts`,
+`test/command-catalog-tareas-y-cola.test.ts`, and
+`test/cli-home.test.ts`. Net +23 passes over the B3 baseline,
+0 new failures, 0 regressions.)
 
-### New tests in this B3 commit
+### New tests in this B4 commit
 
-`test/task-queue-panel-formatter.test.ts`:
+`test/tareas-view-formatter.test.ts` (23 tests):
 
-- `isActionableTask returns true for proposed, paused, in_progress, blocked`
-- `isActionableTask returns false for done and skipped`
-- `summarizeTaskQueueRow returns short text verbatim`
-- `summarizeTaskQueueRow truncates long details to 80 chars with ellipsis`
-- `summarizeTaskQueueRow normalizes whitespace before measuring`
-- `formatTaskListTable renders all tasks including done with a summary column`
-- `formatTaskListTable returns an empty-state marker for zero tasks`
-- `formatActionQueueTable renders actionable tasks with id|status|priority|summary`
-- `formatActionQueueTable returns an empty-state marker for zero actionable tasks`
-- `renderTaskQueuePanel body contains both Lista de tareas and Cola de acciones headers`
-- `renderTaskQueuePanel body shows done and skipped tasks but menu only has actionable options`
-- `renderTaskQueuePanel paginates the action sub-panel into 3 pages of 10/10/7`
-- `renderTaskQueuePanel body shows summary column truncated to 80 chars with ellipsis`
-- `renderTaskQueuePanel body uses a separator between the two sub-panels`
-- `renderTaskQueuePanel body shows the empty-state when no tasks exist`
-- `renderTaskQueuePanel body shows Cola de acciones empty marker when no actionable tasks`
+- `sortTasksByCreatedAtDesc sorts by createdAt DESC (newest first)`
+- `formatTareasView shows ALL tasks including done and skipped`
+- `formatTareasView sorts tasks by createdAt DESC`
+- `formatTareasView paginates 30 tasks into 2 pages of 15/15`
+- `formatTareasView truncates the summary to 60 chars with ellipsis`
+- `formatTareasView shows the empty-state marker for an empty list`
+- `TAREAS_VIEW_PAGE_SIZE_DEFAULT is 15`
+- `formatTareasView clamps out-of-range page index to the last page`
+- `readColaDeAccionesFeed returns an empty list when stateRoot is undefined`
+- `readColaDeAccionesFeed includes supervisor activity events`
+- `readColaDeAccionesFeed includes idu usage events as trigger fires`
+- `readColaDeAccionesFeed includes agentlab runs from agentlabs/runs`
+- `readColaDeAccionesFeed sorts the merged events by ts DESC`
+- `formatColaDeAccionesFeed renders the empty-state marker for an empty list`
+- `formatColaDeAccionesFeed renders the count header and rows with kind and ts`
+- `formatColaDeAccionesFeed body never contains per-task action labels`
+- `paginateColaDeAccionesFeed paginates 50 events into 2 pages of 30/20`
+- `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT is a positive number`
+- `readColaDeAccionesFeed ignores pi_compaction_detected events`
+- `readColaDeAccionesFeed combines supervisor + agentlab + trigger into one sorted feed`
+- `paginateColaDeAccionesFeed clamps out-of-range page index to the last page`
+- `formatColaDeAccionesFeed handles a single-event feed`
+- `formatTareasView renders the truncated id and count header for a 1-task queue` (wiring sanity check)
 
-### Updated tests in this B3 commit
+### Updated tests in this B4 commit
 
-`test/home-menu-tareas-y-cola-wiring.test.ts`:
-
-- `home menu tasks case shows the 3 tasks from the real queue in the panel content` — expects `Lista de tareas (3)` and `Cola de acciones (3)` instead of `Tareas y cola (3)`.
-- `runTaskQueuePanelTui renders the 3 real tasks from the queue runtime` — same header update.
-
-## Files changed
-
- M src/cli.ts                              (imports unchanged; behaviour unchanged)
- M src/structured-task-queue.ts            (+5 new exports; renderTaskQueuePanel body split; StructuredTaskStatus +skipped)
- M test/task-queue-panel-formatter.test.ts (+16 tests for B3 split)
- M test/home-menu-tareas-y-cola-wiring.test.ts (2 wiring tests updated for new headers)
+- `test/home-menu-tareas-y-cola-wiring.test.ts` — rewrote 5 tests
+  to drive the new `tareas-view` and `cola-view` home-menu cases
+  instead of the legacy single `tasks` case. The "cola-view" test
+  captures the 5th `settings` arg and asserts `autoRefresh` is
+  wired with `intervalMs === 5000` and a callable `getContent`.
+- `test/command-catalog-tareas-y-cola.test.ts` — replaced the 2
+  legacy "Tareas y cola" assertions with 3 new assertions for the
+  "Tareas" and "Cola de acciones" entries.
+- `test/cli-home.test.ts` — updated
+  `main and installation menus render unified control options` to
+  expect entries 6-9 of the new menu (was 6-8 of the old menu).
 
 ## UX behaviour after the fix
 
-### Top sub-panel: Lista de tareas (read-only)
-
-Shows ALL tasks (including `done` and `skipped`) with seven columns:
+### Home menu
 
 ```text
-Lista de tareas (3):
+1. Configurar IDU-Pi
+2. Proyecto actual
+3. Telegram remoto
+4. Modelos y perfiles
+5. Supervisor
+6. Tareas            ← new: read-only task list, paginated 15/page
+7. Cola de acciones  ← new: live read-only feed, auto-refresh 5s
+8. Diagnóstico
+9. Exit
+```
+
+### Tareas view (entry 6)
+
+Read-only paginated task list, sorted by `createdAt` DESC. The
+body shows `id | status | guard | priority | age | category |
+summary` (first 60 chars of details with ellipsis). All tasks
+(including `done` and `skipped`) are visible. Menu options are
+ONLY `← Prev`, `Next →`, `↻ Actualizar`, `← Volver`, `Exit`. There
+are NO per-task action labels.
+
+```text
+Tareas (3) — página 1/1:
 task-abc1111 | proposed | —        | P3 | 11h 34m | bug      | Pending bug
 task-def2222 | done     | —        | P5 |  2d 11h | feature  | Done task
 task-ghi3333 | paused   | risky    | P5 |  1d 11h | bug      | Needs confirmation
 ```
 
-The summary column is the first 80 chars of `originalText ?? text`,
-whitespace-normalized, with `...` appended when truncated.
+### Cola de acciones view (entry 7)
 
-### Bottom sub-panel: Cola de acciones (actionable, drives the menu)
-
-Shows only the actionable tasks (excludes `done` and `skipped`)
-with four columns:
+Live read-only feed of supervisor activity + agentlab runs +
+trigger fires, sorted by `ts` DESC. The body shows
+`ts | kind | summary`. Menu options are ONLY `↻ Actualizar ahora`,
+`← Volver`, `Exit`. There are NO per-task action labels. The view
+auto-refreshes every 5000 ms while open (mirrors the "Proyecto
+actual" panel pattern).
 
 ```text
-Cola de acciones (2):
-task-abc1111 | proposed | P3 | Pending bug
-task-ghi3333 | paused   | P5 | Needs confirmation
+Cola de acciones (3):
+2026-06-10T12:00:00.000Z | agentlab   | agentlab security (test-project) status=completed — No issues
+2026-06-10T11:55:00.000Z | trigger    | trigger fire: cli/idu-supervisor-tick
+2026-06-10T11:50:00.000Z | supervisor | supervisor supervisor_tick/orchestrator_requested status=completed (manual)
 ```
-
-The number in the header is the TOTAL actionable count (not the
-page count). The body shows the current page (default 10 / page).
-
-### Separator
-
-A `─` (60 chars) rule sits between the two sub-panels inside the
-`selectMenu` body argument.
-
-### Menu options
-
-Built only from the actionable tasks in the current page. Each
-actionable task has a `👁 Ver` / `✓ Aprobar` / `✗ Rechazar` triple
-(prefixed with the action, the structural status, the truncated id,
-and the 80-char summary), followed by `← Prev` / `Next →` / `← Volver`
-nav entries as needed. Done and skipped tasks do NOT appear in the
-menu — they are only visible in the read-only top sub-panel.
 
 ## Open follow-ups (not in scope for this slice)
 
-None. The B2 follow-ups ("home-menu wiring" and "summary in the
-row") and the B3 follow-up ("split the panel") are all closed by
-this commit. The next follow-up, if any, would be to add a
-"Reasignar prioridad" action to the menu, but the user has not
-asked for it.
+None for B4. The next follow-up, if any, would be to add a
+"Reasignar prioridad" action to the menu — but the user has not
+asked for it. The user explicitly said the Cola de acciones must
+be read-only, so no actions are added there.
 
 ## Next step
 
 Commit this fix with the message
-`fix(idu-pi): split Tareas y cola panel into task list and action queue`
+`fix(idu-pi): Tareas (read-only) and Cola de acciones (live feed, no decisions)`
 and push to main.
+
+## Push status
+
+Local commit `64c6773` is ready. The harness safety policy
+("Gentle AI safety policy requires interactive confirmation before
+this command") blocked `git push origin main` from the worker
+side, so the commit is currently local-only on
+`main` (1 commit ahead of `origin/main`). The previous commit
+`8051256` is at `origin/main` and the revert `ead299b` plus the
+new B4 fix `64c6773` need to be pushed manually (or by the
+parent session) to update `origin/main` to the B4 state.

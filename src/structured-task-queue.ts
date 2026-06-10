@@ -651,8 +651,91 @@ export type TaskQueueMenuOption = { label: string; value: string };
 
 export const TASK_QUEUE_OPTION_DETAILS_MAX = 80;
 export const TASK_QUEUE_PAGE_SIZE_DEFAULT = 10;
+export const TAREAS_VIEW_SUMMARY_MAX = 60;
+export const TAREAS_VIEW_PAGE_SIZE_DEFAULT = 15;
 
 export type TaskQueueAction = "view" | "approve" | "reject";
+
+/**
+ * Sorts tasks by `createdAt` DESC (newest first). Pure helper used
+ * by the read-only "Tareas" TUI view. Falls back to a stable
+ * tie-breaker on `id` so the order is deterministic.
+ */
+export function sortTasksByCreatedAtDesc(
+	tasks: readonly StructuredTask[],
+): StructuredTask[] {
+	return [...tasks].sort((left, right) => {
+		const leftMs = Date.parse(left.createdAt);
+		const rightMs = Date.parse(right.createdAt);
+		if (Number.isFinite(leftMs) && Number.isFinite(rightMs)) {
+			if (rightMs !== leftMs) return rightMs - leftMs;
+		} else if (Number.isFinite(rightMs)) {
+			return 1;
+		} else if (Number.isFinite(leftMs)) {
+			return -1;
+		}
+		return left.id.localeCompare(right.id);
+	});
+}
+
+/**
+ * Builds a one-line row for the read-only "Tareas" TUI view.
+ * Mirrors `formatTaskQueueRow` but uses the
+ * `TAREAS_VIEW_SUMMARY_MAX` (60) char summary, and always appends
+ * the summary column on the same line. Pure.
+ */
+export function formatTareasViewRow(
+	task: StructuredTask,
+	options: TareasYColaRowOptions & { maxSummaryLength?: number } = {},
+): string {
+	const baseRow = formatTaskQueueRow(task, options);
+	const summary = summarizeTaskQueueRow(task, {
+		maxLength: options.maxSummaryLength ?? TAREAS_VIEW_SUMMARY_MAX,
+	});
+	return `${baseRow} | ${summary}`;
+}
+
+/**
+ * Formats a paginated read-only "Tareas" view: ALL tasks (no
+ * filtering by actionable state) sorted by `createdAt` DESC. The
+ * summary column is truncated to `TAREAS_VIEW_SUMMARY_MAX` (60)
+ * chars with a trailing ellipsis. The view has no per-task menu
+ * options: it is a read-only TUI surface. Pure.
+ */
+export function formatTareasView(
+	tasks: readonly StructuredTask[],
+	options: TareasYColaRowOptions & {
+		maxSummaryLength?: number;
+		pageIndex?: number;
+		pageSize?: number;
+	} = {},
+): string {
+	const pageSize =
+		options.pageSize !== undefined && options.pageSize > 0
+			? options.pageSize
+			: TAREAS_VIEW_PAGE_SIZE_DEFAULT;
+	const pageIndex = options.pageIndex ?? 0;
+	const sorted = sortTasksByCreatedAtDesc(tasks);
+	if (sorted.length === 0) {
+		return "Tareas (0):\n  (sin tareas)";
+	}
+	const { tasks: pageTasks, page } = paginateStructuredTaskQueue(
+		sorted,
+		pageIndex,
+		pageSize,
+	);
+	const header = `Tareas (${sorted.length}) — página ${page.pageIndex + 1}/${page.pageCount}:`;
+	if (pageTasks.length === 0) {
+		return `${header}\n  (sin tareas en esta página)`;
+	}
+	const rows = pageTasks.map((task) =>
+		formatTareasViewRow(task, {
+			...options,
+			maxSummaryLength: options.maxSummaryLength ?? TAREAS_VIEW_SUMMARY_MAX,
+		}),
+	);
+	return `${header}\n${rows.join("\n")}`;
+}
 
 /**
  * Truncates a task's details for use inside a TUI menu option label.

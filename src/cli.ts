@@ -395,12 +395,17 @@ import {
 import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
+	formatTareasView,
 	formatTareasYCola,
 	renderTaskQueuePanel,
 	StructuredTaskQueue,
 	structuredTaskInputForText,
 	type StructuredTask,
 } from "./structured-task-queue.js";
+import {
+	formatColaDeAccionesFeed,
+	readColaDeAccionesFeed,
+} from "./cola-acciones-feed.js";
 import {
 	buildTaskPrompt,
 	formatTaskTemplateHelp,
@@ -4168,6 +4173,7 @@ type InteractiveHomeSelectMenu = (
 	options: MenuOption[],
 	status?: ReturnType<typeof buildCliHomeStatus>,
 	content?: string,
+	settings?: Pick<SelectSearchableMenuSettings, "autoRefresh">,
 ) => Promise<string>;
 
 export async function runInteractiveHome(
@@ -4213,11 +4219,16 @@ export async function runInteractiveHome(
 			if (result === "back") continue;
 			return "Salida sin cambios.";
 		}
-		if (choice === "tasks") {
-			const result = await runTaskQueuePanelTui(
+		if (choice === "tareas-view") {
+			const result = await runTareasViewTui(
 				taskQueueRuntime,
 				selectMenuImpl,
 			);
+			if (result === "__back") continue;
+			return result;
+		}
+		if (choice === "cola-view") {
+			const result = await runColaDeAccionesViewTui(status, selectMenuImpl);
 			if (result === "__back") continue;
 			return result;
 		}
@@ -4230,6 +4241,87 @@ export async function runInteractiveHome(
 			return "Salida sin cambios.";
 		}
 		return "Salida sin cambios.";
+	}
+}
+
+type TareasViewDispatchRuntime = Pick<
+	TaskQueuePanelDispatchRuntime,
+	"listTasks"
+>;
+
+function tareasViewOptions(): MenuOption[] {
+	return [
+		{ label: "← Prev", value: "page:prev" },
+		{ label: "Next →", value: "page:next" },
+		{ label: "↻ Actualizar", value: "refresh" },
+		{ label: "← Volver", value: "back" },
+		{ label: "Exit", value: "exit" },
+	];
+}
+
+async function runTareasViewTui(
+	runtime: TareasViewDispatchRuntime,
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<"__back" | string> {
+	let pageIndex = 0;
+	const pageSize = 15;
+	while (true) {
+		const tasks = runtime.listTasks();
+		const buildContent = () =>
+			formatTareasView(tasks, {
+				now: () => new Date(),
+				pageIndex,
+				pageSize,
+			});
+		const choice = await selectMenuImpl(
+			"Tareas",
+			tareasViewOptions(),
+			undefined,
+			buildContent(),
+		);
+		if (choice === "back") return "__back";
+		if (choice === "exit") return "Salida sin cambios.";
+		if (choice === "page:next") {
+			pageIndex += 1;
+		} else if (choice === "page:prev") {
+			pageIndex = Math.max(0, pageIndex - 1);
+		}
+	}
+}
+
+function colaDeAccionesViewOptions(): MenuOption[] {
+	return [
+		{ label: "↻ Actualizar ahora", value: "refresh" },
+		{ label: "← Volver", value: "back" },
+		{ label: "Exit", value: "exit" },
+	];
+}
+
+const COLA_DE_ACCIONES_AUTOREFRESH_MS = 5000;
+
+async function runColaDeAccionesViewTui(
+	status: ReturnType<typeof buildCliHomeStatus>,
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<"__back" | string> {
+	while (true) {
+		const stateRoot = status.project.stateRoot;
+		const buildContent = () =>
+			formatColaDeAccionesFeed(readColaDeAccionesFeed(stateRoot, { limit: 500 }));
+		const choice = await selectMenuImpl(
+			"Cola de acciones",
+			colaDeAccionesViewOptions(),
+			undefined,
+			buildContent(),
+			{
+				autoRefresh: {
+					intervalMs: COLA_DE_ACCIONES_AUTOREFRESH_MS,
+					getContent: buildContent,
+				},
+			},
+		);
+		if (choice === "back") return "__back";
+		if (choice === "exit") return "Salida sin cambios.";
+		// refresh and unknown choices: stay in the loop, re-render.
 	}
 }
 
@@ -4275,7 +4367,8 @@ function mainMenuOptions(): MenuOption[] {
 		{ label: "Telegram remoto", value: "telegram" },
 		{ label: "Modelos y perfiles", value: "models" },
 		{ label: "Supervisor", value: "supervisor" },
-		{ label: "Tareas y cola", value: "tasks" },
+		{ label: "Tareas", value: "tareas-view" },
+		{ label: "Cola de acciones", value: "cola-view" },
 		{ label: "Diagnóstico", value: "diagnostics" },
 		{ label: "Exit", value: "exit" },
 	];
@@ -4865,8 +4958,8 @@ export async function runInteractiveHomeWithQuestion(
 		stdinInteractive: true,
 	});
 	print(formatMainMenu(status));
-	const choice = (await question("\nElegí una opción [1-8]: ")).trim();
-	if (choice === "8" || /^exit|salir$/iu.test(choice))
+	const choice = (await question("\nElegí una opción [1-9]: ")).trim();
+	if (choice === "9" || /^exit|salir$/iu.test(choice))
 		return "Salida sin cambios.";
 	if (choice === "1") return runInstallationMenu(question, print);
 	if (choice === "2") return formatCliProjectStatus(status);
@@ -4875,7 +4968,15 @@ export async function runInteractiveHomeWithQuestion(
 	if (choice === "4") return runModelProfilesMenu(question, print, status);
 	if (choice === "5") return formatSupervisorStatus(status);
 	if (choice === "6") return formatTaskQueueStatus();
-	if (choice === "7") return formatDiagnosticsStatus(status);
+	if (choice === "7") {
+		// "Cola de acciones" is a live read-only TUI view (auto-refresh).
+		// In the non-TUI surface the safest mirror is the formatted
+		// feed snapshot so the user still sees the same data.
+		return formatColaDeAccionesFeed(
+			readColaDeAccionesFeed(status.project.stateRoot, { limit: 200 }),
+		);
+	}
+	if (choice === "8") return formatDiagnosticsStatus(status);
 	return [
 		"Opción no reconocida. No ejecuté acciones.",
 		"Usá `idu-pi` o `idu-pi setup wizard`.",
