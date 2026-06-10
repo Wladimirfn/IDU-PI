@@ -106,13 +106,13 @@ test("applyMigrations upgrades a pre-B0 lab.db by adding the B0 tables without l
 	// Note: proposals table might exist from the SCHEMA blob in real usage, but in this test
 	// we're simulating a minimal pre-B0 state without running initLabDb
 
-	// Run applyMigrations: should skip 0001 (already applied), apply 0002
+	// Run applyMigrations: should skip 0001 (already applied), apply 0002 and any
+	// later migrations (e.g. 0003_skill_rating.sql from B1).
 	const result = applyMigrations(dbPath);
 
-	assert.deepEqual(
-		result.applied,
-		["0002_bibliotecario.sql"],
-		"only 0002 should be applied",
+	assert.ok(
+		result.applied.includes("0002_bibliotecario.sql"),
+		"0002 should be applied",
 	);
 	assert.ok(
 		result.skipped.includes("0001_model_invocation_log.sql"),

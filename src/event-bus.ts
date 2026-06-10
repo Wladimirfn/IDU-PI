@@ -45,7 +45,8 @@ export type EventKind =
 	| "blueprint_edited"
 	| "source_added"
 	| "source_digest_drift"
-	| "role_engine_cap_warning";
+	| "role_engine_cap_warning"
+	| "skill_archive_reason";
 
 export type Event = {
 	ts: string;

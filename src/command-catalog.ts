@@ -1088,6 +1088,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command:
 			'corepack pnpm cli -- idu-birth-repo-plan \'{"repoName":"demo","visibility":"private","owner":"elmas","license":"MIT","initialReadmePolicy":"minimal","remoteProvider":"github","pushApproved":true,"branchPolicy":"main","ciExpectation":"pnpm test"}\'',
 	},
+	{
+		label: "Bibliotecario init",
+		command: "corepack pnpm cli -- idu-bibliotecario-init",
+	},
+	{
+		label: "Skill rating",
+		command: "corepack pnpm cli -- idu-skill-rating <proposalId> <score>",
+	},
 ];
 
 export const BATCH_COMMANDS: LocalCommandEntry[] = [

@@ -125,6 +125,11 @@ import {
 } from "./idu-prepare.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
 import {
+	runBibliotecarioInit,
+	formatBibliotecarioInit,
+} from "./cli-bibliotecario-init.js";
+import { runSkillRating, formatSkillRating } from "./cli-skill-rating.js";
+import {
 	approveMasterPlan,
 	ensureMasterPlanForIdu,
 	formatIduSupervisorPlanReport,
@@ -2493,6 +2498,30 @@ export async function runCliCommand(
 					masterPlanSummary: "",
 				});
 				return ok(formatBirthBibliotecario(result));
+			}
+			case "idu-bibliotecario-init":
+			case "bibliotecario-init": {
+				const result = runBibliotecarioInit({
+					stateRoot: activeRuntime.workspaceRoot,
+				});
+				if (!result.ok) {
+					return fail(result.error);
+				}
+				return ok(formatBibliotecarioInit(result));
+			}
+			case "idu-skill-rating":
+			case "skill-rating": {
+				const result = runSkillRating(rest, {
+					stateRoot: activeRuntime.workspaceRoot,
+				});
+				if (!result.ok) {
+					return {
+						exitCode: result.exitCode,
+						stdout: "",
+						stderr: formatSkillRating(result),
+					};
+				}
+				return ok(formatSkillRating(result));
 			}
 			case "idu-birth-validate":
 			case "birth-validate": {
