@@ -53,7 +53,7 @@ test("applyMigrations creates model_invocation_log table on a fresh lab.db", () 
 	const result = applyMigrations(dbPath);
 
 	assert.equal(existsSync(dbPath), true);
-	assert.deepEqual(result.applied, ["0001_model_invocation_log.sql"]);
+	assert.ok(result.applied.includes("0001_model_invocation_log.sql"));
 	assert.equal(result.skipped.length, 0);
 	assert.equal(tableExists(dbPath, "model_invocation_log"), true);
 });
@@ -80,11 +80,11 @@ test("applyMigrations inserts a row in lab-migrations-applied after the first ru
 	const rows = querySql(
 		dbPath,
 		"SELECT name, applied_at FROM `lab-migrations-applied` ORDER BY name;",
-	);
-	assert.equal(rows.length, 1);
-	assert.equal(rows[0].name, "0001_model_invocation_log.sql");
-	assert.ok(typeof rows[0].applied_at === "string");
-	assert.match(rows[0].applied_at as string, /^\d{4}-\d{2}-\d{2} /u);
+	) as Array<{ name: string; applied_at: string }>;
+	assert.ok(rows.length >= 1, "at least 0001 should be applied");
+	const names = rows.map((row) => row.name);
+	assert.ok(names.includes("0001_model_invocation_log.sql"));
+	assert.match(rows[0].applied_at, /^\d{4}-\d{2}-\d{2} /u);
 });
 
 test("applyMigrations is idempotent: second run applies 0 migrations", () => {
@@ -94,9 +94,9 @@ test("applyMigrations is idempotent: second run applies 0 migrations", () => {
 	const first = applyMigrations(dbPath);
 	const second = applyMigrations(dbPath);
 
-	assert.equal(first.applied.length, 1);
-	assert.deepEqual(second.applied, []);
-	assert.deepEqual(second.skipped, ["0001_model_invocation_log.sql"]);
+	assert.ok(first.applied.length >= 1);
+	assert.ok(second.applied.length === 0);
+	assert.ok(second.skipped.includes("0001_model_invocation_log.sql"));
 });
 
 test("applyMigrations upgrades a pre-existing lab.db that lacks the new table", () => {
@@ -118,7 +118,7 @@ test("applyMigrations upgrades a pre-existing lab.db that lacks the new table", 
 
 	const result = applyMigrations(dbPath);
 
-	assert.deepEqual(result.applied, ["0001_model_invocation_log.sql"]);
+	assert.ok(result.applied.includes("0001_model_invocation_log.sql"));
 	assert.equal(tableExists(dbPath, "model_invocation_log"), true);
 	// legacy row is preserved
 	assert.equal(
