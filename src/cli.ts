@@ -396,6 +396,7 @@ import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	formatTareasYCola,
+	renderTaskQueuePanel,
 	StructuredTaskQueue,
 	structuredTaskInputForText,
 	type StructuredTask,
@@ -4422,7 +4423,17 @@ export type TaskQueuePanelDispatchRuntime = {
 };
 
 export type TaskQueuePanelDispatchResult = {
-	action: "approve" | "reject" | "not-found" | "back" | "exit";
+	action:
+		| "approve"
+		| "reject"
+		| "view"
+		| "page-next"
+		| "page-prev"
+		| "back-to-list"
+		| "not-found"
+		| "back"
+		| "exit";
+	taskId?: string;
 	message?: string;
 };
 
@@ -4436,6 +4447,19 @@ export function dispatchTaskQueuePanelChoice(
 	if (choice === "exit") {
 		return { action: "exit" };
 	}
+	if (choice === "back-to-list") {
+		return { action: "back-to-list" };
+	}
+	if (choice === "page:next") {
+		return { action: "page-next" };
+	}
+	if (choice === "page:prev") {
+		return { action: "page-prev" };
+	}
+	if (choice.startsWith("view:")) {
+		const id = choice.slice("view:".length);
+		return { action: "view", taskId: id };
+	}
 	if (choice.startsWith("approve:")) {
 		const id = choice.slice("approve:".length);
 		const task = runtime.queueApprove(id);
@@ -4444,6 +4468,7 @@ export function dispatchTaskQueuePanelChoice(
 		}
 		return {
 			action: "approve",
+			taskId: id,
 			message: `Tarea aprobada: ${task.id}. No ejecuté IA ni AgentLabs.`,
 		};
 	}
@@ -4455,6 +4480,7 @@ export function dispatchTaskQueuePanelChoice(
 		}
 		return {
 			action: "reject",
+			taskId: id,
 			message: `Tarea rechazada: ${task.id}.`,
 		};
 	}
@@ -4465,53 +4491,65 @@ export async function runTaskQueuePanelTui(
 	runtime: TaskQueuePanelDispatchRuntime,
 	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
 ): Promise<"__back" | string> {
+	let pageIndex = 0;
+	let viewedTaskId: string | undefined;
+	const pageSize = 10;
+
 	while (true) {
 		const tasks = runtime.listTasks();
-		const content = formatTareasYCola(tasks, { now: () => new Date() });
-
-		if (!tasks.length) {
-			const choice = await selectMenuImpl(
-				"Tareas y cola",
-				[
-					{ label: "← Volver", value: "back" },
-					{ label: "Exit", value: "exit" },
-				],
-				undefined,
-				content,
-			);
-			const result = dispatchTaskQueuePanelChoice(runtime, choice);
-			if (result.action === "back") return "__back";
-			if (result.action === "exit") return "Salida sin cambios.";
-			continue;
-		}
-
-		const taskOptions: MenuOption[] = tasks.flatMap((task: StructuredTask) => [
+		const { content, options } = renderTaskQueuePanel(
 			{
-				label: `✓ Aprobar ${task.id.slice(0, 12)} | ${task.status}`,
-				value: `approve:${task.id}`,
+				tasks,
+				pageIndex,
+				pageSize,
+				viewedTaskId,
 			},
 			{
-				label: `✗ Rechazar ${task.id.slice(0, 12)} | ${task.status}`,
-				value: `reject:${task.id}`,
+				approveCommand: (id) => `idu-pi idu-queue-approve ${id}`,
+				rejectCommand: (id) => `idu-pi idu-queue-reject ${id}`,
+				now: () => new Date(),
+				pageSize,
 			},
-		]);
+		);
 
 		const choice = await selectMenuImpl(
 			"Tareas y cola",
-			[
-				...taskOptions,
-				{ label: "← Volver", value: "back" },
-				{ label: "Exit", value: "exit" },
-			],
+			options as MenuOption[],
 			undefined,
 			content,
 		);
-
 		const result = dispatchTaskQueuePanelChoice(runtime, choice);
+
 		if (result.action === "back") return "__back";
 		if (result.action === "exit") return "Salida sin cambios.";
-		if (result.message) {
-			await showTextView("Tareas y cola", result.message);
+		if (result.action === "back-to-list") {
+			viewedTaskId = undefined;
+			continue;
+		}
+		if (result.action === "view" && result.taskId) {
+			viewedTaskId = result.taskId;
+			continue;
+		}
+		if (result.action === "page-next") {
+			pageIndex += 1;
+			continue;
+		}
+		if (result.action === "page-prev") {
+			pageIndex = Math.max(0, pageIndex - 1);
+			continue;
+		}
+		if (result.action === "approve" || result.action === "reject") {
+			if (result.message) {
+				await showTextView("Tareas y cola", result.message);
+			}
+			viewedTaskId = undefined;
+			pageIndex = 0;
+			continue;
+		}
+		if (result.action === "not-found") {
+			if (result.message) {
+				await showTextView("Tareas y cola", result.message);
+			}
 		}
 	}
 }

@@ -127,3 +127,34 @@ test("runCliCommand idu-queue-reject prints 'task not found: <id>' for a missing
 		`did not expect the bare usage hint in CLI output, got: ${out}`,
 	);
 });
+
+// Test 13: dispatcher handles the new "view" action.
+test("dispatchTaskQueuePanelChoice returns view for 'view:<id>'", () => {
+	const task = makeTask("task-abcdef1234");
+	const runtime = makeFakeRuntime([task]);
+	const result = dispatchTaskQueuePanelChoice(runtime, `view:${task.id}`);
+	assert.equal(result.action, "view");
+	assert.equal(result.taskId, task.id);
+});
+
+// Test 14: dispatcher handles the new "page:next" / "page:prev"
+// actions without touching the runtime.
+test("dispatchTaskQueuePanelChoice returns page-next for 'page:next'", () => {
+	const runtime = makeFakeRuntime([]);
+	const result = dispatchTaskQueuePanelChoice(runtime, "page:next");
+	assert.equal(result.action, "page-next");
+});
+
+test("dispatchTaskQueuePanelChoice returns page-prev for 'page:prev'", () => {
+	const runtime = makeFakeRuntime([]);
+	const result = dispatchTaskQueuePanelChoice(runtime, "page:prev");
+	assert.equal(result.action, "page-prev");
+});
+
+// Test 15: dispatcher handles the new "back-to-list" action (back
+// from the view-mode sub-menu to the paginated list).
+test("dispatchTaskQueuePanelChoice returns back-to-list for 'back-to-list'", () => {
+	const runtime = makeFakeRuntime([]);
+	const result = dispatchTaskQueuePanelChoice(runtime, "back-to-list");
+	assert.equal(result.action, "back-to-list");
+});

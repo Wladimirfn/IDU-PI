@@ -560,6 +560,210 @@ function summarizeTaskText(text: string): string {
 		: normalized;
 }
 
+export type TaskQueueMenuOption = { label: string; value: string };
+
+export const TASK_QUEUE_OPTION_DETAILS_MAX = 80;
+export const TASK_QUEUE_PAGE_SIZE_DEFAULT = 10;
+
+export type TaskQueueAction = "view" | "approve" | "reject";
+
+/**
+ * Truncates a task's details for use inside a TUI menu option label.
+ * Whitespace is normalized. If the original text fits in `maxLength`
+ * it is returned verbatim; otherwise it is truncated to `maxLength`
+ * characters including a trailing ellipsis ("...").
+ */
+export function summarizeTaskQueueOptionDetails(
+	task: Pick<StructuredTask, "text" | "originalText">,
+	options: { maxLength?: number } = {},
+): string {
+	const maxLength = options.maxLength ?? TASK_QUEUE_OPTION_DETAILS_MAX;
+	if (maxLength <= 0) return "";
+	const details = (task.originalText ?? task.text)
+		.replace(/\s+/gu, " ")
+		.trim();
+	if (details.length <= maxLength) return details;
+	const sliceLength = Math.max(0, maxLength - 3);
+	return `${details.slice(0, sliceLength)}...`;
+}
+
+/**
+ * Builds a one-line TUI menu option label for a task. The label
+ * combines an action prefix, the task's status, the truncated id,
+ * and a 60-80 char summary of the task's details.
+ *
+ * Example: "✓ Aprobar  [pending] task-000mq8c  Realizar x cosa en x lugar..."
+ */
+export function formatTaskQueueOptionLabel(
+	task: StructuredTask,
+	action: TaskQueueAction,
+): string {
+	const prefix =
+		action === "view"
+			? "👁 Ver"
+			: action === "approve"
+				? "✓ Aprobar"
+				: "✗ Rechazar";
+	const truncatedId = task.id.slice(0, 12);
+	const summary = summarizeTaskQueueOptionDetails(task);
+	return `${prefix}  [${task.status}] ${truncatedId}  ${summary}`;
+}
+
+export type TaskQueuePage = {
+	pageIndex: number;
+	pageCount: number;
+	pageSize: number;
+	total: number;
+	start: number;
+	end: number;
+};
+
+/**
+ * Splits a task list into pages of `pageSize` tasks. The returned
+ * `pageIndex` is always clamped to `[0, pageCount - 1]` so callers
+ * never go out of bounds.
+ */
+export function paginateStructuredTaskQueue(
+	tasks: StructuredTask[],
+	pageIndex: number,
+	pageSize: number = TASK_QUEUE_PAGE_SIZE_DEFAULT,
+): { page: TaskQueuePage; tasks: StructuredTask[] } {
+	const effectivePageSize =
+		pageSize > 0 ? pageSize : TASK_QUEUE_PAGE_SIZE_DEFAULT;
+	const total = tasks.length;
+	const pageCount = Math.max(1, Math.ceil(total / effectivePageSize));
+	const safeIndex = Math.max(0, Math.min(pageIndex, pageCount - 1));
+	const start = safeIndex * effectivePageSize;
+	const end = Math.min(start + effectivePageSize, total);
+	return {
+		page: {
+			pageIndex: safeIndex,
+			pageCount,
+			pageSize: effectivePageSize,
+			total,
+			start,
+			end,
+		},
+		tasks: tasks.slice(start, end),
+	};
+}
+
+export type TaskQueuePanelState = {
+	tasks: StructuredTask[];
+	pageIndex: number;
+	pageSize: number;
+	viewedTaskId: string | undefined;
+};
+
+export type TaskQueuePanelRender = {
+	content: string;
+	options: TaskQueueMenuOption[];
+};
+
+export type RenderTaskQueuePanelOptions = {
+	approveCommand?: (id: string) => string;
+	rejectCommand?: (id: string) => string;
+	now?: () => Date;
+	pageSize?: number;
+};
+
+/**
+ * Pure function that builds the body content and menu options for a
+ * single render of the "Tareas y cola" panel. The body content
+ * changes based on the panel state: when a task is being viewed the
+ * body shows the multi-line detail from `formatStructuredTaskQueueDetail`
+ * for that task; otherwise the body shows the dense table for the
+ * full queue. The menu options are paginated (10 tasks per page by
+ * default) and each task has a view/approve/reject triple.
+ */
+export function renderTaskQueuePanel(
+	state: TaskQueuePanelState,
+	options: RenderTaskQueuePanelOptions = {},
+): TaskQueuePanelRender {
+	const now = options.now ?? (() => new Date());
+	const pageSize =
+		options.pageSize ?? state.pageSize ?? TASK_QUEUE_PAGE_SIZE_DEFAULT;
+	const approveCommand =
+		options.approveCommand ?? ((id: string) => `/queue_approve ${id}`);
+	const rejectCommand =
+		options.rejectCommand ?? ((id: string) => `/queue_reject ${id}`);
+
+	// View mode: show the multi-line detail for the viewed task.
+	if (state.viewedTaskId) {
+		const task = state.tasks.find(
+			(candidate) => candidate.id === state.viewedTaskId,
+		);
+		if (!task) {
+			// Task no longer exists; fall back to the list view.
+			return renderTaskQueuePanel(
+				{ ...state, viewedTaskId: undefined },
+				options,
+			);
+		}
+		const content = formatStructuredTaskQueueDetail([task], {
+			approveCommand,
+			rejectCommand,
+		});
+		return {
+			content,
+			options: [
+				{ label: "✓ Aprobar", value: `approve:${task.id}` },
+				{ label: "✗ Rechazar", value: `reject:${task.id}` },
+				{ label: "← Volver al listado", value: "back-to-list" },
+			],
+		};
+	}
+
+	// Empty queue: keep the existing empty-state behaviour.
+	if (state.tasks.length === 0) {
+		return {
+			content: formatTareasYCola([], { now }),
+			options: [
+				{ label: "← Volver", value: "back" },
+				{ label: "Exit", value: "exit" },
+			],
+		};
+	}
+
+	// List mode: paginated view/approve/reject triple per task plus
+	// page navigation and back to the main menu.
+	const { page, tasks: pageTasks } = paginateStructuredTaskQueue(
+		state.tasks,
+		state.pageIndex,
+		pageSize,
+	);
+	const content = formatTareasYCola(state.tasks, { now });
+
+	const taskOptions: TaskQueueMenuOption[] = pageTasks.flatMap((task) => [
+		{
+			label: formatTaskQueueOptionLabel(task, "view"),
+			value: `view:${task.id}`,
+		},
+		{
+			label: formatTaskQueueOptionLabel(task, "approve"),
+			value: `approve:${task.id}`,
+		},
+		{
+			label: formatTaskQueueOptionLabel(task, "reject"),
+			value: `reject:${task.id}`,
+		},
+	]);
+
+	const navOptions: TaskQueueMenuOption[] = [];
+	if (page.pageIndex > 0) {
+		navOptions.push({ label: "← Prev", value: "page:prev" });
+	}
+	if (page.pageIndex < page.pageCount - 1) {
+		navOptions.push({ label: "Next →", value: "page:next" });
+	}
+	navOptions.push({ label: "← Volver", value: "back" });
+
+	return {
+		content,
+		options: [...taskOptions, ...navOptions],
+	};
+}
+
 function defaultFilePath(
 	workspaceRoot: string | undefined,
 ): string | undefined {
