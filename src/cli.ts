@@ -395,6 +395,7 @@ import {
 import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
+	formatTareasYCola,
 	StructuredTaskQueue,
 	structuredTaskInputForText,
 	type StructuredTask,
@@ -2441,7 +2442,7 @@ export async function runCliCommand(
 			case "queue_approve": {
 				const id = requiredText(rest);
 				const task = activeRuntime.queueApprove(id);
-				if (!task) return fail("Uso: idu-pi queue-approve <id>");
+				if (!task) return fail(`task not found: ${id}`);
 				return ok(`Tarea aprobada: ${task.id}. No ejecuté IA ni AgentLabs.`);
 			}
 			case "idu-queue-reject":
@@ -2449,7 +2450,7 @@ export async function runCliCommand(
 			case "queue_reject": {
 				const id = requiredText(rest);
 				const task = activeRuntime.queueReject(id);
-				if (!task) return fail("Uso: idu-pi queue-reject <id>");
+				if (!task) return fail(`task not found: ${id}`);
 				return ok(`Tarea rechazada: ${task.id}.`);
 			}
 			case "idu-queue-complete":
@@ -4173,12 +4174,17 @@ export async function runInteractiveHome(): Promise<string> {
 			return "Salida sin cambios.";
 		}
 		if (choice === "tasks") {
-			const result = await showTextView(
+			// B2 follow-up: the structuredTaskQueue lives in
+			// createCliRuntime scope; wire the panel via a runtime
+			// hook in a follow-up commit. For now, the TUI menu
+			// lists the entry but the body falls back to a clean
+			// message.
+			await showTextView(
 				"Tareas y cola",
-				formatTaskQueueStatus(),
+				formatTareasYCola([], { now: () => new Date() }) +
+					"\n\nEl panel approve/reject se entrega en un commit de seguimiento (ver follow-up en apply-progress.md).",
 			);
-			if (result === "back") continue;
-			return "Salida sin cambios.";
+			continue;
 		}
 		if (choice === "diagnostics") {
 			const result = await showTextView(
@@ -4372,6 +4378,106 @@ async function runModelProfilesMenuTui(
 		}
 		const result = await showTextView("Modelos Idu-pi", message);
 		if (result === "exit") return "Salida sin cambios.";
+	}
+}
+
+export type TaskQueuePanelDispatchRuntime = {
+	queueApprove: (id: string) => StructuredTask | undefined;
+	queueReject: (id: string) => StructuredTask | undefined;
+	listTasks: () => StructuredTask[];
+};
+
+export type TaskQueuePanelDispatchResult = {
+	action: "approve" | "reject" | "not-found" | "back" | "exit";
+	message?: string;
+};
+
+export function dispatchTaskQueuePanelChoice(
+	runtime: TaskQueuePanelDispatchRuntime,
+	choice: string,
+): TaskQueuePanelDispatchResult {
+	if (choice === "back") {
+		return { action: "back" };
+	}
+	if (choice === "exit") {
+		return { action: "exit" };
+	}
+	if (choice.startsWith("approve:")) {
+		const id = choice.slice("approve:".length);
+		const task = runtime.queueApprove(id);
+		if (!task) {
+			return { action: "not-found", message: `task not found: ${id}` };
+		}
+		return {
+			action: "approve",
+			message: `Tarea aprobada: ${task.id}. No ejecuté IA ni AgentLabs.`,
+		};
+	}
+	if (choice.startsWith("reject:")) {
+		const id = choice.slice("reject:".length);
+		const task = runtime.queueReject(id);
+		if (!task) {
+			return { action: "not-found", message: `task not found: ${id}` };
+		}
+		return {
+			action: "reject",
+			message: `Tarea rechazada: ${task.id}.`,
+		};
+	}
+	return { action: "exit" };
+}
+
+async function runTaskQueuePanelTui(
+	runtime: TaskQueuePanelDispatchRuntime,
+): Promise<"__back" | string> {
+	while (true) {
+		const tasks = runtime.listTasks();
+		const content = formatTareasYCola(tasks, { now: () => new Date() });
+
+		if (!tasks.length) {
+			const choice = await selectMenu(
+				"Tareas y cola",
+				[
+					{ label: "← Volver", value: "back" },
+					{ label: "Exit", value: "exit" },
+				],
+				undefined,
+				content,
+			);
+			const result = dispatchTaskQueuePanelChoice(runtime, choice);
+			if (result.action === "back") return "__back";
+			if (result.action === "exit") return "Salida sin cambios.";
+			continue;
+		}
+
+		const taskOptions: MenuOption[] = tasks.flatMap((task: StructuredTask) => [
+			{
+				label: `✓ Aprobar ${task.id.slice(0, 12)} | ${task.status}`,
+				value: `approve:${task.id}`,
+			},
+			{
+				label: `✗ Rechazar ${task.id.slice(0, 12)} | ${task.status}`,
+				value: `reject:${task.id}`,
+			},
+		]);
+
+		const choice = await selectMenu(
+			"Tareas y cola",
+			[
+				...taskOptions,
+				{ label: "← Volver", value: "back" },
+				{ label: "Exit", value: "exit" },
+			],
+			undefined,
+			content,
+		);
+
+		const result = dispatchTaskQueuePanelChoice(runtime, choice);
+		if (result.action === "back") return "__back";
+		if (result.action === "exit") return "Salida sin cambios.";
+		if (result.message) {
+			await showTextView("Tareas y cola", result.message);
+		}
 	}
 }
 

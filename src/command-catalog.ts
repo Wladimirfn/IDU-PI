@@ -875,6 +875,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 	},
 	{ label: "Queue detail", command: "corepack pnpm cli -- idu-queue-detail" },
 	{
+		label: "Tareas y cola",
+		command: "corepack pnpm cli -- idu-queue-detail",
+	},
+	{
 		label: "Queue clear",
 		command: "corepack pnpm cli -- idu-queue-clear-structured",
 	},

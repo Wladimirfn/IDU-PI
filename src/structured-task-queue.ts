@@ -412,6 +412,73 @@ export function formatStructuredTaskQueueDetail(
 		.join("\n\n")}`;
 }
 
+export type TareasYColaRowOptions = {
+	now?: () => Date;
+	includeApprovalHint?: boolean;
+};
+
+export function formatTaskQueueRow(
+	task: StructuredTask,
+	options: TareasYColaRowOptions = {},
+): string {
+	const now = options.now ? options.now() : new Date();
+	const truncatedId = task.id.slice(0, 12);
+	const status = statusLabel(task);
+	const guard = guardLabel(task);
+	const priority = `P${task.priority}`;
+	const age = formatTaskAge(task.createdAt, now);
+	const category = task.category || "—";
+	return `${truncatedId} | ${status} | ${guard} | ${priority} | ${age} | ${category}`;
+}
+
+function statusLabel(task: StructuredTask): string {
+	if (task.status === "done") return "done";
+	if (task.status === "failed") return "blocked";
+	if (task.status === "running") return "in_progress";
+	// task.status === "pending"
+	if (task.guardStatus === "needs_confirmation") return "paused";
+	return "proposed";
+}
+
+function guardLabel(task: StructuredTask): string {
+	if (!task.guardStatus) return "—";
+	switch (task.guardRisk) {
+		case "low":
+			return "safe";
+		case "medium":
+			return "risky";
+		case "high":
+			return "risky";
+		case "blocker":
+			return "blocking";
+		default:
+			return "—";
+	}
+}
+
+function formatTaskAge(createdAt: string, now: Date): string {
+	const created = Date.parse(createdAt);
+	if (Number.isNaN(created)) return "—";
+	const diffMs = Math.max(0, now.getTime() - created);
+	const totalMinutes = Math.floor(diffMs / 60_000);
+	const days = Math.floor(totalMinutes / (60 * 24));
+	const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+	const minutes = totalMinutes % 60;
+	if (days > 0) return `${days}d ${hours}h`;
+	if (hours > 0 || minutes > 0) return `${hours}h ${minutes}m`;
+	return "0m";
+}
+
+export function formatTareasYCola(
+	tasks: StructuredTask[],
+	options: TareasYColaRowOptions = {},
+): string {
+	if (tasks.length === 0) return "no tasks in the queue";
+	const header = `Tareas y cola (${tasks.length})`;
+	const rows = tasks.map((task) => formatTaskQueueRow(task, options));
+	return `${header}\n\n${rows.join("\n")}`;
+}
+
 function formatPriorityLabel(task: StructuredTask): string {
 	const semanticPriority =
 		task.semanticPriority ?? semanticPriorityFromTaskText(task.text);
