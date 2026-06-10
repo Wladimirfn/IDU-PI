@@ -502,9 +502,7 @@ export function summarizeTaskQueueRow(
 ): string {
 	const maxLength = options.maxLength ?? TASK_QUEUE_OPTION_DETAILS_MAX;
 	if (maxLength <= 0) return "";
-	const details = (task.originalText ?? task.text)
-		.replace(/\s+/gu, " ")
-		.trim();
+	const details = (task.originalText ?? task.text).replace(/\s+/gu, " ").trim();
 	if (details.length <= maxLength) return details;
 	const sliceLength = Math.max(0, maxLength - 3);
 	return `${details.slice(0, sliceLength)}...`;
@@ -560,6 +558,110 @@ export function formatActionQueueTable(
 		const priority = `P${task.priority}`;
 		const summary = summarizeTaskQueueRow(task, {
 			maxLength: options.maxSummaryLength,
+		});
+		return `${truncatedId} | ${status} | ${priority} | ${summary}`;
+	});
+	return `${header}\n${rows.join("\n")}`;
+}
+
+/**
+ * Renders the body for the read-only "Tareas" home-menu entry.
+ * Shows ALL tasks (no filter on status: done, skipped, blocked,
+ * etc. are all included) sorted by `createdAt` DESC (most recent
+ * first) and paginated 15 tasks per page by default.
+ *
+ * Each row uses the seven columns from `formatTaskQueueRow`
+ * (`id | status | guard | priority | age | category`) plus a
+ * summary column that is the first 60 characters of
+ * `originalText ?? text`, whitespace-normalized, with `...`
+ * appended when truncated. The header reads `Tareas (N):` where
+ * `N` is the total task count.
+ */
+export function formatTareasViewTable(
+	tasks: StructuredTask[],
+	options: TareasYColaRowOptions & {
+		maxSummaryLength?: number;
+		pageIndex?: number;
+		pageSize?: number;
+	} = {},
+): string {
+	const maxSummaryLength =
+		options.maxSummaryLength ?? TASK_QUEUE_TAREAS_SUMMARY_MAX;
+	const pageSize =
+		options.pageSize !== undefined && options.pageSize > 0
+			? options.pageSize
+			: TASK_QUEUE_TAREAS_PAGE_SIZE;
+	const pageIndex = options.pageIndex ?? 0;
+	if (tasks.length === 0) {
+		return "Tareas (0):\n  (sin tareas)";
+	}
+	const sorted = sortTasksByCreatedAtDesc(tasks);
+	const { tasks: pageTasks } = paginateStructuredTaskQueue(
+		sorted,
+		pageIndex,
+		pageSize,
+	);
+	const header = `Tareas (${sorted.length}):`;
+	if (pageTasks.length === 0) {
+		return `${header}\n  (sin tareas en esta página)`;
+	}
+	const rows = pageTasks.map((task) => {
+		const baseRow = formatTaskQueueRow(task, options);
+		const summary = summarizeTaskQueueRow(task, {
+			maxLength: maxSummaryLength,
+		});
+		return `${baseRow} | ${summary}`;
+	});
+	return `${header}\n${rows.join("\n")}`;
+}
+
+/**
+ * Renders the body for the actionable "Cola" home-menu entry.
+ * Shows ONLY actionable tasks (status in
+ * {proposed, paused, in_progress, blocked}) sorted by
+ * `createdAt` DESC (most recent first) and paginated 10 tasks
+ * per page by default.
+ *
+ * Each row uses four columns (`id | status | priority | summary`)
+ * with the summary truncated to `maxSummaryLength` (80 by default).
+ * The header reads `Cola de acciones (N):` where `N` is the total
+ * actionable count (not the page count).
+ */
+export function formatColaViewTable(
+	tasks: StructuredTask[],
+	options: TareasYColaRowOptions & {
+		maxSummaryLength?: number;
+		pageIndex?: number;
+		pageSize?: number;
+	} = {},
+): string {
+	const maxSummaryLength =
+		options.maxSummaryLength ?? TASK_QUEUE_COLA_SUMMARY_MAX;
+	const pageSize =
+		options.pageSize !== undefined && options.pageSize > 0
+			? options.pageSize
+			: TASK_QUEUE_COLA_PAGE_SIZE;
+	const pageIndex = options.pageIndex ?? 0;
+	const actionable = tasks.filter(isActionableTask);
+	if (actionable.length === 0) {
+		return "Cola de acciones (0):\n  (sin acciones pendientes)";
+	}
+	const sorted = sortTasksByCreatedAtDesc(actionable);
+	const { tasks: pageTasks } = paginateStructuredTaskQueue(
+		sorted,
+		pageIndex,
+		pageSize,
+	);
+	const header = `Cola de acciones (${sorted.length}):`;
+	if (pageTasks.length === 0) {
+		return `${header}\n  (sin acciones en esta página)`;
+	}
+	const rows = pageTasks.map((task) => {
+		const truncatedId = task.id.slice(0, 12);
+		const status = statusLabel(task);
+		const priority = `P${task.priority}`;
+		const summary = summarizeTaskQueueRow(task, {
+			maxLength: maxSummaryLength,
 		});
 		return `${truncatedId} | ${status} | ${priority} | ${summary}`;
 	});
@@ -651,8 +753,24 @@ export type TaskQueueMenuOption = { label: string; value: string };
 
 export const TASK_QUEUE_OPTION_DETAILS_MAX = 80;
 export const TASK_QUEUE_PAGE_SIZE_DEFAULT = 10;
+export const TASK_QUEUE_TAREAS_PAGE_SIZE = 15;
+export const TASK_QUEUE_TAREAS_SUMMARY_MAX = 60;
+export const TASK_QUEUE_COLA_PAGE_SIZE = 10;
+export const TASK_QUEUE_COLA_SUMMARY_MAX = 80;
 
 export type TaskQueueAction = "view" | "approve" | "reject";
+
+/**
+ * Returns a copy of `tasks` sorted by `createdAt` in descending
+ * order (most recent first). Does not mutate the input.
+ */
+export function sortTasksByCreatedAtDesc(
+	tasks: StructuredTask[],
+): StructuredTask[] {
+	return [...tasks].sort((left, right) =>
+		right.createdAt.localeCompare(left.createdAt),
+	);
+}
 
 /**
  * Truncates a task's details for use inside a TUI menu option label.
@@ -861,6 +979,196 @@ export function renderTaskQueuePanel(
 		content,
 		options: [...taskOptions, ...navOptions],
 	};
+}
+
+// -----------------------------------------------------------------
+// Tareas / Cola panel split (read-only + actionable as two separate
+// home-menu entries, not stacked sub-panels in one entry).
+// -----------------------------------------------------------------
+
+export type TareasViewPanelState = {
+	tasks: StructuredTask[];
+	pageIndex: number;
+	pageSize: number;
+};
+
+export type ColaViewPanelState = {
+	tasks: StructuredTask[];
+	pageIndex: number;
+	pageSize: number;
+	viewedTaskId: string | undefined;
+};
+
+export type ColaViewPanelRender = {
+	content: string;
+	options: TaskQueueMenuOption[];
+};
+
+export type TareasViewPanelRender = {
+	content: string;
+	options: TaskQueueMenuOption[];
+};
+
+export type RenderTareasViewPanelOptions = {
+	now?: () => Date;
+	pageSize?: number;
+};
+
+export type RenderColaViewPanelOptions = {
+	approveCommand?: (id: string) => string;
+	rejectCommand?: (id: string) => string;
+	now?: () => Date;
+	pageSize?: number;
+};
+
+/**
+ * Pure renderer for the read-only "Tareas" home-menu entry. The
+ * body is `formatTareasViewTable` (all tasks, sorted by createdAt
+ * DESC, 15/page, 60-char summary). Menu options are NAV ONLY:
+ * `← Anterior`, `Siguiente →`, `← Volver`, and `Exit`. There are
+ * no per-task action options because the panel is read-only.
+ */
+export function renderTareasViewPanel(
+	state: TareasViewPanelState,
+	options: RenderTareasViewPanelOptions = {},
+): TareasViewPanelRender {
+	const now = options.now ?? (() => new Date());
+	const pageSize =
+		options.pageSize ?? state.pageSize ?? TASK_QUEUE_TAREAS_PAGE_SIZE;
+	const total = state.tasks.length;
+	if (total === 0) {
+		return {
+			content: formatTareasViewTable([], {
+				now,
+				pageIndex: 0,
+				pageSize,
+			}),
+			options: [
+				{ label: "← Volver", value: "back" },
+				{ label: "Exit", value: "exit" },
+			],
+		};
+	}
+	const sorted = sortTasksByCreatedAtDesc(state.tasks);
+	const { page } = paginateStructuredTaskQueue(
+		sorted,
+		state.pageIndex,
+		pageSize,
+	);
+	const content = formatTareasViewTable(state.tasks, {
+		now,
+		pageIndex: state.pageIndex,
+		pageSize,
+	});
+	const navOptions: TaskQueueMenuOption[] = [];
+	if (page.pageIndex > 0) {
+		navOptions.push({ label: "← Anterior", value: "page:prev" });
+	}
+	if (page.pageIndex < page.pageCount - 1) {
+		navOptions.push({ label: "Siguiente →", value: "page:next" });
+	}
+	navOptions.push({ label: "← Volver", value: "back" });
+	navOptions.push({ label: "Exit", value: "exit" });
+	return { content, options: navOptions };
+}
+
+/**
+ * Pure renderer for the actionable "Cola" home-menu entry. The
+ * body is `formatColaViewTable` (actionable only, sorted by
+ * createdAt DESC, 10/page). Menu options are 3 per task
+ * (`👁 Ver` / `✓ Aprobar` / `✗ Rechazar`) plus page nav and
+ * `← Volver`. The user said "lo repetido no va" so each task gets
+ * ONE row with three submenu choices — not three separate rows.
+ */
+export function renderColaViewPanel(
+	state: ColaViewPanelState,
+	options: RenderColaViewPanelOptions = {},
+): ColaViewPanelRender {
+	const now = options.now ?? (() => new Date());
+	const pageSize =
+		options.pageSize ?? state.pageSize ?? TASK_QUEUE_COLA_PAGE_SIZE;
+	const approveCommand =
+		options.approveCommand ?? ((id: string) => `/queue_approve ${id}`);
+	const rejectCommand =
+		options.rejectCommand ?? ((id: string) => `/queue_reject ${id}`);
+
+	// View mode: show the multi-line detail for the viewed task.
+	if (state.viewedTaskId) {
+		const task = state.tasks.find(
+			(candidate) => candidate.id === state.viewedTaskId,
+		);
+		if (!task) {
+			// Task no longer exists; fall back to the list view.
+			return renderColaViewPanel(
+				{ ...state, viewedTaskId: undefined },
+				options,
+			);
+		}
+		const content = formatStructuredTaskQueueDetail([task], {
+			approveCommand,
+			rejectCommand,
+		});
+		return {
+			content,
+			options: [
+				{ label: "✓ Aprobar", value: `approve:${task.id}` },
+				{ label: "✗ Rechazar", value: `reject:${task.id}` },
+				{ label: "← Volver al listado", value: "back-to-list" },
+			],
+		};
+	}
+
+	// No actionable tasks: empty-state body and back + exit menu.
+	const actionableTasks = state.tasks.filter(isActionableTask);
+	if (actionableTasks.length === 0) {
+		return {
+			content: formatColaViewTable(state.tasks, {
+				now,
+				pageIndex: 0,
+				pageSize,
+			}),
+			options: [
+				{ label: "← Volver", value: "back" },
+				{ label: "Exit", value: "exit" },
+			],
+		};
+	}
+
+	// List mode: paginated 3-options-per-actionable-task + nav.
+	const sortedActionable = sortTasksByCreatedAtDesc(actionableTasks);
+	const { page, tasks: pageTasks } = paginateStructuredTaskQueue(
+		sortedActionable,
+		state.pageIndex,
+		pageSize,
+	);
+	const content = formatColaViewTable(state.tasks, {
+		now,
+		pageIndex: state.pageIndex,
+		pageSize,
+	});
+	const taskOptions: TaskQueueMenuOption[] = pageTasks.flatMap((task) => [
+		{
+			label: formatTaskQueueOptionLabel(task, "view"),
+			value: `view:${task.id}`,
+		},
+		{
+			label: formatTaskQueueOptionLabel(task, "approve"),
+			value: `approve:${task.id}`,
+		},
+		{
+			label: formatTaskQueueOptionLabel(task, "reject"),
+			value: `reject:${task.id}`,
+		},
+	]);
+	const navOptions: TaskQueueMenuOption[] = [];
+	if (page.pageIndex > 0) {
+		navOptions.push({ label: "← Anterior", value: "page:prev" });
+	}
+	if (page.pageIndex < page.pageCount - 1) {
+		navOptions.push({ label: "Siguiente →", value: "page:next" });
+	}
+	navOptions.push({ label: "← Volver", value: "back" });
+	return { content, options: [...taskOptions, ...navOptions] };
 }
 
 function defaultFilePath(

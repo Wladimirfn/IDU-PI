@@ -395,10 +395,13 @@ import {
 import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
-	formatTareasYCola,
+	renderColaViewPanel,
 	renderTaskQueuePanel,
+	renderTareasViewPanel,
 	StructuredTaskQueue,
 	structuredTaskInputForText,
+	TASK_QUEUE_COLA_PAGE_SIZE,
+	TASK_QUEUE_TAREAS_PAGE_SIZE,
 	type StructuredTask,
 } from "./structured-task-queue.js";
 import {
@@ -4213,8 +4216,16 @@ export async function runInteractiveHome(
 			if (result === "back") continue;
 			return "Salida sin cambios.";
 		}
-		if (choice === "tasks") {
-			const result = await runTaskQueuePanelTui(
+		if (choice === "tareas") {
+			const result = await runTareasViewPanelTui(
+				taskQueueRuntime,
+				selectMenuImpl,
+			);
+			if (result === "__back") continue;
+			return result;
+		}
+		if (choice === "cola") {
+			const result = await runColaViewPanelTui(
 				taskQueueRuntime,
 				selectMenuImpl,
 			);
@@ -4275,7 +4286,8 @@ function mainMenuOptions(): MenuOption[] {
 		{ label: "Telegram remoto", value: "telegram" },
 		{ label: "Modelos y perfiles", value: "models" },
 		{ label: "Supervisor", value: "supervisor" },
-		{ label: "Tareas y cola", value: "tasks" },
+		{ label: "Tareas", value: "tareas" },
+		{ label: "Cola", value: "cola" },
 		{ label: "Diagnóstico", value: "diagnostics" },
 		{ label: "Exit", value: "exit" },
 	];
@@ -4549,6 +4561,115 @@ export async function runTaskQueuePanelTui(
 		if (result.action === "not-found") {
 			if (result.message) {
 				await showTextView("Tareas y cola", result.message);
+			}
+		}
+	}
+}
+
+/**
+ * TUI runner for the read-only "Tareas" home-menu entry. The panel
+ * has NO per-task actions — only page navigation (`← Anterior`,
+ * `Siguiente →`), `← Volver` to the home menu, and `Exit` to leave
+ * idu-pi. Page size is 15 (constant
+ * `TASK_QUEUE_TAREAS_PAGE_SIZE`).
+ */
+export async function runTareasViewPanelTui(
+	runtime: TaskQueuePanelDispatchRuntime,
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<"__back" | string> {
+	let pageIndex = 0;
+	const pageSize = TASK_QUEUE_TAREAS_PAGE_SIZE;
+
+	while (true) {
+		const tasks = runtime.listTasks();
+		const { content, options } = renderTareasViewPanel(
+			{ tasks, pageIndex, pageSize },
+			{ now: () => new Date(), pageSize },
+		);
+		const choice = await selectMenuImpl(
+			"Tareas",
+			options as MenuOption[],
+			undefined,
+			content,
+		);
+		if (choice === "back") return "__back";
+		if (choice === "exit") return "Salida sin cambios.";
+		if (choice === "page:next") {
+			pageIndex += 1;
+			continue;
+		}
+		if (choice === "page:prev") {
+			pageIndex = Math.max(0, pageIndex - 1);
+		}
+		// Unknown / stale choice: ignore and re-render.
+	}
+}
+
+/**
+ * TUI runner for the actionable "Cola" home-menu entry. The panel
+ * shows ONLY actionable tasks with 3 options per task
+ * (`👁 Ver` / `✓ Aprobar` / `✗ Rechazar`), plus page navigation
+ * (`← Anterior`, `Siguiente →`) and `← Volver` to the home menu.
+ * Reuses `dispatchTaskQueuePanelChoice` from the legacy unified
+ * panel so the approve/reject/view/page actions behave
+ * identically. Page size is 10 (constant
+ * `TASK_QUEUE_COLA_PAGE_SIZE`).
+ */
+export async function runColaViewPanelTui(
+	runtime: TaskQueuePanelDispatchRuntime,
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<"__back" | string> {
+	let pageIndex = 0;
+	let viewedTaskId: string | undefined;
+	const pageSize = TASK_QUEUE_COLA_PAGE_SIZE;
+
+	while (true) {
+		const tasks = runtime.listTasks();
+		const { content, options } = renderColaViewPanel(
+			{ tasks, pageIndex, pageSize, viewedTaskId },
+			{
+				approveCommand: (id) => `idu-pi idu-queue-approve ${id}`,
+				rejectCommand: (id) => `idu-pi idu-queue-reject ${id}`,
+				now: () => new Date(),
+				pageSize,
+			},
+		);
+		const choice = await selectMenuImpl(
+			"Cola de acciones",
+			options as MenuOption[],
+			undefined,
+			content,
+		);
+		const result = dispatchTaskQueuePanelChoice(runtime, choice);
+		if (result.action === "back") return "__back";
+		if (result.action === "exit") return "Salida sin cambios.";
+		if (result.action === "back-to-list") {
+			viewedTaskId = undefined;
+			continue;
+		}
+		if (result.action === "view" && result.taskId) {
+			viewedTaskId = result.taskId;
+			continue;
+		}
+		if (result.action === "page-next") {
+			pageIndex += 1;
+			continue;
+		}
+		if (result.action === "page-prev") {
+			pageIndex = Math.max(0, pageIndex - 1);
+			continue;
+		}
+		if (result.action === "approve" || result.action === "reject") {
+			if (result.message) {
+				await showTextView("Cola de acciones", result.message);
+			}
+			viewedTaskId = undefined;
+			pageIndex = 0;
+			continue;
+		}
+		if (result.action === "not-found") {
+			if (result.message) {
+				await showTextView("Cola de acciones", result.message);
 			}
 		}
 	}

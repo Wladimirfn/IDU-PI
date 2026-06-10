@@ -2,16 +2,24 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	formatActionQueueTable,
+	formatColaViewTable,
 	formatTaskListTable,
 	formatTaskQueueOptionLabel,
 	formatTaskQueueRow,
+	formatTareasViewTable,
 	formatTareasYCola,
 	isActionableTask,
 	paginateStructuredTaskQueue,
+	renderColaViewPanel,
 	renderTaskQueuePanel,
+	renderTareasViewPanel,
+	sortTasksByCreatedAtDesc,
 	summarizeTaskQueueOptionDetails,
 	summarizeTaskQueueRow,
+	TASK_QUEUE_COLA_PAGE_SIZE,
 	TASK_QUEUE_OPTION_DETAILS_MAX,
+	TASK_QUEUE_TAREAS_PAGE_SIZE,
+	TASK_QUEUE_TAREAS_SUMMARY_MAX,
 	type StructuredTask,
 } from "../src/structured-task-queue.js";
 
@@ -674,10 +682,7 @@ test("isActionableTask returns false for done and skipped", () => {
 	// done is excluded
 	assert.equal(isActionableTask(makeTask({ status: "done" })), false);
 	// skipped is excluded (forward-compat: future status "skipped")
-	assert.equal(
-		isActionableTask(makeTask({ status: "skipped" })),
-		false,
-	);
+	assert.equal(isActionableTask(makeTask({ status: "skipped" })), false);
 });
 
 // Test 17: summarizeTaskQueueRow returns short text verbatim and
@@ -735,7 +740,9 @@ test("formatTaskListTable renders all tasks including done with a summary column
 		createdAt: "2026-06-10T10:00:00.000Z",
 	});
 
-	const output = formatTaskListTable([doneTask, activeTask], { now: () => now });
+	const output = formatTaskListTable([doneTask, activeTask], {
+		now: () => now,
+	});
 
 	assert.match(output, /Lista de tareas \(2\)/u);
 	// both tasks must be present, even though one is done
@@ -793,10 +800,9 @@ test("formatActionQueueTable renders actionable tasks with id|status|priority|su
 		createdAt: "2026-06-10T10:00:00.000Z",
 	});
 
-	const output = formatActionQueueTable(
-		[proposed, paused, done],
-		{ now: () => now },
-	);
+	const output = formatActionQueueTable([proposed, paused, done], {
+		now: () => now,
+	});
 
 	assert.match(output, /Cola de acciones \(2\)/u);
 	assert.ok(output.includes("task-prop001"));
@@ -1066,3 +1072,729 @@ test("renderTaskQueuePanel body shows Cola de acciones empty marker when no acti
 	);
 });
 
+// -----------------------------------------------------------------
+// Tests for the B4 panel split: Tareas (read-only) and Cola
+// (actionable) as TWO separate home-menu entries, not stacked
+// sub-panels in one entry.
+// -----------------------------------------------------------------
+
+// Test 27: sortTasksByCreatedAtDesc returns a copy sorted by
+// createdAt DESC. Does not mutate the input.
+test("sortTasksByCreatedAtDesc returns a copy sorted by createdAt DESC", () => {
+	const tasks: StructuredTask[] = [
+		makeTask({
+			id: "task-aaa00000000001",
+			createdAt: "2026-06-10T10:00:00.000Z",
+		}),
+		makeTask({
+			id: "task-bbb00000000002",
+			createdAt: "2026-06-10T12:00:00.000Z",
+		}),
+		makeTask({
+			id: "task-ccc00000000003",
+			createdAt: "2026-06-10T08:00:00.000Z",
+		}),
+	];
+	const sorted = sortTasksByCreatedAtDesc(tasks);
+	// Newest first.
+	assert.equal(sorted[0].id, "task-bbb00000000002");
+	assert.equal(sorted[1].id, "task-aaa00000000001");
+	assert.equal(sorted[2].id, "task-ccc00000000003");
+	// Input is not mutated.
+	assert.equal(tasks[0].id, "task-aaa00000000001");
+});
+
+// Test 28: formatTareasViewTable sorts by createdAt DESC.
+test("formatTareasViewTable sorts tasks by createdAt DESC (most recent first)", () => {
+	const now = new Date("2026-06-10T12:00:00.000Z");
+	const oldTask = makeTask({
+		id: "task-old00000000001",
+		text: "Old task",
+		category: "bug",
+		createdAt: "2026-06-08T10:00:00.000Z",
+	});
+	const newTask = makeTask({
+		id: "task-new00000000002",
+		text: "New task",
+		category: "feature",
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const midTask = makeTask({
+		id: "task-mid00000000003",
+		text: "Mid task",
+		category: "maint",
+		createdAt: "2026-06-09T10:00:00.000Z",
+	});
+	// Note: input order is intentionally NOT sorted.
+	const output = formatTareasViewTable([oldTask, newTask, midTask], {
+		now: () => now,
+	});
+	assert.match(output, /Tareas \(3\):/u);
+	// Extract row order by id substring.
+	const newIdx = output.indexOf("task-new000");
+	const midIdx = output.indexOf("task-mid000");
+	const oldIdx = output.indexOf("task-old000");
+	assert.ok(newIdx >= 0, `expected new task id in output, got: ${output}`);
+	assert.ok(midIdx >= 0, `expected mid task id in output, got: ${output}`);
+	assert.ok(oldIdx >= 0, `expected old task id in output, got: ${output}`);
+	assert.ok(
+		newIdx < midIdx,
+		`new should appear before mid, got newIdx=${newIdx} midIdx=${midIdx}`,
+	);
+	assert.ok(
+		midIdx < oldIdx,
+		`mid should appear before old, got midIdx=${midIdx} oldIdx=${oldIdx}`,
+	);
+});
+
+// Test 29: formatTareasViewTable paginates 15 tasks per page.
+test("formatTareasViewTable paginates 15 tasks per page", () => {
+	const now = new Date("2026-06-10T12:00:00.000Z");
+	const tasks: StructuredTask[] = Array.from({ length: 30 }, (_, i) =>
+		makeTask({
+			id: `task-tareas${i.toString().padStart(4, "0")}abc`,
+			text: `Task ${i}`,
+			createdAt: new Date(Date.parse("2026-06-10T00:00:00.000Z") + i * 1000)
+				.toISOString(),
+		}),
+	);
+
+	// Page 0: 15 tasks (the most recent 15, which are tasks 29..15).
+	const page0 = formatTareasViewTable(tasks, {
+		now: () => now,
+		pageIndex: 0,
+		pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+	});
+	assert.match(page0, /Tareas \(30\):/u);
+	// Count task lines: each starts with a "task-tareas" id.
+	const page0Lines = page0.split("\n").filter((line) =>
+		line.startsWith("task-tareas"),
+	);
+	assert.equal(
+		page0Lines.length,
+		15,
+		`page 0 should have 15 task rows, got ${page0Lines.length}`,
+	);
+
+	// Page 1: 15 tasks (the older 15, which are tasks 14..0).
+	const page1 = formatTareasViewTable(tasks, {
+		now: () => now,
+		pageIndex: 1,
+		pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+	});
+	const page1Lines = page1.split("\n").filter((line) =>
+		line.startsWith("task-tareas"),
+	);
+	assert.equal(
+		page1Lines.length,
+		15,
+		`page 1 should have 15 task rows, got ${page1Lines.length}`,
+	);
+
+	// Out-of-range pageIndex is clamped to the last page by
+	// paginateStructuredTaskQueue, so page 2 returns the same
+	// content as page 1 (15 rows).
+	const page2 = formatTareasViewTable(tasks, {
+		now: () => now,
+		pageIndex: 2,
+		pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+	});
+	const page2Lines = page2.split("\n").filter((line) =>
+		line.startsWith("task-tareas"),
+	);
+	assert.equal(
+		page2Lines.length,
+		15,
+		`page 2 (out-of-range) should clamp to the last page (15 rows), got ${page2Lines.length}`,
+	);
+});
+
+// Test 30: formatTareasViewTable includes ALL tasks (no filter).
+test("formatTareasViewTable includes ALL tasks (done, skipped, blocked all appear)", () => {
+	const now = new Date("2026-06-10T12:00:00.000Z");
+	const proposed = makeTask({
+		id: "task-prop0000000001",
+		text: "Proposed",
+		status: "pending",
+		guardStatus: undefined,
+		priority: 3,
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const paused = makeTask({
+		id: "task-paus0000000002",
+		text: "Paused",
+		status: "pending",
+		guardStatus: "needs_confirmation",
+		priority: 5,
+		createdAt: "2026-06-09T10:00:00.000Z",
+	});
+	const blocked = makeTask({
+		id: "task-block0000000003",
+		text: "Blocked",
+		status: "failed",
+		priority: 0,
+		createdAt: "2026-06-08T10:00:00.000Z",
+	});
+	const done = makeTask({
+		id: "task-done0000000004",
+		text: "Done",
+		status: "done",
+		priority: 2,
+		createdAt: "2026-06-07T10:00:00.000Z",
+	});
+	const skipped = makeTask({
+		id: "task-skip0000000005",
+		text: "Skipped",
+		status: "skipped",
+		priority: 1,
+		createdAt: "2026-06-06T10:00:00.000Z",
+	});
+
+	const output = formatTareasViewTable(
+		[proposed, paused, blocked, done, skipped],
+		{ now: () => now },
+	);
+
+	assert.match(output, /Tareas \(5\):/u);
+	// All five tasks must appear in the body.
+	assert.ok(output.includes("task-prop000"));
+	assert.ok(output.includes("task-paus000"));
+	assert.ok(output.includes("task-block00"));
+	assert.ok(output.includes("task-done000"));
+	assert.ok(output.includes("task-skip000"));
+});
+
+// Test 31: formatTareasViewTable uses 60-char summary with ellipsis.
+test("formatTareasViewTable summary is truncated to 60 chars with ellipsis", () => {
+	const long =
+		"Realizar x cosa en x lugar con varios detalles que se extienden mucho mas alla del limite";
+	assert.ok(long.length > TASK_QUEUE_TAREAS_SUMMARY_MAX);
+	const task = makeTask({
+		id: "task-long0000000001",
+		text: long,
+		originalText: long,
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const output = formatTareasViewTable([task], {
+		now: () => new Date("2026-06-10T12:00:00.000Z"),
+	});
+	// The summary column appended to the row should be exactly 60
+	// chars and end with "...".
+	const expected = long.slice(0, TASK_QUEUE_TAREAS_SUMMARY_MAX - 3) + "...";
+	assert.ok(
+		output.includes(expected),
+		`output should include 60-char truncated summary, got: ${output}`,
+	);
+	assert.equal(
+		expected.length,
+		TASK_QUEUE_TAREAS_SUMMARY_MAX,
+		`truncated summary should be exactly ${TASK_QUEUE_TAREAS_SUMMARY_MAX} chars, got ${expected.length}`,
+	);
+});
+
+// Test 32: formatTareasViewTable returns an empty-state marker.
+test("formatTareasViewTable returns an empty-state marker for zero tasks", () => {
+	const output = formatTareasViewTable([]);
+	assert.match(output, /Tareas \(0\):/u);
+	assert.match(output, /sin tareas/u);
+});
+
+// Test 33: formatColaViewTable filters out done and skipped.
+test("formatColaViewTable filters out done and skipped tasks", () => {
+	const now = new Date("2026-06-10T12:00:00.000Z");
+	const proposed = makeTask({
+		id: "task-prop0000000001",
+		text: "Proposed",
+		status: "pending",
+		guardStatus: undefined,
+		priority: 3,
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const paused = makeTask({
+		id: "task-paus0000000002",
+		text: "Paused",
+		status: "pending",
+		guardStatus: "needs_confirmation",
+		priority: 5,
+		createdAt: "2026-06-09T10:00:00.000Z",
+	});
+	const blocked = makeTask({
+		id: "task-block0000000003",
+		text: "Blocked",
+		status: "failed",
+		priority: 0,
+		createdAt: "2026-06-08T10:00:00.000Z",
+	});
+	const done = makeTask({
+		id: "task-done0000000004",
+		text: "Done",
+		status: "done",
+		priority: 2,
+		createdAt: "2026-06-07T10:00:00.000Z",
+	});
+	const skipped = makeTask({
+		id: "task-skip0000000005",
+		text: "Skipped",
+		status: "skipped",
+		priority: 1,
+		createdAt: "2026-06-06T10:00:00.000Z",
+	});
+
+	const output = formatColaViewTable(
+		[proposed, paused, blocked, done, skipped],
+		{ now: () => now },
+	);
+
+	assert.match(output, /Cola de acciones \(3\):/u);
+	assert.ok(output.includes("task-prop000"));
+	assert.ok(output.includes("task-paus000"));
+	assert.ok(output.includes("task-block00"));
+	// done and skipped must be excluded.
+	assert.ok(!output.includes("task-done000"));
+	assert.ok(!output.includes("task-skip000"));
+});
+
+// Test 34: formatColaViewTable paginates 10 tasks per page.
+test("formatColaViewTable paginates 10 actionable tasks per page", () => {
+	const now = new Date("2026-06-10T12:00:00.000Z");
+	const tasks: StructuredTask[] = Array.from({ length: 25 }, (_, i) =>
+		makeTask({
+			id: `task-cola${i.toString().padStart(4, "0")}abc`,
+			text: `Task ${i}`,
+			status: "pending",
+			guardStatus: undefined,
+			createdAt: new Date(Date.parse("2026-06-10T00:00:00.000Z") + i * 1000)
+				.toISOString(),
+		}),
+	);
+
+	// Page 0: 10 tasks.
+	const page0 = formatColaViewTable(tasks, {
+		now: () => now,
+		pageIndex: 0,
+		pageSize: TASK_QUEUE_COLA_PAGE_SIZE,
+	});
+	assert.match(page0, /Cola de acciones \(25\):/u);
+	const page0Lines = page0.split("\n").filter((line) =>
+		line.startsWith("task-cola"),
+	);
+	assert.equal(
+		page0Lines.length,
+		10,
+		`page 0 should have 10 task rows, got ${page0Lines.length}`,
+	);
+
+	// Page 1: 10 tasks.
+	const page1 = formatColaViewTable(tasks, {
+		now: () => now,
+		pageIndex: 1,
+		pageSize: TASK_QUEUE_COLA_PAGE_SIZE,
+	});
+	const page1Lines = page1.split("\n").filter((line) =>
+		line.startsWith("task-cola"),
+	);
+	assert.equal(
+		page1Lines.length,
+		10,
+		`page 1 should have 10 task rows, got ${page1Lines.length}`,
+	);
+
+	// Page 2: 5 tasks.
+	const page2 = formatColaViewTable(tasks, {
+		now: () => now,
+		pageIndex: 2,
+		pageSize: TASK_QUEUE_COLA_PAGE_SIZE,
+	});
+	const page2Lines = page2.split("\n").filter((line) =>
+		line.startsWith("task-cola"),
+	);
+	assert.equal(
+		page2Lines.length,
+		5,
+		`page 2 should have 5 task rows, got ${page2Lines.length}`,
+	);
+});
+
+// Test 35: formatColaViewTable returns empty-state when no actionable.
+test("formatColaViewTable returns empty-state when no actionable tasks", () => {
+	const done = makeTask({
+		id: "task-done0000000001",
+		text: "Done",
+		status: "done",
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const output = formatColaViewTable([done]);
+	assert.match(output, /Cola de acciones \(0\):/u);
+	assert.match(output, /sin acciones pendientes/u);
+});
+
+// Test 36: renderTareasViewPanel options are NAV ONLY (no per-task).
+test("renderTareasViewPanel options are nav only (no per-task actions)", () => {
+	const task = makeTask({
+		id: "task-abcdef123456789",
+		text: "Test task",
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const render = renderTareasViewPanel({
+		tasks: [task],
+		pageIndex: 0,
+		pageSize: 15,
+	});
+
+	// No view/approve/reject options at all (the panel is read-only).
+	const taskOptions = render.options.filter(
+		(o) =>
+			o.value.startsWith("view:") ||
+			o.value.startsWith("approve:") ||
+			o.value.startsWith("reject:"),
+	);
+	assert.equal(
+		taskOptions.length,
+		0,
+		`expected 0 task options (read-only panel), got ${taskOptions.length}`,
+	);
+
+	// Nav must include ← Anterior (only if page > 0) and Siguiente →
+	// (only if more pages), then ← Volver and Exit.
+	// With 1 task, no page nav, so options are just ← Volver + Exit.
+	assert.equal(render.options.length, 2);
+	assert.equal(render.options[0].value, "back");
+	assert.equal(render.options[1].value, "exit");
+});
+
+// Test 37: renderTareasViewPanel with many tasks shows page nav.
+test("renderTareasViewPanel with 45 tasks paginates 15/page and shows ← Anterior / Siguiente →", () => {
+	const tasks: StructuredTask[] = Array.from({ length: 45 }, (_, i) =>
+		makeTask({
+			id: `task-tareas${i.toString().padStart(4, "0")}abc`,
+			text: `Task ${i}`,
+			createdAt: new Date(Date.parse("2026-06-10T00:00:00.000Z") + i * 1000)
+				.toISOString(),
+		}),
+	);
+
+	// Page 0: Siguiente → + ← Volver + Exit (no ← Anterior on page 0).
+	const page0 = renderTareasViewPanel({
+		tasks,
+		pageIndex: 0,
+		pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+	});
+	assert.ok(page0.options.some((o) => o.value === "page:next"));
+	assert.ok(!page0.options.some((o) => o.value === "page:prev"));
+	assert.ok(page0.options.some((o) => o.value === "back"));
+	assert.ok(page0.options.some((o) => o.value === "exit"));
+
+	// Page 1 (middle): ← Anterior + Siguiente → + ← Volver + Exit.
+	const page1 = renderTareasViewPanel({
+		tasks,
+		pageIndex: 1,
+		pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+	});
+	assert.ok(page1.options.some((o) => o.value === "page:prev"));
+	assert.ok(page1.options.some((o) => o.value === "page:next"));
+	assert.ok(page1.options.some((o) => o.value === "back"));
+	assert.ok(page1.options.some((o) => o.value === "exit"));
+
+	// Page 2 is the last page (45 / 15 = 3 pages): ← Anterior +
+	// ← Volver + Exit (no Siguiente →).
+	const page2 = renderTareasViewPanel({
+		tasks,
+		pageIndex: 2,
+		pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+	});
+	assert.ok(page2.options.some((o) => o.value === "page:prev"));
+	assert.ok(!page2.options.some((o) => o.value === "page:next"));
+	assert.ok(page2.options.some((o) => o.value === "back"));
+	assert.ok(page2.options.some((o) => o.value === "exit"));
+
+	// Body shows the header and at most 15 task rows on page 0.
+	assert.match(page0.content, /Tareas \(45\):/u);
+	const page0Rows = page0.content.split("\n").filter((line) =>
+		line.startsWith("task-tareas"),
+	);
+	assert.equal(
+		page0Rows.length,
+		15,
+		`page 0 body should have 15 task rows, got ${page0Rows.length}`,
+	);
+});
+
+// Test 38: renderTareasViewPanel always has the Exit option, even
+// with non-empty tasks. (Spec: "Only ← Anterior, Siguiente →,
+// ← Volver, Exit" — Exit is always present.)
+test("renderTareasViewPanel always has Exit option with non-empty tasks", () => {
+	const tasks: StructuredTask[] = Array.from({ length: 45 }, (_, i) =>
+		makeTask({
+			id: `task-exit${i.toString().padStart(4, "0")}abc`,
+			text: `Task ${i}`,
+			createdAt: new Date(Date.parse("2026-06-10T00:00:00.000Z") + i * 1000)
+				.toISOString(),
+		}),
+	);
+	for (let p = 0; p < 3; p += 1) {
+		const render = renderTareasViewPanel({
+			tasks,
+			pageIndex: p,
+			pageSize: TASK_QUEUE_TAREAS_PAGE_SIZE,
+		});
+		assert.ok(
+			render.options.some((o) => o.value === "exit"),
+			`page ${p} should have Exit option, got: ${JSON.stringify(render.options)}`,
+		);
+	}
+});
+
+// Test 39: renderColaViewPanel generates 3 options per task.
+test("renderColaViewPanel generates exactly 3 options per actionable task (👁 Ver, ✓ Aprobar, ✗ Rechazar)", () => {
+	const tasks: StructuredTask[] = [
+		makeTask({
+			id: "task-aaa00000000001",
+			text: "Task A",
+			status: "pending",
+			guardStatus: undefined,
+			priority: 3,
+			createdAt: "2026-06-10T10:00:00.000Z",
+		}),
+		makeTask({
+			id: "task-bbb00000000002",
+			text: "Task B",
+			status: "pending",
+			guardStatus: "needs_confirmation",
+			priority: 5,
+			createdAt: "2026-06-10T09:00:00.000Z",
+		}),
+		makeTask({
+			id: "task-ccc00000000003",
+			text: "Task C",
+			status: "running",
+			priority: 4,
+			createdAt: "2026-06-10T08:00:00.000Z",
+		}),
+	];
+	const render = renderColaViewPanel({
+		tasks,
+		pageIndex: 0,
+		pageSize: 10,
+		viewedTaskId: undefined,
+	});
+
+	// 3 actionable tasks -> 9 task options (3 per task).
+	const viewOptions = render.options.filter((o) =>
+		o.value.startsWith("view:"),
+	);
+	const approveOptions = render.options.filter((o) =>
+		o.value.startsWith("approve:"),
+	);
+	const rejectOptions = render.options.filter((o) =>
+		o.value.startsWith("reject:"),
+	);
+	assert.equal(
+		viewOptions.length,
+		3,
+		`expected 3 view options (one per task), got ${viewOptions.length}`,
+	);
+	assert.equal(approveOptions.length, 3);
+	assert.equal(rejectOptions.length, 3);
+
+	// Exactly 3 options per task, no repeated IDs.
+	assert.deepEqual(
+		viewOptions.map((o) => o.value).sort(),
+		[
+			"view:task-aaa00000000001",
+			"view:task-bbb00000000002",
+			"view:task-ccc00000000003",
+		],
+	);
+	assert.deepEqual(
+		approveOptions.map((o) => o.value).sort(),
+		[
+			"approve:task-aaa00000000001",
+			"approve:task-bbb00000000002",
+			"approve:task-ccc00000000003",
+		],
+	);
+	assert.deepEqual(
+		rejectOptions.map((o) => o.value).sort(),
+		[
+			"reject:task-aaa00000000001",
+			"reject:task-bbb00000000002",
+			"reject:task-ccc00000000003",
+		],
+	);
+
+	// The 3 option labels for each task must include the canonical
+	// emojis: 👁 Ver, ✓ Aprobar, ✗ Rechazar.
+	for (const taskId of [
+		"task-aaa00000000001",
+		"task-bbb00000000002",
+		"task-ccc00000000003",
+	]) {
+		const labels = render.options
+			.filter((o) => o.value.endsWith(taskId))
+			.map((o) => o.label);
+		assert.ok(
+			labels.some((l) => l.startsWith("👁 Ver")),
+			`expected "👁 Ver" label for ${taskId}, got: ${labels.join(" | ")}`,
+		);
+		assert.ok(
+			labels.some((l) => l.startsWith("✓ Aprobar")),
+			`expected "✓ Aprobar" label for ${taskId}, got: ${labels.join(" | ")}`,
+		);
+		assert.ok(
+			labels.some((l) => l.startsWith("✗ Rechazar")),
+			`expected "✗ Rechazar" label for ${taskId}, got: ${labels.join(" | ")}`,
+		);
+	}
+});
+
+// Test 40: renderColaViewPanel options are only for actionable tasks.
+test("renderColaViewPanel menu options only include actionable tasks (done and skipped excluded)", () => {
+	const done = makeTask({
+		id: "task-done0000000001",
+		text: "Done",
+		status: "done",
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const skipped = makeTask({
+		id: "task-skip0000000002",
+		text: "Skipped",
+		status: "skipped",
+		createdAt: "2026-06-10T09:00:00.000Z",
+	});
+	const active = makeTask({
+		id: "task-active0000000003",
+		text: "Active",
+		status: "pending",
+		guardStatus: undefined,
+		priority: 3,
+		createdAt: "2026-06-10T08:00:00.000Z",
+	});
+	const render = renderColaViewPanel({
+		tasks: [done, skipped, active],
+		pageIndex: 0,
+		pageSize: 10,
+		viewedTaskId: undefined,
+	});
+
+	// Only the active task should have view/approve/reject options.
+	const allTaskOptionIds = render.options
+		.filter(
+			(o) =>
+				o.value.startsWith("view:") ||
+				o.value.startsWith("approve:") ||
+				o.value.startsWith("reject:"),
+		)
+		.map((o) => o.value.split(":")[1]);
+	const uniqueIds = Array.from(new Set(allTaskOptionIds));
+	assert.deepEqual(
+		uniqueIds,
+		[active.id],
+		`expected only the active task id in menu, got: ${uniqueIds}`,
+	);
+
+	// The Cola body shows ONLY actionable tasks: the header count
+	// is the actionable count (1), and done/skipped are excluded
+	// from the body as well as the menu.
+	assert.match(render.content, /Cola de acciones \(1\):/u);
+	assert.ok(!render.content.includes("task-done000"));
+	assert.ok(!render.content.includes("task-skip000"));
+	assert.ok(render.content.includes("task-active"));
+});
+
+// Test 41: renderColaViewPanel paginates 10 actionable tasks/page.
+test("renderColaViewPanel paginates 25 actionable tasks into 3 pages of 10/10/5", () => {
+	const tasks: StructuredTask[] = Array.from({ length: 25 }, (_, i) =>
+		makeTask({
+			id: `task-cola${i.toString().padStart(4, "0")}abc`,
+			text: `Task ${i}`,
+			status: "pending",
+			guardStatus: undefined,
+			createdAt: new Date(Date.parse("2026-06-10T00:00:00.000Z") + i * 1000)
+				.toISOString(),
+		}),
+	);
+
+	// Page 0: 10 tasks = 30 task options.
+	const page0 = renderColaViewPanel({
+		tasks,
+		pageIndex: 0,
+		pageSize: TASK_QUEUE_COLA_PAGE_SIZE,
+		viewedTaskId: undefined,
+	});
+	assert.equal(
+		page0.options.filter((o) => o.value.startsWith("view:")).length,
+		10,
+		"page 0 should have 10 view options",
+	);
+	assert.ok(page0.options.some((o) => o.value === "page:next"));
+	assert.ok(!page0.options.some((o) => o.value === "page:prev"));
+
+	// Page 1: 10 tasks = 30 task options.
+	const page1 = renderColaViewPanel({
+		tasks,
+		pageIndex: 1,
+		pageSize: TASK_QUEUE_COLA_PAGE_SIZE,
+		viewedTaskId: undefined,
+	});
+	assert.equal(
+		page1.options.filter((o) => o.value.startsWith("view:")).length,
+		10,
+		"page 1 should have 10 view options",
+	);
+	assert.ok(page1.options.some((o) => o.value === "page:prev"));
+	assert.ok(page1.options.some((o) => o.value === "page:next"));
+
+	// Page 2: 5 tasks = 15 task options.
+	const page2 = renderColaViewPanel({
+		tasks,
+		pageIndex: 2,
+		pageSize: TASK_QUEUE_COLA_PAGE_SIZE,
+		viewedTaskId: undefined,
+	});
+	assert.equal(
+		page2.options.filter((o) => o.value.startsWith("view:")).length,
+		5,
+		"page 2 should have 5 view options",
+	);
+	assert.ok(page2.options.some((o) => o.value === "page:prev"));
+	assert.ok(!page2.options.some((o) => o.value === "page:next"));
+});
+
+// Test 42: renderColaViewPanel body shows "Cola de acciones (N)"
+// header, not the stacked B3 view.
+test("renderColaViewPanel body shows the Cola de acciones (N) header", () => {
+	const task = makeTask({
+		id: "task-abcdef123456789",
+		text: "Test",
+		status: "pending",
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const render = renderColaViewPanel({
+		tasks: [task],
+		pageIndex: 0,
+		pageSize: 10,
+		viewedTaskId: undefined,
+	});
+	assert.match(render.content, /Cola de acciones \(1\):/u);
+	// Should NOT contain the B3 stacked headers.
+	assert.doesNotMatch(render.content, /Lista de tareas/u);
+	assert.doesNotMatch(render.content, /^─+$/u);
+});
+
+// Test 43: renderTareasViewPanel body shows the Tareas (N) header
+// only, not the Cola header.
+test("renderTareasViewPanel body shows the Tareas (N) header only", () => {
+	const task = makeTask({
+		id: "task-abcdef123456789",
+		text: "Test",
+		createdAt: "2026-06-10T10:00:00.000Z",
+	});
+	const render = renderTareasViewPanel({
+		tasks: [task],
+		pageIndex: 0,
+		pageSize: 15,
+	});
+	assert.match(render.content, /Tareas \(1\):/u);
+	assert.doesNotMatch(render.content, /Cola de acciones/u);
+	assert.doesNotMatch(render.content, /Lista de tareas/u);
+});
