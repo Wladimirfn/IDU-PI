@@ -404,6 +404,51 @@ test("A3-S1: loop passes canonical labDbPath to saveSemanticCompactionDraft (not
 	);
 });
 
+test("PR-0: loop honors explicit reportsPath when labDbPath is legacy reports/lab.db", () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-legacy-"));
+	const legacyReportsPath = join(root, "reports");
+	const legacyLabDbPath = join(legacyReportsPath, "lab.db");
+	const capturedReportsPaths: string[] = [];
+
+	try {
+		const repository = {
+			getSemanticAuditStats: () => stats({ criticalFindingCount: 1 }),
+			getSemanticAuditCheckpoint: () => checkpoint(),
+			createSemanticAuditRun: () => {},
+			updateSemanticAuditCheckpoint: () => {},
+		};
+		const queue = new StructuredTaskQueue({
+			filePath: join(legacyReportsPath, "tasks.jsonl"),
+		});
+
+		runIduSupervisorLoop({
+			projectId: "pi-telegram-bridge",
+			projectPath: join(root, "project"),
+			workspaceRoot: root,
+			labDbPath: legacyLabDbPath,
+			reportsPath: legacyReportsPath,
+			trigger: "manual",
+			options: {
+				allowSemanticDraft: true,
+				allowAgentTaskPlan: false,
+				dryRun: false,
+			},
+			repository,
+			queue,
+			isIduActive: () => true,
+			saveSemanticCompactionDraft: (input) => {
+				capturedReportsPaths.push(input.reportsPath);
+				return fakeDraft(root);
+			},
+		});
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+
+	assert.deepEqual(capturedReportsPaths, [legacyReportsPath]);
+	assert.notEqual(capturedReportsPaths[0], join(legacyReportsPath, "reports"));
+});
+
 test("A3-S1: loop uses canonical reportsPath (stateRoot/reports) for buildSemanticAgentTaskPlan", () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-canonical-"));
 	const canonicalLabDbPath = join(root, "projects", "pi-telegram-bridge", "lab.db");

@@ -1170,6 +1170,8 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
+				labDbPath,
+				reportsPath,
 				trigger: "manual",
 				options: {
 					allowSemanticDraft: options.allowSemanticDraft ?? false,
@@ -1194,6 +1196,8 @@ export function createCliRuntime(
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				workspaceRoot: runtimeWorkspaceRoot,
+				labDbPath,
+				reportsPath,
 				trigger: "cron_planning",
 				options: {
 					allowSemanticDraft: false,
@@ -3640,6 +3644,9 @@ function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
 		defaultCwd: context.config.defaultCwd,
 		allowedRoots: context.config.allowedRoots,
 		workspaceRoot: context.runtimeWorkspaceRoot,
+		...(context.activeProject.stateRoot
+			? { stateRoot: context.activeProject.stateRoot }
+			: {}),
 		projectId: context.activeProject.id,
 		alignmentState: readProjectAlignmentState(context.runtimeWorkspaceRoot, {
 			projectId: context.activeProject.id,
