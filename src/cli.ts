@@ -2067,12 +2067,14 @@ export async function runCliCommand(
 				// the path from workspaceRoot + projects + projectId + lab.db
 				// produced a nested duplicate (projects/idu-pi/projects/idu-pi/lab.db).
 				// The runtime already exposes the correct canonical path.
-				const labDbPath = activeRuntime.labDbPath ?? join(
-					activeRuntime.workspaceRoot,
-					"projects",
-					activeRuntime.projectId,
-					"lab.db",
-				);
+				const labDbPath =
+					activeRuntime.labDbPath ??
+					join(
+						activeRuntime.workspaceRoot,
+						"projects",
+						activeRuntime.projectId,
+						"lab.db",
+					);
 				const result = buildModelInvocationStatusOrError({
 					projectId: activeRuntime.projectId,
 					stateRoot: activeRuntime.workspaceRoot,

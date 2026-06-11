@@ -1258,7 +1258,10 @@ export async function callIduMcpTool(
 		);
 		const startedAt = Date.now();
 		const result = await dispatchTool(name, args, runtime, resolution);
-		if (!isReadOnlyAlertTelemetryExcludedTool(name) && runtime.projectId.trim()) {
+		if (
+			!isReadOnlyAlertTelemetryExcludedTool(name) &&
+			runtime.projectId.trim()
+		) {
 			await recordMcpUsage(
 				runtime,
 				result,
@@ -2001,11 +2004,19 @@ async function dispatchTool(
 		}
 		case "idu_bibliotecario_init": {
 			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const init = runBibliotecarioInit({ stateRoot, projectId });
 			if (!init.ok) {
-				return invalidMcpInput(name, runtime, resolution, init.error, { stateRoot });
+				return invalidMcpInput(name, runtime, resolution, init.error, {
+					stateRoot,
+				});
 			}
 			return envelope({
 				ok: true,
@@ -2023,12 +2034,23 @@ async function dispatchTool(
 		}
 		case "idu_model_invocation_status": {
 			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const labDbPath = runtime.labDbPath ?? join(stateRoot, "lab.db");
 			const limit = positiveIntegerArg(args, "limit");
 			if (args.limit !== undefined && limit === undefined) {
-				return invalidMcpInput(name, runtime, resolution, "limit must be a positive integer");
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"limit must be a positive integer",
+				);
 			}
 			const result = buildModelInvocationStatusOrError({
 				projectId,
@@ -2039,8 +2061,12 @@ async function dispatchTool(
 					...(limit !== undefined ? { limit } : {}),
 				},
 			});
-			if (!result.ok) return invalidMcpInput(name, runtime, resolution, result.error, { labDbPath });
-			const formatter = runtime.formatModelInvocationStatus ?? formatModelInvocationStatus;
+			if (!result.ok)
+				return invalidMcpInput(name, runtime, resolution, result.error, {
+					labDbPath,
+				});
+			const formatter =
+				runtime.formatModelInvocationStatus ?? formatModelInvocationStatus;
 			const output = `lab.db path: ${labDbPath}\n${formatter(result.report)}`;
 			return envelope({
 				ok: true,
@@ -2048,17 +2074,34 @@ async function dispatchTool(
 				projectId,
 				projectPath: runtime.projectPath,
 				summary: "Estado de invocaciones de modelos generado.",
-				data: { labDbPath, output, report: result.report as unknown as JsonObject },
+				data: {
+					labDbPath,
+					output,
+					report: result.report as unknown as JsonObject,
+				},
 				safeNotes: resolution.safeNotes,
 			});
 		}
 		case "idu_skill_rating": {
 			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
 			const proposalId = stringArg(args, "proposalId");
-			if (!proposalId) return invalidMcpInput(name, runtime, resolution, "proposalId must be non-empty");
+			if (!proposalId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"proposalId must be non-empty",
+				);
 			const score = scoreArg(args, "score");
-			if (!score.ok) return invalidMcpInput(name, runtime, resolution, score.error);
+			if (!score.ok)
+				return invalidMcpInput(name, runtime, resolution, score.error);
 			const result = runSkillRating([proposalId, score.text], {
 				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
 			});
@@ -2086,10 +2129,21 @@ async function dispatchTool(
 		}
 		case "idu_supervisor_trigger": {
 			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
 			const action = supervisorTriggerActionArg(args);
 			if (!action) {
-				return invalidMcpInput(name, runtime, resolution, "action must be one of: enable, disable, status");
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"action must be one of: enable, disable, status",
+				);
 			}
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			if (action === "enable") {
@@ -2100,7 +2154,11 @@ async function dispatchTool(
 					projectId,
 					projectPath: runtime.projectPath,
 					summary: "Supervisor trigger enabled.",
-					data: { action, result, output: formatSupervisorTriggerResult(result) },
+					data: {
+						action,
+						result,
+						output: formatSupervisorTriggerResult(result),
+					},
 					safeNotes: resolution.safeNotes,
 				});
 			}
@@ -2112,7 +2170,11 @@ async function dispatchTool(
 					projectId,
 					projectPath: runtime.projectPath,
 					summary: "Supervisor trigger disabled.",
-					data: { action, result, output: formatSupervisorTriggerResult(result) },
+					data: {
+						action,
+						result,
+						output: formatSupervisorTriggerResult(result),
+					},
 					safeNotes: resolution.safeNotes,
 				});
 			}
@@ -6281,7 +6343,9 @@ function scoreArg(
 ): { ok: true; text: string; value: number } | { ok: false; error: string } {
 	const raw = args[key];
 	const text =
-		typeof raw === "number" || typeof raw === "string" ? String(raw).trim() : "";
+		typeof raw === "number" || typeof raw === "string"
+			? String(raw).trim()
+			: "";
 	const value = Number(text);
 	if (!text || !Number.isFinite(value) || !Number.isInteger(value)) {
 		return { ok: false, error: `${key} must be an integer in 0..10` };
@@ -6297,8 +6361,11 @@ function supervisorTriggerActionArg(
 ): "enable" | "disable" | "status" | undefined {
 	const direct = stringArg(args, "action");
 	const positional = Array.isArray(args.args) ? args.args[0] : undefined;
-	const value = (direct ?? (typeof positional === "string" ? positional.trim() : "")).toLowerCase();
-	if (value === "enable" || value === "disable" || value === "status") return value;
+	const value = (
+		direct ?? (typeof positional === "string" ? positional.trim() : "")
+	).toLowerCase();
+	if (value === "enable" || value === "disable" || value === "status")
+		return value;
 	return undefined;
 }
 

@@ -43,7 +43,10 @@ describe("T3.1 — runBibliotecarioInit", () => {
 		assert.equal(result.bootstrapSkill.name, "bibliotecario-bootstrap");
 
 		// Verify lab_write event was emitted (at least 1)
-		assert.ok(result.events.labWrite >= 1, "Should emit at least 1 lab_write event");
+		assert.ok(
+			result.events.labWrite >= 1,
+			"Should emit at least 1 lab_write event",
+		);
 	});
 
 	it("is idempotent: second run creates zero new rows and zero new events", () => {
