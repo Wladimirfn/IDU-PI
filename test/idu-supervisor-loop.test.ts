@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
 	formatIduSupervisorLoopResult,
@@ -351,4 +351,117 @@ test("loop nunca ejecuta AgentLabs ni borra datos", () => {
 	assert.equal(result.safety.projectCoreModified, false);
 	assert.match(formatIduSupervisorLoopResult(result), /No ejecuté AgentLabs/u);
 	assert.match(formatIduSupervisorLoopResult(result), /no borré memoria/u);
+});
+
+// A2-T: canonical labDbPath tests (Spec A3-S1)
+
+test("A3-S1: loop passes canonical labDbPath to saveSemanticCompactionDraft (not reports/lab.db)", () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-canonical-"));
+	// canonical labDbPath is stateRoot/lab.db (projects/pi-telegram-bridge/lab.db)
+	const canonicalLabDbPath = join(root, "projects", "pi-telegram-bridge", "lab.db");
+	const capturedDbPaths: string[] = [];
+
+	try {
+		const repository = {
+			getSemanticAuditStats: () => stats({ criticalFindingCount: 1 }),
+			getSemanticAuditCheckpoint: () => checkpoint(),
+			createSemanticAuditRun: () => {},
+			updateSemanticAuditCheckpoint: () => {},
+		};
+		const queue = new StructuredTaskQueue({
+			filePath: join(root, "projects", "pi-telegram-bridge", "tasks.jsonl"),
+		});
+
+		runIduSupervisorLoop({
+			projectId: "pi-telegram-bridge",
+			projectPath: join(root, "project"),
+			workspaceRoot: root,
+			labDbPath: canonicalLabDbPath,
+			trigger: "manual",
+			options: {
+				allowSemanticDraft: true,
+				allowAgentTaskPlan: false,
+				dryRun: false,
+			},
+			repository,
+			queue,
+			isIduActive: () => true,
+			saveSemanticCompactionDraft: (input) => {
+				capturedDbPaths.push(input.dbPath);
+				return fakeDraft(root);
+			},
+		});
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+
+	assert.equal(capturedDbPaths.length, 1, "saveSemanticCompactionDraft should have been called once");
+	assert.equal(capturedDbPaths[0], canonicalLabDbPath,
+		"dbPath passed to saveSemanticCompactionDraft must be the canonical labDbPath, not reports/lab.db");
+	assert.ok(
+		!capturedDbPaths[0]?.includes("reports"),
+		`dbPath must not traverse reports/: got ${capturedDbPaths[0]}`,
+	);
+});
+
+test("A3-S1: loop uses canonical reportsPath (stateRoot/reports) for buildSemanticAgentTaskPlan", () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-canonical-"));
+	const canonicalLabDbPath = join(root, "projects", "pi-telegram-bridge", "lab.db");
+	// canonical reportsPath for semantic compaction drafts: stateRoot/reports
+	const canonicalStateRoot = dirname(canonicalLabDbPath);
+	const canonicalReportsPath = join(canonicalStateRoot, "reports");
+	const capturedReportsPaths: string[] = [];
+
+	try {
+		const repository = {
+			getSemanticAuditStats: () => stats({ criticalFindingCount: 1 }),
+			getSemanticAuditCheckpoint: () => checkpoint(),
+			createSemanticAuditRun: () => {},
+			updateSemanticAuditCheckpoint: () => {},
+		};
+		const queue = new StructuredTaskQueue({
+			filePath: join(root, "projects", "pi-telegram-bridge", "tasks.jsonl"),
+		});
+		const draftPath = join(canonicalReportsPath, "semantic-compaction-draft-20260102-030405.json");
+
+		runIduSupervisorLoop({
+			projectId: "pi-telegram-bridge",
+			projectPath: join(root, "project"),
+			workspaceRoot: root,
+			labDbPath: canonicalLabDbPath,
+			trigger: "manual",
+			options: {
+				allowSemanticDraft: true,
+				allowAgentTaskPlan: true,
+				dryRun: false,
+			},
+			repository,
+			queue,
+			isIduActive: () => true,
+			saveSemanticCompactionDraft: (input) => {
+				capturedReportsPaths.push(input.reportsPath);
+				return {
+					path: draftPath,
+					prompt: "safe prompt",
+					draft: fakeDraft(root).draft,
+				};
+			},
+			buildSemanticAgentTaskPlan: (pathOrLatest, reportsPath) => {
+				capturedReportsPaths.push(`plan:${reportsPath}`);
+				return fakePlan(0);
+			},
+		});
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+
+	// saveSemanticCompactionDraft reportsPath must use stateRoot/reports, not workspaceRoot/reports
+	const draftReportsPath = capturedReportsPaths.find(p => !p.startsWith("plan:"));
+	assert.ok(draftReportsPath, "saveSemanticCompactionDraft must have been called");
+	assert.equal(draftReportsPath, canonicalReportsPath,
+		`reportsPath to draft must be stateRoot/reports (${canonicalReportsPath}), not workspaceRoot/reports`);
+	assert.ok(
+		!draftReportsPath?.startsWith(root + "/reports") && !draftReportsPath?.startsWith(root + "\\reports"),
+		`reportsPath must not be workspaceRoot/reports directly: got ${draftReportsPath}`,
+	);
 });

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { shouldUseAutomaticGuardrails } from "./idu-session.js";
 import type { LabDbRepository } from "./lab-db-repository.js";
 import {
@@ -69,6 +69,11 @@ export type IduSupervisorLoopInput = {
 	projectId: string;
 	projectPath: string;
 	workspaceRoot: string;
+	/** Canonical path to lab.db — follows REQ-SF-2 / project-state.ts:63.
+	 *  When provided, used directly; otherwise falls back to the old
+	 *  workspaceRoot/reports/lab.db path (legacy callers that have not yet
+	 *  been updated). */
+	labDbPath?: string;
 	trigger: IduSupervisorTrigger;
 	options: {
 		allowSemanticDraft: boolean;
@@ -178,6 +183,13 @@ export function runIduSupervisorLoop(
 		});
 	}
 
+	// REQ-A3: resolve canonical labDbPath once (REQ-SF-2 pattern, cli.ts:2066-2073).
+	// stateRoot = dirname(labDbPath); reportsPath for semantic drafts is stateRoot/reports.
+	const resolvedLabDbPath =
+		input.labDbPath ??
+		join(input.workspaceRoot, "projects", input.projectId, "lab.db");
+	const resolvedReportsPath = join(dirname(resolvedLabDbPath), "reports");
+
 	let draftPath: string | undefined;
 	const canDraft =
 		auditStatus.decision.shouldRun &&
@@ -190,8 +202,8 @@ export function runIduSupervisorLoop(
 			input.saveSemanticCompactionDraft ?? saveSemanticCompactionDraft
 		)({
 			projectId: input.projectId,
-			dbPath: join(input.workspaceRoot, "reports", "lab.db"),
-			reportsPath: join(input.workspaceRoot, "reports"),
+			dbPath: resolvedLabDbPath,
+			reportsPath: resolvedReportsPath,
 			workspaceRoot: input.workspaceRoot,
 		});
 		draftPath = draft.path;
@@ -218,14 +230,14 @@ export function runIduSupervisorLoop(
 		const pathOrLatest = draftPath;
 		plan = (input.buildSemanticAgentTaskPlan ?? buildSemanticAgentTaskPlan)(
 			pathOrLatest,
-			join(input.workspaceRoot, "reports"),
+			resolvedReportsPath,
 		);
 		if (plan.validDraft && plan.candidates.length > 0) {
 			const result = (
 				input.createSemanticAgentTasks ?? createSemanticAgentTasks
 			)({
 				pathOrLatest,
-				reportsPath: join(input.workspaceRoot, "reports"),
+				reportsPath: resolvedReportsPath,
 				queue: input.queue,
 				projectId: input.projectId,
 				maxCreatedTasks: input.options.maxCreatedTasks,
