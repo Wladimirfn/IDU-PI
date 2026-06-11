@@ -454,6 +454,37 @@ test("review latest valida request", () => {
 	assert.match(formatAgentLabReviewRequestReview(review), /Specialties/u);
 });
 
+test("review current resolves the same request as current.json", () => {
+	const reportsPath = join(root(), "reports");
+	createAgentLabReviewRequests({
+		source: "manual",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath: root(),
+		manualObjective: "revisar UI html components",
+		manualContext: "UI html components",
+		now,
+	});
+
+	const bare = reviewAgentLabReviewRequest("current", reportsPath);
+	const explicit = reviewAgentLabReviewRequest("current.json", reportsPath);
+
+	assert.equal(bare.valid, true);
+	assert.equal(explicit.valid, true);
+	assert.equal(bare.path, explicit.path);
+	assert.match(bare.path, /agentlabs[\\/]requests[\\/]current\.json$/u);
+});
+
+test("review current missing reports current.json candidate", () => {
+	const reportsPath = join(root(), "reports");
+
+	const review = reviewAgentLabReviewRequest("current", reportsPath);
+
+	assert.equal(review.valid, false);
+	assert.match(review.path, /agentlabs[\\/]requests[\\/]current\.json$/u);
+	assert.match(review.errors.join("\n"), /current\.json/u);
+});
+
 test("review ruta legacy relativa busca en reports", () => {
 	const reportsPath = join(root(), "reports");
 	mkdirSync(reportsPath, { recursive: true });

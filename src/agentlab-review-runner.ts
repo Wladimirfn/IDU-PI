@@ -1567,11 +1567,12 @@ function resolveRunCandidate(
 	runDir: string,
 	requested: string,
 ): string {
-	if (isAbsolute(requested)) return resolve(requested);
-	if (requested.startsWith("reports/"))
-		return resolve(join(reports, requested.slice("reports/".length)));
-	const canonical = resolve(join(runDir, requested));
-	const legacy = resolve(join(reports, requested));
+	const normalized = requested === "current" ? RUN_CURRENT_FILE : requested;
+	if (isAbsolute(normalized)) return resolve(normalized);
+	if (normalized.startsWith("reports/"))
+		return resolve(join(reports, normalized.slice("reports/".length)));
+	const canonical = resolve(join(runDir, normalized));
+	const legacy = resolve(join(reports, normalized));
 	return existsSync(canonical) || !existsSync(legacy) ? canonical : legacy;
 }
 
