@@ -2612,7 +2612,10 @@ test("PR-0: createCliRuntime forwards canonical labDbPath to supervisor loop", (
 		/reportsPath,/,
 		"supervisorTick must pass canonical reportsPath into runIduSupervisorLoop",
 	);
-	assert.ok(supervisorCronPlanBlock, "supervisorCronPlan wiring block must exist");
+	assert.ok(
+		supervisorCronPlanBlock,
+		"supervisorCronPlan wiring block must exist",
+	);
 	assert.match(
 		supervisorCronPlanBlock,
 		/labDbPath,/,

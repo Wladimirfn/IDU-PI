@@ -294,14 +294,19 @@ export function inspectProjectConnection(
 		};
 	}
 
-	const alignmentState = matchingAlignmentState(options.alignmentState, project);
+	const alignmentState = matchingAlignmentState(
+		options.alignmentState,
+		project,
+	);
 	const alignmentStatus = alignmentState?.alignmentStatus ?? "pending_scan";
 	return {
 		status: "ready",
 		configStatus: "project_local_valid",
 		alignmentStatus,
 		readiness: alignmentState?.readiness ?? "config_ready",
-		alignmentReason: alignmentState?.alignmentReason ?? ["no existe scan reciente"],
+		alignmentReason: alignmentState?.alignmentReason ?? [
+			"no existe scan reciente",
+		],
 		projectId: project.id,
 		projectPath: project.path,
 		problems,

@@ -128,7 +128,13 @@ function runWithDeps(
 	} = {},
 ): { result: IduSupervisorLoopResult; calls: Record<string, number> } {
 	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-"));
-	const calls = { auditRun: 0, checkpoint: 0, draft: 0, plan: 0, createTasks: 0 };
+	const calls = {
+		auditRun: 0,
+		checkpoint: 0,
+		draft: 0,
+		plan: 0,
+		createTasks: 0,
+	};
 	try {
 		const repository = {
 			getSemanticAuditStats: () => options.stats ?? stats(),
@@ -358,7 +364,12 @@ test("loop nunca ejecuta AgentLabs ni borra datos", () => {
 test("A3-S1: loop passes canonical labDbPath to saveSemanticCompactionDraft (not reports/lab.db)", () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-canonical-"));
 	// canonical labDbPath is stateRoot/lab.db (projects/pi-telegram-bridge/lab.db)
-	const canonicalLabDbPath = join(root, "projects", "pi-telegram-bridge", "lab.db");
+	const canonicalLabDbPath = join(
+		root,
+		"projects",
+		"pi-telegram-bridge",
+		"lab.db",
+	);
 	const capturedDbPaths: string[] = [];
 
 	try {
@@ -395,9 +406,16 @@ test("A3-S1: loop passes canonical labDbPath to saveSemanticCompactionDraft (not
 		rmSync(root, { recursive: true, force: true });
 	}
 
-	assert.equal(capturedDbPaths.length, 1, "saveSemanticCompactionDraft should have been called once");
-	assert.equal(capturedDbPaths[0], canonicalLabDbPath,
-		"dbPath passed to saveSemanticCompactionDraft must be the canonical labDbPath, not reports/lab.db");
+	assert.equal(
+		capturedDbPaths.length,
+		1,
+		"saveSemanticCompactionDraft should have been called once",
+	);
+	assert.equal(
+		capturedDbPaths[0],
+		canonicalLabDbPath,
+		"dbPath passed to saveSemanticCompactionDraft must be the canonical labDbPath, not reports/lab.db",
+	);
 	assert.ok(
 		!capturedDbPaths[0]?.includes("reports"),
 		`dbPath must not traverse reports/: got ${capturedDbPaths[0]}`,
@@ -451,7 +469,12 @@ test("PR-0: loop honors explicit reportsPath when labDbPath is legacy reports/la
 
 test("A3-S1: loop uses canonical reportsPath (stateRoot/reports) for buildSemanticAgentTaskPlan", () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-loop-canonical-"));
-	const canonicalLabDbPath = join(root, "projects", "pi-telegram-bridge", "lab.db");
+	const canonicalLabDbPath = join(
+		root,
+		"projects",
+		"pi-telegram-bridge",
+		"lab.db",
+	);
 	// canonical reportsPath for semantic compaction drafts: stateRoot/reports
 	const canonicalStateRoot = dirname(canonicalLabDbPath);
 	const canonicalReportsPath = join(canonicalStateRoot, "reports");
@@ -467,7 +490,10 @@ test("A3-S1: loop uses canonical reportsPath (stateRoot/reports) for buildSemant
 		const queue = new StructuredTaskQueue({
 			filePath: join(root, "projects", "pi-telegram-bridge", "tasks.jsonl"),
 		});
-		const draftPath = join(canonicalReportsPath, "semantic-compaction-draft-20260102-030405.json");
+		const draftPath = join(
+			canonicalReportsPath,
+			"semantic-compaction-draft-20260102-030405.json",
+		);
 
 		runIduSupervisorLoop({
 			projectId: "pi-telegram-bridge",
@@ -501,12 +527,21 @@ test("A3-S1: loop uses canonical reportsPath (stateRoot/reports) for buildSemant
 	}
 
 	// saveSemanticCompactionDraft reportsPath must use stateRoot/reports, not workspaceRoot/reports
-	const draftReportsPath = capturedReportsPaths.find(p => !p.startsWith("plan:"));
-	assert.ok(draftReportsPath, "saveSemanticCompactionDraft must have been called");
-	assert.equal(draftReportsPath, canonicalReportsPath,
-		`reportsPath to draft must be stateRoot/reports (${canonicalReportsPath}), not workspaceRoot/reports`);
+	const draftReportsPath = capturedReportsPaths.find(
+		(p) => !p.startsWith("plan:"),
+	);
 	assert.ok(
-		!draftReportsPath?.startsWith(root + "/reports") && !draftReportsPath?.startsWith(root + "\\reports"),
+		draftReportsPath,
+		"saveSemanticCompactionDraft must have been called",
+	);
+	assert.equal(
+		draftReportsPath,
+		canonicalReportsPath,
+		`reportsPath to draft must be stateRoot/reports (${canonicalReportsPath}), not workspaceRoot/reports`,
+	);
+	assert.ok(
+		!draftReportsPath?.startsWith(root + "/reports") &&
+			!draftReportsPath?.startsWith(root + "\\reports"),
 		`reportsPath must not be workspaceRoot/reports directly: got ${draftReportsPath}`,
 	);
 });
