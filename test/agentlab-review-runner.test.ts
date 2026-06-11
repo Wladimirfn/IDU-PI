@@ -920,6 +920,46 @@ test("status latest lee informe", async () => {
 	assert.doesNotMatch(formatted, /\[tool:/u);
 });
 
+test("status current resolves the same run as current.json", async () => {
+	const { router, projectPath, workspaceRoot } = routerWith(
+		validReport("agentlab-pi-telegram-bridge-manual-security-01"),
+	);
+	const reportsPath = join(workspaceRoot, "reports");
+	createAgentLabReviewRequests({
+		source: "manual",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		manualObjective: "auth security",
+		manualContext: "auth security",
+	});
+	await runAgentLabReviewRequestFile({
+		pathOrLatest: "latest",
+		reportsPath,
+		projectId: "pi-telegram-bridge",
+		projectPath,
+		router,
+	});
+
+	const bare = getAgentLabReviewStatus("current", reportsPath);
+	const explicit = getAgentLabReviewStatus("current.json", reportsPath);
+
+	assert.equal(bare.valid, true);
+	assert.equal(explicit.valid, true);
+	assert.equal(bare.path, explicit.path);
+	assert.match(bare.path, /agentlabs[\\/]runs[\\/]current\.json$/u);
+});
+
+test("status current missing reports current.json candidate", () => {
+	const reportsPath = join(root(), "reports");
+
+	const status = getAgentLabReviewStatus("current", reportsPath);
+
+	assert.equal(status.valid, false);
+	assert.match(status.path, /agentlabs[\\/]runs[\\/]current\.json$/u);
+	assert.match(status.errors.join("\n"), /current\.json/u);
+});
+
 test("format run muestra resumen", async () => {
 	const { router, projectPath, workspaceRoot } = routerWith(validReport());
 	const reportsPath = join(workspaceRoot, "reports");
