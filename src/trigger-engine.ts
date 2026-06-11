@@ -80,7 +80,10 @@ const stuckTasks1hDefinition: TriggerDefinition = {
 					e.ts >= stuck.ts,
 			);
 			if (later) continue;
-			matches.push({ event: stuck, reason: `task ${taskId} stuck ${(stuck.payload as { ageMs?: number }).ageMs ?? "?"}ms` });
+			matches.push({
+				event: stuck,
+				reason: `task ${taskId} stuck ${(stuck.payload as { ageMs?: number }).ageMs ?? "?"}ms`,
+			});
 		}
 		return { triggerId: "stuck_tasks_1h", matches };
 	},
@@ -98,7 +101,8 @@ const stuckTasks1hDefinition: TriggerDefinition = {
 
 const objectiveReminderHourlyDefinition: TriggerDefinition = {
 	id: "objective_reminder_hourly",
-	description: "Recuerda el objetivo del proyecto cuando el cache tiene más de 1h.",
+	description:
+		"Recuerda el objetivo del proyecto cuando el cache tiene más de 1h.",
 	kinds: ["master_plan_drift"],
 	signature: "objective|cache|active",
 	contract: {
@@ -108,23 +112,45 @@ const objectiveReminderHourlyDefinition: TriggerDefinition = {
 	},
 	match: (events, context) => {
 		const isActive = context.isProjectActive?.() ?? false;
-		if (!isActive) return { triggerId: "objective_reminder_hourly", matches: [] };
-		const cachePath = join(context.stateRoot, "master-plan-objective-cache.json");
+		if (!isActive)
+			return { triggerId: "objective_reminder_hourly", matches: [] };
+		const cachePath = join(
+			context.stateRoot,
+			"master-plan-objective-cache.json",
+		);
 		if (!existsSync(cachePath)) {
 			return {
 				triggerId: "objective_reminder_hourly",
-				matches: [{ event: syntheticEvent(context, "master_plan_drift", { reason: "cache_missing" }), reason: "objective cache missing" }],
+				matches: [
+					{
+						event: syntheticEvent(context, "master_plan_drift", {
+							reason: "cache_missing",
+						}),
+						reason: "objective cache missing",
+					},
+				],
 			};
 		}
 		try {
 			const raw = readFileSync(cachePath, "utf8");
 			const parsed = JSON.parse(raw) as { updatedAt?: string };
-			if (!parsed.updatedAt) return { triggerId: "objective_reminder_hourly", matches: [] };
-			const ageMs = context.now.getTime() - new Date(parsed.updatedAt).getTime();
-			if (ageMs < ONE_HOUR_MS) return { triggerId: "objective_reminder_hourly", matches: [] };
+			if (!parsed.updatedAt)
+				return { triggerId: "objective_reminder_hourly", matches: [] };
+			const ageMs =
+				context.now.getTime() - new Date(parsed.updatedAt).getTime();
+			if (ageMs <= ONE_HOUR_MS)
+				return { triggerId: "objective_reminder_hourly", matches: [] };
 			return {
 				triggerId: "objective_reminder_hourly",
-				matches: [{ event: syntheticEvent(context, "master_plan_drift", { reason: "cache_stale", ageMs }), reason: `cache ageMs ${ageMs}` }],
+				matches: [
+					{
+						event: syntheticEvent(context, "master_plan_drift", {
+							reason: "cache_stale",
+							ageMs,
+						}),
+						reason: `cache ageMs ${ageMs}`,
+					},
+				],
 			};
 		} catch {
 			return { triggerId: "objective_reminder_hourly", matches: [] };
@@ -144,7 +170,8 @@ const objectiveReminderHourlyDefinition: TriggerDefinition = {
 
 const intentionDecisionPendingDefinition: TriggerDefinition = {
 	id: "intention_decision_pending",
-	description: "Detecta intenciones pendientes de decisión humana hace más de 30 min.",
+	description:
+		"Detecta intenciones pendientes de decisión humana hace más de 30 min.",
 	kinds: ["intention_decision_pending"],
 	signature: "intention|intention_decision_pending",
 	contract: {
@@ -153,7 +180,9 @@ const intentionDecisionPendingDefinition: TriggerDefinition = {
 		options: ["review", "delegate", "ignore"],
 	},
 	match: (events, context) => {
-		const fromTs = new Date(context.now.getTime() - THIRTY_MIN_MS).toISOString();
+		const fromTs = new Date(
+			context.now.getTime() - THIRTY_MIN_MS,
+		).toISOString();
 		const window = events.filter((e) => e.ts >= fromTs);
 		const matches: Array<{ event: Event; reason: string }> = [];
 		for (const ev of window) {
@@ -161,7 +190,10 @@ const intentionDecisionPendingDefinition: TriggerDefinition = {
 			const payload = ev.payload as { ageMs?: number; requiresHuman?: boolean };
 			if (payload.requiresHuman !== true) continue;
 			if ((payload.ageMs ?? 0) < THIRTY_MIN_MS) continue;
-			matches.push({ event: ev, reason: `intention pending ${payload.ageMs}ms` });
+			matches.push({
+				event: ev,
+				reason: `intention pending ${payload.ageMs}ms`,
+			});
 		}
 		return { triggerId: "intention_decision_pending", matches };
 	},
@@ -198,7 +230,9 @@ export const TRIGGER_DEFINITIONS: TriggerDefinition[] = [
 	intentionDecisionPendingDefinition,
 ];
 
-export function runTriggerEngineTick(context: TriggerContext): TriggerEngineResult {
+export function runTriggerEngineTick(
+	context: TriggerContext,
+): TriggerEngineResult {
 	const events = readEvents(context.stateRoot, {});
 	let injectedCount = 0;
 	let skippedByIdempotency = 0;

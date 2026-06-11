@@ -1116,6 +1116,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		label: "Skill rating",
 		command: "corepack pnpm cli -- idu-skill-rating <proposalId> <score>",
 	},
+	{
+		label: "Trigger show",
+		command: "corepack pnpm cli -- idu-trigger-show <triggerId>",
+	},
 ];
 
 export const BATCH_COMMANDS: LocalCommandEntry[] = [

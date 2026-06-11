@@ -2659,6 +2659,37 @@ export async function runCliCommand(
 				});
 				return ok(formatBirthRepoPlan(result));
 			}
+			case "idu-trigger-show": {
+				const triggerId = rest[0];
+				if (!triggerId) {
+					return fail("Uso: idu-trigger-show <triggerId>");
+				}
+				const def = TRIGGER_DEFINITIONS.find((d) => d.id === triggerId);
+				if (!def) {
+					return fail(`Trigger not found: ${triggerId}`);
+				}
+				const cadenceMap: Record<string, string> = {
+					objective_reminder_hourly:
+						"1h after the master-plan-objective-cache.json `updatedAt`",
+					stuck_tasks_1h:
+						"1h after task_stuck event without subsequent task_created",
+					intention_decision_pending:
+						"30min after intention_decision_pending event",
+				};
+				const cadence = cadenceMap[def.id] || "not specified";
+				const output = [
+					`ID: ${def.id}`,
+					`Description: ${def.description}`,
+					`Kinds: ${def.kinds.join(", ")}`,
+					`Signature: ${def.signature}`,
+					`Contract:`,
+					`  - decisionRequired: ${def.contract.decisionRequired}`,
+					`  - severity: ${def.contract.severity}`,
+					`  - options: [${def.contract.options.join(", ")}]`,
+					`Cadence: ${cadence}`,
+				].join("\n");
+				return ok(output);
+			}
 			default:
 				return {
 					exitCode: 1,
@@ -4429,14 +4460,10 @@ function installationMenuOptions(): MenuOption[] {
 	];
 }
 
-function supervisorTriggerMenuOptions(
-	currentEnabled: boolean,
-): MenuOption[] {
+function supervisorTriggerMenuOptions(currentEnabled: boolean): MenuOption[] {
 	return [
 		{
-			label: currentEnabled
-				? "Desactivar trigger"
-				: "Activar trigger",
+			label: currentEnabled ? "Desactivar trigger" : "Activar trigger",
 			value: "toggle",
 		},
 		{ label: "↻ Refrescar estado", value: "refresh" },
@@ -4469,7 +4496,7 @@ function formatSupervisorTriggerTui(
 		"",
 		status.enabled
 			? "El script supervisor-tick corre normalmente (cuando no haya un CLI interactivo abierto)."
-			: "El script supervisor-tick se saltea con el motivo \"skipped: trigger disabled by user\".",
+			: 'El script supervisor-tick se saltea con el motivo "skipped: trigger disabled by user".',
 	].join("\n");
 }
 
@@ -4538,9 +4565,8 @@ async function runInstallationMenuTui(
 			output: process.stdout,
 		});
 		try {
-			const result = await handleInstallationChoice(
-				choice,
-				(message: string) => rl.question(message),
+			const result = await handleInstallationChoice(choice, (message: string) =>
+				rl.question(message),
 			);
 			await showTextView("Resultado", result);
 		} finally {
@@ -5873,7 +5899,7 @@ async function handleInstallationChoice(
 			return [
 				"Trigger supervisor desactivado.",
 				`stateRoot: ${stateRoot}`,
-				"El script supervisor-tick se saltea con el motivo \"skipped: trigger disabled by user\".",
+				'El script supervisor-tick se saltea con el motivo "skipped: trigger disabled by user".',
 			].join("\n");
 		}
 		enableSupervisorTrigger(stateRoot, {

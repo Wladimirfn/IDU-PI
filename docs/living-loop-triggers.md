@@ -66,11 +66,11 @@ Cada línea es una inyección:
 
 ## Disparadores iniciales
 
-| triggerId | severity | decisionRequired | kinds |
-| --- | --- | --- | --- |
-| `stuck_tasks_1h` | warning | true | task_stuck, task_created, intention_registered |
-| `objective_reminder_hourly` | info | false | master_plan_drift |
-| `intention_decision_pending` | warning | true | intention_decision_pending |
+| triggerId | severity | decisionRequired | kinds | Cadence |
+| --- | --- | --- | --- | --- |
+| `stuck_tasks_1h` | warning | true | task_stuck, task_created, intention_registered | Fires when a task has been stuck for >1h without a subsequent task_created or intention_registered event for the same taskId. |
+| `objective_reminder_hourly` | info | false | master_plan_drift | Fires when the master-plan objective cache (`master-plan-objective-cache.json`) is missing or older than 1 hour, and the project is active. Uses strict greater-than: `ageMs > 3_600_000`. |
+| `intention_decision_pending` | warning | true | intention_decision_pending | Fires when an intention has been pending human decision for >30min (`ageMs > 1_800_000`) and `requiresHuman` is true. |
 
 ## Tools MCP
 
