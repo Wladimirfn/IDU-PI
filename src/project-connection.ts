@@ -212,7 +212,9 @@ export function inspectProjectConnection(
 		"project-flows.json",
 		validateProjectFlows,
 	);
-	const workspace = inspectWorkspace(options.workspaceRoot);
+	// stateRoot follows project-state.ts:56 — projects/<projectId> under workspaceRoot.
+	const stateRoot = join(options.workspaceRoot, "projects", project.id);
+	const workspace = inspectWorkspace(options.workspaceRoot, stateRoot);
 	const problems: string[] = [];
 	const warnings: string[] = [];
 
@@ -228,9 +230,10 @@ export function inspectProjectConnection(
 		}
 	}
 
+	// REQ-A2: warnings are now based on canonical stateRoot paths (not legacy workspaceRoot/reports/).
 	if (!workspace.reportsExists) {
 		warnings.push(
-			`No existe ${join(options.workspaceRoot, "reports")}; usá /config init_workspace para preparar reportes.`,
+			`No existe el directorio de estado del proyecto (${stateRoot}); usá /config init_workspace para preparar el espacio de trabajo.`,
 		);
 	} else {
 		if (!workspace.labDbExists) {
@@ -441,18 +444,20 @@ function inspectProjectConfigFile(
 
 function inspectWorkspace(
 	workspaceRoot: string,
+	stateRoot: string,
 ): ProjectConnectionWorkspaceStatus {
-	const reportsPath = join(workspaceRoot, "reports");
-	const reportsExists = directoryExists(reportsPath);
-	const labDbExists = existsSync(join(reportsPath, "lab.db"));
-	const tasksJsonlExists = existsSync(join(reportsPath, "tasks.jsonl"));
+	// REQ-A2: check canonical stateRoot paths (project-state.ts:63-64), not workspaceRoot/reports/.
+	// The legacy reports/ directory is preserved untouched (REQ-A4); only the read-pointers change.
+	const stateRootExists = directoryExists(stateRoot);
+	const labDbExists = existsSync(join(stateRoot, "lab.db"));
+	const tasksJsonlExists = existsSync(join(stateRoot, "tasks.jsonl"));
 	return {
 		workspaceRoot,
-		reportsExists,
+		reportsExists: stateRootExists,
 		labDbExists,
-		labDbCanInitialize: reportsExists,
+		labDbCanInitialize: stateRootExists,
 		tasksJsonlExists,
-		tasksJsonlCanCreate: reportsExists,
+		tasksJsonlCanCreate: stateRootExists,
 	};
 }
 

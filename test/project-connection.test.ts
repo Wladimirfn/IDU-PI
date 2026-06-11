@@ -16,6 +16,7 @@ import {
 	formatProjectConnectionReport,
 	inspectProjectConnection,
 } from "../src/project-connection.js";
+import { resolveProjectStatePaths } from "../src/project-state.js";
 
 const tempRoots: string[] = [];
 
@@ -141,7 +142,8 @@ test("needs_understanding if project-local configs are missing", () => {
 test("ready if local blueprint and flows are valid", () => {
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");
-	mkdirSync(join(workspaceRoot, "reports"), { recursive: true });
+	// stateRoot = workspaceRoot/projects/demo (canonical path per project-state.ts)
+	mkdirSync(join(workspaceRoot, "projects", "demo"), { recursive: true });
 	writeProjectConfig(projectPath);
 
 	const report = inspect({
@@ -162,7 +164,7 @@ test("ready if local blueprint and flows are valid", () => {
 test("ready uses matching prepare alignment state", () => {
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");
-	mkdirSync(join(workspaceRoot, "reports"), { recursive: true });
+	mkdirSync(join(workspaceRoot, "projects", "demo"), { recursive: true });
 	writeProjectConfig(projectPath);
 
 	const defaultCwd = tempDir("idu-default-");
@@ -196,7 +198,7 @@ test("ready uses matching prepare alignment state", () => {
 test("ready with non-aligned prepare state keeps safe next action", () => {
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");
-	mkdirSync(join(workspaceRoot, "reports"), { recursive: true });
+	mkdirSync(join(workspaceRoot, "projects", "demo"), { recursive: true });
 	writeProjectConfig(projectPath);
 
 	const defaultCwd = tempDir("idu-default-");
@@ -222,11 +224,12 @@ test("ready with non-aligned prepare state keeps safe next action", () => {
 	assert.equal(report.needsUserConfirmation, true);
 });
 
-test("warnings if reports directory does not exist", () => {
+test("warnings if project state directory does not exist", () => {
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");
 	writeProjectConfig(projectPath);
 
+	// stateRoot = workspaceRoot/projects/demo — not created here, so warning should fire
 	const report = inspect({
 		registry: registry(projectPath),
 		allowedRoots: [projectPath],
@@ -234,7 +237,8 @@ test("warnings if reports directory does not exist", () => {
 	});
 
 	assert.equal(report.status, "ready");
-	assert.match(report.warnings.join("\n"), /reports/);
+	// Warning should mention the state directory (init_workspace)
+	assert.match(report.warnings.join("\n"), /init_workspace/);
 	assert.equal(report.safeToOperate, true);
 });
 
@@ -368,4 +372,101 @@ test("inspectProjectConnection does not write files", () => {
 
 	assert.equal(existsSync(workspaceRoot), false);
 	assert.equal(existsSync(join(projectPath, "config")), false);
+});
+
+// A1-T: canonical stateRoot path tests (Spec A2-S1, A2-S2, A2-S3)
+
+test("A2-S1: labDbExists true when stateRoot/lab.db exists (not reports/lab.db)", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-workspace-");
+	writeProjectConfig(projectPath);
+
+	// Set up ONLY the canonical stateRoot path — no legacy reports/ directory
+	const statePaths = resolveProjectStatePaths({
+		workspaceRoot,
+		projectId: "demo",
+		projectPath,
+	});
+	mkdirSync(statePaths.stateRoot, { recursive: true });
+	writeFileSync(statePaths.labDbPath, "");
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+		workspaceRoot,
+	});
+
+	assert.equal(report.workspace?.labDbExists, true,
+		"labDbExists should be true when stateRoot/lab.db exists");
+});
+
+test("A2-S1 inverse: labDbExists false when only reports/lab.db exists (path bug check)", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-workspace-");
+	writeProjectConfig(projectPath);
+
+	// Create only the legacy/buggy reports/ path — canonical path does NOT exist
+	mkdirSync(join(workspaceRoot, "reports"), { recursive: true });
+	writeFileSync(join(workspaceRoot, "reports", "lab.db"), "");
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+		workspaceRoot,
+	});
+
+	// The buggy behavior reports true here because it checks workspaceRoot/reports/lab.db.
+	// After the fix, this must be false (stateRoot/lab.db does not exist).
+	assert.equal(report.workspace?.labDbExists, false,
+		"labDbExists must be false when only the legacy reports/ path exists, not the canonical stateRoot path");
+});
+
+test("A2-S3: needsUserConfirmation not set to true solely from path bug when canonical lab.db exists", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-workspace-");
+	writeProjectConfig(projectPath);
+
+	// Canonical lab.db exists; no legacy reports/ directory
+	const statePaths = resolveProjectStatePaths({
+		workspaceRoot,
+		projectId: "demo",
+		projectPath,
+	});
+	mkdirSync(statePaths.stateRoot, { recursive: true });
+	writeFileSync(statePaths.labDbPath, "");
+	writeFileSync(statePaths.taskQueuePath, "");
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+		workspaceRoot,
+	});
+
+	assert.equal(report.needsUserConfirmation, false,
+		"needsUserConfirmation must not be true when canonical lab.db exists");
+	assert.equal(report.warnings.filter(w => /lab\.db/i.test(w)).length, 0,
+		"no lab.db warning should appear when canonical lab.db exists");
+});
+
+test("A2-S2: tasksJsonlExists true at canonical stateRoot/tasks.jsonl (not reports/tasks.jsonl)", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-workspace-");
+	writeProjectConfig(projectPath);
+
+	const statePaths = resolveProjectStatePaths({
+		workspaceRoot,
+		projectId: "demo",
+		projectPath,
+	});
+	mkdirSync(statePaths.stateRoot, { recursive: true });
+	writeFileSync(statePaths.taskQueuePath, "");
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+		workspaceRoot,
+	});
+
+	assert.equal(report.workspace?.tasksJsonlExists, true,
+		"tasksJsonlExists should be true when stateRoot/tasks.jsonl exists");
 });
