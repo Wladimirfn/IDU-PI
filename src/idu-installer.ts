@@ -184,7 +184,14 @@ export function detectTools(options: DetectOptions = {}): SystemDetection {
 	const runner = options.runner ?? defaultRunner;
 	const node = detectCommand("node", ["--version"], runner);
 	const npm = detectCommand("npm", ["--version"], runner);
-	const pnpm = detectCommand("pnpm", ["--version"], runner);
+	// REQ-SF-3: try corepack pnpm first (the recommended way to
+	// invoke pnpm on a project that uses corepack), then fall back
+	// to a global pnpm. Without this, a fresh `corepack pnpm` install
+	// ends up with `pnpm: missing` even though `corepack pnpm build`
+	// works.
+	const pnpm = detectCommand("corepack", ["pnpm", "--version"], runner).found
+		? detectCommand("corepack", ["pnpm", "--version"], runner)
+		: detectCommand("pnpm", ["--version"], runner);
 	const git = detectCommand("git", ["--version"], runner);
 	const curl = detectCommand("curl", ["--version"], runner);
 	return {

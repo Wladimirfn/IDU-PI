@@ -128,6 +128,7 @@ import {
 	runBibliotecarioInit,
 	formatBibliotecarioInit,
 } from "./cli-bibliotecario-init.js";
+import { runOnboardProject } from "./cli-onboard-project.js";
 import { runSkillRating, formatSkillRating } from "./cli-skill-rating.js";
 import {
 	approveMasterPlan,
@@ -527,6 +528,7 @@ export type CliRuntime = {
 	projectId: string;
 	projectPath: string;
 	workspaceRoot: string;
+	labDbPath?: string;
 	sessionStatePath?: string;
 	inspectConnection: () => ProjectConnectionReport;
 	formatConnection: (report: ProjectConnectionReport) => string;
@@ -938,6 +940,7 @@ export function createCliRuntime(
 		projectId: activeProject.id,
 		projectPath: activeProject.path,
 		workspaceRoot: runtimeWorkspaceRoot,
+		...(projectStatePaths ? { labDbPath } : {}),
 		...(projectStatePaths?.sessionStatePath
 			? { sessionStatePath: projectStatePaths.sessionStatePath }
 			: {}),
@@ -2060,21 +2063,29 @@ export async function runCliCommand(
 			case "idu-model-invocation-status":
 			case "model-invocation-status": {
 				const { role, limit } = parseModelInvocationStatusArgs(rest);
+				// REQ-SF-2: use the runtime's labDbPath directly. Reconstructing
+				// the path from workspaceRoot + projects + projectId + lab.db
+				// produced a nested duplicate (projects/idu-pi/projects/idu-pi/lab.db).
+				// The runtime already exposes the correct canonical path.
+				const labDbPath = activeRuntime.labDbPath ?? join(
+					activeRuntime.workspaceRoot,
+					"projects",
+					activeRuntime.projectId,
+					"lab.db",
+				);
 				const result = buildModelInvocationStatusOrError({
 					projectId: activeRuntime.projectId,
 					stateRoot: activeRuntime.workspaceRoot,
-					labDbPath: join(
-						activeRuntime.workspaceRoot,
-						"projects",
-						activeRuntime.projectId,
-						"lab.db",
-					),
+					labDbPath,
 					options: { role, limit },
 				});
 				if (!result.ok) {
 					return fail(result.error);
 				}
-				return ok(activeRuntime.formatModelInvocationStatus(result.report));
+				return ok(
+					`lab.db path: ${labDbPath}\n` +
+						activeRuntime.formatModelInvocationStatus(result.report),
+				);
 			}
 			case "idu-orchestrator-advisory":
 			case "orchestrator-advisory":
@@ -2513,10 +2524,31 @@ export async function runCliCommand(
 				});
 				return ok(formatBirthBibliotecario(result));
 			}
+			case "idu-onboard-project":
+			case "onboard-project": {
+				const result = runOnboardProject(
+					activeRuntime.workspaceRoot,
+					activeRuntime.projectId,
+					{
+						projectPath: activeRuntime.projectPath,
+						allowedRoots: [
+							activeRuntime.projectPath,
+							activeRuntime.workspaceRoot,
+						],
+						registryPath: process.env.IDU_PI_REGISTRY_PATH,
+					},
+				);
+				return {
+					exitCode: result.exitCode,
+					stdout: result.ok ? `${JSON.stringify(result, null, 2)}\n` : "",
+					stderr: result.ok ? "" : `${JSON.stringify(result, null, 2)}\n`,
+				};
+			}
 			case "idu-bibliotecario-init":
 			case "bibliotecario-init": {
 				const result = runBibliotecarioInit({
 					stateRoot: activeRuntime.workspaceRoot,
+					projectId: activeRuntime.projectId,
 				});
 				if (!result.ok) {
 					return fail(result.error);
@@ -4116,6 +4148,7 @@ export function helpText(): string {
 		"  idu-pi idu-source-skill-candidates-create all",
 		"  idu-pi idu-source-skill-candidates-review latest",
 		"  idu-pi idu-source-refresh",
+		"  idu-pi idu-onboard-project",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
 		"  idu-pi idu-supervisor-improvements-review latest",

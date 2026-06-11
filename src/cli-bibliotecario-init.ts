@@ -30,8 +30,9 @@ export type BibliotecarioInitOutcome =
 
 export function runBibliotecarioInit(input: {
 	stateRoot: string;
+	projectId: string;
 }): BibliotecarioInitOutcome {
-	const { stateRoot } = input;
+	const { stateRoot, projectId } = input;
 
 	try {
 		// Ensure stateRoot exists
@@ -42,9 +43,12 @@ export function runBibliotecarioInit(input: {
 		const dbPath = join(stateRoot, "lab.db");
 		const dbCreated = !existsSync(dbPath);
 
-		// Initialize lab.db (runs migrations)
+		// REQ-SF-4: stamp events with the ACTIVE project id, not the
+		// literal string "bibliotecario". The bibliotecario lifecycle
+		// is per-project, so the event payload must carry the project
+		// id of the caller.
 		const repo = new LabDbRepository(dbPath, {
-			bibliotecarioProjectId: "bibliotecario",
+			bibliotecarioProjectId: projectId,
 		});
 		repo.init();
 

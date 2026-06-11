@@ -5,6 +5,22 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
+import {
+	formatBibliotecarioInit,
+	runBibliotecarioInit,
+} from "./cli-bibliotecario-init.js";
+import {
+	buildModelInvocationStatusOrError,
+	formatModelInvocationStatus,
+} from "./cli-model-invocation-status.js";
+import { formatSkillRating, runSkillRating } from "./cli-skill-rating.js";
+import {
+	disableSupervisorTrigger,
+	enableSupervisorTrigger,
+	formatSupervisorTriggerResult,
+	formatSupervisorTriggerStatus,
+	getSupervisorTriggerStatus,
+} from "./supervisor-trigger.js";
 import type { SkillDraftFromLessonsMode } from "./skill-draft-from-lessons.js";
 import { applyPackageEnvDefaults, resolveIduRegistryPath } from "./cli-home.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
@@ -54,7 +70,10 @@ import {
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
-import { readPendingInjections, markInjectionAcked } from "./injection-store.js";
+import {
+	readPendingInjections,
+	markInjectionAcked,
+} from "./injection-store.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
@@ -144,6 +163,10 @@ export type IduMcpToolName =
 	| "idu_activate"
 	| "idu_deactivate"
 	| "idu_prepare"
+	| "idu_bibliotecario_init"
+	| "idu_model_invocation_status"
+	| "idu_skill_rating"
+	| "idu_supervisor_trigger"
 	| "idu_master_plan_status"
 	| "idu_master_plan_create"
 	| "idu_master_plan_review"
@@ -329,6 +352,50 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool("idu_prepare", "Ejecuta prepare seguro sin IA ni AgentLabs.", {
 		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 	}),
+	tool(
+		"idu_bibliotecario_init",
+		"Inicializa lab.db y la skill bootstrap del Bibliotecario para el proyecto activo.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_model_invocation_status",
+		"Muestra el estado de invocaciones de modelos usando el lab.db resuelto del proyecto activo.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			role: optionalString("Rol opcional para filtrar invocaciones."),
+			limit: {
+				type: "number",
+				description: "Límite opcional de filas por rol.",
+			},
+		},
+	),
+	tool(
+		"idu_skill_rating",
+		"Registra un score para una propuesta de skill del Bibliotecario.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			proposalId: requiredString("ID de propuesta a calificar."),
+			score: {
+				type: "number",
+				description: "Score entero 0..10.",
+				__required: true,
+			},
+		},
+	),
+	tool(
+		"idu_supervisor_trigger",
+		"Activa, desactiva o consulta el opt-in del supervisor trigger programado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredEnum("Acción: enable, disable o status.", [
+				"enable",
+				"disable",
+				"status",
+			]),
+		},
+	),
 	tool(
 		"idu_master_plan_status",
 		"Lee estado y rutas del Plan Maestro sin regenerar ni modificar el repo real.",
@@ -557,7 +624,9 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Evalúa un plan de repo y otorga repoWritesAllowed solo si Project Core está confirmado, Master Plan aprobado y pushApproved=true. No ejecuta git.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
-			repoPlan: optionalObject("Plan de repo con repoName, visibility, owner, license, initialReadmePolicy, remoteProvider, pushApproved, branchPolicy, ciExpectation."),
+			repoPlan: optionalObject(
+				"Plan de repo con repoName, visibility, owner, license, initialReadmePolicy, remoteProvider, pushApproved, branchPolicy, ciExpectation.",
+			),
 		},
 	),
 	tool(
@@ -565,9 +634,15 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Crea, revisa o aprueba el Master Prototype / Pilot House. Persiste sólo en stateRoot/birth/prototype-master.json.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
-			action: optionalString("Acción: 'draft' | 'review' | 'approve'. Default 'review'."),
-			draft: optionalObject("Payload del prototype (sólo para action='draft')."),
-			approvedBy: optionalString("Identificador del aprobador humano (sólo para action='approve')."),
+			action: optionalString(
+				"Acción: 'draft' | 'review' | 'approve'. Default 'review'.",
+			),
+			draft: optionalObject(
+				"Payload del prototype (sólo para action='draft').",
+			),
+			approvedBy: optionalString(
+				"Identificador del aprobador humano (sólo para action='approve').",
+			),
 		},
 	),
 	tool(
@@ -575,7 +650,9 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Lee inyecciones pendientes del stateRoot. Opcionalmente las marca como acked.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
-			ack: optionalBoolean("Si true (default), marca las inyecciones devueltas como acked."),
+			ack: optionalBoolean(
+				"Si true (default), marca las inyecciones devueltas como acked.",
+			),
 		},
 	),
 	tool(
@@ -1181,7 +1258,7 @@ export async function callIduMcpTool(
 		);
 		const startedAt = Date.now();
 		const result = await dispatchTool(name, args, runtime, resolution);
-		if (!isReadOnlyAlertTelemetryExcludedTool(name)) {
+		if (!isReadOnlyAlertTelemetryExcludedTool(name) && runtime.projectId.trim()) {
 			await recordMcpUsage(
 				runtime,
 				result,
@@ -1920,6 +1997,134 @@ async function dispatchTool(
 					"Prepare seguro: no ejecuté IA ni AgentLabs.",
 				],
 				errors: result.errors,
+			});
+		}
+		case "idu_bibliotecario_init": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const init = runBibliotecarioInit({ stateRoot, projectId });
+			if (!init.ok) {
+				return invalidMcpInput(name, runtime, resolution, init.error, { stateRoot });
+			}
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: `Bibliotecario inicializado para ${projectId}.`,
+				data: {
+					activeProjectId: projectId,
+					init,
+					output: formatBibliotecarioInit(init),
+				},
+				safeNotes: resolution.safeNotes,
+			});
+		}
+		case "idu_model_invocation_status": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const labDbPath = runtime.labDbPath ?? join(stateRoot, "lab.db");
+			const limit = positiveIntegerArg(args, "limit");
+			if (args.limit !== undefined && limit === undefined) {
+				return invalidMcpInput(name, runtime, resolution, "limit must be a positive integer");
+			}
+			const result = buildModelInvocationStatusOrError({
+				projectId,
+				stateRoot,
+				labDbPath,
+				options: {
+					...(stringArg(args, "role") ? { role: stringArg(args, "role") } : {}),
+					...(limit !== undefined ? { limit } : {}),
+				},
+			});
+			if (!result.ok) return invalidMcpInput(name, runtime, resolution, result.error, { labDbPath });
+			const formatter = runtime.formatModelInvocationStatus ?? formatModelInvocationStatus;
+			const output = `lab.db path: ${labDbPath}\n${formatter(result.report)}`;
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: "Estado de invocaciones de modelos generado.",
+				data: { labDbPath, output, report: result.report as unknown as JsonObject },
+				safeNotes: resolution.safeNotes,
+			});
+		}
+		case "idu_skill_rating": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			const proposalId = stringArg(args, "proposalId");
+			if (!proposalId) return invalidMcpInput(name, runtime, resolution, "proposalId must be non-empty");
+			const score = scoreArg(args, "score");
+			if (!score.ok) return invalidMcpInput(name, runtime, resolution, score.error);
+			const result = runSkillRating([proposalId, score.text], {
+				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
+			});
+			if (!result.ok) {
+				return invalidMcpInput(name, runtime, resolution, result.error, {
+					proposalId,
+					score: score.value,
+					exitCode: result.exitCode,
+				});
+			}
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: `Skill rating registrado: ${proposalId}=${result.score}.`,
+				data: {
+					proposalId: result.proposalId,
+					score: result.score,
+					recommendation: result.recommendation,
+					output: formatSkillRating(result),
+				},
+				safeNotes: resolution.safeNotes,
+			});
+		}
+		case "idu_supervisor_trigger": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId) return invalidMcpInput(name, runtime, resolution, "project id must be non-empty");
+			const action = supervisorTriggerActionArg(args);
+			if (!action) {
+				return invalidMcpInput(name, runtime, resolution, "action must be one of: enable, disable, status");
+			}
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			if (action === "enable") {
+				const result = enableSupervisorTrigger(stateRoot, { source: "cli" });
+				return envelope({
+					ok: true,
+					tool: name,
+					projectId,
+					projectPath: runtime.projectPath,
+					summary: "Supervisor trigger enabled.",
+					data: { action, result, output: formatSupervisorTriggerResult(result) },
+					safeNotes: resolution.safeNotes,
+				});
+			}
+			if (action === "disable") {
+				const result = disableSupervisorTrigger(stateRoot, { source: "cli" });
+				return envelope({
+					ok: true,
+					tool: name,
+					projectId,
+					projectPath: runtime.projectPath,
+					summary: "Supervisor trigger disabled.",
+					data: { action, result, output: formatSupervisorTriggerResult(result) },
+					safeNotes: resolution.safeNotes,
+				});
+			}
+			const status = getSupervisorTriggerStatus(stateRoot);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: `Supervisor trigger is ${status.enabled ? "enabled" : "disabled"}.`,
+				data: { action, status, output: formatSupervisorTriggerStatus(status) },
+				safeNotes: resolution.safeNotes,
 			});
 		}
 		case "idu_master_plan_status": {
@@ -3188,9 +3393,9 @@ async function dispatchTool(
 				stateRoot,
 				"existing-scan",
 			);
-			const localRefs = (scan?.observed?.docs ?? []).slice(0, 5).map(
-				(p) => ({ path: p, quality: "secondary" as const }),
-			);
+			const localRefs = (scan?.observed?.docs ?? [])
+				.slice(0, 5)
+				.map((p) => ({ path: p, quality: "secondary" as const }));
 			const env = handleBirthBibliotecarioDiscovery({
 				projectId: runtime.projectId,
 				stateRoot,
@@ -4947,7 +5152,9 @@ function buildSupervisorContextPack(
 	};
 }
 
-export function buildOrchestratorAdvisoriesSection(runtime: CliRuntime): JsonObject {
+export function buildOrchestratorAdvisoriesSection(
+	runtime: CliRuntime,
+): JsonObject {
 	// Get advisories from the runtime (last 500 to have enough data for grouping)
 	const advisories = runtime.getOrchestratorAdvisory
 		? runtime.getOrchestratorAdvisory({ limit: 500 })
@@ -6038,6 +6245,60 @@ function positiveIntegerArg(args: JsonObject, key: string): number | undefined {
 		const parsed = Number(value.trim());
 		if (Number.isInteger(parsed) && parsed > 0) return parsed;
 	}
+	return undefined;
+}
+
+function activeMcpProjectId(
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+): string | undefined {
+	const candidate = runtime.projectId || resolution.projectId;
+	return candidate.trim() ? candidate.trim() : undefined;
+}
+
+function invalidMcpInput(
+	name: IduMcpToolName,
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+	message: string,
+	data: JsonObject = {},
+): IduMcpToolResult {
+	return envelope({
+		ok: false,
+		tool: name,
+		projectId: activeMcpProjectId(runtime, resolution) ?? null,
+		projectPath: runtime.projectPath || resolution.projectPath || null,
+		summary: `Invalid input for ${name}: ${message}`,
+		data,
+		safeNotes: resolution.safeNotes,
+		errors: [message],
+	});
+}
+
+function scoreArg(
+	args: JsonObject,
+	key: string,
+): { ok: true; text: string; value: number } | { ok: false; error: string } {
+	const raw = args[key];
+	const text =
+		typeof raw === "number" || typeof raw === "string" ? String(raw).trim() : "";
+	const value = Number(text);
+	if (!text || !Number.isFinite(value) || !Number.isInteger(value)) {
+		return { ok: false, error: `${key} must be an integer in 0..10` };
+	}
+	if (value < 0 || value > 10) {
+		return { ok: false, error: `${key} must be in 0..10, got ${value}` };
+	}
+	return { ok: true, text, value };
+}
+
+function supervisorTriggerActionArg(
+	args: JsonObject,
+): "enable" | "disable" | "status" | undefined {
+	const direct = stringArg(args, "action");
+	const positional = Array.isArray(args.args) ? args.args[0] : undefined;
+	const value = (direct ?? (typeof positional === "string" ? positional.trim() : "")).toLowerCase();
+	if (value === "enable" || value === "disable" || value === "status") return value;
 	return undefined;
 }
 

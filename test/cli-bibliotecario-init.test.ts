@@ -14,7 +14,10 @@ describe("T3.1 — runBibliotecarioInit", () => {
 	});
 
 	it("creates lab.db, applies migration, seeds bootstrap skill, and emits lab_write event", () => {
-		const result = runBibliotecarioInit({ stateRoot: tempDir });
+		const result = runBibliotecarioInit({
+			stateRoot: tempDir,
+			projectId: "cli-bibliotecario-init-test",
+		});
 
 		// Verify success
 		assert.equal(result.ok, true);
@@ -45,7 +48,10 @@ describe("T3.1 — runBibliotecarioInit", () => {
 
 	it("is idempotent: second run creates zero new rows and zero new events", () => {
 		// First run
-		const first = runBibliotecarioInit({ stateRoot: tempDir });
+		const first = runBibliotecarioInit({
+			stateRoot: tempDir,
+			projectId: "cli-bibliotecario-init-test",
+		});
 		assert.equal(first.ok, true);
 
 		// Count skills after first run
@@ -60,7 +66,10 @@ describe("T3.1 — runBibliotecarioInit", () => {
 			: 0;
 
 		// Second run
-		const second = runBibliotecarioInit({ stateRoot: tempDir });
+		const second = runBibliotecarioInit({
+			stateRoot: tempDir,
+			projectId: "cli-bibliotecario-init-test",
+		});
 		assert.equal(second.ok, true);
 		if (!second.ok) return;
 
@@ -92,7 +101,10 @@ describe("T3.1 — runBibliotecarioInit", () => {
 
 	it("returns failure when stateRoot does not exist", () => {
 		const nonExistentPath = join(tempDir, "does-not-exist");
-		const result = runBibliotecarioInit({ stateRoot: nonExistentPath });
+		const result = runBibliotecarioInit({
+			stateRoot: nonExistentPath,
+			projectId: "cli-bibliotecario-init-test",
+		});
 
 		// Should succeed but create the directory
 		assert.equal(result.ok, true);

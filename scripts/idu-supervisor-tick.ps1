@@ -41,7 +41,10 @@ if ($env:IDU_PI_TICK_INTERVAL_MINUTES) {
 
 # Read trigger engine opt-in.
 $EnvTriggerEngine = $env:IDU_PI_TRIGGER_ENGINE
-if (-not $EnvTriggerEngine) { $EnvTriggerEngine = '1' }
+if (-not $EnvTriggerEngine) { $EnvTriggerEngine = '0' }
+$triggerOptIn = if ($EnvTriggerEngine -eq '1') { 'enabled' } else { 'disabled' }
+Step ("Trigger engine opt-in: " + $triggerOptIn)
+Log ("trigger_opt_in: " + $triggerOptIn)
 
 $banner = 'Idu-pi supervisor tick — interval=' + $IntervalMinutes + 'min, trigger_engine=' + $EnvTriggerEngine
 Step $banner

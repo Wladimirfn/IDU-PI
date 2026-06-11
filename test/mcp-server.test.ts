@@ -1095,6 +1095,10 @@ test("mcp server lists Idu-pi tools", async () => {
 	);
 	assert.ok(tools.some((tool) => tool.name === "idu_skill_draft_from_lessons"));
 	assert.ok(tools.some((tool) => tool.name === "idu_source_refresh"));
+	assert.ok(tools.some((tool) => tool.name === "idu_bibliotecario_init"));
+	assert.ok(tools.some((tool) => tool.name === "idu_model_invocation_status"));
+	assert.ok(tools.some((tool) => tool.name === "idu_skill_rating"));
+	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_trigger"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
 	assert.ok(tools.some((tool) => tool.name === "idu_execution_director_tick"));
@@ -1119,7 +1123,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 70);
+	assert.equal(tools.length, 74);
 });
 
 test("execution director MCP tick saves proposals and outbox reads them", async () => {
