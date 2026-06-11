@@ -324,3 +324,24 @@ corepack pnpm cli -- idu-agentlab-report-consolidate latest
 - No ejecuta AgentLabs salvo comandos explícitos de review run.
 - No aplica Project Core, Constitution, flows, skills ni reglas sin rutas/decisiones explícitas.
 - Nada crítico se aplica sin confirmación humana.
+
+## Cold start
+
+The first `node dist/src/cli.js <command>` after a fresh build is
+slower than subsequent invocations. This is because the test
+runner pipeline (`corepack pnpm test` in `package.json`) runs
+`tsc -p tsconfig.json` and `node scripts/copy-migrations.mjs`
+before invoking the tests, so the `dist/` directory is up to date
+only after that pipeline has run at least once.
+
+If you only need the CLI, the recommended workflow is:
+
+1. `corepack pnpm build` once to populate `dist/`.
+2. Then `node dist/src/cli.js <command>` is fast.
+3. If you change source, run `corepack pnpm tsc` (or the test
+   command) before invoking the CLI again.
+
+Alternative: use `corepack pnpm dev` (if exposed) which watches
+and rebuilds. The dispatcher routes through `dist/` so the cold
+start applies to every `node dist/src/cli.js` invocation that is
+preceded by a fresh clone or a clean.

@@ -109,3 +109,6 @@ sdd-*-output.md
 
 # Throwaway MCP probe scripts
 tmp-mcp-probe.mjs
+
+# Worker outputMode noise directory
+outputMode/

@@ -425,3 +425,21 @@ corepack pnpm test
 - [`docs/project-map-workflow.md`](docs/project-map-workflow.md) — workflow de Project Core, blueprint y flows.
 - [`docs/lab-agent-best-practices.md`](docs/lab-agent-best-practices.md) — checklist operativo para AgentLabs.
 - [`docs/living-loop-triggers.md`](docs/living-loop-triggers.md) — bus de eventos, inyecciones, disparadores y activación (`IDU_PI_TRIGGER_ENGINE=1`).
+
+## Spec-Driven Development (OpenSpec)
+
+This repo follows a Spec-Driven Development (SDD) workflow for any
+slice that touches architecture, data, or the agent contract. The
+canonical home for SDD artifacts is
+[`openspec/changes/`](openspec/changes/). Each change goes through:
+
+- **init** — open the change with project context and plan status
+- **proposal / spec / design / tasks** — the spec-driven work
+- **apply** — strict TDD implementation
+- **verify** — acceptance evidence against the spec
+- **sync** — fold the deltas into the canonical specs
+- **archive** — close the change
+
+Historical breadcrumbs (predate OpenSpec) live in
+`docs/superpowers/{plans,specs}/`. They are kept for context but are
+not the canonical home.
