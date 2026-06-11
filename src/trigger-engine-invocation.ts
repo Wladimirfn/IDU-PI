@@ -1,3 +1,4 @@
+import { readTriggerEngineConfig } from "./trigger-engine-config.js";
 import { runTriggerEngineTick } from "./trigger-engine.js";
 
 export function isTriggerEngineOptIn(): boolean {
@@ -11,10 +12,15 @@ export type RunTriggerEngineOptInInput = {
 	isProjectActive?: () => boolean;
 };
 
-export function runTriggerEngineTickOptIn(
-	input: RunTriggerEngineOptInInput,
-): { ran: boolean; injectedCount: number; skippedByIdempotency: number } {
-	if (!isTriggerEngineOptIn()) {
+export function runTriggerEngineTickOptIn(input: RunTriggerEngineOptInInput): {
+	ran: boolean;
+	injectedCount: number;
+	skippedByIdempotency: number;
+} {
+	if (
+		!isTriggerEngineOptIn() &&
+		!readTriggerEngineConfig(input.stateRoot).enabled
+	) {
 		return { ran: false, injectedCount: 0, skippedByIdempotency: 0 };
 	}
 	const result = runTriggerEngineTick({
