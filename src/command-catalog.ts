@@ -821,6 +821,18 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-supervisor-tick",
 	},
 	{
+		label: "Supervisor trigger enable",
+		command: "corepack pnpm cli -- idu-supervisor-trigger enable",
+	},
+	{
+		label: "Supervisor trigger disable",
+		command: "corepack pnpm cli -- idu-supervisor-trigger disable",
+	},
+	{
+		label: "Supervisor trigger status",
+		command: "corepack pnpm cli -- idu-supervisor-trigger status",
+	},
+	{
 		label: "Idu execution director tick",
 		command: "corepack pnpm cli -- idu-execution-director-tick",
 	},

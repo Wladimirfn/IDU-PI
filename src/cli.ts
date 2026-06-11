@@ -393,6 +393,13 @@ import {
 	type SupervisorLearningRulesTestResult,
 } from "./supervisor-learning-rules.js";
 import {
+	disableSupervisorTrigger,
+	enableSupervisorTrigger,
+	formatSupervisorTriggerResult,
+	formatSupervisorTriggerStatus,
+	getSupervisorTriggerStatus,
+} from "./supervisor-trigger.js";
+import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	formatTareasView,
@@ -2593,6 +2600,41 @@ export async function runCliCommand(
 			case "idu-subscribe-triggers":
 			case "subscribe-triggers":
 				return ok(formatTriggerSubscription());
+			case "idu-supervisor-trigger":
+			case "supervisor-trigger": {
+				const subcommand = (rest.shift() ?? "status").toLowerCase();
+				const stateRoot = activeRuntime.workspaceRoot;
+				if (subcommand === "enable") {
+					return ok(
+						formatSupervisorTriggerResult(
+							enableSupervisorTrigger(stateRoot, {
+								source: "cli",
+								now: new Date(),
+							}),
+						),
+					);
+				}
+				if (subcommand === "disable") {
+					return ok(
+						formatSupervisorTriggerResult(
+							disableSupervisorTrigger(stateRoot, {
+								source: "cli",
+								now: new Date(),
+							}),
+						),
+					);
+				}
+				if (subcommand === "status") {
+					return ok(
+						formatSupervisorTriggerStatus(
+							getSupervisorTriggerStatus(stateRoot),
+						),
+					);
+				}
+				return fail(
+					`Subcomando no reconocido: ${subcommand}. Usá enable | disable | status.`,
+				);
+			}
 			case "idu-birth-repo-plan":
 			case "birth-repo-plan": {
 				const json = rest.join(" ").trim();
@@ -4044,6 +4086,7 @@ export function helpText(): string {
 		"  idu-pi idu-source-skill-candidates-review latest",
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
+		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
 		"  idu-pi idu-supervisor-improvements-review latest",
 		"  idu-pi idu-supervisor-improvements-create latest",
 		"  idu-pi idu-supervisor-improvements-status latest",
@@ -4220,10 +4263,7 @@ export async function runInteractiveHome(
 			return "Salida sin cambios.";
 		}
 		if (choice === "tareas-view") {
-			const result = await runTareasViewTui(
-				taskQueueRuntime,
-				selectMenuImpl,
-			);
+			const result = await runTareasViewTui(taskQueueRuntime, selectMenuImpl);
 			if (result === "__back") continue;
 			return result;
 		}
@@ -4306,7 +4346,9 @@ async function runColaDeAccionesViewTui(
 	while (true) {
 		const stateRoot = status.project.stateRoot;
 		const buildContent = () =>
-			formatColaDeAccionesFeed(readColaDeAccionesFeed(stateRoot, { limit: 500 }));
+			formatColaDeAccionesFeed(
+				readColaDeAccionesFeed(stateRoot, { limit: 500 }),
+			);
 		const choice = await selectMenuImpl(
 			"Cola de acciones",
 			colaDeAccionesViewOptions(),
@@ -4381,27 +4423,141 @@ function installationMenuOptions(): MenuOption[] {
 		{ label: "Instalar/actualizar comandos slash globales", value: "3" },
 		{ label: "Enrolar proyecto actual", value: "4" },
 		{ label: "Activar supervisor en este proyecto", value: "5" },
+		{ label: "Trigger supervisor", value: "6" },
 		{ label: "← Volver", value: "back" },
 		{ label: "Exit", value: "exit" },
 	];
 }
 
-async function runInstallationMenuTui(): Promise<string> {
-	const choice = await selectMenu(
-		"Configurar IDU-Pi",
-		installationMenuOptions(),
-	);
-	if (choice === "back") return "__back";
-	if (choice === "exit") return "Salida sin cambios.";
-	const rl = createInterface({ input: process.stdin, output: process.stdout });
-	try {
-		const result = await handleInstallationChoice(choice, (message: string) =>
-			rl.question(message),
+function supervisorTriggerMenuOptions(
+	currentEnabled: boolean,
+): MenuOption[] {
+	return [
+		{
+			label: currentEnabled
+				? "Desactivar trigger"
+				: "Activar trigger",
+			value: "toggle",
+		},
+		{ label: "↻ Refrescar estado", value: "refresh" },
+		{ label: "← Volver", value: "back" },
+		{ label: "Exit", value: "exit" },
+	];
+}
+
+function formatSupervisorTriggerTui(
+	stateRoot: string,
+	status: ReturnType<typeof getSupervisorTriggerStatus>,
+): string {
+	const fileLine = status.exists
+		? `archivo: ${status.path}`
+		: `archivo: (no existe — comportamiento por defecto: enabled)`;
+	const updatedLine = status.updatedAt
+		? `actualizado: ${status.updatedAt}`
+		: "actualizado: —";
+	const sourceLine = status.source ? `origen: ${status.source}` : "";
+	const noteLine = status.note ? `nota: ${status.note}` : "";
+	return [
+		"Trigger supervisor",
+		"",
+		`stateRoot: ${stateRoot}`,
+		fileLine,
+		`estado: ${status.enabled ? "activado" : "desactivado"}`,
+		updatedLine,
+		...(sourceLine ? [sourceLine] : []),
+		...(noteLine ? [noteLine] : []),
+		"",
+		status.enabled
+			? "El script supervisor-tick corre normalmente (cuando no haya un CLI interactivo abierto)."
+			: "El script supervisor-tick se saltea con el motivo \"skipped: trigger disabled by user\".",
+	].join("\n");
+}
+
+async function runSupervisorTriggerMenuTui(
+	stateRoot: string,
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<string> {
+	while (true) {
+		const status = getSupervisorTriggerStatus(stateRoot);
+		const choice = await selectMenuImpl(
+			"Trigger supervisor",
+			supervisorTriggerMenuOptions(status.enabled),
+			undefined,
+			formatSupervisorTriggerTui(stateRoot, status),
 		);
-		await showTextView("Resultado", result);
-		return "__back";
-	} finally {
-		rl.close();
+		if (choice === "back") return "__back";
+		if (choice === "exit") return "Salida sin cambios.";
+		if (choice === "refresh") continue;
+		if (choice === "toggle") {
+			if (status.enabled) {
+				disableSupervisorTrigger(stateRoot, {
+					source: "tui",
+					now: new Date(),
+				});
+			} else {
+				enableSupervisorTrigger(stateRoot, {
+					source: "tui",
+					now: new Date(),
+				});
+			}
+		}
+	}
+}
+
+async function runInstallationMenuTui(
+	selectMenuImpl: InteractiveHomeSelectMenu = selectMenu,
+): Promise<string> {
+	while (true) {
+		const choice = await selectMenuImpl(
+			"Configurar IDU-Pi",
+			installationMenuOptions(),
+		);
+		if (choice === "back") return "__back";
+		if (choice === "exit") return "Salida sin cambios.";
+		if (choice === "6") {
+			const stateRoot = resolveSupervisorTriggerStateRootForTui();
+			if (!stateRoot) {
+				await showTextView(
+					"Trigger supervisor",
+					[
+						"No hay stateRoot del proyecto activo.",
+						"Enrolá o bootstrappeá el proyecto antes de configurar el trigger.",
+					].join("\n"),
+				);
+				continue;
+			}
+			const result = await runSupervisorTriggerMenuTui(
+				stateRoot,
+				selectMenuImpl,
+			);
+			if (result === "__back") continue;
+			return result;
+		}
+		const rl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		});
+		try {
+			const result = await handleInstallationChoice(
+				choice,
+				(message: string) => rl.question(message),
+			);
+			await showTextView("Resultado", result);
+		} finally {
+			rl.close();
+		}
+	}
+}
+
+function resolveSupervisorTriggerStateRootForTui(): string | undefined {
+	try {
+		const status = buildCliHomeStatus({
+			argvPath: process.argv[1],
+			stdinInteractive: Boolean(process.stdin.isTTY),
+		});
+		return status.project.stateRoot;
+	} catch {
+		return undefined;
 	}
 }
 
@@ -5647,7 +5803,7 @@ async function runInstallationMenu(
 	print: CliPrint,
 ): Promise<string> {
 	print(formatInstallationMenu());
-	const choice = (await question("\nElegí una opción [1-7]: ")).trim();
+	const choice = (await question("\nElegí una opción [1-8]: ")).trim();
 	return handleInstallationChoice(choice, question);
 }
 
@@ -5655,8 +5811,8 @@ async function handleInstallationChoice(
 	choice: string,
 	question: CliQuestion,
 ): Promise<string> {
-	if (choice === "6" || /^volver$/iu.test(choice)) return "Volver sin cambios.";
-	if (choice === "7" || /^exit|salir$/iu.test(choice))
+	if (choice === "7" || /^volver$/iu.test(choice)) return "Volver sin cambios.";
+	if (choice === "8" || /^exit|salir$/iu.test(choice))
 		return "Salida sin cambios.";
 	if (choice === "1") return handleSetupCommand(["status"]);
 	if (choice === "2") {
@@ -5699,6 +5855,36 @@ async function handleInstallationChoice(
 			return "Cancelado sin cambios.";
 		}
 		return runWizardActivateSupervisor();
+	}
+	if (choice === "6") {
+		const stateRoot = resolveSupervisorTriggerStateRootForTui();
+		if (!stateRoot) {
+			return [
+				"No hay stateRoot del proyecto activo.",
+				"Enrolá o bootstrappeá el proyecto antes de configurar el trigger.",
+			].join("\n");
+		}
+		const status = getSupervisorTriggerStatus(stateRoot);
+		if (status.enabled) {
+			disableSupervisorTrigger(stateRoot, {
+				source: "tui",
+				now: new Date(),
+			});
+			return [
+				"Trigger supervisor desactivado.",
+				`stateRoot: ${stateRoot}`,
+				"El script supervisor-tick se saltea con el motivo \"skipped: trigger disabled by user\".",
+			].join("\n");
+		}
+		enableSupervisorTrigger(stateRoot, {
+			source: "tui",
+			now: new Date(),
+		});
+		return [
+			"Trigger supervisor activado.",
+			`stateRoot: ${stateRoot}`,
+			"El script supervisor-tick corre normalmente (cuando no haya un CLI interactivo abierto).",
+		].join("\n");
 	}
 	return "Opción de instalación no reconocida. No ejecuté acciones.";
 }

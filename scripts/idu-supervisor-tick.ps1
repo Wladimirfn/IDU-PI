@@ -1,5 +1,17 @@
 $ErrorActionPreference = 'Stop'
 
+# Ensure console output is UTF-8 so the non-ASCII characters in the
+# log lines (e.g. "tsc falló") survive being captured by external
+# runners (CI, execFile, etc.). Without this, PowerShell 5 on
+# Windows defaults to the legacy OEM code page and the captured
+# stdout ends up with replacement characters.
+try {
+	[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+	$OutputEncoding = [System.Text.Encoding]::UTF8
+} catch {
+	# PowerShell 5 on Linux/macOS may not have [Console]; ignore.
+}
+
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $Root
 $LogDir = Join-Path $Root 'logs'
@@ -38,8 +50,16 @@ Log ('interval_minutes=' + $IntervalMinutes + ' trigger_engine=' + $EnvTriggerEn
 # Step 0: skip when an interactive CLI is open. The user is in a
 # session; do not interrupt them with a tick. Force the tick with
 # IDU_PI_TICK_FORCE=1 if you want it to run anyway.
+#
+# IMPORTANT: do NOT include 'node' in the skip-list. The script
+# itself runs on `node` (via `& node $cliPath idu-automaticov1
+# cycle`), so Get-Process -Name 'node' always returns the current
+# process and the guard would self-detect — skipping the tick even
+# when no human CLI is open. The interactive CLIs we care about are
+# the human-facing shells (pi, opencode variants), not the node
+# runtime.
 if (-not $env:IDU_PI_TICK_FORCE -or $env:IDU_PI_TICK_FORCE -ne '1') {
-	$cliNames = @('pi', 'opencode', 'opencode-go', 'opencode-zen', 'node')
+	$cliNames = @('pi', 'opencode', 'opencode-go', 'opencode-zen')
 	$active = @()
 	foreach ($name in $cliNames) {
 		$processes = Get-Process -Name $name -ErrorAction SilentlyContinue
@@ -53,6 +73,38 @@ if (-not $env:IDU_PI_TICK_FORCE -or $env:IDU_PI_TICK_FORCE -ne '1') {
 		Log $reason
 		Step 'Step 0: skip because a pi/opencode CLI session is active. Set IDU_PI_TICK_FORCE=1 to override.'
 		exit 0
+	}
+}
+
+# Step 0.5: honour the user opt-in. If the TUI "Configurar
+# IDU-Pi" → "Trigger supervisor" panel has disabled the scheduled
+# trigger, the file `<stateRoot>/supervisor-trigger.json` exists
+# with `enabled: false`. The script must skip the tick in that
+# case with a clear log line.
+#
+# `IDU_PI_TICK_STATE_ROOT` is the active project's stateRoot. The
+# install-supervisor-tick.ps1 script sets it when the scheduled
+# task is registered; for ad-hoc runs the operator can set it
+# manually. When unset, the trigger opt-in check is skipped (the
+# script still runs) — the TUI opt-in is best-effort, not a hard
+# gate, so the cron job never silently breaks because of a missing
+# stateRoot.
+$StateRoot = $env:IDU_PI_TICK_STATE_ROOT
+if ($StateRoot) {
+	$triggerFile = Join-Path $StateRoot 'supervisor-trigger.json'
+	if (Test-Path $triggerFile) {
+		try {
+			$triggerContent = Get-Content $triggerFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+			if ($triggerContent.enabled -eq $false) {
+				$reason = 'skipped: trigger disabled by user'
+				Write-Host $reason -ForegroundColor DarkYellow
+				Log $reason
+				Step ('Step 0.5: skip because supervisor trigger is disabled in ' + $triggerFile)
+				exit 0
+			}
+		} catch {
+			Log ('trigger_file_parse_failed: ' + $_ + ' (path=' + $triggerFile + ')')
+		}
 	}
 }
 

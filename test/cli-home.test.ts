@@ -281,6 +281,15 @@ test("main and installation menus render unified control options", () => {
 		formatInstallationMenu(),
 		/Activar supervisor en este proyecto/u,
 	);
+	assert.match(
+		formatInstallationMenu(),
+		/6\. Trigger supervisor/u,
+	);
+	assert.match(
+		formatInstallationMenu(),
+		/7\. ← Volver/u,
+	);
+	assert.match(formatInstallationMenu(), /8\. Exit/u);
 });
 
 test("system status renders MCP Pi and PATH diagnostics", () => {

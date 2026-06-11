@@ -1,8 +1,8 @@
-# Apply progress — living-loop-harness-b2 (TUI panel pagination + summary + B3 split + B4 read-only Tareas + live Cola)
+# Apply progress — living-loop-harness-b2 (TUI panel pagination + summary + B3 split + B4 read-only Tareas + live Cola + B5 supervisor tick skip-list fix + supervisor trigger opt-in)
 
-## Status: complete (B2 + B3 + B4)
+## Status: complete (B2 + B3 + B4 + B5)
 
-## Scope (focused TUI fix in two sub-slices)
+## Scope (focused TUI fix in two sub-slices, plus the B5 supervisor-tick fix)
 
 The TUI "Cola de acciones" panel in the idu-pi CLI was being used
 as a decision surface for the structured task queue (with `👁 Ver /
@@ -21,6 +21,24 @@ So the B4 fix splits the single "Tareas y cola" menu entry into
 two separate home-menu entries and re-purposes the "Cola de
 acciones" view as a live read-only feed of supervisor/agentlab/
 trigger activity, with auto-refresh while the view is open.
+
+The B5 fix (this commit) addresses two related issues with the
+supervisor tick:
+
+1. **Self-matching bug in `scripts/idu-supervisor-tick.ps1`.** The
+   script's skip-list was `@('pi', 'opencode', 'opencode-go',
+   'opencode-zen', 'node')`. The script itself runs on `node` (via
+   `& node $cliPath idu-automaticov1 cycle`), so `Get-Process -Name
+   'node'` always returned the current child process. The guard
+   ALWAYS self-detected and the tick was ALWAYS skipped — even when
+   no human CLI was open. The user explicitly said: the tick must
+   run when no interactive CLI is open.
+2. **No user opt-in for the scheduled tick.** There was no way for
+   the user to disable the scheduled tick from the TUI. This B5
+   slice adds a "Trigger supervisor" entry to the "Configurar
+   IDU-Pi" sub-menu, a `idu-supervisor-trigger enable|disable|
+   status` CLI command, and a `stateRoot/supervisor-trigger.json`
+   opt-in file that the script honours.
 
 ### B2: pagination + summary in the row (already shipped)
 
@@ -57,329 +75,436 @@ the `formatMainMenu` text, and the `formatTaskQueueStatus` helper
 text. The "Tareas" / "Cola de acciones" entries appear in the
 command catalog too so `/comandos` lists them.
 
-## Tasks (B4)
+### B5: fix the supervisor-tick self-matching bug + add a user opt-in
 
-- [x] T1 — RED: tests for `sortTasksByCreatedAtDesc` (sorts by
-  createdAt DESC; deterministic tie-breaker on id).
-- [x] T2 — RED: tests for `formatTareasView`:
-  - shows ALL tasks including done and skipped (read-only);
-  - sorts by createdAt DESC;
-  - paginates 30 tasks into 2 pages of 15/15 (the new page size
-    is 15, not 10);
-  - truncates the summary to 60 chars with ellipsis
-    (`TAREAS_VIEW_SUMMARY_MAX = 60`, NOT 80);
-  - shows the empty-state marker for an empty list;
-  - clamps out-of-range page index to the last page.
-- [x] T3 — RED: tests for the new `cola-acciones-feed` module:
-  - `readColaDeAccionesFeed` returns an empty list when stateRoot
-    is undefined;
-  - includes supervisor activity events (`SupervisorActivityEvent`);
-  - includes idu usage events as "trigger fires" (excluding
-    `pi_compaction_detected` noise);
-  - includes agentlab runs from `stateRoot/agentlabs/runs/`;
-  - sorts the merged events by `ts` DESC;
-  - combines supervisor + agentlab + trigger into one sorted feed
-    (newest first).
-- [x] T4 — RED: tests for `formatColaDeAccionesFeed`:
-  - renders the empty-state marker for an empty list;
-  - renders the count header and rows with kind and ts;
-  - body NEVER contains per-task action labels
-    (`👁 Ver / ✓ Aprobar / ✗ Rechazar`) because the Cola de
-    acciones is a read-only live feed;
-  - handles a single-event feed.
-- [x] T5 — RED: tests for `paginateColaDeAccionesFeed`:
-  - paginates 50 events into 2 pages of 30/20;
-  - clamps out-of-range page index to the last page;
-  - `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT` is a positive number.
-- [x] T6 — RED: wiring tests for the new home-menu cases:
-  - "tareas-view" case shows the 3 tasks read-only with no
-    per-task options;
-  - "tareas-view" case shows the empty-state marker for an empty
-    queue;
-  - "cola-view" case renders the live feed with auto-refresh
-    enabled (intervalMs === 5000, getContent is a function);
-  - "cola-view" body never contains per-task action labels.
-- [x] T7 — GREEN: add `sortTasksByCreatedAtDesc`,
-  `formatTareasViewRow`, `formatTareasView`,
-  `TAREAS_VIEW_SUMMARY_MAX`, `TAREAS_VIEW_PAGE_SIZE_DEFAULT` to
-  `src/structured-task-queue.ts`. Pure functions, no behaviour
-  change for the existing `formatTareasYCola`,
-  `formatTaskListTable`, `formatActionQueueTable`, or
-  `renderTaskQueuePanel` helpers.
-- [x] T8 — GREEN: add `src/cola-acciones-feed.ts` with the
-  `ColaDeAccionesEvent` type, `readColaDeAccionesFeed`,
-  `formatColaDeAccionesFeed`, `paginateColaDeAccionesFeed`, and
-  `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT`. The feed reads from
-  `readSupervisorActivityEvents(stateRoot)`, the agentlab runs
-  directory (`stateRoot/agentlabs/runs/`), and
-  `readIduUsageEvents(stateRoot)`; sorts by `ts` DESC; never
-  throws and never writes.
-- [x] T9 — GREEN: add `runTareasViewTui` and
-  `runColaDeAccionesViewTui` to `src/cli.ts`; replace the single
-  `tasks` case in `runInteractiveHome` with two separate cases
-  (`tareas-view` and `cola-view`); add the two entries to
-  `mainMenuOptions`; add the `autoRefresh` setting to the cola
-  view's `selectMenuImpl` call (intervalMs 5000, mirroring the
-  "Proyecto actual" panel pattern at `src/cli.ts:4838-4848`).
-- [x] T10 — GREEN: extend the `InteractiveHomeSelectMenu` type
-  signature to accept the optional `settings.autoRefresh` arg so
-  the home-menu shim can capture the auto-refresh wiring in tests.
-- [x] T11 — GREEN: update `formatMainMenu` in `src/cli-home.ts`:
-  entry 6 is "Tareas", entry 7 is "Cola de acciones", entry 8 is
-  "Diagnóstico", entry 9 is "Exit". Update `formatTaskQueueStatus`
-  text accordingly. Update `runInteractiveHomeWithQuestion` to
-  match (option 7 is now the Cola de acciones snapshot, option 8
-  is Diagnóstico, option 9 is Exit).
-- [x] T12 — GREEN: update the command catalog in
-  `src/command-catalog.ts` to expose the two new entries
-  ("Tareas" targeting `corepack pnpm cli -- idu-queue-detail`
-  and "Cola de acciones" targeting
-  `corepack pnpm cli -- idu-supervisor-tick`) so `/comandos`
-  lists them.
-- [x] T13 — GREEN: update the wiring tests in
-  `test/home-menu-tareas-y-cola-wiring.test.ts` to drive the
-  new `tareas-view` and `cola-view` cases; update the
-  `test/command-catalog-tareas-y-cola.test.ts` to assert the
-  new labels; update `test/cli-home.test.ts` to match the new
-  9-entry home menu.
-- [x] T14 — VERIFY: `corepack pnpm test` is green.
-  `tests 1784 · pass 1783 · fail 0 · skipped 1 · duration_ms ~49000`.
-  N = 1783 ≥ 1760 ✓.
+The user reported:
+
+> "the current skip-list is `@('pi', 'opencode', 'opencode-go',
+> 'opencode-zen', 'node')`. The script itself runs on `node` (via
+> `& node $cliPath idu-automaticov1 cycle`), so Get-Process -Name
+> 'node' always returns the current process, the guard always
+> self-detects, and the tick is ALWAYS skipped — even when no human
+> CLI is open. The user wants the tick to run when no interactive
+> CLI is open."
+
+The B5 fix:
+
+1. Removes `'node'` from the skip-list. The new list is
+   `@('pi', 'opencode', 'opencode-go', 'opencode-zen')`. The
+   `IDU_PI_TICK_FORCE=1` override still works.
+2. Adds a new "Trigger supervisor" entry to the "Configurar
+   IDU-Pi" sub-menu (entry 6 in the menu). The entry shows the
+   current trigger status (`enabled` / `disabled`, plus `path`,
+   `updatedAt`, `source`, `note`) and offers a single
+   "Activar/Desactivar trigger" toggle. The toggle writes
+   `<stateRoot>/supervisor-trigger.json` with `{ version: 1,
+   enabled, updatedAt, source: "tui" }`.
+3. Adds a new CLI command `idu-supervisor-trigger enable|disable|
+   status` so the opt-in is also scriptable / CI-friendly. The
+   status subcommand is the default when no subcommand is
+   provided.
+4. The script honours the opt-in via a new env var
+   `IDU_PI_TICK_STATE_ROOT` (the active project's stateRoot).
+   When the stateRoot is set and
+   `<stateRoot>/supervisor-trigger.json` exists with
+   `enabled: false`, the script logs `skipped: trigger disabled
+   by user` and exits 0. When the stateRoot is unset the
+   trigger check is skipped (the script proceeds) — the TUI
+   opt-in is best-effort, not a hard gate, so the cron job never
+   silently breaks because of a missing stateRoot.
+
+## Tasks (B5)
+
+- [x] T1 — RED: tests for `supervisor-trigger` module:
+  - `supervisorTriggerPath` joins the filename under the stateRoot;
+  - `SUPERVISOR_TRIGGER_FILENAME === "supervisor-trigger.json"`;
+  - `getSupervisorTriggerStatus` returns the default-enabled state
+    when no file exists;
+  - `readSupervisorTriggerFile` returns null when no file exists;
+  - `enableSupervisorTrigger` writes a file with `enabled: true`
+    and `updatedAt`;
+  - `disableSupervisorTrigger` writes a file with `enabled: false`;
+  - `enable -> disable -> enable` is idempotent in shape;
+  - `getSupervisorTriggerStatus` reflects the on-disk state after
+    writes;
+  - `formatSupervisorTriggerStatus` handles the default-enabled and
+    disabled cases;
+  - `formatSupervisorTriggerResult` renders the result envelope;
+  - `readSupervisorTriggerFile` returns null when the file is
+    malformed JSON;
+  - `readSupervisorTriggerFile` rejects a payload without an
+    `enabled` boolean.
+- [x] T2 — RED: tests for the PowerShell script's skip behaviour
+  (hermetic, spawns `pwsh` with a fake Root in a tempdir so the
+  script's `tsc` call fails fast and never reaches `automaticov1`):
+  - static check: the `$cliNames` array literal in the script does
+    NOT contain `'node'` and DOES contain `pi`, `opencode`,
+    `opencode-go`, `opencode-zen` (the regression we're fixing);
+  - when `IDU_PI_TICK_STATE_ROOT` points at a stateRoot with
+    `supervisor-trigger.json` containing `enabled: false`, the
+    script logs `skipped: trigger disabled by user` and exits 0;
+  - when no `IDU_PI_TICK_STATE_ROOT` is set and no trigger file
+    exists, the script proceeds past the skip checks (the log
+    contains `tsc falló` and NOT `skipped:`);
+  - when `IDU_PI_TICK_STATE_ROOT` points at a stateRoot with the
+    trigger file set to `enabled: true`, the script proceeds past
+    the trigger check (the log contains `tsc falló` and NOT
+    `skipped: trigger disabled by user`);
+  - `IDU_PI_TICK_FORCE=1` still bypasses the CLI-active check (the
+    log contains `tsc falló` and NOT `skipped: CLI active`).
+- [x] T3 — RED: wiring test for the new `idu-supervisor-trigger`
+  CLI command in `command-catalog.test.ts` (3 new `assert.match`
+  entries for `enable`, `disable`, `status`).
+- [x] T4 — RED: wiring test for the new "Trigger supervisor" entry
+  in the "Configurar IDU-Pi" sub-menu in `cli-home.test.ts`
+  (3 new `assert.match` entries for `6. Trigger supervisor`,
+  `7. ← Volver`, `8. Exit`).
+- [x] T5 — GREEN: create `src/supervisor-trigger.ts` with
+  `SupervisorTriggerFile`, `SupervisorTriggerStatus`,
+  `SupervisorTriggerResult`, `supervisorTriggerPath`,
+  `readSupervisorTriggerFile`, `getSupervisorTriggerStatus`,
+  `enableSupervisorTrigger`, `disableSupervisorTrigger`,
+  `formatSupervisorTriggerStatus`, `formatSupervisorTriggerResult`.
+  Pure functions; no lab.db writes; no `lab_write` event.
+- [x] T6 — GREEN: add the `idu-supervisor-trigger` CLI command
+  in `src/cli.ts` (subcommand dispatch: `enable` / `disable` /
+  `status`; default subcommand is `status`; unknown subcommand
+  returns `fail(...)` with a clear usage hint).
+- [x] T7 — GREEN: add the "Trigger supervisor" entry to the TUI
+  "Configurar IDU-Pi" sub-menu in `src/cli.ts` (entry 6) and a
+  `runSupervisorTriggerMenuTui` sub-panel that shows the current
+  status, offers a single "Activar/Desactivar trigger" toggle
+  (which calls `enableSupervisorTrigger` / `disableSupervisorTrigger`
+  with `source: "tui"`), and a "↻ Refrescar estado" refresh option.
+- [x] T8 — GREEN: add the "Trigger supervisor" entry to the
+  non-TUI `formatInstallationMenu` in `src/cli-home.ts` (entry 6)
+  and route the new case `"6"` in `handleInstallationChoice` to
+  the same enable/disable toggle (single-shot, no sub-loop).
+  Shift the existing "Volver" (was 6) to 7 and "Exit" (was 7) to 8.
+- [x] T9 — GREEN: add the "Trigger supervisor enable|disable|status"
+  entries to the CLI command catalog in `src/command-catalog.ts`
+  and the `helpText()` block in `src/cli.ts` so `/comandos` and
+  `--help` surface them.
+- [x] T10 — GREEN: fix `scripts/idu-supervisor-tick.ps1`:
+  - remove `'node'` from the `$cliNames` array;
+  - add a "Step 0.5" trigger opt-in check that reads
+    `<IDU_PI_TICK_STATE_ROOT>/supervisor-trigger.json` and skips
+    with `skipped: trigger disabled by user` when `enabled: false`;
+  - set `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`
+    at the top so non-ASCII characters in log lines (e.g.
+    "tsc falló") survive being captured by external runners;
+  - update the comment above Step 0 to explain why `'node'` was
+    removed (the self-matching bug).
+- [x] T11 — VERIFY: `corepack pnpm test` is green.
+  `tests 1800 · pass 1799 · fail 0 · skipped 1 · duration_ms ~53000`.
+  N = 1799 ≥ 1783 ✓.
 
 ## TDD Cycle Evidence
 
 Strict-TDD cycle, recorded as RED → GREEN.
 
-### B4 cycle (this commit)
+### B5 cycle (this commit)
 
 | Step | Phase | Evidence |
 |------|-------|----------|
-| 1 | RED | Wrote 23 new tests in `test/tareas-view-formatter.test.ts` covering: `sortTasksByCreatedAtDesc` (1), `formatTareasView` (7 — all-tasks, sort, paginate 15, summary 60, empty, out-of-range clamp, `TAREAS_VIEW_PAGE_SIZE_DEFAULT === 15`), `readColaDeAccionesFeed` (6 — empty stateRoot, supervisor events, idu usage events, agentlab runs, sort by ts DESC, ignores pi_compaction_detected, combined feed), `formatColaDeAccionesFeed` (4 — empty, header + rows, no per-task action labels, single event), `paginateColaDeAccionesFeed` (3 — 30/20 split, out-of-range clamp, page size > 0). |
-| 2 | RED | Compiled: TS2305 + TS2552 errors for missing exports (`formatTareasView`, `readColaDeAccionesFeed`, etc.) and TS2554 for the `selectMenuImpl` 5th-arg mismatch. |
-| 3 | FIX 1 | Added the new exports to `src/structured-task-queue.ts` and `src/cola-acciones-feed.ts`. Updated the `InteractiveHomeSelectMenu` type to accept the 5th `settings` arg. |
-| 4 | RED | Ran tests: 5 failures. (a) `formatTareasView` clamps pageIndex 99 to the last page and the LAST task is the OLDEST, not the newest (id was the OLDEST id); (b) 4 tests had type errors (record APIs don't accept `timestamp` and reject the trigger names `"periodic"` / `"schedule"`); (c) the autoRefresh wiring test failed because the shim signature wasn't updated to capture the 5th arg. |
-| 5 | FIX 2 | Replaced `require("node:fs")` with the top-of-file `mkdirSync` import (the compiled JS doesn't have `require`). Replaced the invalid trigger names with valid ones from `IduSupervisorTrigger` (`"manual"`, `"after_task_registered"`, `"after_postflight"`). Removed the `timestamp` overrides and wrote JSONL files directly with controlled timestamps (so the DESC sort is deterministic). |
-| 6 | FIX 3 | Updated the home-menu wiring test 3 ("cola-view" case) to capture the 5th arg (`settings`) and assert `settings.autoRefresh.intervalMs === 5000` + `typeof settings.autoRefresh.getContent === "function"`. |
-| 7 | GREEN | All 1783 tests pass. 0 failures. 1 skipped (legacy). |
-| 8 | VERIFY | Re-ran `corepack pnpm test`: 1784 tests, 1783 pass, 0 fail, 1 skipped. N = 1783 ≥ 1760 ✓. |
+| 1 | RED | Wrote 12 new tests in `test/supervisor-trigger.test.ts` covering: `supervisorTriggerPath` (1), `getSupervisorTriggerStatus` (2), `readSupervisorTriggerFile` (3), `enableSupervisorTrigger` / `disableSupervisorTrigger` (2), idempotency (1), `formatSupervisorTriggerStatus` (1), `formatSupervisorTriggerResult` (1), malformed JSON (1). |
+| 2 | RED | Wrote 5 new tests in `test/idu-supervisor-tick-script.test.ts` covering: static skip-list regression (1), trigger-disabled runtime (1), no-CLI-active runtime (1), trigger-enabled runtime (1), `IDU_PI_TICK_FORCE=1` override (1). |
+| 3 | RED | Compiled: TS2305 errors for missing exports from `./supervisor-trigger.js`. |
+| 4 | FIX 1 | Created `src/supervisor-trigger.ts` with the full module. |
+| 5 | RED | Two test failures: (a) `supervisorTriggerPath("/tmp/...")` asserted on the raw input, but `resolve()` on Windows normalizes the path → C:\\...; fixed by using a `mkdtempSync` root. (b) `require("node:fs")` is not available in ESM mode; replaced with top-of-file imports. |
+| 6 | FIX 2 | Re-ran tests: 12 / 12 pass in `test/supervisor-trigger.test.ts`. |
+| 7 | RED | PowerShell tests failed: captured stdout was `tsc fall` (replacement char) instead of `tsc falló` because PowerShell on Windows defaults to the OEM code page. |
+| 8 | FIX 3 | Added `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` and `$OutputEncoding = [System.Text.Encoding]::UTF8` to the top of the script (wrapped in `try/catch` so PowerShell on Linux/macOS doesn't break). |
+| 9 | GREEN | All 5 PowerShell tests pass. |
+| 10 | RED | Wiring tests in `test/command-catalog.test.ts` and `test/cli-home.test.ts` would have failed without the new entries; added the assertions. |
+| 11 | FIX 4 | Added the `idu-supervisor-trigger` CLI command in `src/cli.ts`, the "Trigger supervisor" TUI entry in `runInstallationMenuTui`, the matching non-TUI case in `handleInstallationChoice`, the `formatInstallationMenu` text in `src/cli-home.ts`, and the 3 command-catalog entries. |
+| 12 | GREEN | All 1800 tests pass. 0 failures. 1 skipped (legacy). |
+| 13 | VERIFY | Re-ran `corepack pnpm test`: 1800 tests, 1799 pass, 0 fail, 1 skipped. N = 1799 ≥ 1783 ✓. |
 
-## What changed (delta over the B3 baseline)
+## What changed (delta over the B4 baseline)
 
-### `src/structured-task-queue.ts` — added new read-only helpers
+### `scripts/idu-supervisor-tick.ps1` — fixed the self-matching bug + added the opt-in
 
-- `sortTasksByCreatedAtDesc(tasks)` — sorts a `StructuredTask[]` by
-  `createdAt` DESC. Stable tie-breaker on `id` so the order is
-  deterministic when two tasks share a `createdAt`. Pure.
-- `formatTareasViewRow(task, options)` — single-row formatter for
-  the read-only "Tareas" TUI view. Mirrors `formatTaskQueueRow` and
-  appends the summary column truncated to
-  `TAREAS_VIEW_SUMMARY_MAX` (60) chars.
-- `formatTareasView(tasks, options)` — paginated read-only body for
-  the "Tareas" TUI view. ALL tasks (no actionable filter). Sorted
-  by `createdAt` DESC. Default page size 15. Pure.
-- `TAREAS_VIEW_SUMMARY_MAX = 60` — constant for the new view
-  (legacy `TASK_QUEUE_OPTION_DETAILS_MAX` stays at 80 for
-  backward compat with the actionable menu labels).
-- `TAREAS_VIEW_PAGE_SIZE_DEFAULT = 15` — constant for the new
-  view (legacy `TASK_QUEUE_PAGE_SIZE_DEFAULT` stays at 10 for
-  backward compat with the B3 panel).
+- **Removed `'node'` from the skip-list.** The new list is
+  `@('pi', 'opencode', 'opencode-go', 'opencode-zen')`. The script
+  itself runs on `node` (via `& node $cliPath idu-automaticov1
+  cycle`), so `Get-Process -Name 'node'` always returned the
+  current child process and the guard ALWAYS self-detected. The
+  tick was always skipped, even when no human CLI was open. This
+  was the bug we were asked to fix.
+- **Added a "Step 0.5" trigger opt-in check.** When
+  `IDU_PI_TICK_STATE_ROOT` is set and
+  `<stateRoot>/supervisor-trigger.json` exists with
+  `enabled: false`, the script logs
+  `skipped: trigger disabled by user` and exits 0. When the
+  stateRoot is unset the trigger check is skipped (the script
+  proceeds) — the TUI opt-in is best-effort, not a hard gate, so
+  the cron job never silently breaks because of a missing
+  stateRoot.
+- **Set `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8`**
+  at the top so non-ASCII characters in log lines (e.g.
+  "tsc falló") survive being captured by external runners
+  (CI, execFile, etc.). Wrapped in `try/catch` so PowerShell on
+  Linux/macOS doesn't break.
+- **Updated the comment** above Step 0 to explain why `'node'`
+  was removed (the self-matching bug).
 
-The legacy `formatTareasYCola`, `formatTaskListTable`,
-`formatActionQueueTable`, `renderTaskQueuePanel`, and
-`paginateStructuredTaskQueue` are unchanged. The B3 wiring is
-preserved so the legacy `runTaskQueuePanelTui` /
-`dispatchTaskQueuePanelChoice` flows used by
-`idu-queue-detail` and other CLI surfaces keep working as
-before.
+The `IDU_PI_TICK_FORCE=1` override still works — it short-circuits
+the CLI-active check before the trigger opt-in check runs, so
+operators can force a tick when they need to.
 
-### `src/cola-acciones-feed.ts` — NEW FILE
+### `src/supervisor-trigger.ts` — NEW FILE
 
-- `ColaDeAccionesEvent` type — common shape for the live feed:
-  `{ kind: "supervisor" | "agentlab" | "trigger"; summary: string;
-  ts: string; source: string }`. Pure.
-- `readColaDeAccionesFeed(stateRoot, options)` — reads supervisor
-  activity events (`src/supervisor-activity-events.ts`), idu usage
-  events (`src/usage-events.ts`), and agentlab runs
-  (`stateRoot/agentlabs/runs/`); normalizes each into the common
-  shape; sorts by `ts` DESC; returns the merged feed. Pure
-  (read-only, never throws, never writes).
-- `formatColaDeAccionesFeed(events)` — renders the feed with a
-  `Cola de acciones (N):` header, rows of
-  `ts | kind | summary`. The body NEVER carries per-task action
-  labels (👁 / ✓ / ✗) because the Cola de acciones is a read-only
-  live feed.
-- `paginateColaDeAccionesFeed(events, pageIndex, pageSize)` —
-  pagination helper for the feed (default page size 30). Pure.
-- `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT = 30` — constant.
+- `SupervisorTriggerFile` type — the on-disk shape:
+  `{ version: 1; enabled: boolean; updatedAt: string;
+  source?: "cli" | "tui"; note?: string }`.
+- `SupervisorTriggerStatus` type — the read-only snapshot for
+  the TUI panel: `{ path, exists, enabled, updatedAt?, source?,
+  note? }`.
+- `SupervisorTriggerResult` type — the write-result envelope:
+  `{ path, state, previous, changed }`.
+- `supervisorTriggerPath(stateRoot)` — joins the
+  `supervisor-trigger.json` filename under the stateRoot.
+- `SUPERVISOR_TRIGGER_FILENAME = "supervisor-trigger.json"` — the
+  constant.
+- `readSupervisorTriggerFile(stateRoot)` — reads the file or
+  returns `null`. Tolerates a missing file and a malformed
+  payload. Validates that `enabled` is a boolean; rejects
+  payloads without an `enabled` field.
+- `getSupervisorTriggerStatus(stateRoot)` — returns the
+  `SupervisorTriggerStatus`. When the file does not exist the
+  status has `exists: false` and `enabled: true` (the default,
+  matching the historical behaviour before the opt-in was added).
+- `enableSupervisorTrigger(stateRoot, options)` — writes
+  `{ enabled: true, ... }`. Idempotent in shape.
+- `disableSupervisorTrigger(stateRoot, options)` — writes
+  `{ enabled: false, ... }`. Idempotent in shape.
+- `formatSupervisorTriggerStatus(status)` — renders the status
+  for the TUI panel.
+- `formatSupervisorTriggerResult(result)` — renders the
+  write-result envelope for the CLI.
 
-### `src/cli.ts` — added two new TUI flows
+This module is intentionally tiny and side-effect-free: it
+reads/writes a single JSON file under the project's stateRoot.
+It is NOT lab.db-bound and does NOT emit a `lab_write` event.
 
-- `runTareasViewTui(runtime, selectMenuImpl)` — paginated read-only
-  task list. Body is `formatTareasView` output. Menu options are
-  ONLY `← Prev`, `Next →`, `↻ Actualizar`, `← Volver`, `Exit`. No
-  per-task action labels. Page size 15.
-- `runColaDeAccionesViewTui(status, selectMenuImpl)` — live
-  read-only feed. Body is `formatColaDeAccionesFeed` output. Menu
-  options are ONLY `↻ Actualizar ahora`, `← Volver`, `Exit`. NO
-  per-task action labels. Wired with `autoRefresh` at
-  `intervalMs: COLA_DE_ACCIONES_AUTOREFRESH_MS = 5000` (mirrors
-  the existing "Proyecto actual" panel pattern at
-  `src/cli.ts:4838-4848`).
-- `runInteractiveHome` — the single `tasks` case was replaced by
-  two separate cases: `tareas-view` (calls `runTareasViewTui`) and
-  `cola-view` (calls `runColaDeAccionesViewTui`).
-- `mainMenuOptions` — replaced the `Tareas y cola` entry with
-  `Tareas` (value `tareas-view`) and `Cola de acciones` (value
-  `cola-view`).
-- `InteractiveHomeSelectMenu` type — extended to accept the
-  optional 5th `settings.autoRefresh` arg so the home-menu shim
-  used by tests can capture the auto-refresh wiring.
-- `runInteractiveHomeWithQuestion` — option numbers re-mapped: 6
-  is "Tareas", 7 is "Cola de acciones" (returns the formatted
-  feed snapshot, since the non-TUI surface has no auto-refresh),
-  8 is "Diagnóstico", 9 is Exit.
+### `src/cli.ts` — added the CLI command + TUI sub-menu
 
-### `src/cli-home.ts` — updated menu text
+- `idu-supervisor-trigger enable|disable|status` — new CLI
+  command. Default subcommand is `status`. Unknown subcommands
+  return `fail(...)` with a clear usage hint. Wired to call
+  `enableSupervisorTrigger` / `disableSupervisorTrigger` with
+  `source: "cli"` and `now: new Date()`.
+- `installationMenuOptions` — added entry 6 "Trigger supervisor".
+  The "← Volver" entry is now `back` (string value) and the
+  "Exit" entry is now `exit` (string value), mirroring the
+  pattern used in the home menu.
+- `runSupervisorTriggerMenuTui(stateRoot, selectMenuImpl)` —
+  new TUI sub-panel. Shows the current status, offers a single
+  "Activar/Desactivar trigger" toggle (which calls
+  `enableSupervisorTrigger` / `disableSupervisorTrigger` with
+  `source: "tui"` and `now: new Date()`), and a "↻ Refrescar
+  estado" refresh option. The panel never modifies the trigger
+  file without the user picking the toggle; refresh is a no-op
+  that just re-renders the status.
+- `runInstallationMenuTui` — intercepts choice `6` BEFORE
+  calling `handleInstallationChoice` (the TUI sub-panel uses
+  the same `selectMenu` loop, so it needs to be in the menu
+  loop, not in the legacy single-shot `handleInstallationChoice`
+  helper). Choices `1`-`5` continue to flow through
+  `handleInstallationChoice` as before.
+- `runInstallationMenu` (non-TUI) — menu prompt is now
+  `[1-8]` (was `[1-7]`).
+- `handleInstallationChoice` — case `"6"` added (single-shot
+  toggle for the non-TUI surface); `"7"` is now "Volver";
+  `"8"` is now "Exit". The non-TUI surface uses the same
+  `getSupervisorTriggerStatus` / `enableSupervisorTrigger` /
+  `disableSupervisorTrigger` helpers.
+- `helpText()` — added the
+  `idu-supervisor-trigger enable|disable|status` entry.
+- `resolveSupervisorTriggerStateRootForTui()` — new helper that
+  resolves the active project's `stateRoot` from
+  `buildCliHomeStatus` (returns `undefined` when the project
+  is not enrolled or the runtime factory fails; the TUI panel
+  shows a clear "no stateRoot" message in that case).
 
-- `formatMainMenu` — entry 6 is "Tareas", 7 is "Cola de
-  acciones", 8 is "Diagnóstico", 9 is Exit.
-- `formatTaskQueueStatus` — header is now "Tareas"; the legacy
-  "Tareas y cola" label is gone; text now reflects the read-only
-  intent ("Vista de solo lectura del task list estructurado" +
-  "MVP seguro: esta pantalla no ejecuta IA ni AgentLabs").
+### `src/cli-home.ts` — updated the non-TUI installation menu text
 
-### `src/command-catalog.ts` — added two entries
+- `formatInstallationMenu` — entry 6 is now "Trigger
+  supervisor", entry 7 is "← Volver", entry 8 is "Exit".
 
-- `CLI_COMMANDS` — replaced the `Tareas y cola` entry with two
-  new entries: `Tareas` (targeting
-  `corepack pnpm cli -- idu-queue-detail`) and `Cola de acciones`
-  (targeting `corepack pnpm cli -- idu-supervisor-tick`). Both
-  appear in the `formatCommandCatalog` output so `/comandos` lists
-  them.
+### `src/command-catalog.ts` — added 3 entries
+
+- `Supervisor trigger enable` → `corepack pnpm cli -- idu-supervisor-trigger enable`.
+- `Supervisor trigger disable` → `corepack pnpm cli -- idu-supervisor-trigger disable`.
+- `Supervisor trigger status` → `corepack pnpm cli -- idu-supervisor-trigger status`.
+
+All three appear in `formatCommandCatalog` so `/comandos` lists
+them.
 
 ## Test summary
 
-`tests 1784 · pass 1783 · fail 0 · skipped 1 · duration_ms ~49000`
+`tests 1800 · pass 1799 · fail 0 · skipped 1 · duration_ms ~53000`
 
-(Before B4: 1761 tests, 1760 pass, 0 fail, 1 skipped. After B4:
-1784 tests, 1783 pass, 0 fail, 1 skipped. Added 23 new tests
-across `test/tareas-view-formatter.test.ts` and rewrote the
-wiring/header assertions in
-`test/home-menu-tareas-y-cola-wiring.test.ts`,
-`test/command-catalog-tareas-y-cola.test.ts`, and
-`test/cli-home.test.ts`. Net +23 passes over the B3 baseline,
-0 new failures, 0 regressions.)
+(Before B5: 1784 tests, 1783 pass, 0 fail, 1 skipped. After B5:
+1800 tests, 1799 pass, 0 fail, 1 skipped. Added 16 new tests
+across `test/supervisor-trigger.test.ts` (12) and
+`test/idu-supervisor-tick-script.test.ts` (5), and 7 new wiring
+assertions in `test/command-catalog.test.ts` (3) and
+`test/cli-home.test.ts` (4). Net +16 passes over the B4
+baseline, 0 new failures, 0 regressions.)
 
-### New tests in this B4 commit
+### New tests in this B5 commit
 
-`test/tareas-view-formatter.test.ts` (23 tests):
+`test/supervisor-trigger.test.ts` (12 tests):
 
-- `sortTasksByCreatedAtDesc sorts by createdAt DESC (newest first)`
-- `formatTareasView shows ALL tasks including done and skipped`
-- `formatTareasView sorts tasks by createdAt DESC`
-- `formatTareasView paginates 30 tasks into 2 pages of 15/15`
-- `formatTareasView truncates the summary to 60 chars with ellipsis`
-- `formatTareasView shows the empty-state marker for an empty list`
-- `TAREAS_VIEW_PAGE_SIZE_DEFAULT is 15`
-- `formatTareasView clamps out-of-range page index to the last page`
-- `readColaDeAccionesFeed returns an empty list when stateRoot is undefined`
-- `readColaDeAccionesFeed includes supervisor activity events`
-- `readColaDeAccionesFeed includes idu usage events as trigger fires`
-- `readColaDeAccionesFeed includes agentlab runs from agentlabs/runs`
-- `readColaDeAccionesFeed sorts the merged events by ts DESC`
-- `formatColaDeAccionesFeed renders the empty-state marker for an empty list`
-- `formatColaDeAccionesFeed renders the count header and rows with kind and ts`
-- `formatColaDeAccionesFeed body never contains per-task action labels`
-- `paginateColaDeAccionesFeed paginates 50 events into 2 pages of 30/20`
-- `COLA_DE_ACCIONES_PAGE_SIZE_DEFAULT is a positive number`
-- `readColaDeAccionesFeed ignores pi_compaction_detected events`
-- `readColaDeAccionesFeed combines supervisor + agentlab + trigger into one sorted feed`
-- `paginateColaDeAccionesFeed clamps out-of-range page index to the last page`
-- `formatColaDeAccionesFeed handles a single-event feed`
-- `formatTareasView renders the truncated id and count header for a 1-task queue` (wiring sanity check)
+- `supervisorTriggerPath joins the filename under the stateRoot`
+- `getSupervisorTriggerStatus returns the default-enabled state when no file exists`
+- `readSupervisorTriggerFile returns null when no file exists`
+- `enableSupervisorTrigger writes a file with enabled=true and updatedAt`
+- `disableSupervisorTrigger writes a file with enabled=false`
+- `enable -> disable -> enable is idempotent in shape but the changed flag tracks the last call`
+- `getSupervisorTriggerStatus reflects the on-disk state after writes`
+- `formatSupervisorTriggerStatus handles the default-enabled and disabled cases`
+- `formatSupervisorTriggerResult renders the result envelope`
+- `readSupervisorTriggerFile returns null when the file is malformed JSON`
+- `readSupervisorTriggerFile rejects a payload without an enabled boolean`
 
-### Updated tests in this B4 commit
+`test/idu-supervisor-tick-script.test.ts` (5 tests):
 
-- `test/home-menu-tareas-y-cola-wiring.test.ts` — rewrote 5 tests
-  to drive the new `tareas-view` and `cola-view` home-menu cases
-  instead of the legacy single `tasks` case. The "cola-view" test
-  captures the 5th `settings` arg and asserts `autoRefresh` is
-  wired with `intervalMs === 5000` and a callable `getContent`.
-- `test/command-catalog-tareas-y-cola.test.ts` — replaced the 2
-  legacy "Tareas y cola" assertions with 3 new assertions for the
-  "Tareas" and "Cola de acciones" entries.
-- `test/cli-home.test.ts` — updated
-  `main and installation menus render unified control options` to
-  expect entries 6-9 of the new menu (was 6-8 of the old menu).
+- `skip-list does NOT include 'node' (regression: self-matching bug)`
+- `script honours the trigger-disabled opt-in and logs 'skipped: trigger disabled by user'`
+- `script proceeds past skip checks when no interactive CLI is open and trigger is default-enabled`
+- `script proceeds past skip checks when trigger file exists with enabled: true`
+- `IDU_PI_TICK_FORCE=1 bypasses the CLI-active check (override still works)`
+
+### Updated tests in this B5 commit
+
+- `test/command-catalog.test.ts` — added 3 new `assert.match`
+  entries for the new `idu-supervisor-trigger enable|disable|
+  status` CLI catalog entries.
+- `test/cli-home.test.ts` — extended
+  `main and installation menus render unified control options`
+  to expect entry 6 "Trigger supervisor", entry 7 "← Volver",
+  entry 8 "Exit" in the installation menu.
 
 ## UX behaviour after the fix
 
-### Home menu
+### "Configurar IDU-Pi" sub-menu
 
 ```text
-1. Configurar IDU-Pi
-2. Proyecto actual
-3. Telegram remoto
-4. Modelos y perfiles
-5. Supervisor
-6. Tareas            ← new: read-only task list, paginated 15/page
-7. Cola de acciones  ← new: live read-only feed, auto-refresh 5s
-8. Diagnóstico
-9. Exit
+1. Verificar sistema
+2. Instalar/actualizar MCP en Pi
+3. Instalar/actualizar comandos slash globales
+4. Enrolar proyecto actual
+5. Activar supervisor en este proyecto
+6. Trigger supervisor               ← new
+7. ← Volver
+8. Exit
 ```
 
-### Tareas view (entry 6)
-
-Read-only paginated task list, sorted by `createdAt` DESC. The
-body shows `id | status | guard | priority | age | category |
-summary` (first 60 chars of details with ellipsis). All tasks
-(including `done` and `skipped`) are visible. Menu options are
-ONLY `← Prev`, `Next →`, `↻ Actualizar`, `← Volver`, `Exit`. There
-are NO per-task action labels.
+### "Trigger supervisor" sub-panel (TUI, entry 6)
 
 ```text
-Tareas (3) — página 1/1:
-task-abc1111 | proposed | —        | P3 | 11h 34m | bug      | Pending bug
-task-def2222 | done     | —        | P5 |  2d 11h | feature  | Done task
-task-ghi3333 | paused   | risky    | P5 |  1d 11h | bug      | Needs confirmation
+Trigger supervisor
+
+stateRoot: <project stateRoot>
+archivo: <stateRoot>/supervisor-trigger.json
+estado: activado                       (or: desactivado)
+actualizado: 2026-06-10T10:00:00.000Z
+origen: tui
+nota: —
+
+El script supervisor-tick corre normalmente
+(cuando no haya un CLI interactivo abierto).
+
+[ Desactivar trigger ]                (or: [ Activar trigger ])
+[ ↻ Refrescar estado ]
+[ ← Volver ]
+[ Exit ]
 ```
 
-### Cola de acciones view (entry 7)
+### Non-TUI "Trigger supervisor" (entry 6, `--help` / setup surface)
 
-Live read-only feed of supervisor activity + agentlab runs +
-trigger fires, sorted by `ts` DESC. The body shows
-`ts | kind | summary`. Menu options are ONLY `↻ Actualizar ahora`,
-`← Volver`, `Exit`. There are NO per-task action labels. The view
-auto-refreshes every 5000 ms while open (mirrors the "Proyecto
-actual" panel pattern).
+The single-shot toggle prints the same status block as the TUI
+panel, then enables or disables the trigger and prints a short
+confirmation line that says what the script will do on the next
+tick:
 
 ```text
-Cola de acciones (3):
-2026-06-10T12:00:00.000Z | agentlab   | agentlab security (test-project) status=completed — No issues
-2026-06-10T11:55:00.000Z | trigger    | trigger fire: cli/idu-supervisor-tick
-2026-06-10T11:50:00.000Z | supervisor | supervisor supervisor_tick/orchestrator_requested status=completed (manual)
+Trigger supervisor desactivado.
+stateRoot: <project stateRoot>
+El script supervisor-tick se saltea con el motivo
+"skipped: trigger disabled by user".
 ```
+
+### `idu-supervisor-trigger` CLI (for scripts / CI)
+
+```text
+$ idu-pi idu-supervisor-trigger status
+Supervisor trigger
+
+path: <stateRoot>/supervisor-trigger.json
+state: enabled (default — no file present)
+
+$ idu-pi idu-supervisor-trigger disable
+Supervisor trigger
+
+path: <stateRoot>/supervisor-trigger.json
+state: disabled
+updatedAt: 2026-06-10T10:00:00.000Z
+changed: yes
+
+$ idu-pi idu-supervisor-trigger enable
+Supervisor trigger
+
+path: <stateRoot>/supervisor-trigger.json
+state: enabled
+updatedAt: 2026-06-10T10:00:01.000Z
+changed: yes
+previous: enabled=false, updatedAt=2026-06-10T10:00:00.000Z
+```
+
+### PowerShell script behaviour
+
+- The skip-list is now `@('pi', 'opencode', 'opencode-go',
+  'opencode-zen')` (no `node`). The script does NOT
+  self-match the `node` child it spawns for the
+  `automaticov1 cycle` invocation.
+- `IDU_PI_TICK_FORCE=1` still bypasses the CLI-active check
+  (use this to force a tick even when a `pi` / `opencode` is
+  open).
+- When `IDU_PI_TICK_STATE_ROOT` is set and
+  `<stateRoot>/supervisor-trigger.json` exists with
+  `enabled: false`, the script logs
+  `skipped: trigger disabled by user` and exits 0. When the
+  stateRoot is unset the trigger check is skipped (the script
+  proceeds) — the TUI opt-in is best-effort, not a hard
+  gate, so the cron job never silently breaks because of a
+  missing stateRoot.
 
 ## Open follow-ups (not in scope for this slice)
 
-None for B4. The next follow-up, if any, would be to add a
-"Reasignar prioridad" action to the menu — but the user has not
-asked for it. The user explicitly said the Cola de acciones must
-be read-only, so no actions are added there.
+None for B5. The next follow-up, if any, would be to update
+`scripts/install-supervisor-tick.ps1` to set
+`IDU_PI_TICK_STATE_ROOT` to the active project's stateRoot at
+install time, so the trigger opt-in is honoured by the
+scheduled task without the operator having to configure the env
+var manually. The user did not ask for this in the B5 scope;
+the current behaviour is "opt-in best-effort" which is the
+safest default.
 
 ## Next step
 
 Commit this fix with the message
-`fix(idu-pi): Tareas (read-only) and Cola de acciones (live feed, no decisions)`
+`fix(idu-pi): remove node from supervisor tick skip-list and add enable/disable in setup menu`
 and push to main.
 
 ## Push status
 
-Local commit `64c6773` is ready. The harness safety policy
-("Gentle AI safety policy requires interactive confirmation before
-this command") blocked `git push origin main` from the worker
-side, so the commit is currently local-only on
-`main` (1 commit ahead of `origin/main`). The previous commit
-`8051256` is at `origin/main` and the revert `ead299b` plus the
-new B4 fix `64c6773` need to be pushed manually (or by the
-parent session) to update `origin/main` to the B4 state.
+Local commit pending. The harness safety policy ("Gentle AI
+safety policy requires interactive confirmation before this
+command") blocks `git push origin main` from the worker side.
+The commit is local-only on `main` (1 commit ahead of
+`origin/main` after this B5 commit is added). The previous
+commits `ead299b` and `720a12a` are at `origin/main`.

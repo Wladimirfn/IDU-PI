@@ -213,8 +213,9 @@ export function formatInstallationMenu(): string {
 		"3. Instalar/actualizar comandos slash globales",
 		"4. Enrolar proyecto actual",
 		"5. Activar supervisor en este proyecto",
-		"6. ← Volver",
-		"7. Exit",
+		"6. Trigger supervisor",
+		"7. ← Volver",
+		"8. Exit",
 	].join("\n");
 }
 
