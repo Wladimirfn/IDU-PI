@@ -2592,6 +2592,39 @@ test("CLI supervisor learning rules QA commands funcionan", async () => {
 	});
 });
 
+test("PR-0: createCliRuntime forwards canonical labDbPath to supervisor loop", () => {
+	const source = readFileSync("src/cli.ts", "utf8");
+	const supervisorTickBlock = source.match(
+		/supervisorTick: \(options = \{\}\) => \{[\s\S]*?\n\t\t\},\n\t\tsupervisorCronPlan:/u,
+	)?.[0];
+	const supervisorCronPlanBlock = source.match(
+		/supervisorCronPlan: \(\) =>[\s\S]*?\n\t\tformatSupervisorTick:/u,
+	)?.[0];
+
+	assert.ok(supervisorTickBlock, "supervisorTick wiring block must exist");
+	assert.match(
+		supervisorTickBlock,
+		/labDbPath,/,
+		"supervisorTick must pass canonical labDbPath into runIduSupervisorLoop",
+	);
+	assert.match(
+		supervisorTickBlock,
+		/reportsPath,/,
+		"supervisorTick must pass canonical reportsPath into runIduSupervisorLoop",
+	);
+	assert.ok(supervisorCronPlanBlock, "supervisorCronPlan wiring block must exist");
+	assert.match(
+		supervisorCronPlanBlock,
+		/labDbPath,/,
+		"supervisorCronPlan must pass canonical labDbPath into planIduSupervisorCron",
+	);
+	assert.match(
+		supervisorCronPlanBlock,
+		/reportsPath,/,
+		"supervisorCronPlan must pass canonical reportsPath into planIduSupervisorCron",
+	);
+});
+
 test("CLI supervisor-tick funciona sin AgentLabs", async () => {
 	await withRuntime(async (runtime) => {
 		const result = await runCliCommand(["supervisor-tick"], runtime);

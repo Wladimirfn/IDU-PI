@@ -74,6 +74,9 @@ export type IduSupervisorLoopInput = {
 	 *  workspaceRoot/reports/lab.db path (legacy callers that have not yet
 	 *  been updated). */
 	labDbPath?: string;
+	/** Canonical reports directory for semantic drafts/plans. When absent,
+	 *  derived from dirname(labDbPath)/reports for project-state callers. */
+	reportsPath?: string;
 	trigger: IduSupervisorTrigger;
 	options: {
 		allowSemanticDraft: boolean;
@@ -183,12 +186,14 @@ export function runIduSupervisorLoop(
 		});
 	}
 
-	// REQ-A3: resolve canonical labDbPath once (REQ-SF-2 pattern, cli.ts:2066-2073).
-	// stateRoot = dirname(labDbPath); reportsPath for semantic drafts is stateRoot/reports.
+	// REQ-A3: resolve canonical paths once. Enrolled projects use stateRoot/lab.db
+	// and stateRoot/reports; legacy callers may use workspaceRoot/reports/lab.db
+	// and must pass reportsPath explicitly to avoid reports/reports nesting.
 	const resolvedLabDbPath =
 		input.labDbPath ??
 		join(input.workspaceRoot, "projects", input.projectId, "lab.db");
-	const resolvedReportsPath = join(dirname(resolvedLabDbPath), "reports");
+	const resolvedReportsPath =
+		input.reportsPath ?? join(dirname(resolvedLabDbPath), "reports");
 
 	let draftPath: string | undefined;
 	const canDraft =

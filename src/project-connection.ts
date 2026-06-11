@@ -70,6 +70,7 @@ export type InspectProjectConnectionOptions = {
 	defaultCwd: string;
 	allowedRoots: string[];
 	workspaceRoot: string;
+	stateRoot?: string;
 	projectId?: string;
 	now?: () => Date;
 	alignmentState?: ProjectAlignmentState;
@@ -212,8 +213,11 @@ export function inspectProjectConnection(
 		"project-flows.json",
 		validateProjectFlows,
 	);
-	// stateRoot follows project-state.ts:56 — projects/<projectId> under workspaceRoot.
-	const stateRoot = join(options.workspaceRoot, "projects", project.id);
+	// stateRoot follows project-state.ts:56 by default, but enrolled callers may
+	// already run with workspaceRoot equal to the project stateRoot. In that case
+	// the explicit stateRoot prevents stateRoot/projects/<id> double nesting.
+	const stateRoot =
+		options.stateRoot ?? join(options.workspaceRoot, "projects", project.id);
 	const workspace = inspectWorkspace(options.workspaceRoot, stateRoot);
 	const problems: string[] = [];
 	const warnings: string[] = [];

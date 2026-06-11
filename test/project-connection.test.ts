@@ -46,6 +46,7 @@ function inspect(options: {
 	registry: ProjectRegistry;
 	allowedRoots?: string[];
 	workspaceRoot?: string;
+	stateRoot?: string;
 	projectId?: string;
 }) {
 	const defaultCwd = tempDir("idu-default-");
@@ -53,6 +54,7 @@ function inspect(options: {
 		defaultCwd,
 		allowedRoots: options.allowedRoots ?? [defaultCwd],
 		workspaceRoot: options.workspaceRoot ?? tempDir("idu-workspace-"),
+		...(options.stateRoot ? { stateRoot: options.stateRoot } : {}),
 		registry: options.registry,
 		...(options.projectId ? { projectId: options.projectId } : {}),
 	});
@@ -467,6 +469,41 @@ test("A2-S2: tasksJsonlExists true at canonical stateRoot/tasks.jsonl (not repor
 		workspaceRoot,
 	});
 
-	assert.equal(report.workspace?.tasksJsonlExists, true,
-		"tasksJsonlExists should be true when stateRoot/tasks.jsonl exists");
+	assert.equal(
+		report.workspace?.tasksJsonlExists,
+		true,
+		"tasksJsonlExists should be true when stateRoot/tasks.jsonl exists",
+	);
+});
+
+test("PR-0: enrolled project inspection uses explicit stateRoot without double nesting", () => {
+	const projectPath = tempDir();
+	const workspaceRoot = tempDir("idu-global-workspace-");
+	const enrolledStateRoot = join(workspaceRoot, "projects", "demo");
+	writeProjectConfig(projectPath);
+	mkdirSync(enrolledStateRoot, { recursive: true });
+	writeFileSync(join(enrolledStateRoot, "lab.db"), "");
+	writeFileSync(join(enrolledStateRoot, "tasks.jsonl"), "");
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+		workspaceRoot: enrolledStateRoot,
+		stateRoot: enrolledStateRoot,
+	});
+
+	assert.equal(report.workspace?.labDbExists, true);
+	assert.equal(report.workspace?.tasksJsonlExists, true);
+	assert.equal(
+		report.workspace?.reportsExists,
+		true,
+		"state directory should be the enrolled stateRoot itself, not stateRoot/projects/demo",
+	);
+	assert.equal(
+		report.warnings.some((warning) =>
+			warning.includes(join(enrolledStateRoot, "projects", "demo")),
+		),
+		false,
+		"inspection must not warn about a double-nested stateRoot/projects/demo path",
+	);
 });
