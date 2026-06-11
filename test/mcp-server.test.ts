@@ -85,6 +85,10 @@ import type {
 	SourceSkillCandidateCreationResult,
 	SourceSkillCandidateReview,
 } from "../src/source-skill-candidates.js";
+import {
+	readTriggerEngineConfig,
+	saveTriggerEngineConfig,
+} from "../src/trigger-engine-config.js";
 
 const UNUSED = "unused";
 
@@ -1099,6 +1103,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_model_invocation_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_skill_rating"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_trigger"));
+	assert.ok(tools.some((tool) => tool.name === "idu_trigger_engine"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
 	assert.ok(tools.some((tool) => tool.name === "idu_execution_director_tick"));
@@ -1123,7 +1128,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 74);
+	assert.equal(tools.length, 75);
 });
 
 test("execution director MCP tick saves proposals and outbox reads them", async () => {
@@ -1656,6 +1661,84 @@ test("idu_status works with mocked active project", async () => {
 	);
 	assert.equal(result.ok, true);
 	assert.equal(result.projectPath, "C:/projects/active");
+});
+
+test("idu_status exposes trigger engine persisted status", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-mcp-trigger-status-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		saveTriggerEngineConfig(stateRoot, {
+			enabled: true,
+			updatedAt: "2026-06-11T18:10:00.000Z",
+			source: "cli",
+		});
+
+		const result = await callIduMcpTool(
+			"idu_status",
+			{},
+			{
+				runtimeFactory: factory(),
+				projectResolver: () => ({
+					...registered("C:/projects/sistema"),
+					stateRoot,
+				}),
+			},
+		);
+
+		assert.equal(result.ok, true);
+		assert.deepEqual(result.data.triggerEngine, {
+			path: join(stateRoot, "trigger-engine-config.json"),
+			exists: true,
+			enabled: true,
+			updatedAt: "2026-06-11T18:10:00.000Z",
+			source: "cli",
+		});
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_trigger_engine MCP tool toggles persisted config", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-mcp-trigger-toggle-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		const options = {
+			runtimeFactory: factory(),
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		};
+
+		const status = await callIduMcpTool(
+			"idu_trigger_engine",
+			{ action: "status" },
+			options,
+		);
+		assert.equal(status.ok, true);
+		assert.equal(
+			(status.data.status as { enabled?: boolean }).enabled,
+			false,
+		);
+
+		const enabled = await callIduMcpTool(
+			"idu_trigger_engine",
+			{ action: "enable" },
+			options,
+		);
+		assert.equal(enabled.ok, true);
+		assert.equal(readTriggerEngineConfig(stateRoot).enabled, true);
+
+		const disabled = await callIduMcpTool(
+			"idu_trigger_engine",
+			{ action: "disable" },
+			options,
+		);
+		assert.equal(disabled.ok, true);
+		assert.equal(readTriggerEngineConfig(stateRoot).enabled, false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 test("MCP usage recording is visible when tool call resolves", async () => {

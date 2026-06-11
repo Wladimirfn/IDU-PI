@@ -401,6 +401,13 @@ import {
 	getSupervisorTriggerStatus,
 } from "./supervisor-trigger.js";
 import {
+	disableTriggerEngineConfig,
+	enableTriggerEngineConfig,
+	formatTriggerEngineConfigResult,
+	formatTriggerEngineConfigStatus,
+	getTriggerEngineConfigStatus,
+} from "./trigger-engine-config.js";
+import {
 	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
 	formatTareasView,
@@ -2673,6 +2680,41 @@ export async function runCliCommand(
 					`Subcomando no reconocido: ${subcommand}. Usá enable | disable | status.`,
 				);
 			}
+			case "idu-trigger-engine":
+			case "trigger-engine": {
+				const subcommand = (rest.shift() ?? "status").toLowerCase();
+				const stateRoot = activeRuntime.workspaceRoot;
+				if (subcommand === "enable") {
+					return ok(
+						formatTriggerEngineConfigResult(
+							enableTriggerEngineConfig(stateRoot, {
+								source: "cli",
+								now: new Date(),
+							}),
+						),
+					);
+				}
+				if (subcommand === "disable") {
+					return ok(
+						formatTriggerEngineConfigResult(
+							disableTriggerEngineConfig(stateRoot, {
+								source: "cli",
+								now: new Date(),
+							}),
+						),
+					);
+				}
+				if (subcommand === "status") {
+					return ok(
+						formatTriggerEngineConfigStatus(
+							getTriggerEngineConfigStatus(stateRoot),
+						),
+					);
+				}
+				return fail(
+					`Subcomando no reconocido: ${subcommand}. Usá enable | disable | status.`,
+				);
+			}
 			case "idu-birth-repo-plan":
 			case "birth-repo-plan": {
 				const json = rest.join(" ").trim();
@@ -4160,6 +4202,7 @@ export function helpText(): string {
 		"  idu-pi idu-onboard-project",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
+		"  idu-pi idu-trigger-engine enable|disable|status      # opt-in persistente del trigger engine",
 		"  idu-pi idu-supervisor-improvements-review latest",
 		"  idu-pi idu-supervisor-improvements-create latest",
 		"  idu-pi idu-supervisor-improvements-status latest",

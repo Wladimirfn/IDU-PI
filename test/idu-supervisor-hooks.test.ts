@@ -242,6 +242,20 @@ test("hook corre si /idu active y evento relevante", async () => {
 	});
 });
 
+test("hook forwards canonical labDbPath and reportsPath to supervisor loop", async () => {
+	await withHookRuntime(({ runTask, calls, root }) => {
+		const labDbPath = join(root, "projects", "pi-telegram-bridge", "lab.db");
+		const reportsPath = join(root, "projects", "pi-telegram-bridge", "reports");
+
+		const result = runTask({ labDbPath, reportsPath });
+
+		assert.equal(result.status, "completed");
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0].labDbPath, labDbPath);
+		assert.equal(calls[0].reportsPath, reportsPath);
+	});
+});
+
 test("supervisor activity records throttled hook skip", async () => {
 	await withHookRuntime(({ runTask, calls, root, activity }) => {
 		assert.equal(runTask().status, "completed");

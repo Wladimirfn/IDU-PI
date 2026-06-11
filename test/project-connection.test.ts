@@ -398,8 +398,11 @@ test("A2-S1: labDbExists true when stateRoot/lab.db exists (not reports/lab.db)"
 		workspaceRoot,
 	});
 
-	assert.equal(report.workspace?.labDbExists, true,
-		"labDbExists should be true when stateRoot/lab.db exists");
+	assert.equal(
+		report.workspace?.labDbExists,
+		true,
+		"labDbExists should be true when stateRoot/lab.db exists",
+	);
 });
 
 test("A2-S1 inverse: labDbExists false when only reports/lab.db exists (path bug check)", () => {
@@ -419,8 +422,11 @@ test("A2-S1 inverse: labDbExists false when only reports/lab.db exists (path bug
 
 	// The buggy behavior reports true here because it checks workspaceRoot/reports/lab.db.
 	// After the fix, this must be false (stateRoot/lab.db does not exist).
-	assert.equal(report.workspace?.labDbExists, false,
-		"labDbExists must be false when only the legacy reports/ path exists, not the canonical stateRoot path");
+	assert.equal(
+		report.workspace?.labDbExists,
+		false,
+		"labDbExists must be false when only the legacy reports/ path exists, not the canonical stateRoot path",
+	);
 });
 
 test("A2-S3: needsUserConfirmation not set to true solely from path bug when canonical lab.db exists", () => {
@@ -444,10 +450,16 @@ test("A2-S3: needsUserConfirmation not set to true solely from path bug when can
 		workspaceRoot,
 	});
 
-	assert.equal(report.needsUserConfirmation, false,
-		"needsUserConfirmation must not be true when canonical lab.db exists");
-	assert.equal(report.warnings.filter(w => /lab\.db/i.test(w)).length, 0,
-		"no lab.db warning should appear when canonical lab.db exists");
+	assert.equal(
+		report.needsUserConfirmation,
+		false,
+		"needsUserConfirmation must not be true when canonical lab.db exists",
+	);
+	assert.equal(
+		report.warnings.filter((w) => /lab\.db/i.test(w)).length,
+		0,
+		"no lab.db warning should appear when canonical lab.db exists",
+	);
 });
 
 test("A2-S2: tasksJsonlExists true at canonical stateRoot/tasks.jsonl (not reports/tasks.jsonl)", () => {

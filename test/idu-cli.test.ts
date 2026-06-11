@@ -71,6 +71,7 @@ import type {
 	AgentLabConsolidationResult,
 	AgentLabConsolidationStatus,
 } from "../src/agentlab-report-consolidation.js";
+import { readTriggerEngineConfig } from "../src/trigger-engine-config.js";
 import type {
 	SkillDraftCreationResult,
 	SkillDraftReview,
@@ -1624,6 +1625,23 @@ test("cli status sin runtime no crea registry faltante", async () => {
 	}
 });
 
+test("CLI idu-trigger-engine toggles persisted trigger config", async () => {
+	await withRuntime(async (runtime) => {
+		const status = await runCliCommand(["idu-trigger-engine", "status"], runtime);
+		const enabled = await runCliCommand(["idu-trigger-engine", "enable"], runtime);
+		const disabled = await runCliCommand(["idu-trigger-engine", "disable"], runtime);
+
+		assert.equal(status.exitCode, 0);
+		assert.match(status.stdout, /Trigger engine/u);
+		assert.match(status.stdout, /disabled \(default/u);
+		assert.equal(enabled.exitCode, 0);
+		assert.equal(disabled.exitCode, 0);
+		assert.equal(readTriggerEngineConfig(runtime.workspaceRoot).enabled, false);
+		assert.match(enabled.stdout, /enabled/u);
+		assert.match(disabled.stdout, /disabled/u);
+	});
+});
+
 test("CLI master-plan commands are wired with aliases", async () => {
 	await withRuntime(async (runtime) => {
 		const status = await runCliCommand(["master-plan-status"], runtime);
@@ -2612,7 +2630,10 @@ test("PR-0: createCliRuntime forwards canonical labDbPath to supervisor loop", (
 		/reportsPath,/,
 		"supervisorTick must pass canonical reportsPath into runIduSupervisorLoop",
 	);
-	assert.ok(supervisorCronPlanBlock, "supervisorCronPlan wiring block must exist");
+	assert.ok(
+		supervisorCronPlanBlock,
+		"supervisorCronPlan wiring block must exist",
+	);
 	assert.match(
 		supervisorCronPlanBlock,
 		/labDbPath,/,
