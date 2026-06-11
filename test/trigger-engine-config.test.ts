@@ -10,6 +10,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+	disableTriggerEngineConfig,
+	enableTriggerEngineConfig,
+	formatTriggerEngineConfigResult,
+	formatTriggerEngineConfigStatus,
+	getTriggerEngineConfigStatus,
 	readTriggerEngineConfig,
 	saveTriggerEngineConfig,
 	triggerEngineConfigPath,
@@ -95,5 +100,38 @@ test("readTriggerEngineConfig defaults missing metadata on valid files", () => {
 		assert.equal(config.enabled, true);
 		assert.equal(config.updatedAt, "1970-01-01T00:00:00.000Z");
 		assert.equal(config.source, undefined);
+	});
+});
+
+test("getTriggerEngineConfigStatus reports default disabled state", () => {
+	withStateRoot((stateRoot) => {
+		const status = getTriggerEngineConfigStatus(stateRoot);
+
+		assert.equal(status.path, triggerEngineConfigPath(stateRoot));
+		assert.equal(status.exists, false);
+		assert.equal(status.enabled, false);
+		assert.match(formatTriggerEngineConfigStatus(status), /disabled \(default/u);
+	});
+});
+
+test("enableTriggerEngineConfig and disableTriggerEngineConfig toggle persisted state", () => {
+	withStateRoot((stateRoot) => {
+		const enabled = enableTriggerEngineConfig(stateRoot, {
+			now: new Date("2026-06-11T18:00:00.000Z"),
+			source: "cli",
+		});
+
+		assert.equal(enabled.state.enabled, true);
+		assert.equal(readTriggerEngineConfig(stateRoot).enabled, true);
+		assert.match(formatTriggerEngineConfigResult(enabled), /enabled/u);
+
+		const disabled = disableTriggerEngineConfig(stateRoot, {
+			now: new Date("2026-06-11T18:05:00.000Z"),
+			source: "cli",
+		});
+
+		assert.equal(disabled.previous?.enabled, true);
+		assert.equal(disabled.state.enabled, false);
+		assert.equal(readTriggerEngineConfig(stateRoot).enabled, false);
 	});
 });

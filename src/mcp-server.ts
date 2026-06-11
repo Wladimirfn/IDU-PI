@@ -21,6 +21,13 @@ import {
 	formatSupervisorTriggerStatus,
 	getSupervisorTriggerStatus,
 } from "./supervisor-trigger.js";
+import {
+	disableTriggerEngineConfig,
+	enableTriggerEngineConfig,
+	formatTriggerEngineConfigResult,
+	formatTriggerEngineConfigStatus,
+	getTriggerEngineConfigStatus,
+} from "./trigger-engine-config.js";
 import type { SkillDraftFromLessonsMode } from "./skill-draft-from-lessons.js";
 import { applyPackageEnvDefaults, resolveIduRegistryPath } from "./cli-home.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
@@ -167,6 +174,7 @@ export type IduMcpToolName =
 	| "idu_model_invocation_status"
 	| "idu_skill_rating"
 	| "idu_supervisor_trigger"
+	| "idu_trigger_engine"
 	| "idu_master_plan_status"
 	| "idu_master_plan_create"
 	| "idu_master_plan_review"
@@ -387,6 +395,18 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool(
 		"idu_supervisor_trigger",
 		"Activa, desactiva o consulta el opt-in del supervisor trigger programado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredEnum("Acción: enable, disable o status.", [
+				"enable",
+				"disable",
+				"status",
+			]),
+		},
+	),
+	tool(
+		"idu_trigger_engine",
+		"Activa, desactiva o consulta el opt-in persistente del trigger engine.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 			action: requiredEnum("Acción: enable, disable o status.", [
@@ -1905,6 +1925,8 @@ async function dispatchTool(
 		case "idu_status": {
 			const connection = runtime.inspectConnection();
 			const session = getIduSessionStatus(runtime.projectId);
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const triggerEngine = getTriggerEngineConfigStatus(stateRoot);
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1920,6 +1942,7 @@ async function dispatchTool(
 					alignmentStatus: connection.alignmentStatus,
 					sessionStatePath: session.sessionStatePath,
 					recommendedNext: connection.recommendedNext,
+					triggerEngine,
 					connection,
 				},
 				safeNotes: resolution.safeNotes,
@@ -2186,6 +2209,68 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 				summary: `Supervisor trigger is ${status.enabled ? "enabled" : "disabled"}.`,
 				data: { action, status, output: formatSupervisorTriggerStatus(status) },
+				safeNotes: resolution.safeNotes,
+			});
+		}
+		case "idu_trigger_engine": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
+			const action = supervisorTriggerActionArg(args);
+			if (!action) {
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"action must be one of: enable, disable, status",
+				);
+			}
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			if (action === "enable") {
+				const result = enableTriggerEngineConfig(stateRoot, { source: "cli" });
+				return envelope({
+					ok: true,
+					tool: name,
+					projectId,
+					projectPath: runtime.projectPath,
+					summary: "Trigger engine enabled.",
+					data: {
+						action,
+						result,
+						output: formatTriggerEngineConfigResult(result),
+					},
+					safeNotes: resolution.safeNotes,
+				});
+			}
+			if (action === "disable") {
+				const result = disableTriggerEngineConfig(stateRoot, { source: "cli" });
+				return envelope({
+					ok: true,
+					tool: name,
+					projectId,
+					projectPath: runtime.projectPath,
+					summary: "Trigger engine disabled.",
+					data: {
+						action,
+						result,
+						output: formatTriggerEngineConfigResult(result),
+					},
+					safeNotes: resolution.safeNotes,
+				});
+			}
+			const status = getTriggerEngineConfigStatus(stateRoot);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: `Trigger engine is ${status.enabled ? "enabled" : "disabled"}.`,
+				data: { action, status, output: formatTriggerEngineConfigStatus(status) },
 				safeNotes: resolution.safeNotes,
 			});
 		}

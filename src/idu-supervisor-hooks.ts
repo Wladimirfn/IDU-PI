@@ -56,6 +56,8 @@ type CommonHookInput = {
 	projectId: string;
 	projectPath: string;
 	workspaceRoot: string;
+	labDbPath?: string;
+	reportsPath?: string;
 	repository: HookRepository;
 	queue: StructuredTaskQueue;
 	isIduActive?: (projectId: string) => boolean;
@@ -253,6 +255,8 @@ function maybeRunSupervisor(
 			projectId: input.projectId,
 			projectPath: input.projectPath,
 			workspaceRoot: input.workspaceRoot,
+			labDbPath: input.labDbPath,
+			reportsPath: input.reportsPath,
 			trigger: input.trigger,
 			options: {
 				allowSemanticDraft:
