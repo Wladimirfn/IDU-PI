@@ -1771,6 +1771,11 @@ test("CLI scheduled alert tick is OS-priority and read-only by default", async (
 			),
 			true,
 		);
+		const events = readFileSync(join(workspaceRoot, "events.jsonl"), "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { kind?: string });
+		assert.ok(events.some((event) => event.kind === "task_stuck"));
 	});
 });
 
