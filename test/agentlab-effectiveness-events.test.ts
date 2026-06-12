@@ -218,11 +218,42 @@ test("AgentLab effectiveness report summarizes outcomes findings and privacy fla
 	assert.equal(report.humanApprovalRequired, 2);
 	assert.equal(report.evidenceCompleteness.complete, 1);
 	assert.equal(report.evidenceCompleteness.partial, 1);
+	assert.equal(report.staleRequests, 0);
 	assert.equal(report.tokensMeasured, false);
 	assert.equal(report.contextPercentMeasured, false);
 	assert.equal(report.promptTextStored, false);
 	assert.equal(report.rawUserTextStored, false);
 	assert.equal(report.remoteAnalytics, false);
+});
+
+test("AgentLab effectiveness report treats latest status as current unresolved stale state", () => {
+	const staleEvent = agentLabEffectivenessEventFromStatus("idu-pi", {
+		path: "current.json",
+		name: "current.json",
+		valid: false,
+		errors: ["AgentLab run stale: current request has no valid run."],
+	} satisfies AgentLabReviewStatus);
+	const validStatusEvent = agentLabEffectivenessEventFromStatus("idu-pi", {
+		path: "current.json",
+		name: "current.json",
+		valid: true,
+		errors: [],
+		result: runResult(),
+	} satisfies AgentLabReviewStatus);
+
+	const resolved = buildAgentLabEffectivenessReport([
+		staleEvent,
+		validStatusEvent,
+	]);
+	assert.equal(resolved.outcomes.stale, 1);
+	assert.equal(resolved.staleRequests, 0);
+	assert.equal(resolved.recent.length, 2);
+
+	const unresolved = buildAgentLabEffectivenessReport([
+		validStatusEvent,
+		staleEvent,
+	]);
+	assert.equal(unresolved.staleRequests, 1);
 });
 
 test("AgentLab effectiveness events do not serialize forbidden raw fields", () => {

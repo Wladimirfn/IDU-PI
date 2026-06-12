@@ -105,6 +105,25 @@ export type AgentLabEffectivenessReport = {
 	recent: AgentLabEffectivenessEvent[];
 };
 
+type EventOrder = { timestampMs: number; sequence: number };
+
+function eventOrder(timestamp: string, sequence: number): EventOrder {
+	const timestampMs = Date.parse(timestamp);
+	return {
+		// Use a tuple, not timestamp arithmetic, so same-millisecond status checks remain deterministic.
+		timestampMs: Number.isFinite(timestampMs)
+			? timestampMs
+			: Number.NEGATIVE_INFINITY,
+		sequence,
+	};
+}
+
+function isSameOrAfterOrder(next: EventOrder, current: EventOrder): boolean {
+	if (next.timestampMs !== current.timestampMs)
+		return next.timestampMs > current.timestampMs;
+	return next.sequence >= current.sequence;
+}
+
 const pendingEffectivenessWrites = new Set<
 	Promise<AgentLabEffectivenessRecordResult>
 >();
@@ -207,10 +226,21 @@ export function buildAgentLabEffectivenessReport(
 	let humanApprovalRequired = 0;
 	let securityViolations = 0;
 	let staleRequests = 0;
+	let latestStatusStaleRequests: number | undefined;
+	let latestStatusOrder: EventOrder | undefined;
+	let eventSequence = 0;
 	for (const event of events) {
+		eventSequence += 1;
+		const order = eventOrder(event.timestamp, eventSequence);
 		if (event.eventType === "request_created") requestsCreated += 1;
 		else if (event.eventType === "run_completed") reviewRuns += 1;
-		else if (event.eventType === "status_checked") statusChecks += 1;
+		else if (event.eventType === "status_checked") {
+			statusChecks += 1;
+			if (!latestStatusOrder || isSameOrAfterOrder(order, latestStatusOrder)) {
+				latestStatusOrder = order;
+				latestStatusStaleRequests = event.staleRequests ?? 0;
+			}
+		}
 		totalRequests += event.requestCount ?? 0;
 		totalRuns += event.runCount ?? 0;
 		if (event.requiresHumanApproval) humanApprovalRequired += 1;
@@ -238,7 +268,7 @@ export function buildAgentLabEffectivenessReport(
 		humanApprovalRequired,
 		evidenceCompleteness,
 		securityViolations,
-		staleRequests,
+		staleRequests: latestStatusStaleRequests ?? staleRequests,
 		tokensMeasured: false,
 		contextPercentMeasured: false,
 		promptTextStored: false,
