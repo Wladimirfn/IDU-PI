@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
@@ -187,6 +187,7 @@ import {
 	inspectEvents,
 } from "./events-inspector.js";
 import {
+	appendInjection,
 	readPendingInjections,
 	markInjectionAcked,
 	type Injection,
@@ -495,6 +496,7 @@ import {
 } from "./agentlab-effectiveness-events.js";
 import {
 	buildAutonomousAlertEngineReport,
+	type AutonomousAlertDecision,
 	type AutonomousAlertEngineReport,
 } from "./autonomous-alert-engine.js";
 import {
@@ -506,6 +508,12 @@ import {
 	type AutonomousAlertScheduledTickResult,
 } from "./autonomous-alert-scheduler.js";
 import { emitStuckTaskEventsFromAlertReport } from "./autonomous-alert-engine-event-bridge.js";
+import {
+	appendDigestQueueEntry,
+	classifyInterrupt,
+	maybeFlushDigest,
+	type DigestSignal,
+} from "./digest.js";
 import {
 	appendAutonomousAlertDecision,
 	readAutonomousAlertEngineState,
@@ -549,6 +557,7 @@ export type CliRuntime = {
 	projectPath: string;
 	workspaceRoot: string;
 	labDbPath?: string;
+	digestNotify?: (text: string) => void;
 	sessionStatePath?: string;
 	inspectConnection: () => ProjectConnectionReport;
 	formatConnection: (report: ProjectConnectionReport) => string;
@@ -3184,6 +3193,111 @@ function runCliAutonomousAlertTick(
 	};
 }
 
+export type DigestAlertRoutingResult = {
+	processedCount: number;
+	immediateCount: number;
+	digestCount: number;
+};
+
+export function routeAlertDecisionsForDigest(input: {
+	stateRoot: string;
+	now: Date;
+	decisions: readonly AutonomousAlertDecision[];
+}): DigestAlertRoutingResult {
+	let immediateCount = 0;
+	let digestCount = 0;
+	for (const decision of input.decisions) {
+		const signal = digestSignalFromAlertDecision(decision);
+		if (classifyInterrupt(signal) === "immediate") {
+			appendInjection(
+				input.stateRoot,
+				buildAlertRouteInjection(decision, signal, input.now, "immediate"),
+			);
+			immediateCount += 1;
+			continue;
+		}
+		appendDigestQueueEntry(input.stateRoot, signal);
+		appendInjection(
+			input.stateRoot,
+			buildAlertRouteInjection(decision, signal, input.now, "digest"),
+		);
+		digestCount += 1;
+	}
+	return {
+		processedCount: input.decisions.length,
+		immediateCount,
+		digestCount,
+	};
+}
+
+function digestSignalFromAlertDecision(
+	decision: AutonomousAlertDecision,
+): DigestSignal {
+	const truth = decision.uncomfortableTruths[0];
+	return {
+		id: decision.id,
+		kind: "autonomous_alert",
+		domain: decision.domain,
+		severity: decision.severity,
+		riskLevel: decision.severity === "high" ? "high" : undefined,
+		guardRisk: decision.taskDraft?.guardRisk,
+		summary: truth?.claim ?? `${decision.domain} alert decision`,
+		requiredAction: truth?.requiredNext ?? decision.recommendedAction,
+		recommendedAction: decision.recommendedAction,
+		evidenceRefs: decision.evidenceRefs,
+		generatedAt: decision.generatedAt,
+	};
+}
+
+function buildAlertRouteInjection(
+	decision: AutonomousAlertDecision,
+	signal: DigestSignal,
+	now: Date,
+	route: "immediate" | "digest",
+): Injection {
+	const triggerId =
+		route === "immediate"
+			? "autonomous_alert_immediate"
+			: "autonomous_alert_digest_queued";
+	const ts = now.toISOString();
+	const evidenceRefs = [...new Set(signal.evidenceRefs ?? [])];
+	return {
+		ts,
+		triggerId,
+		decisionEnvelope: {
+			severity:
+				route === "immediate"
+					? decision.severity === "high"
+						? "critical"
+						: "warning"
+					: "info",
+			summary: `${route === "immediate" ? "Immediate alert" : "Digest-queued alert"}: ${signal.summary ?? decision.id}`,
+			options:
+				route === "immediate"
+					? [
+							"Review alert before continuing",
+							signal.requiredAction ?? "Review required",
+						]
+					: ["Queued for scheduled digest", "No immediate interrupt required"],
+			evidenceRefs,
+			orchestratorDecisionRequired:
+				route === "immediate" &&
+				(decision.requiresHuman || decision.recommendedAction === "ask_human"),
+		},
+		injectionId: createHash("sha1")
+			.update(
+				JSON.stringify({
+					triggerId,
+					ts,
+					decisionId: decision.id,
+					route,
+				}),
+			)
+			.digest("hex"),
+		acked: false,
+	};
+}
+
 function runCliAutonomousAlertScheduledTick(
 	runtime: CliRuntime,
 	options: { allowTaskCreation?: boolean } = {},
@@ -3251,6 +3365,14 @@ function runCliAutonomousAlertScheduledTick(
 			now,
 			report: alertTickResult.report,
 		});
+		const digestRouting = routeAlertDecisionsForDigest({
+			stateRoot: runtime.workspaceRoot,
+			now,
+			decisions: alertTickResult.report.decisions,
+		});
+		(
+			alertTickResult as unknown as { digestRouting?: DigestAlertRoutingResult }
+		).digestRouting = digestRouting;
 	}
 	// Trigger engine integration: opt-in via IDU_PI_TRIGGER_ENGINE=1
 	runTriggerEngineTickOptIn({
@@ -3258,6 +3380,13 @@ function runCliAutonomousAlertScheduledTick(
 		projectId: runtime.projectId,
 		isProjectActive: () => getIduSessionStatus(runtime.projectId).active,
 	});
+	const digestFlush = maybeFlushDigest({
+		stateRoot: runtime.workspaceRoot,
+		now,
+		notify: runtime.digestNotify,
+	});
+	(alertTickResult as unknown as { digestFlush?: unknown }).digestFlush =
+		digestFlush;
 	// MCP context pack auto-refresh: if staleness != fresh and we are ready,
 	// emit a regeneration event and write a fresh pack snapshot.
 	const mcpContextPackAutoRefresh = runMcpContextPackAutoRefreshTick({
