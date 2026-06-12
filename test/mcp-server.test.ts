@@ -1103,6 +1103,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_bibliotecario_init"));
 	assert.ok(tools.some((tool) => tool.name === "idu_model_invocation_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_skill_rating"));
+	assert.ok(tools.some((tool) => tool.name === "idu_birth_general_spec"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_trigger"));
 	assert.ok(tools.some((tool) => tool.name === "idu_trigger_engine"));
 	assert.ok(tools.some((tool) => tool.name === "idu_role_engine_control"));
@@ -1131,8 +1132,102 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 77);
+	assert.equal(tools.length, 78);
 });
+
+test("idu_birth_general_spec MCP tool approves spec on enrolled stateRoot", async () => {
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-general-spec-"));
+	seedMcpBirthPrerequisites(stateRoot);
+	const result = await callIduMcpTool(
+		"idu_birth_general_spec",
+		{ sections: mcpGeneralSpecSections(), approvedBy: "owner" },
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	assert.equal(result.tool, "idu_birth_general_spec");
+	assert.match(result.summary, /birth_general_spec_status=approved/u);
+	assert.equal(
+		(result.data.birth as { generalSpec?: { status?: string } }).generalSpec
+			?.status,
+		"approved",
+	);
+	assert.equal(
+		(result.data.readiness as { state?: string }).state,
+		"implementation_ready",
+	);
+	const persisted = JSON.parse(
+		readFileSync(join(stateRoot, "birth", "general-spec.json"), "utf8"),
+	) as { status?: string; specVersion?: number };
+	assert.equal(persisted.status, "approved");
+	assert.equal(persisted.specVersion, 1);
+});
+
+test("idu_birth_general_spec MCP tool returns clear error without enrolled stateRoot", async () => {
+	const result = await callIduMcpTool(
+		"idu_birth_general_spec",
+		{ sections: mcpGeneralSpecSections() },
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => ({
+				status: "unregistered_project",
+				projectId: "missing",
+				projectPath: "C:/missing",
+				safeNotes: [],
+				errors: ["project is not enrolled"],
+			}),
+		},
+	);
+
+	assert.equal(result.ok, false);
+	assert.match(result.summary, /Proyecto no registrado|active project/i);
+});
+
+function seedMcpBirthPrerequisites(stateRoot: string): void {
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "birth"), { recursive: true });
+	writeFileSync(
+		join(stateRoot, "config", "project-core.json"),
+		JSON.stringify({ status: "confirmed" }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		JSON.stringify({ status: "active" }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "master-plan.json"),
+		JSON.stringify({ status: "approved", workMilestones: [{ id: "m1" }] }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "birth", "bibliotecario-discovery.json"),
+		JSON.stringify({ status: "local_sources_found" }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "birth", "prototype-master.json"),
+		JSON.stringify({ status: "approved" }),
+		"utf8",
+	);
+}
+
+function mcpGeneralSpecSections(): Record<string, string[]> {
+	return {
+		navigation: ["header"],
+		baseComponents: ["Button"],
+		pageStructureRules: ["every page declares a layout"],
+		dataRules: ["no secrets in client state"],
+		interactionRules: ["confirm destructive actions"],
+		motionRules: ["respect prefers-reduced-motion"],
+		accessibilityCriteria: ["keyboard reachable"],
+		performanceCriteria: ["TTI under 3s"],
+	};
+}
 
 test("execution director MCP tick saves proposals and outbox reads them", async () => {
 	const runtime = fakeRuntime();

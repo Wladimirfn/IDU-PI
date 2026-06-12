@@ -39,6 +39,9 @@ export function approveBirthGeneralSpec(
 		motionRules: input.sections.motionRules,
 		accessibilityCriteria: input.sections.accessibilityCriteria,
 		performanceCriteria: input.sections.performanceCriteria,
+		specVersion: 1,
+		provenance: {},
+		evidence: {},
 		approvedBy: input.approvedBy,
 		approvedAt: new Date().toISOString(),
 	};

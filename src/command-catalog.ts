@@ -1100,6 +1100,11 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 			'corepack pnpm cli -- idu-birth-prototype-master \'{"action":"review"}\'',
 	},
 	{
+		label: "Birth general spec",
+		command:
+			"corepack pnpm cli -- idu-birth-general-spec --spec-file general-spec.json",
+	},
+	{
 		label: "Pending injections",
 		command: "corepack pnpm cli -- idu-pending-injections",
 	},
