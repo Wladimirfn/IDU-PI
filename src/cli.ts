@@ -176,6 +176,10 @@ import {
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
 import {
+	approveBirthGeneralSpec,
+	type ApproveBirthGeneralSpecResult,
+} from "./birth-general-spec-runtime.js";
+import {
 	handleBirthPrototypeMaster,
 	type BirthPrototypeMasterEnvelope,
 } from "./birth-prototype-runtime.js";
@@ -440,7 +444,7 @@ import {
 	inferTaskTemplateKind,
 	type TaskTemplateKind,
 } from "./task-templates.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	bridgeLifecycleReply,
@@ -2630,6 +2634,26 @@ export async function runCliCommand(
 				});
 				return ok(formatBirthValidate(result));
 			}
+			case "idu-birth-general-spec":
+			case "birth-general-spec": {
+				if (!activeRuntime.workspaceRoot) {
+					return fail(
+						"General Spec approval requires an active project stateRoot.",
+					);
+				}
+				const input = parseBirthGeneralSpecCliInput(rest);
+				const result = approveBirthGeneralSpec({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+					sections: input.sections,
+					approvedBy: input.approvedBy,
+				});
+				const status = handleBirthStatus({
+					projectId: activeRuntime.projectId,
+					stateRoot: activeRuntime.workspaceRoot,
+				});
+				return ok(formatBirthGeneralSpec(result, status));
+			}
 			case "idu-birth-prototype-master":
 			case "birth-prototype-master": {
 				const json = rest.join(" ").trim();
@@ -4369,6 +4393,7 @@ export function helpText(): string {
 		"  idu-pi idu-source-skill-candidates-review latest",
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-onboard-project",
+		"  idu-pi idu-birth-general-spec --spec-file <general-spec.json>",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
 		"  idu-pi idu-trigger-engine enable|disable|status      # opt-in persistente del trigger engine",
@@ -6264,6 +6289,78 @@ async function confirmAction(
 		answer === "si" ||
 		answer === "sí"
 	);
+}
+
+function parseBirthGeneralSpecCliInput(parts: string[]): {
+	sections: Parameters<typeof approveBirthGeneralSpec>[0]["sections"];
+	approvedBy: string;
+} {
+	const specFileIndex = parts.indexOf("--spec-file");
+	let raw: unknown;
+	if (specFileIndex >= 0) {
+		const specPath = parts[specFileIndex + 1];
+		if (!specPath)
+			throw new Error("Uso: idu-birth-general-spec --spec-file <path>");
+		raw = JSON.parse(readFileSync(specPath, "utf8"));
+	} else {
+		const json = parts.join(" ").trim();
+		if (!json)
+			throw new Error("Uso: idu-birth-general-spec --spec-file <path>");
+		raw = JSON.parse(json);
+	}
+	const parsed = isObjectRecord(raw) ? raw : {};
+	const sections = isObjectRecord(parsed.sections) ? parsed.sections : parsed;
+	return {
+		sections: parseGeneralSpecSections(sections),
+		approvedBy:
+			typeof parsed.approvedBy === "string" && parsed.approvedBy.trim()
+				? parsed.approvedBy.trim()
+				: "owner",
+	};
+}
+
+function parseGeneralSpecSections(
+	value: Record<string, unknown>,
+): Parameters<typeof approveBirthGeneralSpec>[0]["sections"] {
+	return {
+		navigation: requiredStringArray(value, "navigation"),
+		baseComponents: requiredStringArray(value, "baseComponents"),
+		pageStructureRules: requiredStringArray(value, "pageStructureRules"),
+		dataRules: requiredStringArray(value, "dataRules"),
+		interactionRules: requiredStringArray(value, "interactionRules"),
+		motionRules: requiredStringArray(value, "motionRules"),
+		accessibilityCriteria: requiredStringArray(value, "accessibilityCriteria"),
+		performanceCriteria: requiredStringArray(value, "performanceCriteria"),
+	};
+}
+
+function requiredStringArray(
+	value: Record<string, unknown>,
+	key: string,
+): string[] {
+	const field = value[key];
+	if (!Array.isArray(field) || field.some((item) => typeof item !== "string")) {
+		throw new Error(`General Spec field '${key}' must be an array of strings.`);
+	}
+	return field;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function formatBirthGeneralSpec(
+	result: ApproveBirthGeneralSpecResult,
+	status: BirthStatusEnvelope,
+): string {
+	const lines: string[] = [];
+	lines.push(`Birth General Spec — ${result.projectId}`);
+	lines.push(`status: ${result.generalSpec.status}`);
+	lines.push(`specVersion: ${result.generalSpec.specVersion ?? 1}`);
+	lines.push(`approvedBy: ${result.generalSpec.approvedBy ?? "—"}`);
+	lines.push("");
+	lines.push(formatBirthStatus(status));
+	return lines.join("\n");
 }
 
 function formatBirthStatus(env: BirthStatusEnvelope): string {

@@ -84,6 +84,7 @@ import {
 	handleBirthRepoPlan,
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
+import { approveBirthGeneralSpec } from "./birth-general-spec-runtime.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
@@ -211,6 +212,7 @@ export type IduMcpToolName =
 	| "idu_birth_validate"
 	| "idu_birth_repo_plan"
 	| "idu_birth_prototype_master"
+	| "idu_birth_general_spec"
 	| "idu_pending_injections"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
@@ -690,6 +692,17 @@ const TOOLS: IduMcpToolDefinition[] = [
 			approvedBy: optionalString(
 				"Identificador del aprobador humano (sólo para action='approve').",
 			),
+		},
+	),
+	tool(
+		"idu_birth_general_spec",
+		"Aprueba explícitamente la General Spec provista por el owner y persiste stateRoot/birth/general-spec.json. No deriva contenido ni usa IA.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			sections: optionalObject(
+				"General Spec sections: navigation, baseComponents, pageStructureRules, dataRules, interactionRules, motionRules, accessibilityCriteria, performanceCriteria.",
+			),
+			approvedBy: optionalString("Identificador del aprobador humano."),
 		},
 	),
 	tool(
@@ -3724,6 +3737,46 @@ async function dispatchTool(
 				],
 			});
 		}
+		case "idu_birth_general_spec": {
+			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary:
+						"General Spec approval requires an active project stateRoot.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["active project stateRoot is missing"],
+				});
+			}
+			const params = args as JsonObject;
+			const sections = parseGeneralSpecSectionsArg(params.sections);
+			const birth = approveBirthGeneralSpec({
+				projectId: runtime.projectId,
+				stateRoot: resolution.stateRoot,
+				sections,
+				approvedBy: stringArg(params, "approvedBy") ?? "owner",
+			});
+			const readiness = handleBirthStatus({
+				projectId: runtime.projectId,
+				stateRoot: resolution.stateRoot,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_general_spec_status=${birth.generalSpec.status}`,
+				data: { birth, readiness },
+				safeNotes: [
+					...resolution.safeNotes,
+					"General Spec approval is explicit owner input; no derivation, model call, or Telegram surface was used.",
+					"Only stateRoot/birth/general-spec.json is written.",
+				],
+			});
+		}
 		case "idu_birth_validate": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			if (!runtime.projectPath) {
@@ -6511,6 +6564,36 @@ function stringListArg(args: JsonObject, key: string): string[] {
 		.filter((item): item is string => typeof item === "string")
 		.map((item) => item.trim())
 		.filter(Boolean);
+}
+
+function parseGeneralSpecSectionsArg(
+	value: unknown,
+): Parameters<typeof approveBirthGeneralSpec>[0]["sections"] {
+	const sections = asRecord(value);
+	return {
+		navigation: requiredJsonStringArray(sections, "navigation"),
+		baseComponents: requiredJsonStringArray(sections, "baseComponents"),
+		pageStructureRules: requiredJsonStringArray(sections, "pageStructureRules"),
+		dataRules: requiredJsonStringArray(sections, "dataRules"),
+		interactionRules: requiredJsonStringArray(sections, "interactionRules"),
+		motionRules: requiredJsonStringArray(sections, "motionRules"),
+		accessibilityCriteria: requiredJsonStringArray(
+			sections,
+			"accessibilityCriteria",
+		),
+		performanceCriteria: requiredJsonStringArray(
+			sections,
+			"performanceCriteria",
+		),
+	};
+}
+
+function requiredJsonStringArray(args: JsonObject, key: string): string[] {
+	const value = args[key];
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+		throw new Error(`General Spec field '${key}' must be an array of strings.`);
+	}
+	return value as string[];
 }
 
 function positiveIntegerArg(args: JsonObject, key: string): number | undefined {

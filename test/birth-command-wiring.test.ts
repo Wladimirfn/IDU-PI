@@ -13,6 +13,7 @@ const cases = [
 	"idu-birth-validate",
 	"idu-birth-repo-plan",
 	"idu-birth-prototype-master",
+	"idu-birth-general-spec",
 	"idu-pending-injections",
 	"idu-subscribe-triggers",
 ];
@@ -51,6 +52,7 @@ for (const t of [
 	"idu_birth_validate",
 	"idu_birth_repo_plan",
 	"idu_birth_prototype_master",
+	"idu_birth_general_spec",
 	"idu_pending_injections",
 	"idu_subscribe_triggers",
 ]) {

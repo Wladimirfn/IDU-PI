@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3267,11 +3274,98 @@ test("comando desconocido muestra ayuda", async () => {
 	});
 });
 
+test("idu-birth-general-spec approves General Spec on enrolled project path", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		seedBirthPrerequisites(workspaceRoot);
+		const specPath = join(workspaceRoot, "general-spec-input.json");
+		writeFileSync(
+			specPath,
+			JSON.stringify({
+				sections: validGeneralSpecSections(),
+				approvedBy: "owner",
+			}),
+			"utf8",
+		);
+
+		const result = await runCliCommand(
+			["idu-birth-general-spec", "--spec-file", specPath],
+			runtime,
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Birth General Spec/u);
+		assert.match(result.stdout, /status: approved/u);
+		assert.match(result.stdout, /state: implementation_ready/u);
+		assert.match(result.stdout, /nextRequiredAction: idu_birth_status/u);
+		const persisted = JSON.parse(
+			readFileSync(join(workspaceRoot, "birth", "general-spec.json"), "utf8"),
+		) as { status?: string; specVersion?: number };
+		assert.equal(persisted.status, "approved");
+		assert.equal(persisted.specVersion, 1);
+	});
+});
+
+test("idu-birth-general-spec reports a clear no-project error", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["idu-birth-general-spec", "{}"], {
+			...runtime,
+			workspaceRoot: "",
+		});
+
+		assert.equal(result.exitCode, 1);
+		assert.match(result.stderr, /active project/i);
+	});
+});
+
 test("cli help no requiere runtime ni configuración", async () => {
 	const result = await runCliCommand(["--help"]);
 
 	assert.equal(result.exitCode, 0);
 	assert.match(result.stdout, /Uso: idu-pi/u);
 	assert.match(result.stdout, /idu-pi idu start/u);
+	assert.match(result.stdout, /idu-pi idu-birth-general-spec/u);
 	assert.equal(result.stderr, "");
 });
+
+function seedBirthPrerequisites(stateRoot: string): void {
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "birth"), { recursive: true });
+	writeFileSync(
+		join(stateRoot, "config", "project-core.json"),
+		JSON.stringify({ status: "confirmed" }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		JSON.stringify({ status: "active" }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "master-plan.json"),
+		JSON.stringify({ status: "approved", workMilestones: [{ id: "m1" }] }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "birth", "bibliotecario-discovery.json"),
+		JSON.stringify({ status: "local_sources_found" }),
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "birth", "prototype-master.json"),
+		JSON.stringify({ status: "approved" }),
+		"utf8",
+	);
+}
+
+function validGeneralSpecSections(): Record<string, string[]> {
+	return {
+		navigation: ["header"],
+		baseComponents: ["Button"],
+		pageStructureRules: ["every page declares a layout"],
+		dataRules: ["no secrets in client state"],
+		interactionRules: ["confirm destructive actions"],
+		motionRules: ["respect prefers-reduced-motion"],
+		accessibilityCriteria: ["keyboard reachable"],
+		performanceCriteria: ["TTI under 3s"],
+	};
+}
