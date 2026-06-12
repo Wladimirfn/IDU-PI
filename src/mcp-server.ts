@@ -28,6 +28,14 @@ import {
 	formatTriggerEngineConfigStatus,
 	getTriggerEngineConfigStatus,
 } from "./trigger-engine-config.js";
+import {
+	DEFAULT_ROLE_ENGINE_CONFIG,
+	disableRoleEngineConfig,
+	enableRoleEngineConfig,
+	formatRoleEngineConfigResult,
+	getRoleEngineConfigStatus,
+} from "./role-engine-config.js";
+import type { IduModelRoleId } from "./model-assignments.js";
 import type { SkillDraftFromLessonsMode } from "./skill-draft-from-lessons.js";
 import { applyPackageEnvDefaults, resolveIduRegistryPath } from "./cli-home.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
@@ -175,6 +183,8 @@ export type IduMcpToolName =
 	| "idu_skill_rating"
 	| "idu_supervisor_trigger"
 	| "idu_trigger_engine"
+	| "idu_role_engine_control"
+	| "idu_role_engine_status"
 	| "idu_master_plan_status"
 	| "idu_master_plan_create"
 	| "idu_master_plan_review"
@@ -414,6 +424,23 @@ const TOOLS: IduMcpToolDefinition[] = [
 				"disable",
 				"status",
 			]),
+		},
+	),
+	tool(
+		"idu_role_engine_control",
+		"Activa o desactiva el RoleEngine global o una role específica. Advisory-only: no invoca modelos por sí mismo.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredEnum("Acción: enable o disable.", ["enable", "disable"]),
+			role: optionalString("Role opcional para cambiar sólo su flag."),
+		},
+	),
+	tool(
+		"idu_role_engine_status",
+		"Consulta configuración y estado del RoleEngine sin invocar modelos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			role: optionalString("Role opcional para inspección enfocada."),
 		},
 	),
 	tool(
@@ -1950,6 +1977,7 @@ async function dispatchTool(
 		}
 		case "idu_activate": {
 			const session = activateIduSession(runtime.projectId);
+			const roleEngineBinding = runtime.rebindRoleEngine?.();
 			return envelope({
 				ok: true,
 				tool: name,
@@ -1957,7 +1985,10 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 				summary:
 					"Guardrails automáticos activados sin scan pesado ni AgentLabs.",
-				data: session as unknown as JsonObject,
+				data: {
+					...(session as unknown as JsonObject),
+					...(roleEngineBinding ? { roleEngineBinding } : {}),
+				},
 				safeNotes: [
 					...resolution.safeNotes,
 					"No ejecuté scan pesado.",
@@ -1967,13 +1998,17 @@ async function dispatchTool(
 		}
 		case "idu_deactivate": {
 			const session = deactivateIduSession(runtime.projectId);
+			const roleEngineBinding = runtime.unbindRoleEngine?.();
 			return envelope({
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: "Guardrails automáticos desactivados.",
-				data: session as unknown as JsonObject,
+				data: {
+					...(session as unknown as JsonObject),
+					...(roleEngineBinding ? { roleEngineBinding } : {}),
+				},
 				safeNotes: resolution.safeNotes,
 			});
 		}
@@ -2270,8 +2305,103 @@ async function dispatchTool(
 				projectId,
 				projectPath: runtime.projectPath,
 				summary: `Trigger engine is ${status.enabled ? "enabled" : "disabled"}.`,
-				data: { action, status, output: formatTriggerEngineConfigStatus(status) },
+				data: {
+					action,
+					status,
+					output: formatTriggerEngineConfigStatus(status),
+				},
 				safeNotes: resolution.safeNotes,
+			});
+		}
+		case "idu_role_engine_control": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
+			const action = roleEngineControlActionArg(args);
+			if (!action) {
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"action must be one of: enable, disable",
+				);
+			}
+			const role = roleEngineRoleArg(args);
+			if (role === "invalid") {
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					`role must be one of: ${Object.keys(DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled).join(", ")}`,
+				);
+			}
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const result =
+				action === "enable"
+					? enableRoleEngineConfig(stateRoot, role)
+					: disableRoleEngineConfig(stateRoot, role);
+			const roleEngineBinding = runtime.rebindRoleEngine?.();
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: `Role engine ${role ? `role ${role} ` : ""}${action}d.`,
+				data: {
+					action,
+					role,
+					result,
+					...(roleEngineBinding ? { roleEngineBinding } : {}),
+					output: formatRoleEngineConfigResult(result),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"No invoqué modelos; sólo actualicé el opt-in persistente.",
+				],
+			});
+		}
+		case "idu_role_engine_status": {
+			const projectId = activeMcpProjectId(runtime, resolution);
+			if (!projectId)
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					"project id must be non-empty",
+				);
+			const role = roleEngineRoleArg(args);
+			if (role === "invalid") {
+				return invalidMcpInput(
+					name,
+					runtime,
+					resolution,
+					`role must be one of: ${Object.keys(DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled).join(", ")}`,
+				);
+			}
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const status = getRoleEngineConfigStatus(stateRoot);
+			const runtimeStatus = runtime.getRoleEngineStatus?.();
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId,
+				projectPath: runtime.projectPath,
+				summary: `Role engine is ${status.enabled ? "enabled" : "disabled"}.`,
+				data: {
+					role,
+					status,
+					...(role ? { roleEnabled: status.roleEnabled[role] } : {}),
+					...(runtimeStatus ? { runtimeStatus } : {}),
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Consulta de estado: no invoqué modelos.",
+				],
 			});
 		}
 		case "idu_master_plan_status": {
@@ -6452,6 +6582,24 @@ function supervisorTriggerActionArg(
 	if (value === "enable" || value === "disable" || value === "status")
 		return value;
 	return undefined;
+}
+
+function roleEngineControlActionArg(
+	args: JsonObject,
+): "enable" | "disable" | undefined {
+	const action = supervisorTriggerActionArg(args);
+	return action === "enable" || action === "disable" ? action : undefined;
+}
+
+function roleEngineRoleArg(
+	args: JsonObject,
+): IduModelRoleId | "invalid" | undefined {
+	const value = stringArg(args, "role");
+	if (!value) return undefined;
+	if (value in DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled) {
+		return value as IduModelRoleId;
+	}
+	return "invalid";
 }
 
 const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([

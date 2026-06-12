@@ -3,7 +3,6 @@ import {
 	existsSync,
 	mkdtempSync,
 	readdirSync,
-	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -13,6 +12,9 @@ import { afterEach, test } from "node:test";
 import {
 	DEFAULT_MAX_ROLE_INVOCATIONS_PER_TURN,
 	DEFAULT_ROLE_ENGINE_CONFIG,
+	disableRoleEngineConfig,
+	enableRoleEngineConfig,
+	getRoleEngineConfigStatus,
 	loadRoleEngineConfig,
 	resolveRoleEngineConfig,
 	roleEngineConfigPath,
@@ -115,7 +117,7 @@ test("saveRoleEngineConfig writes atomically and creates a backup file", () => {
 		},
 	});
 	// Second save creates a backup of the previous file.
-	const second = saveRoleEngineConfig(root, {
+	saveRoleEngineConfig(root, {
 		enabled: false,
 	});
 	assert.equal(existsSync(roleEngineConfigPath(root)), true);
@@ -135,4 +137,24 @@ test("saveRoleEngineConfig preserves all 13 roleEnabled keys even when patch is 
 	assert.equal(cfg.roleEnabled["agentlab-security"], true);
 	assert.equal(cfg.roleEnabled["supervisor-main"], false);
 	assert.equal(Object.keys(cfg.roleEnabled).length, 13);
+});
+
+test("role engine control helpers toggle global and per-role flags", () => {
+	const root = freshRoot();
+	assert.equal(getRoleEngineConfigStatus(root).enabled, false);
+
+	const enabled = enableRoleEngineConfig(root);
+	assert.equal(enabled.state.enabled, true);
+	assert.equal(resolveRoleEngineConfig(root).enabled, true);
+
+	const roleEnabled = enableRoleEngineConfig(root, "supervisor-main");
+	assert.equal(roleEnabled.state.roleEnabled["supervisor-main"], true);
+	assert.equal(
+		resolveRoleEngineConfig(root).roleEnabled["supervisor-main"],
+		true,
+	);
+
+	const disabled = disableRoleEngineConfig(root);
+	assert.equal(disabled.state.enabled, false);
+	assert.equal(resolveRoleEngineConfig(root).enabled, false);
 });

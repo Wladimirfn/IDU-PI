@@ -44,6 +44,22 @@ export type RoleEngineConfigPatch = {
 	roleCooldownMs?: Partial<Record<IduModelRoleId, number>>;
 };
 
+export type RoleEngineConfigStatus = {
+	path: string;
+	exists: boolean;
+	enabled: boolean;
+	maxRoleInvocationsPerTurn: number;
+	roleEnabled: Record<IduModelRoleId, boolean>;
+	roleCooldownMs: Partial<Record<IduModelRoleId, number>>;
+};
+
+export type RoleEngineConfigResult = {
+	path: string;
+	state: RoleEngineConfig;
+	previous: RoleEngineConfig | null;
+	changed: boolean;
+};
+
 export const DEFAULT_MAX_ROLE_INVOCATIONS_PER_TURN = 50;
 
 export const DEFAULT_ROLE_ENGINE_CONFIG: RoleEngineConfig = {
@@ -235,6 +251,84 @@ export function saveRoleEngineConfig(
 		}
 	}
 	return next;
+}
+
+export function getRoleEngineConfigStatus(
+	stateRoot: string,
+): RoleEngineConfigStatus {
+	const path = roleEngineConfigPath(stateRoot);
+	const config = resolveRoleEngineConfig(stateRoot);
+	return {
+		path,
+		exists: existsSync(path),
+		enabled: config.enabled,
+		maxRoleInvocationsPerTurn: config.maxRoleInvocationsPerTurn,
+		roleEnabled: config.roleEnabled,
+		roleCooldownMs: config.roleCooldownMs,
+	};
+}
+
+export function enableRoleEngineConfig(
+	stateRoot: string,
+	roleId?: IduModelRoleId,
+): RoleEngineConfigResult {
+	return setRoleEngineConfig(stateRoot, true, roleId);
+}
+
+export function disableRoleEngineConfig(
+	stateRoot: string,
+	roleId?: IduModelRoleId,
+): RoleEngineConfigResult {
+	return setRoleEngineConfig(stateRoot, false, roleId);
+}
+
+export function formatRoleEngineConfigStatus(
+	status: RoleEngineConfigStatus,
+): string {
+	return [
+		"Role engine",
+		"",
+		`path: ${status.path}`,
+		`state: ${status.enabled ? "enabled" : "disabled"}${status.exists ? "" : " (default — no file present)"}`,
+		`maxRoleInvocationsPerTurn: ${status.maxRoleInvocationsPerTurn}`,
+	].join("\n");
+}
+
+export function formatRoleEngineConfigResult(
+	result: RoleEngineConfigResult,
+): string {
+	return [
+		"Role engine",
+		"",
+		`path: ${result.path}`,
+		`state: ${result.state.enabled ? "enabled" : "disabled"}`,
+		`changed: ${result.changed ? "yes" : "no"}`,
+		...(result.previous
+			? [`previous: enabled=${result.previous.enabled}`]
+			: []),
+	].join("\n");
+}
+
+function setRoleEngineConfig(
+	stateRoot: string,
+	enabled: boolean,
+	roleId?: IduModelRoleId,
+): RoleEngineConfigResult {
+	const path = roleEngineConfigPath(stateRoot);
+	const previous = existsSync(path) ? resolveRoleEngineConfig(stateRoot) : null;
+	const patch: RoleEngineConfigPatch = roleId
+		? { roleEnabled: { [roleId]: enabled } }
+		: { enabled };
+	const state = saveRoleEngineConfig(stateRoot, patch);
+	const previousValue = roleId
+		? previous?.roleEnabled[roleId]
+		: previous?.enabled;
+	return {
+		path,
+		state,
+		previous,
+		changed: previous === null || previousValue !== enabled,
+	};
 }
 
 /**

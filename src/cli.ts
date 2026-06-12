@@ -103,11 +103,23 @@ import {
 	formatOrchestratorAdvisory,
 	formatRoleEngineStatus,
 	runIdOrchestratorAdvisoryCommand,
+	runIdRoleEngineCommand,
 	runIdRoleEngineStatusCommand,
 	type RoleEngineStatusReport,
 } from "./cli-role-engine.js";
 import { getOrchestratorAdvisoryStream } from "./orchestrator-advisory-stream.js";
-import { resolveRoleEngineConfig } from "./role-engine-config.js";
+import {
+	resolveRoleEngineConfig,
+	runRoleEngineMigration,
+	saveRoleEngineConfig,
+	type RoleEngineConfig,
+	type RoleEngineConfigPatch,
+} from "./role-engine-config.js";
+import {
+	rebindRoleEngineSubscription,
+	unbindRoleEngineSubscription,
+	type RoleEngineSubscriptionStatus,
+} from "./role-engine-subscription.js";
 import type { RoleAdvisory } from "./roles/index.js";
 import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
@@ -806,6 +818,9 @@ export type CliRuntime = {
 	formatOrchestratorAdvisory: (rows: RoleAdvisory[]) => string;
 	getRoleEngineStatus: () => RoleEngineStatusReport;
 	formatRoleEngineStatus: (report: RoleEngineStatusReport) => string;
+	saveRoleEngineConfig?: (patch: RoleEngineConfigPatch) => RoleEngineConfig;
+	rebindRoleEngine?: () => RoleEngineSubscriptionStatus;
+	unbindRoleEngine?: () => RoleEngineSubscriptionStatus;
 	activeProfileId?: () => string;
 };
 
@@ -934,6 +949,7 @@ export function createCliRuntime(
 		config.agentProfiles,
 	);
 	const masterPlanStateRoot = runtimeStateRoot;
+	runRoleEngineMigration(masterPlanStateRoot);
 	const context = {
 		config,
 		registry,
@@ -1600,6 +1616,16 @@ export function createCliRuntime(
 			};
 		},
 		formatRoleEngineStatus,
+		saveRoleEngineConfig: (patch) =>
+			saveRoleEngineConfig(masterPlanStateRoot, patch),
+		rebindRoleEngine: () =>
+			rebindRoleEngineSubscription({
+				projectId: activeProject.id,
+				stateRoot: masterPlanStateRoot,
+				router: agentRouter,
+				repository: labDbRepository,
+			}),
+		unbindRoleEngine: () => unbindRoleEngineSubscription(activeProject.id),
 		activeProfileId: () => agentRouter.activeProfile().id,
 	};
 }
@@ -2104,6 +2130,9 @@ export async function runCliCommand(
 			case "idu-orchestrator-advisory":
 			case "orchestrator-advisory":
 				return ok(runIdOrchestratorAdvisoryCommand(rest, activeRuntime));
+			case "idu-role-engine":
+			case "role-engine":
+				return ok(runIdRoleEngineCommand(rest, activeRuntime));
 			case "idu-role-engine-status":
 			case "role-engine-status":
 				return ok(runIdRoleEngineStatusCommand(rest, activeRuntime));

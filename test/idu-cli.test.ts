@@ -71,6 +71,10 @@ import type {
 	AgentLabConsolidationResult,
 	AgentLabConsolidationStatus,
 } from "../src/agentlab-report-consolidation.js";
+import {
+	resolveRoleEngineConfig,
+	saveRoleEngineConfig,
+} from "../src/role-engine-config.js";
 import { readTriggerEngineConfig } from "../src/trigger-engine-config.js";
 import type {
 	SkillDraftCreationResult,
@@ -1570,12 +1574,7 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		getOrchestratorAdvisory: () => [],
 		formatOrchestratorAdvisory: () => "no advisories yet",
 		getRoleEngineStatus: () => ({
-			config: {
-				enabled: false,
-				maxRoleInvocationsPerTurn: 50,
-				roleEnabled: {},
-				roleCooldownMs: {},
-			},
+			config: resolveRoleEngineConfig(runtime.workspaceRoot),
 			lastFires: [],
 			lastCapWarning: undefined,
 			advisoryStreamSummary: {
@@ -1584,6 +1583,8 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 			},
 		}),
 		formatRoleEngineStatus: () => "role engine status unavailable",
+		saveRoleEngineConfig: (patch) =>
+			saveRoleEngineConfig(runtime.workspaceRoot, patch),
 	};
 	return runtime;
 }
@@ -1627,9 +1628,18 @@ test("cli status sin runtime no crea registry faltante", async () => {
 
 test("CLI idu-trigger-engine toggles persisted trigger config", async () => {
 	await withRuntime(async (runtime) => {
-		const status = await runCliCommand(["idu-trigger-engine", "status"], runtime);
-		const enabled = await runCliCommand(["idu-trigger-engine", "enable"], runtime);
-		const disabled = await runCliCommand(["idu-trigger-engine", "disable"], runtime);
+		const status = await runCliCommand(
+			["idu-trigger-engine", "status"],
+			runtime,
+		);
+		const enabled = await runCliCommand(
+			["idu-trigger-engine", "enable"],
+			runtime,
+		);
+		const disabled = await runCliCommand(
+			["idu-trigger-engine", "disable"],
+			runtime,
+		);
 
 		assert.equal(status.exitCode, 0);
 		assert.match(status.stdout, /Trigger engine/u);
@@ -1639,6 +1649,37 @@ test("CLI idu-trigger-engine toggles persisted trigger config", async () => {
 		assert.equal(readTriggerEngineConfig(runtime.workspaceRoot).enabled, false);
 		assert.match(enabled.stdout, /enabled/u);
 		assert.match(disabled.stdout, /disabled/u);
+	});
+});
+
+test("CLI idu-role-engine toggles persisted role engine config", async () => {
+	await withRuntime(async (runtime) => {
+		const status = await runCliCommand(["idu-role-engine", "status"], runtime);
+		assert.equal(status.exitCode, 0);
+		assert.match(status.stdout, /role engine status/u);
+
+		const enabled = await runCliCommand(["idu-role-engine", "enable"], runtime);
+		assert.equal(enabled.exitCode, 0);
+		assert.equal(resolveRoleEngineConfig(runtime.workspaceRoot).enabled, true);
+
+		const roleEnabled = await runCliCommand(
+			["idu-role-engine", "enable", "--role", "supervisor-main"],
+			runtime,
+		);
+		assert.equal(roleEnabled.exitCode, 0);
+		assert.equal(
+			resolveRoleEngineConfig(runtime.workspaceRoot).roleEnabled[
+				"supervisor-main"
+			],
+			true,
+		);
+
+		const disabled = await runCliCommand(
+			["idu-role-engine", "disable"],
+			runtime,
+		);
+		assert.equal(disabled.exitCode, 0);
+		assert.equal(resolveRoleEngineConfig(runtime.workspaceRoot).enabled, false);
 	});
 });
 

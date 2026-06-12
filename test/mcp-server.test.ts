@@ -89,6 +89,7 @@ import {
 	readTriggerEngineConfig,
 	saveTriggerEngineConfig,
 } from "../src/trigger-engine-config.js";
+import { resolveRoleEngineConfig } from "../src/role-engine-config.js";
 
 const UNUSED = "unused";
 
@@ -1104,6 +1105,8 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_skill_rating"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_trigger"));
 	assert.ok(tools.some((tool) => tool.name === "idu_trigger_engine"));
+	assert.ok(tools.some((tool) => tool.name === "idu_role_engine_control"));
+	assert.ok(tools.some((tool) => tool.name === "idu_role_engine_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
 	assert.ok(tools.some((tool) => tool.name === "idu_execution_director_tick"));
@@ -1128,7 +1131,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 75);
+	assert.equal(tools.length, 77);
 });
 
 test("execution director MCP tick saves proposals and outbox reads them", async () => {
@@ -1716,10 +1719,7 @@ test("idu_trigger_engine MCP tool toggles persisted config", async () => {
 			options,
 		);
 		assert.equal(status.ok, true);
-		assert.equal(
-			(status.data.status as { enabled?: boolean }).enabled,
-			false,
-		);
+		assert.equal((status.data.status as { enabled?: boolean }).enabled, false);
 
 		const enabled = await callIduMcpTool(
 			"idu_trigger_engine",
@@ -1736,6 +1736,53 @@ test("idu_trigger_engine MCP tool toggles persisted config", async () => {
 		);
 		assert.equal(disabled.ok, true);
 		assert.equal(readTriggerEngineConfig(stateRoot).enabled, false);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("idu_role_engine MCP tools expose status and toggle persisted config", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-mcp-role-engine-toggle-"));
+	try {
+		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+		const options = {
+			runtimeFactory: factory(),
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		};
+
+		const status = await callIduMcpTool("idu_role_engine_status", {}, options);
+		assert.equal(status.ok, true);
+		assert.equal((status.data.status as { enabled?: boolean }).enabled, false);
+
+		const enabled = await callIduMcpTool(
+			"idu_role_engine_control",
+			{ action: "enable" },
+			options,
+		);
+		assert.equal(enabled.ok, true);
+		assert.equal(resolveRoleEngineConfig(stateRoot).enabled, true);
+
+		const roleEnabled = await callIduMcpTool(
+			"idu_role_engine_control",
+			{ action: "enable", role: "supervisor-main" },
+			options,
+		);
+		assert.equal(roleEnabled.ok, true);
+		assert.equal(
+			resolveRoleEngineConfig(stateRoot).roleEnabled["supervisor-main"],
+			true,
+		);
+
+		const disabled = await callIduMcpTool(
+			"idu_role_engine_control",
+			{ action: "disable" },
+			options,
+		);
+		assert.equal(disabled.ok, true);
+		assert.equal(resolveRoleEngineConfig(stateRoot).enabled, false);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

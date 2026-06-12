@@ -954,6 +954,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-role-engine-status",
 	},
 	{
+		label: "Role engine control",
+		command: "corepack pnpm cli -- idu-role-engine enable",
+	},
+	{
 		label: "Semantic audit status",
 		command: "corepack pnpm cli -- idu-semantic-audit-status",
 	},

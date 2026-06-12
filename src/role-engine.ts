@@ -120,6 +120,11 @@ export class RoleEngine {
 		// Find roles that subscribe to this event kind
 		const candidates = this.findSubscribers(event.kind as EventKind);
 
+		if (!this.deps.config.enabled) {
+			result.skippedByDisabled = candidates.length;
+			return result;
+		}
+
 		const eventHash = computeEventHash(event);
 		const inputSignature = computeInputSignature(event);
 

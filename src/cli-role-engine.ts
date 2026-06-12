@@ -7,6 +7,13 @@
  */
 
 import type { CliRuntime } from "./cli.js";
+import type { IduModelRoleId } from "./model-assignments.js";
+import {
+	DEFAULT_ROLE_ENGINE_CONFIG,
+	formatRoleEngineConfigResult,
+	saveRoleEngineConfig,
+	type RoleEngineConfigPatch,
+} from "./role-engine-config.js";
 import type { RoleAdvisory } from "./roles/index.js";
 
 export type RoleEngineStatusReport = {
@@ -78,6 +85,59 @@ export function runIdRoleEngineStatusCommand(
 ): string {
 	const report = runtime.getRoleEngineStatus();
 	return runtime.formatRoleEngineStatus(report);
+}
+
+export function runIdRoleEngineCommand(
+	rest: string[],
+	runtime: CliRuntime,
+): string {
+	const action = rest[0];
+	if (action === "status" || action === undefined) {
+		return runIdRoleEngineStatusCommand(rest.slice(1), runtime);
+	}
+	if (action !== "enable" && action !== "disable") {
+		return "Usage: idu-role-engine enable|disable|status [--role <roleId>]";
+	}
+
+	const roleId = parseRoleArg(rest.slice(1));
+	if (roleId === "invalid") {
+		return `Invalid role id. Valid roles: ${Object.keys(DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled).join(", ")}`;
+	}
+
+	const enabled = action === "enable";
+	const patch: RoleEngineConfigPatch = roleId
+		? { roleEnabled: { [roleId]: enabled } }
+		: { enabled };
+	const result = runtime.saveRoleEngineConfig
+		? runtime.saveRoleEngineConfig(patch)
+		: saveRoleEngineConfig(runtime.workspaceRoot, patch);
+	const binding = runtime.rebindRoleEngine?.();
+
+	return [
+		formatRoleEngineConfigResult({
+			path: `${runtime.workspaceRoot}/role-engine.json`,
+			state: result,
+			previous: null,
+			changed: true,
+		}),
+		...(binding
+			? [
+					"",
+					`binding: ${binding.enabled ? "enabled" : "disabled"} (${binding.subscriptionCount} subscriptions)`,
+				]
+			: []),
+	].join("\n");
+}
+
+function parseRoleArg(args: string[]): IduModelRoleId | "invalid" | undefined {
+	const index = args.indexOf("--role");
+	if (index === -1) return undefined;
+	const value = args[index + 1];
+	if (!value) return "invalid";
+	if (value in DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled) {
+		return value as IduModelRoleId;
+	}
+	return "invalid";
 }
 
 /**
