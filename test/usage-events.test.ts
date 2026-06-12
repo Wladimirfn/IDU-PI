@@ -400,6 +400,57 @@ test("usage report uses newest Idu-pi call timestamp, ignoring newer compaction 
 	);
 });
 
+test("usage report separates raw failures from unresolved current failures", () => {
+	const failed = "2026-06-11T12:12:29.000Z";
+	const resolved = "2026-06-11T12:13:29.000Z";
+	const report = buildIduUsageReport([
+		{
+			version: 1,
+			id: "failed-agentlab-status",
+			timestamp: failed,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_agentlab_review_status",
+			allowedToProceed: false,
+			requiresHuman: true,
+			ok: false,
+		},
+		{
+			version: 1,
+			id: "resolved-agentlab-status",
+			timestamp: resolved,
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_agentlab_review_status",
+			allowedToProceed: true,
+			requiresHuman: false,
+			ok: true,
+		},
+	]);
+
+	assert.equal(report.failed, 1);
+	assert.equal(report.unresolvedFailures, 0);
+});
+
+test("usage report keeps active unresolved failures when no later success exists", () => {
+	const report = buildIduUsageReport([
+		{
+			version: 1,
+			id: "failed-agentlab-status",
+			timestamp: "2026-06-11T12:12:29.000Z",
+			projectId: "idu-pi",
+			surface: "mcp",
+			action: "idu_agentlab_review_status",
+			allowedToProceed: false,
+			requiresHuman: true,
+			ok: false,
+		},
+	]);
+
+	assert.equal(report.failed, 1);
+	assert.equal(report.unresolvedFailures, 1);
+});
+
 test("usage report uses newest timestamp instead of event order", () => {
 	const newer = new Date(Date.now() - 3 * 60_000).toISOString();
 	const older = new Date(Date.now() - 10 * 60_000).toISOString();

@@ -72,10 +72,30 @@ export type IduUsageReport = {
 	requiresHuman: number;
 	notAllowed: number;
 	failed: number;
+	unresolvedFailures: number;
 	topActions: { action: string; count: number }[];
 	topRecommendations: { recommendation: string; count: number }[];
 	recent: IduUsageEvent[];
 };
+
+type EventOrder = { timestampMs: number; sequence: number };
+
+function eventOrder(timestamp: string, sequence: number): EventOrder {
+	const timestampMs = Date.parse(timestamp);
+	return {
+		// Use a tuple, not timestamp arithmetic, so same-millisecond bursts remain deterministic.
+		timestampMs: Number.isFinite(timestampMs)
+			? timestampMs
+			: Number.NEGATIVE_INFINITY,
+		sequence,
+	};
+}
+
+function isSameOrAfterOrder(next: EventOrder, current: EventOrder): boolean {
+	if (next.timestampMs !== current.timestampMs)
+		return next.timestampMs > current.timestampMs;
+	return next.sequence >= current.sequence;
+}
 
 const SAFE_LABEL_RE = /[^A-Za-z0-9._:-]/gu;
 const MAX_LABEL_LENGTH = 96;
@@ -221,6 +241,11 @@ export function buildIduUsageReport(
 	let lastMcpActivityMs = Number.NEGATIVE_INFINITY;
 	let lastSupervisorContextPack: string | undefined;
 	let lastSupervisorContextPackMs = Number.NEGATIVE_INFINITY;
+	const unresolvedFailureByAction = new Map<
+		string,
+		{ order: EventOrder; failed: boolean }
+	>();
+	let eventSequence = 0;
 	for (const event of events) {
 		if (event.sessionId) sessions.add(event.sessionId);
 		const eventType = effectiveEventType(event);
@@ -229,6 +254,8 @@ export function buildIduUsageReport(
 			continue;
 		}
 		const eventMs = Date.parse(event.timestamp);
+		eventSequence += 1;
+		const order = eventOrder(event.timestamp, eventSequence);
 		if (Number.isFinite(eventMs) && eventMs > lastActivityMs) {
 			lastActivity = event.timestamp;
 			lastActivityMs = eventMs;
@@ -259,6 +286,16 @@ export function buildIduUsageReport(
 		if (event.requiresHuman === true) requiresHuman += 1;
 		if (event.allowedToProceed === false) notAllowed += 1;
 		if (event.ok === false) failed += 1;
+		if (typeof event.ok === "boolean") {
+			const failureKey = `${event.surface}:${event.action}`;
+			const current = unresolvedFailureByAction.get(failureKey);
+			if (!current || isSameOrAfterOrder(order, current.order)) {
+				unresolvedFailureByAction.set(failureKey, {
+					order,
+					failed: event.ok === false,
+				});
+			}
+		}
 		increment(byAction, event.action);
 		increment(byRecommendation, event.recommendation ?? "unknown");
 	}
@@ -282,6 +319,9 @@ export function buildIduUsageReport(
 		requiresHuman,
 		notAllowed,
 		failed,
+		unresolvedFailures: [...unresolvedFailureByAction.values()].filter(
+			(state) => state.failed,
+		).length,
 		topActions: topEntries(byAction, topLimit).map(([action, count]) => ({
 			action,
 			count,

@@ -3648,6 +3648,117 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	rmSync(root, { recursive: true, force: true });
 });
 
+test("idu_supervisor_self_maintenance_advisory ignores resolved historical AgentLab pressure", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-resolved-"));
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	mkdirSync(join(stateRoot, "reports"), { recursive: true });
+	const failedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+	const resolvedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+	writeFileSync(
+		join(stateRoot, "reports", "idu-usage-events.jsonl"),
+		[
+			JSON.stringify({
+				version: 1,
+				id: "usage-failed-agentlab-status",
+				timestamp: failedAt,
+				projectId: "idu-pi",
+				surface: "mcp",
+				action: "idu_agentlab_review_status",
+				ok: false,
+				allowedToProceed: false,
+				requiresHuman: true,
+			}),
+			JSON.stringify({
+				version: 1,
+				id: "usage-resolved-agentlab-status",
+				timestamp: resolvedAt,
+				projectId: "idu-pi",
+				surface: "mcp",
+				action: "idu_agentlab_review_status",
+				ok: true,
+				allowedToProceed: true,
+				requiresHuman: false,
+			}),
+		].join("\n") + "\n",
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "reports", "agentlab-effectiveness-events.jsonl"),
+		[
+			JSON.stringify({
+				version: 1,
+				id: "agentlab-stale-status",
+				timestamp: failedAt,
+				projectId: "idu-pi",
+				eventType: "status_checked",
+				source: "mcp",
+				outcome: "stale",
+				staleRequests: 1,
+				ok: false,
+			}),
+			JSON.stringify({
+				version: 1,
+				id: "agentlab-resolved-status",
+				timestamp: resolvedAt,
+				projectId: "idu-pi",
+				eventType: "status_checked",
+				source: "mcp",
+				staleRequests: 0,
+				ok: true,
+			}),
+		].join("\n") + "\n",
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "reports", "idu-supervisor-activity-events.jsonl"),
+		Array.from({ length: 5 }, (_, index) =>
+			JSON.stringify({
+				version: 1,
+				id: `supervisor-skipped-${index}`,
+				timestamp: resolvedAt,
+				projectId: "idu-pi",
+				eventType: "supervisor_hook",
+				origin: "supervisor_auto_hook",
+				trigger: "after_postflight",
+				status: "skipped",
+				reason: "not_enough_data",
+				active: true,
+			}),
+		).join("\n") + "\n",
+		"utf8",
+	);
+
+	const result = await callIduMcpTool(
+		"idu_supervisor_self_maintenance_advisory",
+		{},
+		{
+			runtimeFactory: () => fakeRuntime(),
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		totals: { usageFailures: number; agentLabStaleRequests: number };
+		signals: Array<{ category: string; evidenceRefs: string[] }>;
+	};
+	assert.equal(report.totals.usageFailures, 0);
+	assert.equal(report.totals.agentLabStaleRequests, 0);
+	const activity = report.signals.find(
+		(signal) => signal.category === "supervisor_activity_pressure",
+	);
+	assert.ok(activity);
+	assert.ok(
+		activity.evidenceRefs.some((ref) => ref === "idu-usage-events:failures=0"),
+	);
+	assert.ok(
+		activity.evidenceRefs.some(
+			(ref) => ref === "agentlab-review-requests:stale=0",
+		),
+	);
+	rmSync(root, { recursive: true, force: true });
+});
+
 test("idu_external_intelligence_report is allowlisted and advisory-only", async () => {
 	const root = mkdtempSync(join(tmpdir(), "idu-external-intelligence-mcp-"));
 	try {
