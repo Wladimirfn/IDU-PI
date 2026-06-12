@@ -18,14 +18,65 @@ export type BirthGeneralSpecSections = {
 	performanceCriteria: string[];
 };
 
+export type BirthGeneralSpecProvenance =
+	| "scan"
+	| "scan-empty"
+	| "model"
+	| "human";
+
+export type BirthGeneralSpecProvenanceMap = Record<
+	string,
+	BirthGeneralSpecProvenance
+>;
+
+export type BirthGeneralSpecEvidenceMap = Record<string, string[]>;
+
 export type BirthGeneralSpec = BirthGeneralSpecSections & {
 	version: 1;
 	projectId: string;
 	status: BirthGeneralSpecStatus;
 	derivedFrom: Array<"project-core" | "master-plan" | "prototype-master">;
+	/**
+	 * Content version for living-spec propagation. Pre-G0 specs omit this field
+	 * and normalize to 1. Distinct from the `version` schema field.
+	 */
+	specVersion?: number;
+	provenance?: BirthGeneralSpecProvenanceMap;
+	evidence?: BirthGeneralSpecEvidenceMap;
 	approvedBy?: string;
 	approvedAt?: string;
 };
+
+export type NormalizedBirthGeneralSpec = BirthGeneralSpec & {
+	specVersion: number;
+	provenance: BirthGeneralSpecProvenanceMap;
+	evidence: BirthGeneralSpecEvidenceMap;
+};
+
+export function normalizeBirthGeneralSpec(
+	raw: unknown,
+): NormalizedBirthGeneralSpec {
+	const spec = isRecord(raw) ? raw : {};
+	const rawSpecVersion = spec.specVersion;
+	const specVersion =
+		typeof rawSpecVersion === "number" && Number.isFinite(rawSpecVersion)
+			? rawSpecVersion
+			: 1;
+	return {
+		...(spec as BirthGeneralSpec),
+		specVersion,
+		provenance: isRecord(spec.provenance)
+			? (spec.provenance as BirthGeneralSpecProvenanceMap)
+			: {},
+		evidence: isRecord(spec.evidence)
+			? (spec.evidence as BirthGeneralSpecEvidenceMap)
+			: {},
+	};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export type BirthPrototypeCheckResult = {
 	ok: boolean;
