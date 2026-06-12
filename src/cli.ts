@@ -493,6 +493,7 @@ import {
 	runAutonomousAlertScheduledTick,
 	type AutonomousAlertScheduledTickResult,
 } from "./autonomous-alert-scheduler.js";
+import { emitStuckTaskEventsFromAlertReport } from "./autonomous-alert-engine-event-bridge.js";
 import {
 	appendAutonomousAlertDecision,
 	readAutonomousAlertEngineState,
@@ -3168,11 +3169,13 @@ function runCliAutonomousAlertScheduledTick(
 		);
 		return selfMaintenance;
 	};
+	const now = new Date();
 	const alertTickResult = runAutonomousAlertScheduledTick({
 		projectId: runtime.projectId,
 		projectPath: runtime.projectPath,
 		stateRoot: runtime.workspaceRoot,
 		iduActive: getIduSessionStatus(runtime.projectId).active,
+		now,
 		allowTaskCreation: options.allowTaskCreation === true,
 		loadPlan: () => {
 			if (!runtime.masterPlanReview) {
@@ -3212,6 +3215,14 @@ function runCliAutonomousAlertScheduledTick(
 			return { id: task.id };
 		},
 	});
+	if (alertTickResult.report) {
+		emitStuckTaskEventsFromAlertReport({
+			stateRoot: runtime.workspaceRoot,
+			projectId: runtime.projectId,
+			now,
+			report: alertTickResult.report,
+		});
+	}
 	// Trigger engine integration: opt-in via IDU_PI_TRIGGER_ENGINE=1
 	runTriggerEngineTickOptIn({
 		stateRoot: runtime.workspaceRoot,
@@ -3224,7 +3235,7 @@ function runCliAutonomousAlertScheduledTick(
 		stateRoot: runtime.workspaceRoot,
 		projectId: runtime.projectId,
 		iduActive: getIduSessionStatus(runtime.projectId).active,
-		now: new Date(),
+		now,
 	});
 	(
 		alertTickResult as unknown as { mcpContextPackAutoRefresh?: unknown }
