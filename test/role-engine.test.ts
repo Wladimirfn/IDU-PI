@@ -180,6 +180,42 @@ test("dispatch() finds roles that subscribe to a kind and calls them", async () 
 	assert.equal(result.fired[0]?.roleId, "supervisor-main");
 });
 
+test("dispatch() honors global enabled=false before invoking enabled roles", async () => {
+	const root = freshRoot();
+	let invokeCalled = false;
+
+	const roleMain = fakeRole("supervisor-main", {
+		subscribesTo: ["orchestrator_turn"],
+		invoke: async (input) => {
+			invokeCalled = true;
+			return {
+				roleId: "supervisor-main",
+				priority: 90,
+				ts: input.context.now.toISOString(),
+				advisory: "should not fire",
+				evidenceRefs: [],
+			};
+		},
+	});
+
+	const engine = new RoleEngine({
+		stateRoot: root,
+		projectId: "test",
+		router: {} as never,
+		repository: {} as never,
+		config: defaultConfig({ enabled: false }),
+		registry: { "supervisor-main": roleMain },
+		now: () => new Date("2026-01-01T00:00:00.000Z"),
+		appendAdvisory: () => {},
+	});
+
+	const result = await engine.onEvent(makeEvent("orchestrator_turn"));
+
+	assert.equal(invokeCalled, false);
+	assert.equal(result.fired.length, 0);
+	assert.equal(result.skippedByDisabled, 1);
+});
+
 // ---------------------------------------------------------------------------
 // 2. dispatch() honors shouldFire returning false (skips invoke)
 // ---------------------------------------------------------------------------

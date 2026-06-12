@@ -9,9 +9,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RoleAdvisory } from "../src/roles/index.js";
+import type { RoleEngineConfigPatch } from "../src/role-engine-config.js";
 import type { RoleEngineStatusReport } from "../src/cli-role-engine.js";
 import {
 	runIdOrchestratorAdvisoryCommand,
+	runIdRoleEngineCommand,
 	runIdRoleEngineStatusCommand,
 } from "../src/cli-role-engine.js";
 import type { CliRuntime } from "../src/cli.js";
@@ -22,6 +24,7 @@ function createMockRuntime(
 	advisories: RoleAdvisory[] = [],
 	statusReport?: RoleEngineStatusReport,
 ): CliRuntime {
+	let enabled = statusReport?.config.enabled ?? false;
 	const runtime = {
 		getOrchestratorAdvisory: (options?: {
 			roleId?: string;
@@ -59,7 +62,7 @@ function createMockRuntime(
 			if (statusReport) return statusReport;
 			return {
 				config: {
-					enabled: false,
+					enabled,
 					maxRoleInvocationsPerTurn: 50,
 					roleEnabled: {
 						"supervisor-main": false,
@@ -76,6 +79,27 @@ function createMockRuntime(
 				},
 			};
 		},
+		saveRoleEngineConfig: (patch: RoleEngineConfigPatch) => {
+			enabled = patch.enabled ?? enabled;
+			return {
+				enabled,
+				maxRoleInvocationsPerTurn: 50,
+				roleEnabled: {
+					"supervisor-main": false,
+					...patch.roleEnabled,
+				},
+				roleCooldownMs: {
+					"supervisor-main": 30000,
+				},
+			};
+		},
+		rebindRoleEngine: () => ({
+			projectId: "test",
+			stateRoot: "test-root",
+			enabled,
+			subscriptionCount: enabled ? 1 : 0,
+			rebound: false,
+		}),
 		formatRoleEngineStatus: (report: RoleEngineStatusReport) => {
 			return (
 				`Role Engine Status:\n` +
@@ -179,6 +203,19 @@ test("runIdOrchestratorAdvisoryCommand without filters returns the most recent a
 	assert.ok(result.includes("Second"));
 });
 
+test("runIdRoleEngineCommand enable toggles the global role engine flag", () => {
+	const runtime = createMockRuntime([]);
+	const result = runIdRoleEngineCommand(["enable"], runtime);
+	assert.ok(result.includes("state: enabled"));
+	assert.equal(runtime.getRoleEngineStatus().config.enabled, true);
+});
+
+test("runIdRoleEngineCommand status returns a status report", () => {
+	const runtime = createMockRuntime([]);
+	const result = runIdRoleEngineCommand(["status"], runtime);
+	assert.ok(result.includes("Role Engine Status"));
+});
+
 test("runIdRoleEngineStatusCommand returns a status report with config + lastFires + lastCapWarning + advisoryStreamSummary", () => {
 	const statusReport: RoleEngineStatusReport = {
 		config: {
@@ -227,12 +264,15 @@ test("createCliRuntime wires getRoleEngineStatus to the role-engine-config and o
 	assert.ok("advisoryStreamSummary" in result);
 });
 
-test("command-catalog.ts has entries for idu-orchestrator-advisory and idu-role-engine-status", () => {
+test("command-catalog.ts has entries for idu-orchestrator-advisory and role-engine commands", () => {
 	const advisoryCommand = CLI_COMMANDS.find((cmd) =>
 		cmd.command.includes("idu-orchestrator-advisory"),
 	);
 	const statusCommand = CLI_COMMANDS.find((cmd) =>
 		cmd.command.includes("idu-role-engine-status"),
+	);
+	const controlCommand = CLI_COMMANDS.find((cmd) =>
+		cmd.command.includes("idu-role-engine enable"),
 	);
 
 	assert.ok(
@@ -245,6 +285,12 @@ test("command-catalog.ts has entries for idu-orchestrator-advisory and idu-role-
 	assert.ok(statusCommand, "idu-role-engine-status should be in CLI_COMMANDS");
 	assert.ok(statusCommand.label);
 	assert.ok(statusCommand.command);
+	assert.ok(
+		controlCommand,
+		"idu-role-engine control should be in CLI_COMMANDS",
+	);
+	assert.ok(controlCommand.label);
+	assert.ok(controlCommand.command);
 });
 
 test("CLI dispatch handles idu-orchestrator-advisory and idu-role-engine-status by calling the new methods", () => {
