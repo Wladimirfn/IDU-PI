@@ -15,6 +15,7 @@ import {
 	createCliTask,
 	formatCliTaskResult,
 	rejectStructuredTaskById,
+	routeAlertDecisionsForDigest,
 	runCliCommand,
 	normalizeCliArgs,
 	type CliRuntime,
@@ -75,6 +76,13 @@ import {
 	resolveRoleEngineConfig,
 	saveRoleEngineConfig,
 } from "../src/role-engine-config.js";
+import {
+	appendDigestQueueEntry,
+	readDigestQueue,
+	readDigestSchedule,
+	saveDigestSchedule,
+} from "../src/digest.js";
+import { readPendingInjections } from "../src/injection-store.js";
 import { readTriggerEngineConfig } from "../src/trigger-engine-config.js";
 import type {
 	SkillDraftCreationResult,
@@ -118,6 +126,53 @@ async function withRuntime(
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+}
+
+function configureScheduledTickReady(
+	runtime: CliRuntime,
+	workspaceRoot: string,
+): void {
+	configureIduSessionStore({ workspaceRoot });
+	activateIduSession(runtime.projectId);
+	runtime.masterPlanReview = () =>
+		({
+			markdown: "# Plan Maestro Idu-pi\n",
+			plan: {
+				status: "approved",
+				inferredObjective:
+					"Idu-pi supervises the Pi orchestrator with evidence.",
+				executiveSummary: "Supervisor/auditor summary",
+				criticalRisks: [],
+			},
+		}) as any;
+}
+
+function alertDecision(overrides: Record<string, unknown> = {}): any {
+	return {
+		version: 1,
+		id: "alert-1",
+		generatedAt: "2026-06-12T12:00:00.000Z",
+		projectId: "pi-telegram-bridge",
+		authority: "advisory",
+		domain: "repeated_bug",
+		severity: "warning",
+		confidence: 0.85,
+		evidenceRefs: ["test:evidence"],
+		rawHonesty: true,
+		uncomfortableTruths: [
+			{
+				claim: "Non-critical repeated issue",
+				evidenceRefs: ["test:evidence"],
+				impact: "Review load increases.",
+				requiredNext: "Review during digest.",
+			},
+		],
+		recommendedAction: "report_only",
+		cooldownKey: "test:alert-1",
+		requiresHuman: false,
+		forbiddenActions: [],
+		...overrides,
+	};
 }
 
 function fakeConnection(projectPath: string): ProjectConnectionReport {
@@ -1875,19 +1930,7 @@ test("CLI automaticov1 cycle blocks when execution readiness is missing", async 
 
 test("CLI scheduled alert tick creates tasks only with explicit allow-task-creation", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
-		configureIduSessionStore({ workspaceRoot });
-		activateIduSession(runtime.projectId);
-		runtime.masterPlanReview = () =>
-			({
-				markdown: "# Plan Maestro Idu-pi\n",
-				plan: {
-					status: "approved",
-					inferredObjective:
-						"Idu-pi supervises the Pi orchestrator with evidence.",
-					executiveSummary: "Supervisor/auditor summary",
-					criticalRisks: [],
-				},
-			}) as any;
+		configureScheduledTickReady(runtime, workspaceRoot);
 		for (let index = 0; index < 4; index += 1) {
 			runtime.createTask("bug", `scheduled backlog repeated ${index}`);
 		}
@@ -1900,6 +1943,135 @@ test("CLI scheduled alert tick creates tasks only with explicit allow-task-creat
 		assert.match(result.stdout, /allowTaskCreation: true/u);
 		assert.match(result.stdout, /Tareas creadas: 1/u);
 		assert.ok((runtime.listTasks?.().length ?? 0) > 4);
+	});
+});
+
+test("digest alert routing queues non-critical decisions without immediate route", async () => {
+	await withRuntime((_runtime, { workspaceRoot }) => {
+		const now = new Date("2026-06-12T12:00:00.000Z");
+		const decisions = Array.from({ length: 5 }, (_, index) =>
+			alertDecision({
+				id: `alert-non-critical-${index}`,
+				cooldownKey: `test:non-critical-${index}`,
+			}),
+		);
+
+		const result = routeAlertDecisionsForDigest({
+			stateRoot: workspaceRoot,
+			now,
+			decisions,
+		});
+
+		const queue = readDigestQueue(workspaceRoot);
+		const injections = readPendingInjections(workspaceRoot);
+		assert.deepEqual(result, {
+			processedCount: 5,
+			immediateCount: 0,
+			digestCount: 5,
+		});
+		assert.equal(queue.length, 5);
+		assert.equal(injections.length, 5);
+		assert.equal(
+			injections.every(
+				(injection) => injection.triggerId === "autonomous_alert_digest_queued",
+			),
+			true,
+		);
+	});
+});
+
+test("digest alert routing immediately injects security and high-risk decisions", async () => {
+	await withRuntime((_runtime, { workspaceRoot }) => {
+		const now = new Date("2026-06-12T12:00:00.000Z");
+		const result = routeAlertDecisionsForDigest({
+			stateRoot: workspaceRoot,
+			now,
+			decisions: [
+				alertDecision({
+					id: "alert-security",
+					domain: "security",
+					recommendedAction: "ask_human",
+					requiresHuman: true,
+				}),
+				alertDecision({
+					id: "alert-high",
+					severity: "high",
+					recommendedAction: "ask_human",
+					requiresHuman: true,
+				}),
+			],
+		});
+
+		const queue = readDigestQueue(workspaceRoot);
+		const injections = readPendingInjections(workspaceRoot);
+		assert.deepEqual(result, {
+			processedCount: 2,
+			immediateCount: 2,
+			digestCount: 0,
+		});
+		assert.equal(queue.length, 0);
+		assert.equal(injections.length, 2);
+		assert.equal(
+			injections.every(
+				(injection) => injection.triggerId === "autonomous_alert_immediate",
+			),
+			true,
+		);
+	});
+});
+
+test("CLI scheduled alert tick flushes queued digest with best-effort notify", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureScheduledTickReady(runtime, workspaceRoot);
+		runtime.digestNotify = () => {
+			throw new Error("telegram down");
+		};
+		appendDigestQueueEntry(workspaceRoot, {
+			id: "queued-signal-1",
+			kind: "task_stuck",
+			domain: "stale_work",
+			severity: "warning",
+			riskLevel: "medium",
+			summary: "Queued non-critical signal",
+			requiredAction: "Review in digest",
+			evidenceRefs: ["test:queued-signal-1"],
+		});
+		saveDigestSchedule(workspaceRoot, {
+			version: 1,
+			slotsLocal: ["00:00"],
+		});
+
+		const result = await runCliCommand(["alerts", "scheduled-tick"], runtime);
+
+		const queue = readDigestQueue(workspaceRoot);
+		const schedule = readDigestSchedule(workspaceRoot);
+		const digestInjections = readPendingInjections(workspaceRoot).filter(
+			(injection) => injection.triggerId === "non_critical_digest",
+		);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /status: ran/u);
+		assert.equal(queue.length, 0);
+		assert.equal(typeof schedule.lastFlushAt, "string");
+		assert.equal(digestInjections.length, 1);
+	});
+});
+
+test("CLI scheduled alert tick does not emit empty digest", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		configureScheduledTickReady(runtime, workspaceRoot);
+		saveDigestSchedule(workspaceRoot, {
+			version: 1,
+			slotsLocal: ["00:00"],
+		});
+
+		const result = await runCliCommand(["alerts", "scheduled-tick"], runtime);
+
+		const digestInjections = readPendingInjections(workspaceRoot).filter(
+			(injection) => injection.triggerId === "non_critical_digest",
+		);
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /status: ran/u);
+		assert.equal(digestInjections.length, 0);
 	});
 });
 
