@@ -1105,6 +1105,11 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 			"corepack pnpm cli -- idu-birth-general-spec --spec-file general-spec.json",
 	},
 	{
+		label: "Birth general spec derive",
+		command:
+			"corepack pnpm cli -- idu-birth-general-spec-derive --ui-file src/App.tsx",
+	},
+	{
 		label: "Pending injections",
 		command: "corepack pnpm cli -- idu-pending-injections",
 	},

@@ -85,6 +85,7 @@ import {
 	type BirthRepoPlan,
 } from "./birth-runtime.js";
 import { approveBirthGeneralSpec } from "./birth-general-spec-runtime.js";
+import { runVisualDerivation } from "./birth-general-spec-derive.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
@@ -213,6 +214,7 @@ export type IduMcpToolName =
 	| "idu_birth_repo_plan"
 	| "idu_birth_prototype_master"
 	| "idu_birth_general_spec"
+	| "idu_birth_general_spec_derive"
 	| "idu_pending_injections"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
@@ -703,6 +705,16 @@ const TOOLS: IduMcpToolDefinition[] = [
 				"General Spec sections: navigation, baseComponents, pageStructureRules, dataRules, interactionRules, motionRules, accessibilityCriteria, performanceCriteria.",
 			),
 			approvedBy: optionalString("Identificador del aprobador humano."),
+		},
+	),
+	tool(
+		"idu_birth_general_spec_derive",
+		"Ejecuta derivación visual owner-invoked para General Spec usando agentlab-ui-ux. No se dispara automáticamente desde approveBirthGeneralSpec.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			uiFiles: optionalStringArray(
+				"Archivos UI permitidos para evidencia file:line del patch visual.",
+			),
 		},
 	),
 	tool(
@@ -3773,6 +3785,42 @@ async function dispatchTool(
 				safeNotes: [
 					...resolution.safeNotes,
 					"General Spec approval is explicit owner input; no derivation, model call, or Telegram surface was used.",
+					"Only stateRoot/birth/general-spec.json is written.",
+				],
+			});
+		}
+		case "idu_birth_general_spec_derive": {
+			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary:
+						"General Spec derivation requires an active project stateRoot.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["active project stateRoot is missing"],
+				});
+			}
+			const params = args as JsonObject;
+			const promptForRole = runtime.promptForRole;
+			const result = await runVisualDerivation({
+				stateRoot: resolution.stateRoot,
+				uiFiles: stringListArg(params, "uiFiles"),
+				promptForRole:
+					promptForRole ?? (async () => ({ ok: false, output: "" })),
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `birth_general_spec_derive applied=${result.appliedCount}`,
+				data: { derivation: result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"General Spec visual derivation is owner-invoked only; approveBirthGeneralSpec does not auto-trigger it.",
 					"Only stateRoot/birth/general-spec.json is written.",
 				],
 			});
