@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
+import type { BirthGeneralSpec } from "./birth-general-spec.js";
 
 export type BirthExistingScanObserved = {
 	packageManager: "pnpm" | "yarn" | "npm" | "unknown";
@@ -43,6 +44,7 @@ export type BirthDetectedSpecs = {
 		visualPatterns: string[];
 		testPatterns: string[];
 	};
+	generalSpecDraft: BirthGeneralSpec;
 	contradictions: string[];
 	approval: BirthExistingScanApproval;
 };
@@ -195,8 +197,55 @@ function deriveDetectedSpecs(scan: BirthExistingScan): BirthDetectedSpecs {
 			visualPatterns: [],
 			testPatterns,
 		},
+		generalSpecDraft: buildScanGeneralSpecDraft({
+			projectId: scan.projectId,
+			stack,
+			architecturePatterns,
+			testPatterns,
+		}),
 		contradictions: [],
 		approval: { status: "draft" },
+	};
+}
+
+function buildScanGeneralSpecDraft(input: {
+	projectId: string;
+	stack: string[];
+	architecturePatterns: string[];
+	testPatterns: string[];
+}): BirthGeneralSpec {
+	return {
+		version: 1,
+		projectId: input.projectId,
+		status: "draft",
+		derivedFrom: ["project-core", "master-plan", "prototype-master"],
+		specVersion: 1,
+		navigation: [],
+		baseComponents:
+			input.stack.length > 0 ? input.stack : ["unclassified_stack"],
+		pageStructureRules:
+			input.architecturePatterns.length > 0
+				? input.architecturePatterns
+				: ["scan_detected_no_architecture_patterns"],
+		dataRules:
+			input.testPatterns.length > 0
+				? input.testPatterns
+				: ["scan_detected_no_test_patterns"],
+		interactionRules: [],
+		motionRules: [],
+		accessibilityCriteria: [],
+		performanceCriteria: [],
+		provenance: {
+			baseComponents: "scan",
+			pageStructureRules: "scan",
+			dataRules: "scan",
+			navigation: "scan-empty",
+			interactionRules: "scan-empty",
+			motionRules: "scan-empty",
+			accessibilityCriteria: "scan-empty",
+			performanceCriteria: "scan-empty",
+		},
+		evidence: {},
 	};
 }
 
