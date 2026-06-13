@@ -1104,6 +1104,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_model_invocation_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_skill_rating"));
 	assert.ok(tools.some((tool) => tool.name === "idu_birth_general_spec"));
+	assert.ok(
+		tools.some((tool) => tool.name === "idu_birth_general_spec_derive"),
+	);
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_trigger"));
 	assert.ok(tools.some((tool) => tool.name === "idu_trigger_engine"));
 	assert.ok(tools.some((tool) => tool.name === "idu_role_engine_control"));
@@ -1132,7 +1135,89 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 78);
+	assert.equal(tools.length, 79);
+});
+
+test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-general-spec-derive-"));
+	seedMcpBirthPrerequisites(stateRoot);
+	writeFileSync(
+		join(stateRoot, "birth", "general-spec.json"),
+		JSON.stringify(
+			{
+				version: 1,
+				projectId: "sistema_de_mantencion",
+				status: "approved",
+				derivedFrom: ["project-core", "master-plan", "prototype-master"],
+				specVersion: 1,
+				navigation: [],
+				baseComponents: ["Button"],
+				pageStructureRules: ["layout"],
+				dataRules: ["data"],
+				interactionRules: [],
+				motionRules: [],
+				accessibilityCriteria: [],
+				performanceCriteria: [],
+				provenance: { motionRules: "scan-empty" },
+				evidence: {},
+			},
+			null,
+			2,
+		),
+		"utf8",
+	);
+	const runtime = {
+		...fakeRuntime(),
+		promptForRole: async () => ({
+			ok: true,
+			output: JSON.stringify({
+				motionRules: [
+					{
+						value: "Use opacity transitions only.",
+						evidence: ["src/App.tsx:3"],
+					},
+				],
+			}),
+		}),
+	};
+
+	const result = await callIduMcpTool(
+		"idu_birth_general_spec_derive",
+		{ uiFiles: ["src/App.tsx"] },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+
+	assert.equal(result.ok, true);
+	assert.equal(result.tool, "idu_birth_general_spec_derive");
+	assert.match(result.summary, /applied=1/u);
+	const persisted = JSON.parse(
+		readFileSync(join(stateRoot, "birth", "general-spec.json"), "utf8"),
+	) as { motionRules?: string[]; provenance?: Record<string, string> };
+	assert.deepEqual(persisted.motionRules, ["Use opacity transitions only."]);
+	assert.equal(persisted.provenance?.motionRules, "model");
+});
+
+test("idu_birth_general_spec_derive MCP tool returns clear error without enrolled stateRoot", async () => {
+	const result = await callIduMcpTool(
+		"idu_birth_general_spec_derive",
+		{},
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => ({
+				status: "unregistered_project",
+				projectId: "missing",
+				projectPath: "C:/missing",
+				safeNotes: [],
+				errors: ["project is not enrolled"],
+			}),
+		},
+	);
+
+	assert.equal(result.ok, false);
+	assert.match(result.summary, /Proyecto no registrado|active project/i);
 });
 
 test("idu_birth_general_spec MCP tool approves spec on enrolled stateRoot", async () => {

@@ -3305,6 +3305,77 @@ test("idu-birth-general-spec approves General Spec on enrolled project path", as
 	});
 });
 
+test("idu-birth-general-spec-derive updates visual fields on enrolled project path", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		seedBirthPrerequisites(workspaceRoot);
+		writeFileSync(
+			join(workspaceRoot, "birth", "general-spec.json"),
+			JSON.stringify(
+				{
+					version: 1,
+					projectId: runtime.projectId,
+					status: "approved",
+					derivedFrom: ["project-core", "master-plan", "prototype-master"],
+					specVersion: 1,
+					navigation: [],
+					baseComponents: ["Button"],
+					pageStructureRules: ["layout"],
+					dataRules: ["data"],
+					interactionRules: [],
+					motionRules: [],
+					accessibilityCriteria: [],
+					performanceCriteria: [],
+					provenance: { motionRules: "scan-empty" },
+					evidence: {},
+				},
+				null,
+				2,
+			),
+			"utf8",
+		);
+		const deriveRuntime = {
+			...runtime,
+			promptForRole: async () => ({
+				ok: true,
+				output: JSON.stringify({
+					motionRules: [
+						{
+							value: "Use opacity transitions only.",
+							evidence: ["src/App.tsx:3"],
+						},
+					],
+				}),
+			}),
+		};
+
+		const result = await runCliCommand(
+			["idu-birth-general-spec-derive", "--ui-file", "src/App.tsx"],
+			deriveRuntime,
+		);
+
+		assert.equal(result.exitCode, 0);
+		assert.match(result.stdout, /Birth General Spec Derivation/u);
+		assert.match(result.stdout, /applied: 1/u);
+		const persisted = JSON.parse(
+			readFileSync(join(workspaceRoot, "birth", "general-spec.json"), "utf8"),
+		) as { motionRules?: string[]; provenance?: Record<string, string> };
+		assert.deepEqual(persisted.motionRules, ["Use opacity transitions only."]);
+		assert.equal(persisted.provenance?.motionRules, "model");
+	});
+});
+
+test("idu-birth-general-spec-derive reports a clear no-project error", async () => {
+	await withRuntime(async (runtime) => {
+		const result = await runCliCommand(["idu-birth-general-spec-derive"], {
+			...runtime,
+			workspaceRoot: "",
+		});
+
+		assert.equal(result.exitCode, 1);
+		assert.match(result.stderr, /active project/i);
+	});
+});
+
 test("idu-birth-general-spec reports a clear no-project error", async () => {
 	await withRuntime(async (runtime) => {
 		const result = await runCliCommand(["idu-birth-general-spec", "{}"], {
@@ -3324,6 +3395,7 @@ test("cli help no requiere runtime ni configuración", async () => {
 	assert.match(result.stdout, /Uso: idu-pi/u);
 	assert.match(result.stdout, /idu-pi idu start/u);
 	assert.match(result.stdout, /idu-pi idu-birth-general-spec/u);
+	assert.match(result.stdout, /idu-pi idu-birth-general-spec-derive/u);
 	assert.equal(result.stderr, "");
 });
 

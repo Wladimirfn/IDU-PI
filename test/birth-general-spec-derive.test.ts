@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { readBirthArtifact } from "../src/birth-artifacts.js";
 import {
 	applyVisualDerivation,
 	buildStage2Prompt,
 	runVisualDerivation,
 } from "../src/birth-general-spec-derive.js";
+import { approveBirthGeneralSpec } from "../src/birth-general-spec-runtime.js";
 import type { NormalizedBirthGeneralSpec } from "../src/birth-general-spec.js";
 
 function baseSpec(): NormalizedBirthGeneralSpec {
@@ -176,4 +181,71 @@ test("buildStage2Prompt names visual fields and UI files", () => {
 	assert.match(prompt, /src\/App\.tsx/u);
 	assert.match(prompt, /src\/Button\.tsx/u);
 	assert.match(prompt, /file:line/u);
+});
+
+test("approveBirthGeneralSpec does not auto-trigger stage 2 derivation", () => {
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-g2-no-auto-"));
+	try {
+		approveBirthGeneralSpec({
+			projectId: "demo",
+			stateRoot,
+			approvedBy: "owner",
+			sections: {
+				navigation: ["manual nav"],
+				baseComponents: ["Button"],
+				pageStructureRules: ["layout"],
+				dataRules: ["data"],
+				interactionRules: ["click"],
+				motionRules: ["motion"],
+				accessibilityCriteria: ["a11y"],
+				performanceCriteria: ["perf"],
+			},
+		});
+		const persisted = readBirthArtifact<NormalizedBirthGeneralSpec>(
+			stateRoot,
+			"general-spec",
+		);
+		assert.ok(persisted);
+		assert.deepEqual(persisted.provenance, {});
+		assert.deepEqual(persisted.evidence, {});
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
+
+test("runVisualDerivation writes updated spec to stateRoot when stateRoot is provided", async () => {
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-g2-write-"));
+	try {
+		mkdirSync(join(stateRoot, "birth"), { recursive: true });
+		writeFileSync(
+			join(stateRoot, "birth", "general-spec.json"),
+			`${JSON.stringify(baseSpec(), null, 2)}\n`,
+			"utf8",
+		);
+		const result = await runVisualDerivation({
+			stateRoot,
+			uiFiles: ["src/Button.tsx"],
+			promptForRole: async () => ({
+				ok: true,
+				output: JSON.stringify({
+					motionRules: [
+						{
+							value: "Use opacity transitions only.",
+							evidence: ["src/Button.tsx:7"],
+						},
+					],
+				}),
+			}),
+		});
+
+		assert.equal(result.appliedCount, 1);
+		const persisted = readBirthArtifact<NormalizedBirthGeneralSpec>(
+			stateRoot,
+			"general-spec",
+		);
+		assert.deepEqual(persisted?.motionRules, ["Use opacity transitions only."]);
+		assert.equal(persisted?.provenance.motionRules, "model");
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
 });

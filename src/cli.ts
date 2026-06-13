@@ -180,6 +180,11 @@ import {
 	type ApproveBirthGeneralSpecResult,
 } from "./birth-general-spec-runtime.js";
 import {
+	runVisualDerivation,
+	type VisualDerivationPrompt,
+	type VisualDerivationResult,
+} from "./birth-general-spec-derive.js";
+import {
 	handleBirthPrototypeMaster,
 	type BirthPrototypeMasterEnvelope,
 } from "./birth-prototype-runtime.js";
@@ -563,6 +568,7 @@ export type CliRuntime = {
 	labDbPath?: string;
 	digestNotify?: (text: string) => void;
 	sessionStatePath?: string;
+	promptForRole?: VisualDerivationPrompt;
 	inspectConnection: () => ProjectConnectionReport;
 	formatConnection: (report: ProjectConnectionReport) => string;
 	formatDashboard: (report: ProjectConnectionReport) => string;
@@ -978,6 +984,12 @@ export function createCliRuntime(
 		projectPath: activeProject.path,
 		workspaceRoot: runtimeWorkspaceRoot,
 		...(projectStatePaths ? { labDbPath } : {}),
+		promptForRole: (role, message) =>
+			agentRouter.promptForRole(role, message, {
+				projectId: activeProject.id,
+				stateRoot: runtimeStateRoot,
+				invocationSink: labDbRepository.appendInvocation.bind(labDbRepository),
+			}),
 		...(projectStatePaths?.sessionStatePath
 			? { sessionStatePath: projectStatePaths.sessionStatePath }
 			: {}),
@@ -2653,6 +2665,22 @@ export async function runCliCommand(
 					stateRoot: activeRuntime.workspaceRoot,
 				});
 				return ok(formatBirthGeneralSpec(result, status));
+			}
+			case "idu-birth-general-spec-derive":
+			case "birth-general-spec-derive": {
+				if (!activeRuntime.workspaceRoot) {
+					return fail(
+						"General Spec derivation requires an active project stateRoot.",
+					);
+				}
+				const promptForRole = activeRuntime.promptForRole;
+				const result = await runVisualDerivation({
+					stateRoot: activeRuntime.workspaceRoot,
+					uiFiles: parseUiFiles(rest),
+					promptForRole:
+						promptForRole ?? (async () => ({ ok: false, output: "" })),
+				});
+				return ok(formatBirthGeneralSpecDerivation(result));
 			}
 			case "idu-birth-prototype-master":
 			case "birth-prototype-master": {
@@ -4394,6 +4422,7 @@ export function helpText(): string {
 		"  idu-pi idu-source-refresh",
 		"  idu-pi idu-onboard-project",
 		"  idu-pi idu-birth-general-spec --spec-file <general-spec.json>",
+		"  idu-pi idu-birth-general-spec-derive --ui-file src/App.tsx",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
 		"  idu-pi idu-trigger-engine enable|disable|status      # opt-in persistente del trigger engine",
@@ -6360,6 +6389,42 @@ function formatBirthGeneralSpec(
 	lines.push(`approvedBy: ${result.generalSpec.approvedBy ?? "—"}`);
 	lines.push("");
 	lines.push(formatBirthStatus(status));
+	return lines.join("\n");
+}
+
+function parseUiFiles(parts: string[]): string[] {
+	const files: string[] = [];
+	for (let index = 0; index < parts.length; index++) {
+		const part = parts[index];
+		if (part === "--ui-file") {
+			const file = parts[index + 1];
+			if (file) files.push(file);
+			index++;
+		} else if (part === "--ui-files") {
+			const value = parts[index + 1];
+			if (value)
+				files.push(
+					...value
+						.split(",")
+						.map((item) => item.trim())
+						.filter(Boolean),
+				);
+			index++;
+		}
+	}
+	return files;
+}
+
+function formatBirthGeneralSpecDerivation(
+	result: VisualDerivationResult,
+): string {
+	const lines: string[] = [];
+	lines.push("Birth General Spec Derivation");
+	lines.push(`applied: ${result.appliedCount}`);
+	lines.push(`dropped: ${result.droppedCount}`);
+	if (result.routerFallbackWarning) {
+		lines.push(`warning: ${result.routerFallbackWarning}`);
+	}
 	return lines.join("\n");
 }
 
