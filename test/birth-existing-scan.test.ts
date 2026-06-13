@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { scanExistingProject } from "../src/birth-existing-scan.js";
+import type { NormalizedBirthGeneralSpec } from "../src/birth-general-spec.js";
 
 function makeFixture(): string {
 	const root = mkdtempSync(join(tmpdir(), "idu-birth-scan-"));
@@ -103,6 +104,74 @@ test("scanExistingProject does not mark Project Core or Master Plan as approved"
 		assert.equal(result.detectedSpecs.approval.status, "draft");
 		// The scan is evidence, not approval
 		assert.equal(result.detectedSpecs.status, "draft");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("scanExistingProject emits a General Spec draft with scan-empty visual provenance", () => {
+	const root = makeFixture();
+	try {
+		const result = scanExistingProject({
+			projectPath: root,
+			projectId: "fixture",
+		});
+		const detected = result.detectedSpecs as typeof result.detectedSpecs & {
+			generalSpecDraft?: NormalizedBirthGeneralSpec;
+		};
+		const spec = detected.generalSpecDraft;
+		assert.ok(spec, "expected detected specs to include generalSpecDraft");
+		assert.equal(spec.specVersion, 1);
+		assert.ok(
+			spec.baseComponents.length > 0,
+			"expected evidence-backed base components",
+		);
+		assert.ok(
+			spec.pageStructureRules.length > 0,
+			"expected evidence-backed page structure rules",
+		);
+		assert.ok(spec.dataRules.length > 0, "expected evidence-backed data rules");
+		for (const field of [
+			"navigation",
+			"interactionRules",
+			"motionRules",
+			"accessibilityCriteria",
+			"performanceCriteria",
+		] as const) {
+			assert.deepEqual(
+				spec[field],
+				[],
+				`${field} should stay empty at scan stage`,
+			);
+			assert.equal(
+				spec.provenance[field],
+				"scan-empty",
+				`${field} should be distinguishably empty`,
+			);
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("scanExistingProject keeps detectedSpecs fields additive while adding General Spec draft", () => {
+	const root = makeFixture();
+	try {
+		const result = scanExistingProject({
+			projectPath: root,
+			projectId: "fixture",
+		});
+		assert.ok(Array.isArray(result.detectedSpecs.detected.stack));
+		assert.ok(
+			Array.isArray(result.detectedSpecs.detected.architecturePatterns),
+		);
+		assert.ok(Array.isArray(result.detectedSpecs.detected.visualPatterns));
+		assert.ok(Array.isArray(result.detectedSpecs.detected.testPatterns));
+		assert.deepEqual(result.detectedSpecs.detected.visualPatterns, []);
+		const detected = result.detectedSpecs as typeof result.detectedSpecs & {
+			generalSpecDraft?: NormalizedBirthGeneralSpec;
+		};
+		assert.ok(detected.generalSpecDraft);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
