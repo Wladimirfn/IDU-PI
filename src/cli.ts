@@ -2655,7 +2655,7 @@ export async function runCliCommand(
 					);
 				}
 				const input = parseBirthGeneralSpecCliInput(rest);
-				const result = approveBirthGeneralSpec({
+				const result = await approveBirthGeneralSpec({
 					projectId: activeRuntime.projectId,
 					stateRoot: activeRuntime.workspaceRoot,
 					sections: input.sections,

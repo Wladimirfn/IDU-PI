@@ -3800,7 +3800,7 @@ async function dispatchTool(
 			}
 			const params = args as JsonObject;
 			const sections = parseGeneralSpecSectionsArg(params.sections);
-			const birth = approveBirthGeneralSpec({
+			const birth = await approveBirthGeneralSpec({
 				projectId: runtime.projectId,
 				stateRoot: resolution.stateRoot,
 				sections,
