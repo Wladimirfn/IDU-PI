@@ -1135,7 +1135,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 79);
+	assert.equal(tools.length, 81);
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {
