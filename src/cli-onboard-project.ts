@@ -1,21 +1,32 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { projectEnroll } from "./idu-installer.js";
 import { runBibliotecarioInit } from "./cli-bibliotecario-init.js";
 import { enableSupervisorTrigger } from "./supervisor-trigger.js";
 import { getSourceLibraryStatus } from "./source-library.js";
-import { runIduPrepare, type IduPrepareResult } from "./idu-prepare.js";
+import { writeBirthArtifact } from "./birth-artifacts.js";
+import { scanExistingProject } from "./birth-existing-scan.js";
+import { inspectProjectConnection } from "./project-connection.js";
+import {
+	inferMission,
+	persistBlueprint,
+	type BlueprintArtifact,
+	type MissionDraft,
+	type ProjectDocs,
+} from "./genesis-mission.js";
 import { safeProjectStateId } from "./project-state.js";
-import type { ProjectConnectionReport } from "./project-connection.js";
-import type { ProjectFlows } from "./project-flows.js";
-import type { ProjectPostflightReport } from "./project-postflight.js";
+import type { ProjectEntry } from "./projects.js";
+import type { ProjectRegistry } from "./projects.js";
 
 export type OnboardProjectStepId =
 	| "projectEnroll"
 	| "runBibliotecarioInit"
 	| "enableSupervisorTrigger"
 	| "readSourceLibraryStatus"
-	| "runPrepare";
+	| "scanExistingProject"
+	| "inspectConnection"
+	| "inferMission"
+	| "persistBlueprint";
 
 export type OnboardProjectStep = {
 	id: OnboardProjectStepId;
@@ -25,12 +36,18 @@ export type OnboardProjectStep = {
 	error?: string;
 };
 
+export type OnboardConfirmMission = {
+	owner: string;
+	now?: () => Date;
+};
+
 export type OnboardProjectOptions = {
 	projectPath?: string;
 	workspaceRoot?: string;
 	allowedRoots?: string[];
 	registryPath?: string;
 	skipTriggerEnable?: boolean;
+	confirmMission?: OnboardConfirmMission;
 	now?: () => Date;
 };
 
@@ -42,7 +59,11 @@ export type OnboardProjectReport = {
 	projectPath: string;
 	steps: OnboardProjectStep[];
 	errors: string[];
+	missionDraft?: MissionDraft;
+	blueprint?: BlueprintArtifact;
 };
+
+const MAX_README_BYTES = 16_000;
 
 export function runOnboardProject(
 	stateRoot: string,
@@ -134,18 +155,75 @@ export function runOnboardProject(
 		};
 	});
 
-	recordStep(steps, "runPrepare", () => {
-		const result = runPrepare({
-			stateRoot: resolvedStateRoot,
-			projectId: normalizedProjectId,
+	let scanResult: ReturnType<typeof scanExistingProject> | undefined;
+	recordStep(steps, "scanExistingProject", () => {
+		scanResult = scanExistingProject({
 			projectPath,
+			projectId: normalizedProjectId,
 		});
-		if (result.errors.length > 0) throw new Error(result.errors.join("; "));
+		writeBirthArtifact(resolvedStateRoot, "existing-scan", scanResult.scan);
+		writeBirthArtifact(
+			resolvedStateRoot,
+			"detected-specs",
+			scanResult.detectedSpecs,
+		);
 		return {
-			summary: result.recommendedNext,
-			data: result,
+			summary: `scan ${scanResult.scan.scanId}: ${scanResult.scan.observed.frameworks.length} frameworks, ${scanResult.scan.observed.tests.length} test files`,
+			data: scanResult,
 		};
 	});
+
+	recordStep(steps, "inspectConnection", () => {
+		const registry = loadRegistryQuiet(registryPath);
+		const report = inspectProjectConnection({
+			registry,
+			defaultCwd: projectPath,
+			allowedRoots,
+			workspaceRoot,
+			stateRoot: resolvedStateRoot,
+			projectId: normalizedProjectId,
+			now: options.now,
+		});
+		return {
+			summary: `connection status=${report.status} readiness=${report.readiness} config=${report.configStatus}`,
+			data: report,
+		};
+	});
+
+	const docs = scanResult ? readProjectDocs(projectPath) : emptyProjectDocs();
+	const missionDraft: MissionDraft | undefined = scanResult
+		? (() => {
+				const draft = inferMission(scanResult, docs);
+				recordStep(steps, "inferMission", () => ({
+					summary: `mission draft for ${draft.projectId}: ${draft.unbreakableRules.length} rules`,
+					data: draft,
+				}));
+				writeBirthArtifact(resolvedStateRoot, "mission-draft", draft);
+				return draft;
+			})()
+		: undefined;
+
+	let blueprint: BlueprintArtifact | undefined;
+	if (missionDraft && options.confirmMission) {
+		const { owner, now } = options.confirmMission;
+		recordStep(steps, "persistBlueprint", () => {
+			const next: BlueprintArtifact = {
+				version: 1,
+				projectId: missionDraft.projectId,
+				objective: missionDraft.objective,
+				unbreakableRules: missionDraft.unbreakableRules,
+				hierarchy: missionDraft.hierarchy,
+				confirmedBy: owner,
+				confirmedAt: (now?.() ?? new Date()).toISOString(),
+			};
+			persistBlueprint(resolvedStateRoot, next);
+			blueprint = next;
+			return {
+				summary: `blueprint confirmed by ${owner}`,
+				data: next,
+			};
+		});
+	}
 
 	const errors = steps
 		.filter((step) => step.status === "failed")
@@ -158,6 +236,8 @@ export function runOnboardProject(
 		projectPath,
 		steps,
 		errors,
+		missionDraft,
+		blueprint,
 	};
 }
 
@@ -195,117 +275,102 @@ function inferWorkspaceRoot(stateRoot: string, projectId: string): string {
 	return stateRoot;
 }
 
-function runPrepare(input: {
-	stateRoot: string;
-	projectId: string;
-	projectPath: string;
-}): IduPrepareResult {
-	const reportsPath = join(input.stateRoot, "reports");
-	mkdirSync(reportsPath, { recursive: true });
-	const flows = emptyProjectFlows();
-	return runIduPrepare({
-		projectId: input.projectId,
-		projectPath: input.projectPath,
-		reportsPath,
-		inspectConnection: () => connectionReport(input),
-		initProjectConfig: () => ({
-			projectPath: input.projectPath,
-			projectName: input.projectId,
-			created: [],
-			existing: [],
-		}),
-		inspectProjectMap: () => ({ ok: true }),
-		loadProjectFlows: () => flows,
-		scanProjectMap: () => ({ ok: true }),
-		suggestProjectFlows: () => ({
-			screens: [],
-			uiElements: [],
-			dataStores: [],
-			flows: [],
-		}),
-		draftProjectFlows: () => ({
-			path: join(reportsPath, "onboard-project-flows-draft.json"),
-		}),
-		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
-		postflight: () => postflightReport(),
-		createStructuredTask: () => ({ id: "onboard-project-lab-review" }),
-	});
+function loadRegistryQuiet(registryPath: string): ProjectRegistry {
+	try {
+		if (!existsSync(registryPath)) {
+			return { activeProjectId: null, projects: [] as ProjectEntry[] };
+		}
+		const raw = readFileSync(registryPath, "utf8");
+		const parsed = JSON.parse(raw) as unknown;
+		if (
+			typeof parsed === "object" &&
+			parsed !== null &&
+			Array.isArray((parsed as { projects?: unknown }).projects)
+		) {
+			return parsed as ProjectRegistry;
+		}
+	} catch {
+		// ignore: registry read is best-effort for the truthful inspection path
+	}
+	return { activeProjectId: null, projects: [] as ProjectEntry[] };
 }
 
-function connectionReport(input: {
-	stateRoot: string;
-	projectId: string;
-	projectPath: string;
-}): ProjectConnectionReport {
-	const now = new Date().toISOString();
-	return {
-		status: "ready",
-		configStatus: "project_local_valid",
-		alignmentStatus: "aligned",
-		readiness: "aligned_ready",
-		alignmentReason: ["onboard-project smoke prepare"],
-		projectId: input.projectId,
-		projectPath: input.projectPath,
-		problems: [],
-		warnings: [],
-		recommendedNext: "Proyecto preparado; continuar bajo riesgo low.",
-		safeToOperate: true,
-		needsUserConfirmation: false,
-		inspectedAt: now,
-		blueprint: {
-			exists: true,
-			source: "project-local",
-			valid: true,
-			path: join(input.projectPath, "config", "project-blueprint.json"),
-			errors: [],
-		},
-		flows: {
-			exists: true,
-			source: "project-local",
-			valid: true,
-			path: join(input.projectPath, "config", "project-flows.json"),
-			errors: [],
-		},
-		workspace: {
-			workspaceRoot: input.stateRoot,
-			reportsExists: existsSync(join(input.stateRoot, "reports")),
-			labDbExists: existsSync(join(input.stateRoot, "lab.db")),
-			labDbCanInitialize: true,
-			tasksJsonlExists: existsSync(join(input.stateRoot, "tasks.jsonl")),
-			tasksJsonlCanCreate: true,
-		},
-	};
+function readProjectDocs(projectPath: string): ProjectDocs {
+	const docs: ProjectDocs = {};
+	const pkg = readPackageJsonSafe(projectPath);
+	if (pkg) {
+		if (typeof pkg.name === "string") {
+			docs.packageName = pkg.name;
+		}
+		if (typeof pkg.description === "string") {
+			docs.packageDescription = pkg.description;
+		}
+	}
+	docs.tsconfigStrict = readTsconfigStrict(projectPath);
+	docs.readmeTitle = readReadmeTitle(projectPath);
+	return docs;
 }
 
-function postflightReport(): ProjectPostflightReport {
-	return {
-		risk: "low",
-		changedFiles: [],
-		observedChangeMode: "stateRoot",
-		impactedAreas: [],
-		warnings: [],
-		recommendedNext: "Proyecto preparado; continuar bajo riesgo low.",
-		shouldRunAgentLab: false,
-		suggestedAgentLabs: [],
-		requiresHumanConfirmation: false,
-		physicalGates: [],
-	};
+function emptyProjectDocs(): ProjectDocs {
+	return {};
 }
 
-function emptyProjectFlows(): ProjectFlows {
-	return {
-		version: "1.0.0",
-		projectType: "unknown",
-		invariants: [],
-		qualityRules: [],
-		forbiddenTransitions: [],
-		allowedTransitions: [],
-		validationChecklist: [],
-		modules: [],
-		screens: [],
-		uiElements: [],
-		dataStores: [],
-		flows: [],
-		moduleConnections: [],
-	};
+function readPackageJsonSafe(projectPath: string): Record<string, unknown> | undefined {
+	const pkgPath = join(projectPath, "package.json");
+	try {
+		if (!existsSync(pkgPath)) return undefined;
+		const raw = readFileSync(pkgPath, "utf8");
+		if (raw.length > MAX_README_BYTES) return undefined;
+		const parsed = JSON.parse(raw);
+		if (typeof parsed === "object" && parsed !== null) {
+			return parsed as Record<string, unknown>;
+		}
+	} catch {
+		// fallthrough: best-effort doc harvest
+	}
+	return undefined;
 }
+
+function readTsconfigStrict(projectPath: string): boolean {
+	const tsconfigPath = join(projectPath, "tsconfig.json");
+	try {
+		if (!existsSync(tsconfigPath)) return false;
+		const raw = readFileSync(tsconfigPath, "utf8");
+		if (raw.length > MAX_README_BYTES) return false;
+		const parsed = JSON.parse(raw);
+		if (
+			typeof parsed === "object" &&
+			parsed !== null &&
+			(parsed as { compilerOptions?: { strict?: unknown } }).compilerOptions
+				?.strict === true
+		) {
+			return true;
+		}
+	} catch {
+		// fallthrough
+	}
+	return false;
+}
+
+function readReadmeTitle(projectPath: string): string | undefined {
+	const candidates = ["README.md", "readme.md", "README.MD"];
+	for (const name of candidates) {
+		const path = join(projectPath, name);
+		if (!existsSync(path)) continue;
+		try {
+			const raw = readFileSync(path, "utf8");
+			if (raw.length > MAX_README_BYTES) continue;
+			const firstHeading = raw.match(/^#\s+(.+)$/mu);
+			if (firstHeading) {
+				return firstHeading[1].trim();
+			}
+		} catch {
+			// fallthrough: try next candidate
+		}
+	}
+	return undefined;
+}
+
+export { inferWorkspaceRoot as _inferWorkspaceRootForTests };
+export { readProjectDocs as _readProjectDocsForTests };
+export type { ProjectDocs as _ProjectDocsForTests };
