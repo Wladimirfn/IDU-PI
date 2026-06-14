@@ -95,6 +95,7 @@ import {
 	loadSkillsIndexFromLabDb,
 } from "./skills-index-runtime.js";
 import { packSkillsIndex } from "./skills-index.js";
+import { readTaxonomyGuide } from "./taxonomy-placement.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
@@ -3867,7 +3868,8 @@ async function dispatchTool(
 					tool: name,
 					projectId: runtime.projectId,
 					projectPath: runtime.projectPath,
-					summary: "Genesis mission draft requires an enrolled project stateRoot.",
+					summary:
+						"Genesis mission draft requires an enrolled project stateRoot.",
 					data: {},
 					safeNotes: resolution.safeNotes,
 					errors: ["enrolled project stateRoot is missing"],
@@ -3898,7 +3900,8 @@ async function dispatchTool(
 					tool: name,
 					projectId: runtime.projectId,
 					projectPath: runtime.projectPath,
-					summary: "Genesis mission confirm requires an enrolled project stateRoot.",
+					summary:
+						"Genesis mission confirm requires an enrolled project stateRoot.",
 					data: {},
 					safeNotes: resolution.safeNotes,
 					errors: ["enrolled project stateRoot is missing"],
@@ -3911,7 +3914,8 @@ async function dispatchTool(
 					tool: name,
 					projectId: runtime.projectId,
 					projectPath: runtime.projectPath,
-					summary: "Genesis mission confirm requires an explicit owner argument.",
+					summary:
+						"Genesis mission confirm requires an explicit owner argument.",
 					data: {},
 					safeNotes: [
 						...resolution.safeNotes,
@@ -5521,11 +5525,19 @@ function buildActiveSkillsIndex(stateRoot: string): Array<{
 	}
 }
 
+function detectProjectTypeForTaxonomy(runtime: CliRuntime): string {
+	const path = (runtime.projectPath ?? "").toLowerCase();
+	if (path.includes("component") || path.includes("ui")) return "web";
+	if (path.includes("lib") || path.includes("pkg")) return "library";
+	return "program";
+}
+
 export function buildSupervisorContextPack(
 	runtime: CliRuntime,
 	request: string,
 	includePlanSnapshot: boolean,
-): JsonObject {	if (!runtime.masterPlanReview) {
+): JsonObject {
+	if (!runtime.masterPlanReview) {
 		throw new Error("Master Plan no disponible en este runtime.");
 	}
 	const review = runtime.masterPlanReview("latest");
@@ -5687,6 +5699,10 @@ export function buildSupervisorContextPack(
 		},
 		...(embeddedPlanSnapshot ? { planSnapshot: embeddedPlanSnapshot } : {}),
 		activeSkillsIndex: buildActiveSkillsIndex(runtime.workspaceRoot),
+		taxonomyGuide: readTaxonomyGuide(
+			runtime.workspaceRoot,
+			detectProjectTypeForTaxonomy(runtime),
+		),
 		contextBudget: mergeContextBudgetUsage("supervisor_context_pack", [
 			humanVision.usage,
 			taskGoal.usage,
