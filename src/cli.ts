@@ -878,6 +878,7 @@ export type CreateCliRuntimeOptions = {
 	projectPath?: string;
 	requireTelegramConfig?: boolean;
 	createRegistryIfMissing?: boolean;
+	stateRoot?: string;
 };
 
 export function createCliRuntime(

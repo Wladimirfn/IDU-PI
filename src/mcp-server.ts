@@ -90,7 +90,11 @@ import {
 	runGenesisMissionConfirm,
 	runGenesisMissionDraft,
 } from "./genesis-mission-tools.js";
-import { loadSkillsForTask } from "./skills-index-runtime.js";
+import {
+	loadSkillsForTask,
+	loadSkillsIndexFromLabDb,
+} from "./skills-index-runtime.js";
+import { packSkillsIndex } from "./skills-index.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
@@ -5502,12 +5506,26 @@ function buildConsultationFromAdvisory(input: {
 	});
 }
 
-function buildSupervisorContextPack(
+function buildActiveSkillsIndex(stateRoot: string): Array<{
+	skillId: string;
+	name: string;
+	summary: string;
+	path: string;
+	rating: number;
+}> {
+	try {
+		const entries = loadSkillsIndexFromLabDb(stateRoot);
+		return packSkillsIndex(entries);
+	} catch {
+		return [];
+	}
+}
+
+export function buildSupervisorContextPack(
 	runtime: CliRuntime,
 	request: string,
 	includePlanSnapshot: boolean,
-): JsonObject {
-	if (!runtime.masterPlanReview) {
+): JsonObject {	if (!runtime.masterPlanReview) {
 		throw new Error("Master Plan no disponible en este runtime.");
 	}
 	const review = runtime.masterPlanReview("latest");
@@ -5668,6 +5686,7 @@ function buildSupervisorContextPack(
 			evidenceRefs: alignmentAdvisory.evidenceRefs,
 		},
 		...(embeddedPlanSnapshot ? { planSnapshot: embeddedPlanSnapshot } : {}),
+		activeSkillsIndex: buildActiveSkillsIndex(runtime.workspaceRoot),
 		contextBudget: mergeContextBudgetUsage("supervisor_context_pack", [
 			humanVision.usage,
 			taskGoal.usage,
