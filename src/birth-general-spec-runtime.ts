@@ -1,4 +1,5 @@
-import { writeBirthArtifact } from "./birth-artifacts.js";
+import { readBirthArtifact, writeBirthArtifact } from "./birth-artifacts.js";
+import { ensureDesignSkillForVersion } from "./spec-propagation.js";
 import type { BirthGeneralSpec } from "./birth-general-spec.js";
 
 export type ApproveBirthGeneralSpecInput = {
@@ -23,9 +24,15 @@ export type ApproveBirthGeneralSpecResult = {
 	generalSpec: BirthGeneralSpec;
 };
 
-export function approveBirthGeneralSpec(
+export async function approveBirthGeneralSpec(
 	input: ApproveBirthGeneralSpecInput,
-): ApproveBirthGeneralSpecResult {
+): Promise<ApproveBirthGeneralSpecResult> {
+	const existing = readBirthArtifact<BirthGeneralSpec>(
+		input.stateRoot,
+		"general-spec",
+	);
+	const nextSpecVersion = (existing?.specVersion ?? 0) + 1;
+
 	const spec: BirthGeneralSpec = {
 		version: 1,
 		projectId: input.projectId,
@@ -39,12 +46,23 @@ export function approveBirthGeneralSpec(
 		motionRules: input.sections.motionRules,
 		accessibilityCriteria: input.sections.accessibilityCriteria,
 		performanceCriteria: input.sections.performanceCriteria,
-		specVersion: 1,
+		specVersion: nextSpecVersion,
 		provenance: {},
 		evidence: {},
 		approvedBy: input.approvedBy,
 		approvedAt: new Date().toISOString(),
 	};
 	writeBirthArtifact(input.stateRoot, "general-spec", spec);
+
+	await ensureDesignSkillForVersion({
+		spec: { specVersion: nextSpecVersion },
+		skill: { derivedFromSpecVersion: existing?.specVersion ?? 1 },
+		rederive: async () => {
+			// Re-derive design skill from the updated spec
+			// This is a placeholder; actual re-derivation would call the visual derivation
+			// For now, we just ensure the version tracking is correct
+		},
+	});
+
 	return { version: 1, projectId: input.projectId, generalSpec: spec };
 }
