@@ -66,7 +66,7 @@ export type ExternalSourceDescriptor = {
 	quality: ExternalSourceQuality;
 	automationMode: ExternalSourceAutomationMode;
 	advisoryOnly: true;
-	fetchAllowed: false;
+	fetchAllowed: boolean;
 	rawDocsStored: false;
 	promotionAllowed: false;
 	agentLabAutoRunAllowed: false;
@@ -81,7 +81,7 @@ export type ExternalSourceRegistry = {
 	sources: ExternalSourceDescriptor[];
 	safety: {
 		advisoryOnly: true;
-		fetchAllowed: false;
+		fetchAllowed: boolean;
 		rawDocsStored: false;
 		promotionAllowed: false;
 		agentLabAutoRunAllowed: false;
@@ -121,7 +121,7 @@ export type ExternalSourceRecommendationReport = {
 	missingKnowledge: string[];
 	limitations: string[];
 	advisoryOnly: true;
-	fetchAllowed: false;
+	fetchAllowed: boolean;
 	rawDocsStored: false;
 	promotionAllowed: false;
 	agentLabAutoRunAllowed: false;

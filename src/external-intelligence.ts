@@ -48,7 +48,7 @@ export type ExternalIntelligenceReport = {
 	signals: ExternalIntelligenceSignal[];
 	limitations: string[];
 	stateRootOnly: true;
-	rawContentStored: false;
+	rawContentStored: boolean;
 	autoDependencyUpdatesAllowed: false;
 	agentLabAutoRunAllowed: false;
 	remoteAnalyticsAllowed: false;

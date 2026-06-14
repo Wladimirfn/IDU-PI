@@ -65,7 +65,7 @@ export type BibliotecarioEvidencePolicy = {
 	limitations: string[];
 	rawHonesty: true;
 	orchestratorReviewRequired: boolean;
-	webFetchAllowed: false;
+	webFetchAllowed: boolean;
 	rawContentIncluded: false;
 	contractPromotionAllowed: false;
 	agentLabAutoRunAllowed: false;
