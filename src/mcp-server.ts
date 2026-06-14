@@ -90,6 +90,7 @@ import {
 	runGenesisMissionConfirm,
 	runGenesisMissionDraft,
 } from "./genesis-mission-tools.js";
+import { loadSkillsForTask } from "./skills-index-runtime.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
@@ -221,6 +222,7 @@ export type IduMcpToolName =
 	| "idu_birth_general_spec_derive"
 	| "idu_genesis_mission_draft"
 	| "idu_genesis_mission_confirm"
+	| "idu_skill_for_task"
 	| "idu_pending_injections"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
@@ -736,6 +738,14 @@ const TOOLS: IduMcpToolDefinition[] = [
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 			owner: optionalString("Owner explícito que confirma la misión."),
+		},
+	),
+	tool(
+		"idu_skill_for_task",
+		"Recomienda skills del índice local del proyecto para una tarea. Read-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: requiredString("Tarea o intención para rankear skills."),
 		},
 	),
 	tool(
@@ -3934,6 +3944,35 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"Owner-invoked only; no auto-trigger from idu_genesis_mission_draft.",
 					"Only stateRoot/birth/blueprint.json is written.",
+				],
+			});
+		}
+		case "idu_skill_for_task": {
+			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "idu_skill_for_task requires an enrolled project stateRoot.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["enrolled project stateRoot is missing"],
+				});
+			}
+			const request = requiredText(args, "request");
+			const skills = loadSkillsForTask(resolution.stateRoot, request);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `skills ranked: ${skills.length} matches`,
+				data: { request, skills },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Skills index is read from lab.db; no stateRoot or lab.db writes.",
+					"No auto-promotion of skills or contracts.",
 				],
 			});
 		}
