@@ -494,7 +494,7 @@ test("Idu-pi supervisor cycle is accepted end-to-end without unsafe apply", asyn
 				now: () => new Date("2026-05-25T00:02:00.000Z"),
 			},
 		);
-		assert.equal(existsSync(skillProposals.path ?? ""), true);
+		assert.equal(existsSync(await skillProposals.path ?? ""), true);
 		const createSkill = findSkillProposal(
 			skillProposals.created,
 			"create_skill",
