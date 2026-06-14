@@ -9,6 +9,7 @@ export type BirthArtifactName =
 	| "existing-scan"
 	| "detected-specs"
 	| "bibliotecario-discovery"
+	| "blueprint"
 	| "prototype-master"
 	| "general-spec"
 	| "repo-plan"
