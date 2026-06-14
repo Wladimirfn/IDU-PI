@@ -7,6 +7,7 @@ import {
 	recordUserSignal,
 	runSql,
 	sqlInteger,
+	sqlOptionalString,
 	sqlString,
 	type BugFinding,
 	type BugFindingInput,
@@ -17,6 +18,8 @@ import {
 import type {
 	SkillInsert,
 	SkillRecord,
+	SkillIndexInsert,
+	SkillIndexRecord,
 	SourceInsert,
 	SourceRecord,
 	DigestInsert,
@@ -246,6 +249,73 @@ ON CONFLICT(id) DO UPDATE SET
 			createdAt,
 			updatedAt,
 		};
+	}
+
+	appendSkillIndex(input: SkillIndexInsert): SkillIndexRecord {
+		initLabDb(this.dbPath);
+		const priority = input.priority ?? 100;
+		const description = input.description ?? undefined;
+		const fingerprint = input.fingerprint ?? undefined;
+		const sql = `
+INSERT INTO skill_index (id, name, path, source, description, priority, fingerprint)
+VALUES (
+	${sqlString(input.id)},
+	${sqlString(input.name)},
+	${sqlString(input.path)},
+	${sqlString(input.source)},
+	${sqlOptionalString(description)},
+	${sqlInteger(priority, "priority")},
+	${sqlOptionalString(fingerprint)}
+)
+ON CONFLICT(id) DO UPDATE SET
+	name = excluded.name,
+	path = excluded.path,
+	source = excluded.source,
+	description = excluded.description,
+	priority = excluded.priority,
+	fingerprint = excluded.fingerprint;
+`;
+		runSql(this.dbPath, sql);
+		const indexedAt = new Date().toISOString();
+		return {
+			id: input.id,
+			name: input.name,
+			path: input.path,
+			source: input.source,
+			description: description ?? null,
+			priority,
+			fingerprint: fingerprint ?? null,
+			indexedAt,
+		};
+	}
+
+	listSkillIndex(): SkillIndexRecord[] {
+		initLabDb(this.dbPath);
+		const raw = runSql(
+			this.dbPath,
+			`SELECT id, name, path, source, description, priority, fingerprint, indexed_at FROM skill_index ORDER BY priority ASC, name ASC;`,
+		).trim();
+		if (!raw) return [];
+		const rows = JSON.parse(raw) as Array<{
+			id: string;
+			name: string;
+			path: string;
+			source: SkillIndexRecord["source"];
+			description: string | null;
+			priority: number;
+			fingerprint: string | null;
+			indexed_at: string;
+		}>;
+		return rows.map((row) => ({
+			id: row.id,
+			name: row.name,
+			path: row.path,
+			source: row.source,
+			description: row.description,
+			priority: row.priority,
+			fingerprint: row.fingerprint,
+			indexedAt: row.indexed_at,
+		}));
 	}
 
 	listSkills(): SkillRecord[] {

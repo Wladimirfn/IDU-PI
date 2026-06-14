@@ -20,6 +20,27 @@ export type SourceRecord = {
 	status: "pending" | "extracted" | "digested" | "failed";
 };
 
+export type SkillIndexRecord = {
+	id: string;
+	name: string;
+	path: string;
+	source: "project" | "source" | "user" | "global";
+	description: string | null;
+	priority: number;
+	fingerprint: string | null;
+	indexedAt: string;
+};
+
+export type SkillIndexInsert = {
+	id: string;
+	name: string;
+	path: string;
+	source: SkillIndexRecord["source"];
+	description?: string | null;
+	priority?: number;
+	fingerprint?: string | null;
+};
+
 export type DigestRecord = {
 	id: string;
 	sourceId: string;
