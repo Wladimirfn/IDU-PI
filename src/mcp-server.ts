@@ -86,6 +86,10 @@ import {
 } from "./birth-runtime.js";
 import { approveBirthGeneralSpec } from "./birth-general-spec-runtime.js";
 import { runVisualDerivation } from "./birth-general-spec-derive.js";
+import {
+	runGenesisMissionConfirm,
+	runGenesisMissionDraft,
+} from "./genesis-mission-tools.js";
 import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
@@ -215,6 +219,8 @@ export type IduMcpToolName =
 	| "idu_birth_prototype_master"
 	| "idu_birth_general_spec"
 	| "idu_birth_general_spec_derive"
+	| "idu_genesis_mission_draft"
+	| "idu_genesis_mission_confirm"
 	| "idu_pending_injections"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
@@ -715,6 +721,21 @@ const TOOLS: IduMcpToolDefinition[] = [
 			uiFiles: optionalStringArray(
 				"Archivos UI permitidos para evidencia file:line del patch visual.",
 			),
+		},
+	),
+	tool(
+		"idu_genesis_mission_draft",
+		"Genera un mission draft no confirmado para el proyecto target; persiste mission-draft y devuelve el draft estructurado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_genesis_mission_confirm",
+		"Persiste un BlueprintArtifact confirmado a partir de un mission-draft existente; requiere owner explícito.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			owner: optionalString("Owner explícito que confirma la misión."),
 		},
 	),
 	tool(
@@ -3822,6 +3843,97 @@ async function dispatchTool(
 					...resolution.safeNotes,
 					"General Spec visual derivation is owner-invoked only; approveBirthGeneralSpec does not auto-trigger it.",
 					"Only stateRoot/birth/general-spec.json is written.",
+				],
+			});
+		}
+		case "idu_genesis_mission_draft": {
+			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Genesis mission draft requires an enrolled project stateRoot.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["enrolled project stateRoot is missing"],
+				});
+			}
+			const result = runGenesisMissionDraft({
+				stateRoot: resolution.stateRoot,
+				projectPath: runtime.projectPath,
+			});
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `mission-draft persisted for ${result.missionDraft.projectId}`,
+				data: { missionDraft: result.missionDraft },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Mission draft is unconfirmed until idu_genesis_mission_confirm runs.",
+					"Only stateRoot/birth/mission-draft.json is written.",
+				],
+			});
+		}
+		case "idu_genesis_mission_confirm": {
+			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Genesis mission confirm requires an enrolled project stateRoot.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: ["enrolled project stateRoot is missing"],
+				});
+			}
+			const owner = stringArg(args, "owner");
+			if (!owner) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "Genesis mission confirm requires an explicit owner argument.",
+					data: {},
+					safeNotes: [
+						...resolution.safeNotes,
+						"No stateRoot file was written.",
+					],
+					errors: ["owner is required"],
+				});
+			}
+			const result = runGenesisMissionConfirm({
+				stateRoot: resolution.stateRoot,
+				projectPath: runtime.projectPath,
+				owner,
+			});
+			if (!result.ok) {
+				return envelope({
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: result.error ?? "Mission confirm failed.",
+					data: {},
+					safeNotes: resolution.safeNotes,
+					errors: [result.error ?? "mission confirm failed"],
+				});
+			}
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `blueprint confirmed by ${result.blueprint.confirmedBy}`,
+				data: { blueprint: result.blueprint },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Owner-invoked only; no auto-trigger from idu_genesis_mission_draft.",
+					"Only stateRoot/birth/blueprint.json is written.",
 				],
 			});
 		}
