@@ -13,6 +13,10 @@ import {
 	type SemanticCompactionDraft,
 	type SemanticCompactionReview,
 } from "./semantic-compaction.js";
+import {
+	collectDraftInputs,
+	type DraftInputs,
+} from "./skill-draft-inputs.js";
 
 export type SkillImprovementProposalType =
 	| "create_skill"
@@ -127,10 +131,13 @@ export function buildSkillImprovementPlan(
 	}
 	const draft = review.draft;
 	const createdAt = (options.now?.() ?? new Date()).toISOString();
+	const stateRoot = options.workspaceRoot ?? reportsPath;
+	const inputs: DraftInputs = collectDraftInputs(stateRoot, draft.projectId);
 	const proposals = buildProposals(
 		{ ...review, draft },
 		skillRegistry,
 		createdAt,
+		{ stateRoot, projectId: draft.projectId, inputs },
 	)
 		.sort(compareProposal)
 		.slice(0, options.maxProposals ?? MAX_PROPOSALS)
@@ -332,13 +339,36 @@ export function formatSkillImprovementStatus(
 	].join("\n");
 }
 
+function buildCitationsSuffix(inputs: DraftInputs): string {
+	const parts: string[] = [];
+	if (inputs.generalSpec) {
+		parts.push(
+			`[general-spec v${inputs.generalSpec.specVersion ?? "?"}]`,
+		);
+	}
+	if (inputs.blueprint) {
+		parts.push(`[blueprint: ${inputs.blueprint.objective}]`);
+	}
+	if (inputs.flows) {
+		parts.push(`[flows: ${inputs.flows.projectType}]`);
+	}
+	if (inputs.agentlabFindings && inputs.agentlabFindings.length > 0) {
+		parts.push(
+			`[findings: ${inputs.agentlabFindings.length} open]`,
+		);
+	}
+	return parts.length > 0 ? ` ${parts.join(" ")}` : "";
+}
+
 function buildProposals(
 	review: SemanticCompactionReview & { draft: SemanticCompactionDraft },
 	skillRegistry: SkillMetadata[],
 	createdAt: string,
+	context: { stateRoot: string; projectId: string; inputs: DraftInputs },
 ): SkillImprovementProposal[] {
 	const draft = review.draft;
 	const proposals: SkillImprovementProposal[] = [];
+	const citations = buildCitationsSuffix(context.inputs);
 	const candidateTexts = [
 		...draft.suggestedSkillUpdates,
 		...draft.suggestedAgentTasks.filter((item) =>
@@ -367,7 +397,7 @@ function buildProposals(
 				type,
 				skillName,
 				title: titleFor(type, skillName, text),
-				description: descriptionFor(type),
+				description: descriptionFor(type) + citations,
 				evidence: group.items,
 				sourceDraftPath: review.path,
 				riskLevel: riskFor(text, type),

@@ -138,7 +138,7 @@ function findProposal(
 	return proposal;
 }
 
-test("review latest lee draft válido", () => {
+test("review latest lee draft válido", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -160,7 +160,7 @@ test("review latest lee draft válido", () => {
 	}
 });
 
-test("review ruta fuera de reports falla", () => {
+test("review ruta fuera de reports falla", async () => {
 	const root = tempRoot();
 	try {
 		const reportsPath = join(root, "reports");
@@ -182,7 +182,7 @@ test("review ruta fuera de reports falla", () => {
 	}
 });
 
-test("suggestedSkillUpdates genera improve_skill", () => {
+test("suggestedSkillUpdates genera improve_skill", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -201,7 +201,7 @@ test("suggestedSkillUpdates genera improve_skill", () => {
 	}
 });
 
-test("auth login repetido genera propuesta de seguridad", () => {
+test("auth login repetido genera propuesta de seguridad", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -223,7 +223,7 @@ test("auth login repetido genera propuesta de seguridad", () => {
 	}
 });
 
-test("DB schema repetido genera propuesta de DB", () => {
+test("DB schema repetido genera propuesta de DB", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -245,7 +245,7 @@ test("DB schema repetido genera propuesta de DB", () => {
 	}
 });
 
-test("skill ruidosa genera archive_skill propuesta", () => {
+test("skill ruidosa genera archive_skill propuesta", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -262,7 +262,7 @@ test("skill ruidosa genera archive_skill propuesta", () => {
 	}
 });
 
-test("create guarda skill-improvement-proposals en reports", () => {
+test("create guarda skill-improvement-proposals en reports", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -288,7 +288,7 @@ test("create guarda skill-improvement-proposals en reports", () => {
 	}
 });
 
-test("create no modifica .agents ni .atl", () => {
+test("create no modifica .agents ni .atl", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -322,7 +322,7 @@ test("create no modifica .agents ni .atl", () => {
 	}
 });
 
-test("status muestra conteos", () => {
+test("status muestra conteos", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -347,7 +347,7 @@ test("status muestra conteos", () => {
 	}
 });
 
-test("deduplica propuestas repetidas", () => {
+test("deduplica propuestas repetidas", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -389,7 +389,7 @@ test("deduplica propuestas repetidas", () => {
 	}
 });
 
-test("limita a máximo 10 propuestas", () => {
+test("limita a máximo 10 propuestas", async () => {
 	const root = tempRoot();
 	try {
 		writeSkillIndex(root);
@@ -409,7 +409,7 @@ test("limita a máximo 10 propuestas", () => {
 	}
 });
 
-test("status ruta fuera de reports falla", () => {
+test("status ruta fuera de reports falla", async () => {
 	const root = tempRoot();
 	try {
 		const reportsPath = join(root, "reports");
