@@ -108,7 +108,7 @@ test("skip-list does NOT include 'node' (regression: self-matching bug)", () => 
 	}
 });
 
-test("script honours the trigger-disabled opt-in and logs 'skipped: trigger disabled by user'", async () => {
+test("script honours the trigger-disabled opt-in and exits silently (no output, no log)", async () => {
 	const { fakeRoot, fakeScript, cleanup } = copyScriptToTempRoot();
 	try {
 		const fakeStateRoot = join(fakeRoot, "state");
@@ -122,31 +122,30 @@ test("script honours the trigger-disabled opt-in and logs 'skipped: trigger disa
 			IDU_PI_TICK_STATE_ROOT: fakeStateRoot,
 		});
 		assert.equal(result.code, 0, `script must exit 0 when trigger is disabled, got ${result.code}; stderr=${result.stderr}`);
-		assert.match(
+		// Silent-when-disabled: no "skipped" line in stdout, no
+		// banner output, no tsc error. The opt-in is invisible by
+		// design — the user does not want a disabled trigger to
+		// interrupt their day or close their work.
+		assert.doesNotMatch(
 			result.stdout,
 			/skipped: trigger disabled by user/u,
-			`expected 'skipped: trigger disabled by user' in stdout, got: ${result.stdout}`,
+			`script must be silent when trigger is disabled, got: ${result.stdout}`,
 		);
-		// The script must NOT have reached tsc when the trigger is
-		// disabled. The tsc failure log line is the proof-of-proceed
-		// in the next test; here the early-exit must short-circuit.
 		assert.doesNotMatch(
 			result.stdout,
 			/tsc falló/u,
 			`script must not run tsc when trigger is disabled, got: ${result.stdout}`,
 		);
-		// The log file should also record the skip.
+		// The log file must also be silent — no "skipped" line.
 		const logFile = join(fakeRoot, "logs", "supervisor-tick.log");
-		assert.ok(
-			existsSync(logFile),
-			`expected log file at ${logFile} to be written`,
-		);
-		const logContents = readFileSync(logFile, "utf8");
-		assert.match(
-			logContents,
-			/skipped: trigger disabled by user/u,
-			`expected 'skipped: trigger disabled by user' in log file, got: ${logContents}`,
-		);
+		if (existsSync(logFile)) {
+			const logContents = readFileSync(logFile, "utf8");
+			assert.doesNotMatch(
+				logContents,
+				/skipped: trigger disabled by user/u,
+				`log file must be silent when trigger is disabled, got: ${logContents}`,
+			);
+		}
 	} finally {
 		cleanup();
 	}
