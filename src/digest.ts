@@ -224,9 +224,7 @@ function isImmediateRiskTerm(term: string): boolean {
 		term === "data-loss" ||
 		term === "dataloss" ||
 		term === "auth" ||
-		term === "auth_change" ||
-		term === "high" ||
-		term === "blocker"
+		term === "auth_change"
 	);
 }
 

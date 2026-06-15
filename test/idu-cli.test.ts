@@ -1987,7 +1987,7 @@ test("digest alert routing queues non-critical decisions without immediate route
 	});
 });
 
-test("digest alert routing immediately injects security and high-risk decisions", async () => {
+test("digest alert routing: security goes immediate, high severity goes to digest (W1 fix)", async () => {
 	await withRuntime((_runtime, { workspaceRoot }) => {
 		const now = new Date("2026-06-12T12:00:00.000Z");
 		const result = routeAlertDecisionsForDigest({
@@ -2011,19 +2011,28 @@ test("digest alert routing immediately injects security and high-risk decisions"
 
 		const queue = readDigestQueue(workspaceRoot);
 		const injections = readPendingInjections(workspaceRoot);
+		// Per the supervisor-main profile policy: only security/db/data-loss
+		// (critical signals) interrupt. High severity alone goes to digest.
 		assert.deepEqual(result, {
 			processedCount: 2,
-			immediateCount: 2,
-			digestCount: 0,
+			immediateCount: 1,
+			digestCount: 1,
 		});
-		assert.equal(queue.length, 0);
-		assert.equal(injections.length, 2);
-		assert.equal(
-			injections.every(
-				(injection) => injection.triggerId === "autonomous_alert_immediate",
-			),
-			true,
+		assert.equal(queue.length, 1, "high severity should be queued in digest");
+		assert.equal(queue[0]?.id, "alert-high");
+		// Both paths emit an injection (immediate or digest-queued);
+		// the immediate one is flagged so the runtime can render
+		// the human-readable form, the digest one is metadata for
+		// the scheduled flush.
+		assert.equal(injections.length, 2, "both decisions should emit an injection");
+		const immediate = injections.filter(
+			(injection) => injection.triggerId === "autonomous_alert_immediate",
 		);
+		const digestQueued = injections.filter(
+			(injection) => injection.triggerId === "autonomous_alert_digest_queued",
+		);
+		assert.equal(immediate.length, 1);
+		assert.equal(digestQueued.length, 1);
 	});
 });
 
