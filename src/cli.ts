@@ -203,6 +203,7 @@ import {
 } from "./injection-store.js";
 import { applyPrune, planPrune } from "./idu-outbox-prune.js";
 import { listDecisions } from "./decision-ledger.js";
+import { emitAlertsScheduledTick } from "./role-events.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import {
@@ -3278,6 +3279,23 @@ function runCliAutonomousAlertTick(
 	runtime: CliRuntime,
 	options: { allowTaskCreation?: boolean } = {},
 ): CliAutonomousAlertTickResult {
+	const stateRoot = runtime.workspaceRoot;
+	const projectId = runtime.projectId;
+	// Emit alerts_scheduled_tick so the role engine subscriptions
+	// (supervisor-main, supervisor-semantic) receive a stimulus at
+	// the start of every tick. Best-effort: a failure to append
+	// the event must not block the tick.
+	try {
+		emitAlertsScheduledTick({
+			stateRoot,
+			projectId,
+			cronExpr: "*/15 * * * *",
+			source: "cron",
+			now: new Date(),
+		});
+	} catch {
+		// best-effort; do not block the tick
+	}
 	const state = readAutonomousAlertEngineState(runtime.workspaceRoot);
 	const selfMaintenance = buildCliSelfMaintenanceReport(
 		runtime,

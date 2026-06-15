@@ -102,6 +102,8 @@ import {
 	markInjectionAcked,
 } from "./injection-store.js";
 import { applyPrune, planPrune } from "./idu-outbox-prune.js";
+import { listDecisions } from "./decision-ledger.js";
+import { emitOrchestratorTurn } from "./role-events.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
@@ -1332,6 +1334,26 @@ export async function callIduMcpTool(
 	input: unknown = {},
 	options: IduMcpServerOptions = {},
 ): Promise<IduMcpToolResult> {
+	// Emit orchestrator_turn event so supervisor-main and
+	// supervisor-semantic (which are subscribed to this kind) receive
+	// a stimulus at the start of every tool call. Best-effort: a
+	// failure to append the event must not block the tool.
+	try {
+		const ctx = resolveMcpProjectContext(
+			(options as { projectPath?: string }).projectPath,
+		);
+		if (ctx.projectId && ctx.stateRoot) {
+			emitOrchestratorTurn({
+				stateRoot: ctx.stateRoot,
+				projectId: ctx.projectId,
+				toolName: name,
+				source: "mcp-server",
+				now: new Date(),
+			});
+		}
+	} catch {
+		// best-effort; do not block the tool
+	}
 	if (!isToolName(name)) {
 		return envelope({
 			ok: false,
