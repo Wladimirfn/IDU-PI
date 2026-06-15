@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -107,6 +107,38 @@ test("Wiring 4: markInjectionAcked records a decision in the ledger with profile
 		);
 		assert.ok(ackDecision, "decision for inj-test-1 must be recorded");
 		assert.equal(ackDecision?.profileRef, "config/profiles/orchestrator.md");
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
+
+test("Wiring 4b: when recordDecision throws, markInjectionAcked throws and leaves injection un-acked", () => {
+	const stateRoot = makeStateRoot();
+	try {
+		appendInjection(stateRoot, {
+			ts: new Date().toISOString(),
+			triggerId: "test_trigger",
+			decisionEnvelope: {
+				severity: "info",
+				summary: "demo injection",
+				options: ["review", "ignore"],
+				evidenceRefs: [],
+				orchestratorDecisionRequired: false,
+			},
+			injectionId: "inj-test-1b",
+			acked: false,
+		});
+		// Make the lab.db path point to a directory so SQLite cannot open it
+		// and recordDecision will throw.
+		mkdirSync(join(stateRoot, "lab.db"));
+		assert.throws(
+			() => markInjectionAcked(stateRoot, "inj-test-1b"),
+			/lab\.db|SQLITE|database/i,
+		);
+		// injection must still be un-acked (so orchestrator can retry)
+		const raw = readFileSync(join(stateRoot, "injections.jsonl"), "utf8");
+		assert.ok(raw.includes("inj-test-1b"));
+		assert.ok(!/"acked":true/.test(raw), "injection must remain un-acked");
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
