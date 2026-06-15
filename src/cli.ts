@@ -202,6 +202,7 @@ import {
 	type Injection,
 } from "./injection-store.js";
 import { applyPrune, planPrune } from "./idu-outbox-prune.js";
+import { listDecisions } from "./decision-ledger.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import {
@@ -2734,6 +2735,41 @@ export async function runCliCommand(
 					}
 				}
 				return ok(formatPendingInjections(pending, ack));
+			}
+			case "idu-decision-ledger":
+			case "decision-ledger": {
+				// Syntax: idu-decision-ledger list [--project <id>] [--since <iso>] [--limit N]
+				let projectId = "";
+				let since: string | undefined;
+				let limit = 50;
+				for (const arg of rest) {
+					if (arg.startsWith("--project=")) {
+						projectId = arg.slice("--project=".length);
+						continue;
+					}
+					if (arg.startsWith("--since=")) {
+						since = arg.slice("--since=".length);
+						continue;
+					}
+					const m = /^--limit\s+(\d+)$/u.exec(arg);
+					if (m) limit = Number(m[1]);
+				}
+				if (!projectId) {
+					projectId = activeRuntime.workspaceRoot;
+				}
+				const dbPath = join(activeRuntime.workspaceRoot, "lab.db");
+				const decisions = listDecisions(dbPath, { projectId, since, limit });
+				return ok(
+					[
+						`Decision ledger for projectId=${projectId}`,
+						`count: ${decisions.length}`,
+						"",
+						...decisions.map((d) => {
+							const rationale = d.rationale ? ` — ${d.rationale}` : "";
+							return `[${d.id}] ${d.decidedAt} ${d.decidedBy} ${d.decision} ${d.targetKind}:${d.targetId}${d.profileRef ? ` (profile: ${d.profileRef})` : ""}${rationale}`;
+						}),
+					].join("\n"),
+				);
 			}
 			case "idu-outbox-prune":
 			case "outbox-prune": {
