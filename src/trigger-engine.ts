@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { Event } from "./event-bus.js";
-import { readEvents } from "./event-bus.js";
+import { appendEvent, readEvents } from "./event-bus.js";
+import { buildObjectiveReminderText } from "./objective-reminder.js";
 import type { Injection } from "./injection-store.js";
 import { appendInjection, readPendingInjections } from "./injection-store.js";
 
@@ -156,16 +157,34 @@ const objectiveReminderHourlyDefinition: TriggerDefinition = {
 			return { triggerId: "objective_reminder_hourly", matches: [] };
 		}
 	},
-	build: (_matches, context) => ({
-		triggerId: "objective_reminder_hourly",
-		decisionEnvelope: {
-			severity: "info",
-			summary: "Recordatorio del objetivo del proyecto",
-			options: ["review", "ignore"],
-			evidenceRefs: ["master-plan-objective-cache.json"],
-			orchestratorDecisionRequired: false,
-		},
-	}),
+	build: (_matches, context) => {
+		const summary = buildObjectiveReminderText({
+			stateRoot: context.stateRoot,
+			now: context.now,
+		});
+		// Emit the master_plan_drift event so the role engine
+		// (supervisor-main, supervisor-semantic) sees the stimulus.
+		try {
+			appendEvent(
+				context.stateRoot,
+				syntheticEvent(context, "master_plan_drift", {
+					reason: "objective_reminder_fired",
+				}),
+			);
+		} catch {
+			// best-effort; do not block the build
+		}
+		return {
+			triggerId: "objective_reminder_hourly",
+			decisionEnvelope: {
+				severity: "info",
+				summary,
+				options: ["review", "ignore"],
+				evidenceRefs: ["master-plan-objective-cache.json"],
+				orchestratorDecisionRequired: false,
+			},
+		};
+	},
 };
 
 const intentionDecisionPendingDefinition: TriggerDefinition = {

@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { assertSafeArtifactName } from "./birth-artifacts.js";
+import { recordDecision } from "./decision-ledger.js";
 
 export type InjectionSeverity = "info" | "warning" | "critical";
 
@@ -92,11 +93,13 @@ export function markInjectionAcked(
 	if (!raw.trim()) return;
 	const lines = raw.split("\n").filter((line) => line.length > 0);
 	let touched = false;
+	let decidedKind = "injection";
 	const updated: string[] = lines.map((line) => {
 		try {
 			const parsed = JSON.parse(line) as Injection;
 			if (parsed.injectionId === injectionId && !parsed.acked) {
 				touched = true;
+				decidedKind = parsed.triggerId ?? "injection";
 				return JSON.stringify({ ...parsed, acked: true });
 			}
 			return line;
@@ -106,4 +109,20 @@ export function markInjectionAcked(
 	});
 	if (!touched) return;
 	writeFileSync(filePath, `${updated.join("\n")}\n`, "utf8");
+	// Best-effort: record the decision in the ledger so the
+	// orchestrator's choice is preserved between sessions.
+	try {
+		const dbPath = join(stateRoot, "lab.db");
+		recordDecision(dbPath, {
+			projectId: "default",
+			decidedAt: new Date().toISOString(),
+			decidedBy: "orchestrator",
+			decision: "ack",
+			targetKind: decidedKind,
+			targetId: injectionId,
+			profileRef: "config/profiles/orchestrator.md",
+		});
+	} catch {
+		// best-effort; do not block the ack
+	}
 }
