@@ -136,6 +136,14 @@ export type MasterPlanOperationalContract = {
 	mode: "block" | "ask_human" | "warn" | "allow";
 };
 
+export type MasterPlanApprovedContract = {
+	contractId: string;
+	claim: string;
+	severity: "info" | "warning" | "critical";
+	approvedAt?: string;
+	approvedBy?: string;
+};
+
 export type MasterPlanContractViolation = {
 	area: MasterPlanOperationalContract["area"];
 	title: string;
@@ -363,6 +371,7 @@ export type MasterPlan = {
 	securityModel: MasterPlanSecurityModel;
 	docNotebook: MasterPlanDocNotebook;
 	operationalContracts: MasterPlanOperationalContract[];
+	approvedContracts?: MasterPlanApprovedContract[];
 	contractViolations: MasterPlanContractViolation[];
 	workMilestones: MasterPlanWorkMilestone[];
 	toolingDetected: string[];
@@ -434,7 +443,7 @@ export type MasterPlanStatusResult =
 			staleReason?: string;
 			observedGitHead?: string;
 			planGitHead?: string;
-		});
+	  });
 
 export type MasterPlanReview = {
 	plan: MasterPlan;

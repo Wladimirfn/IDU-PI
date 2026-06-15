@@ -73,7 +73,7 @@ test("detectContractDrift returns 0 violations for a plan with no approvedContra
 	}
 });
 
-test("detectContractDrift returns 0 violations even when approvedContracts is non-empty (placeholder behavior)", () => {
+test("detectContractDrift emits a violation when data-retention contract is approved but retention.json is missing", () => {
 	const { root, cleanup } = makeRoot();
 	try {
 		const result = detectContractDrift({
@@ -81,15 +81,104 @@ test("detectContractDrift returns 0 violations even when approvedContracts is no
 			plan: {
 				approvedContracts: [
 					{
-						contractId: "auth-no-secrets",
-						claim: "Password and tokens must never be logged",
+						contractId: "data-retention",
+						claim: "Stores must declare retention, backup, and cleanup",
 						severity: "critical",
 					},
 				],
 			},
 		});
-		assert.equal(result.violations.length, 0);
 		assert.equal(result.scannedContracts, 1);
+		assert.equal(result.violations.length, 1);
+		const v = result.violations[0];
+		assert.equal(v?.contractId, "data-retention");
+		assert.equal(v?.severity, "critical");
+		assert.ok(
+			(v?.evidence ?? "").includes("retention.json"),
+			"evidence must mention retention.json",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("detectContractDrift returns 0 violations when data-retention contract is approved and retention.json is valid", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		writeFileSync(
+			join(root, "retention.json"),
+			JSON.stringify({
+				version: 1,
+				stores: {
+					"events.jsonl": { maxAgeDays: 30, maxLines: 10000 },
+					"lab.db": { maxAgeDays: 90, vacuumOnStartup: true },
+				},
+			}),
+			"utf8",
+		);
+		const result = detectContractDrift({
+			stateRoot: root,
+			plan: {
+				approvedContracts: [
+					{
+						contractId: "data-retention",
+						claim: "Stores must declare retention",
+						severity: "critical",
+					},
+				],
+			},
+		});
+		assert.equal(result.scannedContracts, 1);
+		assert.equal(result.violations.length, 0);
+	} finally {
+		cleanup();
+	}
+});
+
+test("detectContractDrift emits a violation when retention.json has empty stores", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		writeFileSync(
+			join(root, "retention.json"),
+			JSON.stringify({ version: 1, stores: {} }),
+			"utf8",
+		);
+		const result = detectContractDrift({
+			stateRoot: root,
+			plan: {
+				approvedContracts: [
+					{
+						contractId: "data-retention",
+						claim: "Stores must declare retention",
+						severity: "critical",
+					},
+				],
+			},
+		});
+		assert.equal(result.violations.length, 1);
+		assert.ok((result.violations[0]?.evidence ?? "").includes("empty"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("detectContractDrift skips unknown contractIds (no checker registered)", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		const result = detectContractDrift({
+			stateRoot: root,
+			plan: {
+				approvedContracts: [
+					{
+						contractId: "future-checker-not-yet-implemented",
+						claim: "Future claim",
+						severity: "warning",
+					},
+				],
+			},
+		});
+		assert.equal(result.scannedContracts, 1);
+		assert.equal(result.violations.length, 0);
 	} finally {
 		cleanup();
 	}
@@ -207,11 +296,7 @@ test("readPlan returns undefined for an incompatible plan shape", () => {
 	try {
 		const planPath = join(root, "master-plan.json");
 		// Minimal seed that fails compatibility: schemaVersion 0
-		writeFileSync(
-			planPath,
-			JSON.stringify({ status: "approved" }),
-			"utf8",
-		);
+		writeFileSync(planPath, JSON.stringify({ status: "approved" }), "utf8");
 		const plan = readPlan(planPath);
 		assert.equal(plan, undefined);
 	} finally {
