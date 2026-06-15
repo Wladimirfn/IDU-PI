@@ -1,5 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { detectContractDrift } from "./contract-drift.js";
+import { appendEvent } from "./event-bus.js";
 import { shouldUseAutomaticGuardrails } from "./idu-session.js";
 import {
 	runIduSupervisorLoop,
@@ -8,6 +10,7 @@ import {
 	type IduSupervisorTrigger,
 } from "./idu-supervisor-loop.js";
 import type { LabDbRepository } from "./lab-db-repository.js";
+import { readPlan } from "./master-plan.js";
 import type { ProjectPreflightRisk } from "./project-preflight.js";
 import type { SemanticAuditTriggerResult } from "./semantic-audit-trigger.js";
 import type {
@@ -132,7 +135,7 @@ export function maybeRunSupervisorAfterPostflight(
 	input: MaybeRunSupervisorAfterPostflightInput,
 ): IduSupervisorHookResult {
 	const bypassThrottle = isHighOrBlocker(input.risk);
-	return maybeRunSupervisor({
+	const result = maybeRunSupervisor({
 		...input,
 		trigger: "after_postflight",
 		allowSemanticDraft: false,
@@ -140,6 +143,39 @@ export function maybeRunSupervisorAfterPostflight(
 		bypassThrottle,
 		relevantEvent: true,
 	});
+	// Wire contract-drift detection on every postflight: the plan
+	// is durable but a code change may violate an approved contract.
+	// detectContractDrift is a no-op until the user approves
+	// contracts via /idu revise; the wire is in place so violations
+	// are caught automatically as soon as contracts are approved.
+	try {
+		const planPath = join(input.workspaceRoot, "master-plan.json");
+		const plan = readPlan(planPath);
+		const drift = detectContractDrift({
+			stateRoot: input.workspaceRoot,
+			plan,
+		});
+		for (const v of drift.violations) {
+			appendEvent(input.workspaceRoot, {
+				ts: new Date().toISOString(),
+				kind: "contract_drift_violation",
+				projectId: input.projectId,
+				payload: {
+					contractId: v.contractId,
+					claim: v.claim,
+					severity: v.severity,
+					evidence: v.evidence,
+					source: "after_postflight",
+				},
+				sourceRef: "contract-drift-detector",
+				evidenceRefs: [],
+			});
+		}
+	} catch {
+		// best-effort; drift detection is advisory and must not
+		// affect the supervisor hook result.
+	}
+	return result;
 }
 
 export function maybeRunSupervisorAfterSemanticTrigger(

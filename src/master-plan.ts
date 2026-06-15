@@ -429,7 +429,12 @@ export type MasterPlanStatusResult =
 			incompatibleReason: string;
 			recommendedNext: string;
 	  }
-	| (MasterPlanCurrent & { exists: true; staleReason?: string });
+	| (MasterPlanCurrent & {
+			exists: true;
+			staleReason?: string;
+			observedGitHead?: string;
+			planGitHead?: string;
+		});
 
 export type MasterPlanReview = {
 	plan: MasterPlan;
@@ -722,33 +727,19 @@ export function getMasterPlanStatus(input: {
 	if (!compatibility.compatible) {
 		return incompatibleStatus(current, compatibility.reason);
 	}
-	if (
-		current.status === "approved" &&
-		input.currentGitHead &&
-		current.gitHead &&
-		input.currentGitHead !== current.gitHead
-	) {
-		const stale = writeCurrent(stateRoot, {
-			...current,
-			status: "stale",
-			gitHead: input.currentGitHead,
-			updatedAt: new Date().toISOString(),
-		});
-		const plan = readPlan(safePlanPath(stateRoot, stale.currentPlanJson));
-		if (plan)
-			writeMemory(
-				stateRoot,
-				{ ...plan, status: "stale", gitHead: input.currentGitHead },
-				stale,
-			);
-		return {
-			...stale,
-			exists: true,
-			staleReason:
-				"Git HEAD cambió desde la aprobación; se recomienda redraft.",
-		};
-	}
-	return { ...current, exists: true };
+	// The Plan Maestro is durable: status stays "approved" until the
+	// user explicitly revises it via /idu revise or /idu redraft.
+	// A git commit does NOT auto-mark the plan as stale. We surface
+	// the observed vs plan git HEAD so callers can run a separate
+	// drift detection (see detectContractDrift in contract-drift.ts)
+	// without losing the approved contract.
+	const observed = input.currentGitHead;
+	const planHead = current.gitHead;
+	const gitDrift =
+		observed && planHead && observed !== planHead
+			? { observedGitHead: observed, planGitHead: planHead }
+			: {};
+	return { ...current, ...gitDrift, exists: true };
 }
 
 export function recordMasterPlanLabReviewDone(input: {
@@ -4675,7 +4666,7 @@ function readPlanRaw(path: string): Partial<MasterPlan> | undefined {
 	}
 }
 
-function readPlan(path: string): MasterPlan | undefined {
+export function readPlan(path: string): MasterPlan | undefined {
 	const raw = readPlanRaw(path);
 	return raw && isMasterPlanCompatible(raw)
 		? normalizeMasterPlan(raw)
