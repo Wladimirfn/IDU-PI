@@ -1,4 +1,6 @@
 import { appendEvent } from "./event-bus.js";
+import { detectContractDrift } from "./contract-drift.js";
+import { readPlan } from "./master-plan.js";
 import {
 	autoRefreshMcpContextPack,
 	readAutoRefreshPack,
@@ -90,6 +92,43 @@ export function runMcpContextPackAutoRefreshTick(
 			reason: decision.reason,
 		}),
 	});
+
+	// Wire contract-drift detection: the auto-refresh tick is one of
+	// the two natural places to scan for code-vs-plan drift (the
+	// other is the postflight hook). The function is a no-op while
+	// approvedContracts is empty, but the wire is in place so when
+	// the user approves contracts via /idu revise, the next tick
+	// catches violations without further changes.
+	try {
+		const planPath = `${input.stateRoot}/master-plan.json`;
+		const plan = readPlan(planPath);
+		const drift = detectContractDrift({
+			stateRoot: input.stateRoot,
+			plan,
+		});
+		if (drift.violations.length > 0) {
+			for (const v of drift.violations) {
+				appendEvent(input.stateRoot, {
+					ts: now.toISOString(),
+					kind: "contract_drift_violation",
+					projectId: input.projectId,
+					payload: {
+						contractId: v.contractId,
+						claim: v.claim,
+						severity: v.severity,
+						evidence: v.evidence,
+						source: "mcp-context-pack-auto-refresh",
+					},
+					sourceRef: "contract-drift-detector",
+					evidenceRefs: [],
+				});
+			}
+		}
+	} catch {
+		// best-effort; drift detection is advisory and must not
+		// block the auto-refresh result.
+	}
+
 	return {
 		ran: true,
 		shouldRefresh: true,
