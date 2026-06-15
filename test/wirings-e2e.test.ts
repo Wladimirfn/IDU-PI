@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +10,7 @@ import {
 	emitAlertsScheduledTick,
 } from "../src/role-events.js";
 import { listDecisions } from "../src/decision-ledger.js";
+import { runTriggerEngineTick } from "../src/trigger-engine.js";
 import { buildObjectiveReminderText } from "../src/objective-reminder.js";
 
 function makeStateRoot(): string {
@@ -144,7 +145,54 @@ test("Wiring 4b: when recordDecision throws, markInjectionAcked throws and leave
 	}
 });
 
-test("Wiring 5: when orchestrator_turn + alerts_scheduled_tick fire, both events coexist in events.jsonl", () => {
+test("Wiring 5: objective_reminder_hourly build emits master_plan_drift event when cache is stale", () => {
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-wiring5-"));
+	try {
+		// Seed: stale objective cache so the trigger matches
+		const cachePath = join(stateRoot, "master-plan-objective-cache.json");
+		const now = new Date("2026-06-15T00:00:00Z");
+		const stale = new Date(now.getTime() - 3_600_000 - 1).toISOString();
+		writeFileSync(
+			cachePath,
+			JSON.stringify({
+				version: 1,
+				projectId: "demo",
+				objective: "Idu-pi supervisa proyectos",
+				updatedAt: stale,
+			}),
+			"utf8",
+		);
+		const result = runTriggerEngineTick({
+			stateRoot,
+			projectId: "demo",
+			now,
+			isProjectActive: () => true,
+		});
+		assert.ok(
+			result.injectedCount >= 1,
+			"objective_reminder_hourly must fire when cache is stale",
+		);
+		const events = readEventsJsonl(stateRoot);
+		const driftEvents = events.filter((e) => e.kind === "master_plan_drift");
+		assert.ok(
+			driftEvents.length >= 1,
+			"at least one master_plan_drift event must be emitted by the trigger",
+		);
+		const reasons = driftEvents.map(
+			(e) => (e.payload as { reason?: string }).reason,
+		);
+		assert.ok(
+			reasons.some(
+				(r) => r === "cache_stale" || r === "objective_reminder_fired",
+			),
+			`master_plan_drift event must carry reason (got: ${JSON.stringify(reasons)})`,
+		);
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
+
+test("Wiring 5b: orchestrator_turn and alerts_scheduled_tick coexist in events.jsonl", () => {
 	const stateRoot = makeStateRoot();
 	try {
 		emitOrchestratorTurn({
