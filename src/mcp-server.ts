@@ -101,6 +101,7 @@ import {
 	readPendingInjections,
 	markInjectionAcked,
 } from "./injection-store.js";
+import { applyPrune, planPrune } from "./idu-outbox-prune.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
@@ -229,6 +230,7 @@ export type IduMcpToolName =
 	| "idu_genesis_mission_confirm"
 	| "idu_skill_for_task"
 	| "idu_pending_injections"
+	| "idu_outbox_prune"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
@@ -761,6 +763,15 @@ const TOOLS: IduMcpToolDefinition[] = [
 			ack: optionalBoolean(
 				"Si true (default), marca las inyecciones devueltas como acked.",
 			),
+		},
+	),
+	tool(
+		"idu_outbox_prune",
+		"Archiva propuestas e inyecciones más viejas que N días. Sin confirm=true es dry-run. StateRoot-only writes.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			olderThanDays: optionalEnum("Días de antiguedad; default 30.", ["7", "14", "30", "60", "90"]),
+			confirm: optionalBoolean("Si true, aplica el archive; si no, dry-run."),
 		},
 	),
 	tool(
@@ -4087,6 +4098,66 @@ async function dispatchTool(
 					ack
 						? "Side effect: mark-as-acked happened on disk."
 						: "Side effect: read-only, no disk write.",
+				],
+			});
+		}
+		case "idu_outbox_prune": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as { olderThanDays?: string | number; confirm?: boolean };
+			const olderThanDays =
+				typeof params.olderThanDays === "string"
+					? Number(params.olderThanDays)
+					: typeof params.olderThanDays === "number"
+						? params.olderThanDays
+						: 30;
+			const confirm = params.confirm === true;
+			const plan = planPrune(stateRoot, { olderThanDays });
+			if (!confirm) {
+				return envelope({
+					ok: true,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: `dry-run: proposals=${plan.proposals.length} injections=${plan.injections.length} cutoff=${plan.cutoff}`,
+					data: {
+						outboxPrune: {
+							dryRun: true,
+							cutoff: plan.cutoff,
+							proposals: plan.proposals.map((e) => ({
+								id: e.id,
+								createdAt: e.createdAt,
+							})),
+							injections: plan.injections.map((e) => ({
+								id: e.id,
+								createdAt: e.createdAt,
+							})),
+						},
+					},
+					safeNotes: [
+						...resolution.safeNotes,
+						"Dry run: no files were touched. Re-call with confirm=true to apply.",
+					],
+				});
+			}
+			const result = applyPrune(stateRoot, plan, { olderThanDays });
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `applied: archive=${result.archiveDir} archived(proposals=${result.archived.proposals}, injections=${result.archived.injections})`,
+				data: {
+					outboxPrune: {
+						dryRun: false,
+						cutoff: result.cutoff,
+						archiveDir: result.archiveDir,
+						archived: result.archived,
+						removed: result.removed,
+					},
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"StateRoot-only writes: archived old entries to .archive/YYYY-MM-DD/ and removed from live files.",
 				],
 			});
 		}
