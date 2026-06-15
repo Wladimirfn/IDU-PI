@@ -2024,7 +2024,11 @@ test("digest alert routing: security goes immediate, high severity goes to diges
 		// the immediate one is flagged so the runtime can render
 		// the human-readable form, the digest one is metadata for
 		// the scheduled flush.
-		assert.equal(injections.length, 2, "both decisions should emit an injection");
+		assert.equal(
+			injections.length,
+			2,
+			"both decisions should emit an injection",
+		);
 		const immediate = injections.filter(
 			(injection) => injection.triggerId === "autonomous_alert_immediate",
 		);

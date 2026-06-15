@@ -108,7 +108,8 @@ test("collectDraftInputs returns empty agentlabFindings when lab.db does not exi
 		const inputs = await collectDraftInputs(stateRoot, "demo");
 		// No lab.db → no findings (or empty array)
 		assert.ok(
-			inputs.agentlabFindings === undefined || inputs.agentlabFindings.length === 0,
+			inputs.agentlabFindings === undefined ||
+				inputs.agentlabFindings.length === 0,
 		);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });
@@ -162,7 +163,8 @@ test("collectDraftInputs returns empty agentlabFindings for a different project"
 		const inputs = await collectDraftInputs(stateRoot, "demo");
 		// No findings for "demo" project
 		assert.ok(
-			inputs.agentlabFindings === undefined || inputs.agentlabFindings.length === 0,
+			inputs.agentlabFindings === undefined ||
+				inputs.agentlabFindings.length === 0,
 		);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });

@@ -13,10 +13,7 @@ import {
 	type SemanticCompactionDraft,
 	type SemanticCompactionReview,
 } from "./semantic-compaction.js";
-import {
-	collectDraftInputs,
-	type DraftInputs,
-} from "./skill-draft-inputs.js";
+import { collectDraftInputs, type DraftInputs } from "./skill-draft-inputs.js";
 
 export type SkillImprovementProposalType =
 	| "create_skill"
@@ -342,9 +339,7 @@ export function formatSkillImprovementStatus(
 function buildCitationsSuffix(inputs: DraftInputs): string {
 	const parts: string[] = [];
 	if (inputs.generalSpec) {
-		parts.push(
-			`[general-spec v${inputs.generalSpec.specVersion ?? "?"}]`,
-		);
+		parts.push(`[general-spec v${inputs.generalSpec.specVersion ?? "?"}]`);
 	}
 	if (inputs.blueprint) {
 		parts.push(`[blueprint: ${inputs.blueprint.objective}]`);
@@ -353,9 +348,7 @@ function buildCitationsSuffix(inputs: DraftInputs): string {
 		parts.push(`[flows: ${inputs.flows.projectType}]`);
 	}
 	if (inputs.agentlabFindings && inputs.agentlabFindings.length > 0) {
-		parts.push(
-			`[findings: ${inputs.agentlabFindings.length} open]`,
-		);
+		parts.push(`[findings: ${inputs.agentlabFindings.length} open]`);
 	}
 	return parts.length > 0 ? ` ${parts.join(" ")}` : "";
 }

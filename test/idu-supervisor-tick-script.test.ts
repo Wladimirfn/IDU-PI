@@ -27,13 +27,7 @@ async function runScript(
 	try {
 		const { stdout, stderr } = await execFile(
 			"pwsh",
-			[
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				scriptPath,
-			],
+			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
 			{
 				env: { ...process.env, ...env },
 				timeout: timeoutMs,
@@ -79,13 +73,8 @@ test("skip-list does NOT include 'node' (regression: self-matching bug)", () => 
 		`expected ${SCRIPT_PATH} to exist for the static check`,
 	);
 	const source = readFileSync(SCRIPT_PATH, "utf8");
-	const match = source.match(
-		/\$cliNames\s*=\s*@\(\s*([\s\S]+?)\s*\)/u,
-	);
-	assert.ok(
-		match,
-		`could not find $cliNames array literal in the script`,
-	);
+	const match = source.match(/\$cliNames\s*=\s*@\(\s*([\s\S]+?)\s*\)/u);
+	assert.ok(match, `could not find $cliNames array literal in the script`);
 	const raw = match[1];
 	const names = raw
 		.split(/,\s*/u)
@@ -121,7 +110,11 @@ test("script honours the trigger-disabled opt-in and exits silently (no output, 
 		const result = await runScript(fakeScript, {
 			IDU_PI_TICK_STATE_ROOT: fakeStateRoot,
 		});
-		assert.equal(result.code, 0, `script must exit 0 when trigger is disabled, got ${result.code}; stderr=${result.stderr}`);
+		assert.equal(
+			result.code,
+			0,
+			`script must exit 0 when trigger is disabled, got ${result.code}; stderr=${result.stderr}`,
+		);
 		// Silent-when-disabled: no "skipped" line in stdout, no
 		// banner output, no tsc error. The opt-in is invisible by
 		// design — the user does not want a disabled trigger to

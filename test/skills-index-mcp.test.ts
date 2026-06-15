@@ -63,7 +63,10 @@ test("loadSkillsIndexFromLabDb returns skill_index entries with default rating",
 test("loadSkillsForTask ranks skills by score and empty result for unrelated task", () => {
 	const stateRoot = makeRepoWithIndex();
 	try {
-		const ranked = loadSkillsForTask(stateRoot, "review onboarding documentation");
+		const ranked = loadSkillsForTask(
+			stateRoot,
+			"review onboarding documentation",
+		);
 		assert.ok(ranked.length > 0, "expected at least one match for onboarding");
 		assert.equal(
 			ranked[0]?.skillId,

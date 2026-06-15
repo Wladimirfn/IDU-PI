@@ -18,16 +18,49 @@ test("scoreByTerms returns zero for no overlap and higher for more overlapping t
 	assert.equal(scoreByTerms(entry, ["python"]), 0);
 	assert.equal(scoreByTerms(entry, ["onboard"]), 1);
 	const onAndTeam = scoreByTerms(entry, ["onboard", "team", "agentlab"]);
-	assert.ok(onAndTeam > scoreByTerms(entry, ["onboard"]), "more matches must score higher");
+	assert.ok(
+		onAndTeam > scoreByTerms(entry, ["onboard"]),
+		"more matches must score higher",
+	);
 });
 
 test("buildSkillsIndex filters to active skills with rating >= 7 only", () => {
 	const rows: Array<SkillIndexRow> = [
-		{ id: "1", name: "active-strong", path: "/skills/active-strong", active: true, rating: 9 },
-		{ id: "2", name: "active-medium", path: "/skills/active-medium", active: true, rating: 7 },
-		{ id: "3", name: "active-weak", path: "/skills/active-weak", active: true, rating: 5 },
-		{ id: "4", name: "archived-strong", path: "/skills/archived-strong", active: false, rating: 9 },
-		{ id: "5", name: "active-strong-2", path: "/skills/active-strong-2", active: true, rating: 8 },
+		{
+			id: "1",
+			name: "active-strong",
+			path: "/skills/active-strong",
+			active: true,
+			rating: 9,
+		},
+		{
+			id: "2",
+			name: "active-medium",
+			path: "/skills/active-medium",
+			active: true,
+			rating: 7,
+		},
+		{
+			id: "3",
+			name: "active-weak",
+			path: "/skills/active-weak",
+			active: true,
+			rating: 5,
+		},
+		{
+			id: "4",
+			name: "archived-strong",
+			path: "/skills/archived-strong",
+			active: false,
+			rating: 9,
+		},
+		{
+			id: "5",
+			name: "active-strong-2",
+			path: "/skills/active-strong-2",
+			active: true,
+			rating: 8,
+		},
 	];
 	const index = buildSkillsIndex(stubDb(rows));
 	assert.deepEqual(

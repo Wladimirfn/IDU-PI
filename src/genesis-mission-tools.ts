@@ -46,7 +46,10 @@ export function runGenesisMissionDraft(
 	const projectPath = resolve(input.projectPath);
 	mkdirSync(stateRoot, { recursive: true });
 	mkdirSync(joinBirth(stateRoot), { recursive: true });
-	const scan = scanExistingProject({ projectPath, projectId: projectIdFromPath(projectPath) });
+	const scan = scanExistingProject({
+		projectPath,
+		projectId: projectIdFromPath(projectPath),
+	});
 	writeBirthArtifact(stateRoot, "existing-scan", scan.scan);
 	writeBirthArtifact(stateRoot, "detected-specs", scan.detectedSpecs);
 	const docs: ProjectDocs = readProjectDocs(projectPath);
@@ -67,7 +70,8 @@ export function runGenesisMissionConfirm(
 			stateRoot,
 			projectPath,
 			blueprint: emptyBlueprint(projectPath),
-			error: "No mission-draft persisted; call idu_genesis_mission_draft first.",
+			error:
+				"No mission-draft persisted; call idu_genesis_mission_draft first.",
 		};
 	}
 	const next: BlueprintArtifact = {

@@ -20,7 +20,10 @@ function makeStateRoot(): string {
 	return mkdtempSync(join(tmpdir(), "idu-outbox-prune-"));
 }
 
-function daysAgoIso(days: number, now = new Date("2026-06-15T00:00:00Z")): string {
+function daysAgoIso(
+	days: number,
+	now = new Date("2026-06-15T00:00:00Z"),
+): string {
 	return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
@@ -104,14 +107,15 @@ test("planPrune filters out recent entries, keeps old ones", () => {
 		const plan = planPrune(stateRoot, OPTS);
 		assert.equal(plan.proposals.length, 2, "should keep 2 old proposals");
 		assert.equal(plan.injections.length, 3, "should keep 3 old injections");
-		assert.deepEqual(
-			plan.proposals.map((p) => p.id).sort(),
-			["p-old-1", "p-old-2"],
-		);
-		assert.deepEqual(
-			plan.injections.map((i) => i.id).sort(),
-			["i-old-1", "i-old-2", "i-old-3"],
-		);
+		assert.deepEqual(plan.proposals.map((p) => p.id).sort(), [
+			"p-old-1",
+			"p-old-2",
+		]);
+		assert.deepEqual(plan.injections.map((i) => i.id).sort(), [
+			"i-old-1",
+			"i-old-2",
+			"i-old-3",
+		]);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
@@ -136,10 +140,7 @@ test("applyPrune archives to .archive/YYYY-MM-DD/ and removes from live", () => 
 		assert.match(live, /p-new-1/);
 		assert.doesNotMatch(live, /p-old-1/);
 		// Live injections file should only have i-new-1
-		const liveInj = readFileSync(
-			join(stateRoot, "injections.jsonl"),
-			"utf8",
-		);
+		const liveInj = readFileSync(join(stateRoot, "injections.jsonl"), "utf8");
 		assert.match(liveInj, /i-new-1/);
 		assert.doesNotMatch(liveInj, /i-old-1/);
 		// Archive file should have the old entries

@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
-import {
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { readBirthArtifact } from "../src/birth-artifacts.js";
-import type { BlueprintArtifact, MissionDraft } from "../src/genesis-mission.js";
-import { runGenesisMissionDraft, runGenesisMissionConfirm } from "../src/genesis-mission-tools.js";
+import type {
+	BlueprintArtifact,
+	MissionDraft,
+} from "../src/genesis-mission.js";
+import {
+	runGenesisMissionDraft,
+	runGenesisMissionConfirm,
+} from "../src/genesis-mission-tools.js";
 
 function makeRepoWithSource(): {
 	stateRoot: string;
@@ -32,7 +33,11 @@ function makeRepoWithSource(): {
 		)}\n`,
 		"utf8",
 	);
-	writeFileSync(join(projectPath, "tsconfig.json"), "{\"strict\": true}\n", "utf8");
+	writeFileSync(
+		join(projectPath, "tsconfig.json"),
+		'{"strict": true}\n',
+		"utf8",
+	);
 	return { stateRoot, projectPath };
 }
 
@@ -46,7 +51,10 @@ test("runGenesisMissionDraft returns a truthful unconfirmed draft", () => {
 			draft.missionDraft.objective,
 			/Maintenance dashboard for field teams/u,
 		);
-		const persisted = readBirthArtifact<MissionDraft>(stateRoot, "mission-draft");
+		const persisted = readBirthArtifact<MissionDraft>(
+			stateRoot,
+			"mission-draft",
+		);
 		assert.ok(persisted);
 		assert.equal(persisted?.status, "draft");
 	} finally {
@@ -67,7 +75,10 @@ test("runGenesisMissionConfirm persists a confirmed blueprint", () => {
 		assert.equal(result.ok, true);
 		assert.equal(result.blueprint.confirmedBy, "owner");
 		assert.equal(result.blueprint.confirmedAt, "2026-06-14T00:00:00.000Z");
-		const persisted = readBirthArtifact<BlueprintArtifact>(stateRoot, "blueprint");
+		const persisted = readBirthArtifact<BlueprintArtifact>(
+			stateRoot,
+			"blueprint",
+		);
 		assert.deepEqual(persisted, result.blueprint);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });

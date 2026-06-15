@@ -49,8 +49,7 @@ export type RoleProfile = RoleProfileFrontmatter & {
 };
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/u;
-const PROHIBICIONES_HEADING_RE =
-	/^#{2,}\s*Qué tengo prohibido\s*$/gmu;
+const PROHIBICIONES_HEADING_RE = /^#{2,}\s*Qué tengo prohibido\s*$/gmu;
 const LIST_ITEM_RE = /^\s*-\s+(.+?)\s*$/u;
 
 function parseFrontmatter(raw: string): {
@@ -131,16 +130,16 @@ export function loadRoleProfile(roleId: string): RoleProfile {
 	const profilesDir = resolveProfilesDir();
 	const path = join(profilesDir, `${roleId}.md`);
 	if (!existsSync(path)) {
-		throw new Error(
-			`Role profile not found: ${roleId} (looked at ${path})`,
-		);
+		throw new Error(`Role profile not found: ${roleId} (looked at ${path})`);
 	}
 	const raw = readFileSync(path, "utf8");
 	const { frontmatter, body } = parseFrontmatter(raw);
 	const prohibitions = parseProhibitions(body);
 	const tipoRaw = (frontmatter.tipo ?? "").toLowerCase();
 	const tipo: RoleType =
-		tipoRaw === "supervisor" || tipoRaw === "agentlab" || tipoRaw === "orquestador"
+		tipoRaw === "supervisor" ||
+		tipoRaw === "agentlab" ||
+		tipoRaw === "orquestador"
 			? (tipoRaw as RoleType)
 			: "agentlab";
 	return {
