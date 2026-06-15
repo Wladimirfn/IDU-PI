@@ -201,6 +201,7 @@ import {
 	markInjectionAcked,
 	type Injection,
 } from "./injection-store.js";
+import { applyPrune, planPrune } from "./idu-outbox-prune.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import {
@@ -2733,6 +2734,51 @@ export async function runCliCommand(
 					}
 				}
 				return ok(formatPendingInjections(pending, ack));
+			}
+			case "idu-outbox-prune":
+			case "outbox-prune": {
+				// Syntax: idu-outbox-prune [--older-than 30d] [--confirm]
+				let olderThanDays = 30;
+				let confirm = false;
+				for (const arg of rest) {
+					if (arg === "--confirm") {
+						confirm = true;
+						continue;
+					}
+					const m = /^--older-than\s+(\d+)([dhm])$/u.exec(arg);
+					if (m) {
+						const n = Number(m[1]);
+						const unit = m[2];
+						if (unit === "d") olderThanDays = n;
+						else if (unit === "h") olderThanDays = Math.max(1, Math.round(n / 24));
+						else if (unit === "m") olderThanDays = Math.max(1, Math.round((n / 60) / 24));
+					}
+				}
+				const plan = planPrune(activeRuntime.workspaceRoot, { olderThanDays });
+				if (!confirm) {
+					return ok(
+						[
+							"Outbox prune — DRY RUN (use --confirm to apply)",
+							`cutoff: ${plan.cutoff}`,
+							`proposals prunable: ${plan.proposals.length}`,
+							`injections prunable: ${plan.injections.length}`,
+							"",
+							"Nada se modifica. Re-correr con --confirm para archivar.",
+						].join("\n"),
+					);
+				}
+				const result = applyPrune(activeRuntime.workspaceRoot, plan, {
+					olderThanDays,
+				});
+				return ok(
+					[
+						"Outbox prune — applied",
+						`cutoff: ${result.cutoff}`,
+						`archive: ${result.archiveDir}`,
+						`archived: proposals=${result.archived.proposals}, injections=${result.archived.injections}`,
+						`removed (live): proposals=${result.removed.proposals}, injections=${result.removed.injections}`,
+					].join("\n"),
+				);
 			}
 			case "idu-subscribe-triggers":
 			case "subscribe-triggers":
