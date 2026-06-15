@@ -1,5 +1,5 @@
 /**
- * prompt-helpers — T1.6.
+ * prompt-helpers — T1.6+PR-3.
  *
  * Reusable helpers for building prompts to the LLM.
  * Currently used by supervisor-main; will be reused by supervisor-semantic
@@ -8,6 +8,7 @@
 
 import type { RoleAdvisory } from "./index.js";
 import type { Event } from "../event-bus.js";
+import { loadRoleProfile, type RoleProfile } from "./profile-loader.js";
 
 /**
  * Build a deterministic summary of recent state for the LLM prompt.
@@ -53,4 +54,26 @@ export function buildStateSummary(
 	}
 
 	return lines.join("\n");
+}
+
+/**
+ * Load the role's profile and return a short identity string suitable
+ * for the top of a system prompt: the role name, the type, the
+ * default model, and the prohibitions (so the LLM is reminded of
+ * the contract on every invocation). This is the shim that the
+ * existing role modules use without rewriting their call sites.
+ */
+export function buildRoleIdentity(roleId: string): string {
+	const profile: RoleProfile = loadRoleProfile(roleId);
+	const prohibitions = profile.prohibitions
+		.map((p) => `  - ${p}`)
+		.join("\n");
+	return [
+		`# Role: ${profile.nombre} (${profile.rolId})`,
+		`type: ${profile.tipo}`,
+		`default model: ${profile.modeloDefecto || "(unassigned)"}`,
+		"",
+		"## Prohibitions (must not violate)",
+		prohibitions,
+	].join("\n");
 }
