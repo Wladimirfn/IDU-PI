@@ -1,3 +1,7 @@
+param(
+	[string]$StateRoot
+)
+
 $ErrorActionPreference = 'Stop'
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -21,24 +25,27 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 # canonical idu-pi stateRoot (best-effort default for the live
 # install on this machine). Operators with multiple projects must
 # install one scheduled task per stateRoot.
-param(
-	[string]$StateRoot
-)
 if (-not $StateRoot) { $StateRoot = $env:IDU_PI_TICK_STATE_ROOT }
 if (-not $StateRoot) {
 	$StateRoot = Join-Path $env:USERPROFILE 'Documents\bridge-agents\projects\idu-pi'
 }
 
 $PowerShell = (Get-Command powershell.exe).Source
-$Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$TickScript`""
+# Wrap the env var setting in a small PowerShell bootstrap so the
+# child process inherits IDU_PI_TICK_STATE_ROOT. The shell prefix
+# `KEY="value"` is bash, not PowerShell — using it from
+# New-ScheduledTaskAction does nothing on Windows.
+$BootstrapScript = Join-Path $Root 'scripts/idu-supervisor-tick-bootstrap.ps1'
+$BootstrapContent = @"
+`$env:IDU_PI_TICK_STATE_ROOT = "$StateRoot"
+& "$TickScript"
+"@
+Set-Content -Path $BootstrapScript -Value $BootstrapContent -Encoding UTF8
+$Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$BootstrapScript`""
 
-# Build the action with the stateRoot env var so the tick script
-# can resolve the trigger opt-in file.
+# Build the action. The stateRoot env var is injected via the
+# bootstrap wrapper (compatible with PS5 ScheduledTasks).
 $Action = New-ScheduledTaskAction -Execute $PowerShell -Argument $Arguments -WorkingDirectory $Root
-$Action.EnvironmentVariables = @(
-	[Microsoft.PowerShell.Cmdletization.GeneratedTypes.ScheduledTask.TaskEnvironmentVariable]::new(
-		'IDU_PI_TICK_STATE_ROOT', $StateRoot)
-)
 
 $RepetitionDuration = (New-TimeSpan -Days 365)
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration $RepetitionDuration
