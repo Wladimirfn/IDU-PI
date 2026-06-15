@@ -51,7 +51,7 @@ function signal(overrides: Partial<DigestSignal> = {}): DigestSignal {
 	};
 }
 
-test("classifyInterrupt routes critical security/db/data-loss/high-risk signals immediately", () => {
+test("classifyInterrupt routes critical security/db/data-loss signals immediately, not high severity", () => {
 	assert.equal(classifyInterrupt(signal({ domain: "security" })), "immediate");
 	assert.equal(classifyInterrupt(signal({ domain: "db" })), "immediate");
 	assert.equal(
@@ -66,13 +66,16 @@ test("classifyInterrupt routes critical security/db/data-loss/high-risk signals 
 		classifyInterrupt(signal({ riskHints: ["security"] })),
 		"immediate",
 	);
+	// Per the supervisor-main profile policy: only security/db/data-loss
+	// (critical signals) interrupt; high severity alone does NOT
+	// interrupt and goes to the digest. This is the W1 fix.
 	assert.equal(
 		classifyInterrupt(signal({ domain: "stale_work", riskLevel: "high" })),
-		"immediate",
+		"digest",
 	);
 	assert.equal(
 		classifyInterrupt(signal({ domain: "stale_work", guardRisk: "high" })),
-		"immediate",
+		"digest",
 	);
 	assert.equal(
 		classifyInterrupt(signal({ domain: "backlog", riskLevel: "medium" })),
