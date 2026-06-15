@@ -89,13 +89,18 @@ export function recordDecision(
 	})();
 	let id = Number(parsed[0]?.id ?? 0);
 	if (id === 0) {
-		// Fallback: count is the new id.
-		const countOut = runSql(
+		// Fallback: each runSql spawns a fresh sqlite3 process, so
+		// last_insert_rowid() does not survive between calls. The
+		// next-id is the current MAX(id)+1; COALESCE handles the
+		// empty-table case (returns 1). MAX is the right choice
+		// over COUNT(*) because rows may have been deleted, making
+		// the count diverge from the highest assigned id.
+		const maxOut = runSql(
 			dbPath,
-			"SELECT COUNT(*) AS n FROM decision_ledger;",
+			"SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM decision_ledger;",
 		).trim();
-		const countParsed = JSON.parse(countOut) as Array<{ n: number }>;
-		id = Number(countParsed[0]?.n ?? 0);
+		const maxParsed = JSON.parse(maxOut) as Array<{ next_id: number }>;
+		id = Number(maxParsed[0]?.next_id ?? 1);
 	}
 	return { ...record, id };
 }

@@ -92,14 +92,38 @@ export function markInjectionAcked(
 	const raw = readFileSync(filePath, "utf8");
 	if (!raw.trim()) return;
 	const lines = raw.split("\n").filter((line) => line.length > 0);
-	let touched = false;
-	let decidedKind = "injection";
+	let target: Injection | null = null;
+	for (const line of lines) {
+		try {
+			const parsed = JSON.parse(line) as Injection;
+			if (parsed.injectionId === injectionId && !parsed.acked) {
+				target = parsed;
+				break;
+			}
+		} catch {
+			// skip malformed line
+		}
+	}
+	if (!target) return;
+	const injection = target;
+	// Record the decision FIRST so a ledger/DB failure is not
+	// swallowed silently. If recordDecision throws, the injection
+	// is left un-acked and the orchestrator can retry the ack.
+	const dbPath = join(stateRoot, "lab.db");
+	recordDecision(dbPath, {
+		projectId: "default",
+		decidedAt: new Date().toISOString(),
+		decidedBy: "orchestrator",
+		decision: "ack",
+		targetKind: injection.triggerId ?? "injection",
+		targetId: injectionId,
+		profileRef: "config/profiles/orchestrator.md",
+	});
+	// Then update the injection file to mark it acked.
 	const updated: string[] = lines.map((line) => {
 		try {
 			const parsed = JSON.parse(line) as Injection;
 			if (parsed.injectionId === injectionId && !parsed.acked) {
-				touched = true;
-				decidedKind = parsed.triggerId ?? "injection";
 				return JSON.stringify({ ...parsed, acked: true });
 			}
 			return line;
@@ -107,22 +131,5 @@ export function markInjectionAcked(
 			return line;
 		}
 	});
-	if (!touched) return;
 	writeFileSync(filePath, `${updated.join("\n")}\n`, "utf8");
-	// Best-effort: record the decision in the ledger so the
-	// orchestrator's choice is preserved between sessions.
-	try {
-		const dbPath = join(stateRoot, "lab.db");
-		recordDecision(dbPath, {
-			projectId: "default",
-			decidedAt: new Date().toISOString(),
-			decidedBy: "orchestrator",
-			decision: "ack",
-			targetKind: decidedKind,
-			targetId: injectionId,
-			profileRef: "config/profiles/orchestrator.md",
-		});
-	} catch {
-		// best-effort; do not block the ack
-	}
 }

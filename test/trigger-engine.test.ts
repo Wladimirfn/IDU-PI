@@ -8,6 +8,7 @@ import {
 	TRIGGER_DEFINITIONS,
 } from "../src/trigger-engine.js";
 import { appendEvent } from "../src/event-bus.js";
+import { readEvents } from "../src/event-bus.js";
 import { readPendingInjections } from "../src/injection-store.js";
 
 function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
@@ -441,6 +442,103 @@ test("objective_reminder_hourly envelope has decisionRequired: false", () => {
 			o?.decisionEnvelope.options,
 			["review", "ignore"],
 			"options should be review and ignore",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("runTriggerEngineTick continues to fire other triggers when one build throws", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		// Seed: stuck task that should fire stuck_tasks_1h
+		appendEvent(stateRoot, {
+			ts: FIXED_TS,
+			kind: "task_stuck",
+			projectId: "idu-pi",
+			payload: {
+				taskId: "t-x",
+				ageMs: 3_700_000,
+				domain: "stale_work",
+				severity: "warning",
+			},
+			sourceRef: "autonomous-alert-engine",
+			evidenceRefs: [],
+		});
+		// Seed: stale objective cache so objective_reminder fires too
+		const cachePath = join(stateRoot, "master-plan-objective-cache.json");
+		writeFileSync(
+			cachePath,
+			JSON.stringify({
+				version: 1,
+				projectId: "idu-pi",
+				objective: "test",
+				updatedAt: "2026-06-08T07:00:00.000Z",
+			}),
+			"utf8",
+		);
+		// Define a faulty trigger that matches but throws on build
+		const faultyDef = {
+			id: "faulty_test_trigger",
+			description: "faulty trigger for resilience test",
+			kinds: ["task_stuck"],
+			signature: "faulty|test",
+			contract: {
+				decisionRequired: true,
+				severity: "warning" as const,
+				options: ["review"],
+			},
+			match: () => ({
+				triggerId: "faulty_test_trigger",
+				matches: [
+					{
+						event: {
+							ts: FIXED_TS,
+							kind: "task_stuck",
+							projectId: "idu-pi",
+							payload: { taskId: "t-x" },
+							sourceRef: "test",
+							evidenceRefs: [],
+						},
+						reason: "always matches",
+					},
+				],
+			}),
+			build: () => {
+				throw new Error("profile missing");
+			},
+		};
+		const stuckDef = TRIGGER_DEFINITIONS.find(
+			(d) => d.id === "stuck_tasks_1h",
+		);
+		assert.ok(stuckDef, "stuck_tasks_1h must be defined");
+		const result = runTriggerEngineTick(
+			{
+				stateRoot,
+				projectId: "idu-pi",
+				now: new Date(FIXED_TS),
+			},
+			[faultyDef, stuckDef],
+		);
+		// Tick did NOT throw, and stuck_tasks_1h still fired
+		assert.ok(result.injectedCount >= 1, "stuck_tasks_1h must still fire");
+		const pending = readPendingInjections(stateRoot);
+		assert.ok(
+			pending.some((p) => p.triggerId === "stuck_tasks_1h"),
+			"stuck_tasks_1h injection should exist",
+		);
+		assert.equal(
+			pending.some((p) => p.triggerId === "faulty_test_trigger"),
+			false,
+			"faulty trigger should not inject",
+		);
+		// trigger_build_failed event was appended
+		const events = readEvents(stateRoot, {});
+		const failEvent = events.find((e) => e.kind === "trigger_build_failed");
+		assert.ok(failEvent, "trigger_build_failed event should exist");
+		assert.equal(
+			(failEvent?.payload as { triggerId?: string }).triggerId,
+			"faulty_test_trigger",
 		);
 	} finally {
 		cleanup();
