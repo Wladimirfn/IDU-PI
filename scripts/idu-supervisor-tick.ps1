@@ -86,12 +86,19 @@ if (-not $env:IDU_PI_TICK_FORCE -or $env:IDU_PI_TICK_FORCE -ne '1') {
 # case with a clear log line.
 #
 # `IDU_PI_TICK_STATE_ROOT` is the active project's stateRoot. The
-# install-supervisor-tick.ps1 script sets it when the scheduled
-# task is registered; for ad-hoc runs the operator can set it
-# manually. When unset, the trigger opt-in check is skipped (the
-# script still runs) — the TUI opt-in is best-effort, not a hard
-# gate, so the cron job never silently breaks because of a missing
-# stateRoot.
+# install-supervisor-tick.ps1 script sets it as a task env var
+# when the scheduled task is registered (see
+# scripts/install-supervisor-tick.ps1). For ad-hoc runs the
+# operator can set it manually. When unset, the trigger opt-in
+# check is skipped (the script still runs) — the TUI opt-in is
+# best-effort, not a hard gate, so the cron job never silently
+# breaks because of a missing stateRoot.
+#
+# Silent-when-disabled: when the trigger is disabled by the user,
+# the script exits silently (no console output, no log line). This
+# matches the operator expectation that a disabled trigger should
+# be invisible — interrupting their day-to-day work or showing
+# "skipped" lines is exactly what the opt-in exists to prevent.
 $StateRoot = $env:IDU_PI_TICK_STATE_ROOT
 if ($StateRoot) {
 	$triggerFile = Join-Path $StateRoot 'supervisor-trigger.json'
@@ -99,10 +106,7 @@ if ($StateRoot) {
 		try {
 			$triggerContent = Get-Content $triggerFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
 			if ($triggerContent.enabled -eq $false) {
-				$reason = 'skipped: trigger disabled by user'
-				Write-Host $reason -ForegroundColor DarkYellow
-				Log $reason
-				Step ('Step 0.5: skip because supervisor trigger is disabled in ' + $triggerFile)
+				# Silent exit: no Write-Host, no Log. The user opted out.
 				exit 0
 			}
 		} catch {
