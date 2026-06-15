@@ -195,6 +195,27 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	};
 	writeFileSync(statePath, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
 
+	// Write a single ready signal so external tools and the
+	// supervisor cycle have one source of truth for "this project
+	// is bootstrapped and ready" instead of fragmenting the check
+	// across idu-session-state.json + birth/status.json + manual
+	// state dir probes.
+	const readyPath = join(statePaths.stateRoot, "idu-ready.json");
+	writeFileSync(
+		readyPath,
+		`${JSON.stringify(
+			{
+				version: 1,
+				projectId: project.id,
+				readyAt: new Date().toISOString(),
+				...(currentGitHead ? { gitHead: currentGitHead } : {}),
+			},
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+
 	return {
 		project,
 		statePaths,
