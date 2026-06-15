@@ -19,7 +19,9 @@
     "mcp": "tsc -p tsconfig.json && node dist/src/mcp-server.js",
     "start": "node dist/src/index.js",
     "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
-    "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js dist/test/**/*.test.js"
+    "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js dist/test/**/*.test.js",
+    "sync:profiles": "node scripts/sync-profiles.mjs",
+    "sync:profiles:dry": "node scripts/sync-profiles.mjs --dry-run"
   },
   "dependencies": {
     "dotenv": "17.4.2",
