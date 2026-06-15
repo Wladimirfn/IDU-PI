@@ -52,23 +52,15 @@ function makeBaseEvent(
 }
 
 export function emitOrchestratorTurn(input: OrchestratorTurnInput): void {
-	const event = makeBaseEvent(
-		input,
-		"orchestrator_turn",
-		{
-			toolName: input.toolName,
-		},
-	);
+	const event = makeBaseEvent(input, "orchestrator_turn", {
+		toolName: input.toolName,
+	});
 	appendEvent(input.stateRoot, event);
 }
 
 export function emitAlertsScheduledTick(input: AlertsScheduledTickInput): void {
-	const event = makeBaseEvent(
-		input,
-		"alerts_scheduled_tick",
-		{
-			cronExpr: input.cronExpr,
-		},
-	);
+	const event = makeBaseEvent(input, "alerts_scheduled_tick", {
+		cronExpr: input.cronExpr,
+	});
 	appendEvent(input.stateRoot, event);
 }

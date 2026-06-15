@@ -72,9 +72,7 @@ export function scoreSkillsForTask(
 		.map((row) => row.entry);
 }
 
-export function packSkillsIndex(
-	entries: SkillIndexEntry[],
-): SkillIndexEntry[] {
+export function packSkillsIndex(entries: SkillIndexEntry[]): SkillIndexEntry[] {
 	return entries.slice(0, SKILLS_INDEX_PACK_CAP).map((entry) => ({
 		...entry,
 		summary: entry.summary.slice(0, SKILLS_INDEX_SUMMARY_CAP),

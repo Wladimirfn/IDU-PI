@@ -61,92 +61,87 @@ function makeProjectTree(projectPath: string): void {
 	);
 }
 
-test(
-	"E1-S1: full birth pipeline completes for a fresh project",
-	async (t) => {
-		const stateRoot = makeStateRoot("s1");
-		const projectPath = join(stateRoot, "repo");
-		try {
-			makeProjectTree(projectPath);
-			const report = runOnboardProject(stateRoot, "demo", {
-				projectPath,
-				workspaceRoot: stateRoot,
-				allowedRoots: [stateRoot, projectPath],
-				registryPath: join(stateRoot, "registry", "projects.json"),
-			});
-			assert.equal(report.ok, true, JSON.stringify(report, null, 2));
-			assert.equal(report.exitCode, 0);
-			assert.ok(
-				report.missionDraft,
-				"missionDraft should be present after runOnboardProject",
-			);
-			t.diagnostic(
-				"onboard steps: " + report.steps.map((s) => s.id).join(", "),
-			);
-		} finally {
-			rmSync(stateRoot, { recursive: true, force: true });
-		}
-	},
-);
+test("E1-S1: full birth pipeline completes for a fresh project", async (t) => {
+	const stateRoot = makeStateRoot("s1");
+	const projectPath = join(stateRoot, "repo");
+	try {
+		makeProjectTree(projectPath);
+		const report = runOnboardProject(stateRoot, "demo", {
+			projectPath,
+			workspaceRoot: stateRoot,
+			allowedRoots: [stateRoot, projectPath],
+			registryPath: join(stateRoot, "registry", "projects.json"),
+		});
+		assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+		assert.equal(report.exitCode, 0);
+		assert.ok(
+			report.missionDraft,
+			"missionDraft should be present after runOnboardProject",
+		);
+		t.diagnostic("onboard steps: " + report.steps.map((s) => s.id).join(", "));
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
 
-test(
-	"E1-S2: spec edit propagates through approveBirthGeneralSpec",
-	async () => {
-		const stateRoot = makeStateRoot("s2");
-		try {
-			// First approval sets specVersion to 1
-			await approveBirthGeneralSpec({
-				stateRoot,
-				projectId: "demo",
-				sections: {
-					navigation: [],
-					baseComponents: [],
-					pageStructureRules: [],
-					dataRules: [],
-					interactionRules: [],
-					motionRules: [],
-					accessibilityCriteria: [],
-					performanceCriteria: [],
-				},
-				approvedBy: "e2e-test",
-			});
-			const first = readBirthArtifact<{ specVersion: number }>(
-				stateRoot,
-				"general-spec",
-			);
-			assert.ok(first, "general-spec should be readable after first approval");
-			assert.equal(first?.specVersion, 1);
-			// Second approval bumps to 2
-			await approveBirthGeneralSpec({
-				stateRoot,
-				projectId: "demo",
-				sections: {
-					navigation: [],
-					baseComponents: [],
-					pageStructureRules: [],
-					dataRules: [],
-					interactionRules: [],
-					motionRules: [],
-					accessibilityCriteria: [],
-					performanceCriteria: [],
-				},
-				approvedBy: "e2e-test",
-			});
-			const second = readBirthArtifact<{ specVersion: number }>(
-				stateRoot,
-				"general-spec",
-			);
-			assert.equal(second?.specVersion, 2);
-		} finally {
-			rmSync(stateRoot, { recursive: true, force: true });
-		}
-	},
-);
+test("E1-S2: spec edit propagates through approveBirthGeneralSpec", async () => {
+	const stateRoot = makeStateRoot("s2");
+	try {
+		// First approval sets specVersion to 1
+		await approveBirthGeneralSpec({
+			stateRoot,
+			projectId: "demo",
+			sections: {
+				navigation: [],
+				baseComponents: [],
+				pageStructureRules: [],
+				dataRules: [],
+				interactionRules: [],
+				motionRules: [],
+				accessibilityCriteria: [],
+				performanceCriteria: [],
+			},
+			approvedBy: "e2e-test",
+		});
+		const first = readBirthArtifact<{ specVersion: number }>(
+			stateRoot,
+			"general-spec",
+		);
+		assert.ok(first, "general-spec should be readable after first approval");
+		assert.equal(first?.specVersion, 1);
+		// Second approval bumps to 2
+		await approveBirthGeneralSpec({
+			stateRoot,
+			projectId: "demo",
+			sections: {
+				navigation: [],
+				baseComponents: [],
+				pageStructureRules: [],
+				dataRules: [],
+				interactionRules: [],
+				motionRules: [],
+				accessibilityCriteria: [],
+				performanceCriteria: [],
+			},
+			approvedBy: "e2e-test",
+		});
+		const second = readBirthArtifact<{ specVersion: number }>(
+			stateRoot,
+			"general-spec",
+		);
+		assert.equal(second?.specVersion, 2);
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
 
 test("E2E-B1: idu_skill_for_task returns empty list (not an error) on a fresh project", () => {
 	const stateRoot = makeStateRoot("b1");
 	try {
-		const result = loadSkillsForTask(stateRoot, "implement a new page component");
+		const result = loadSkillsForTask(
+			stateRoot,
+			"implement a new page component",
+		);
 		assert.ok(Array.isArray(result), "result must be an array");
 		// Empty is acceptable; the contract is "does not throw" + returns array
 	} finally {
@@ -205,7 +200,11 @@ test("G5: taxonomy seed is idempotent and creates parseable file", () => {
 					version: 1,
 					projectType: "web",
 					rules: [
-						{ id: "web-components", canonicalDir: "src/components", mustIndex: true },
+						{
+							id: "web-components",
+							canonicalDir: "src/components",
+							mustIndex: true,
+						},
 					],
 				},
 				null,

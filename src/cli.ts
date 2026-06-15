@@ -2787,8 +2787,10 @@ export async function runCliCommand(
 						const n = Number(m[1]);
 						const unit = m[2];
 						if (unit === "d") olderThanDays = n;
-						else if (unit === "h") olderThanDays = Math.max(1, Math.round(n / 24));
-						else if (unit === "m") olderThanDays = Math.max(1, Math.round((n / 60) / 24));
+						else if (unit === "h")
+							olderThanDays = Math.max(1, Math.round(n / 24));
+						else if (unit === "m")
+							olderThanDays = Math.max(1, Math.round(n / 60 / 24));
 					}
 				}
 				const plan = planPrune(activeRuntime.workspaceRoot, { olderThanDays });
@@ -4925,16 +4927,15 @@ async function runSupervisorTriggerMenuTui(
 		if (choice === "exit") return "Salida sin cambios.";
 		if (choice === "refresh") continue;
 		if (choice === "toggle") {
-			const result =
-				status.enabled
-					? disableSupervisorTrigger(stateRoot, {
-							source: "tui",
-							now: new Date(),
-						})
-					: enableSupervisorTrigger(stateRoot, {
-							source: "tui",
-							now: new Date(),
-						});
+			const result = status.enabled
+				? disableSupervisorTrigger(stateRoot, {
+						source: "tui",
+						now: new Date(),
+					})
+				: enableSupervisorTrigger(stateRoot, {
+						source: "tui",
+						now: new Date(),
+					});
 			// Show the operator the result so they have proof the
 			// opt-in was persisted. Without this feedback the user
 			// can't tell whether the toggle wrote the file or
@@ -4944,7 +4945,7 @@ async function runSupervisorTriggerMenuTui(
 				"",
 				result.state.enabled
 					? "El script supervisor-tick correrá normalmente."
-					: 'El script supervisor-tick se saltea silenciosamente. El estado quedó persistido en ' +
+					: "El script supervisor-tick se saltea silenciosamente. El estado quedó persistido en " +
 						result.path,
 			].join("\n");
 		}

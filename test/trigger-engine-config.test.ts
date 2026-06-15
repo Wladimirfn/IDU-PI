@@ -110,7 +110,10 @@ test("getTriggerEngineConfigStatus reports default disabled state", () => {
 		assert.equal(status.path, triggerEngineConfigPath(stateRoot));
 		assert.equal(status.exists, false);
 		assert.equal(status.enabled, false);
-		assert.match(formatTriggerEngineConfigStatus(status), /disabled \(default/u);
+		assert.match(
+			formatTriggerEngineConfigStatus(status),
+			/disabled \(default/u,
+		);
 	});
 });
 

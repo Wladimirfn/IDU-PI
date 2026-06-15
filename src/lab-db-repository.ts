@@ -447,9 +447,7 @@ ON CONFLICT(id) DO UPDATE SET
 
 	listDigests(sourceId?: string): DigestRecord[] {
 		initLabDb(this.dbPath);
-		const where = sourceId
-			? `WHERE source_id = ${sqlString(sourceId)}`
-			: "";
+		const where = sourceId ? `WHERE source_id = ${sqlString(sourceId)}` : "";
 		const raw = runSql(
 			this.dbPath,
 			`SELECT id, source_id, generated_at, body FROM digests ${where} ORDER BY generated_at DESC;`,
@@ -566,7 +564,8 @@ ON CONFLICT(id) DO UPDATE SET
 		if (filters?.kind) {
 			conditions.push(`kind = ${sqlString(filters.kind)}`);
 		}
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+		const where =
+			conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 		const raw = runSql(
 			this.dbPath,
 			`SELECT id, kind, payload, created_at, status FROM bibliotecario_proposals ${where} ORDER BY created_at DESC;`,

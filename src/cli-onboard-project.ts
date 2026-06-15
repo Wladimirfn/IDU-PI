@@ -315,7 +315,9 @@ function emptyProjectDocs(): ProjectDocs {
 	return {};
 }
 
-function readPackageJsonSafe(projectPath: string): Record<string, unknown> | undefined {
+function readPackageJsonSafe(
+	projectPath: string,
+): Record<string, unknown> | undefined {
 	const pkgPath = join(projectPath, "package.json");
 	try {
 		if (!existsSync(pkgPath)) return undefined;

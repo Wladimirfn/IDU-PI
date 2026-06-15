@@ -37,8 +37,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = resolve(__dirname, "..");
 
-const DEFAULT_SOURCE =
-	"C:/Users/elmas/Downloads/Documento proyecto/Perfil ia";
+const DEFAULT_SOURCE = "C:/Users/elmas/Downloads/Documento proyecto/Perfil ia";
 const TARGET_DIR = join(REPO_ROOT, "config", "profiles");
 
 // Filename fallback when the upstream file lacks a rol-id

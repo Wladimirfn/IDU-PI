@@ -15,22 +15,19 @@ function signal(overrides: Partial<DigestSignal> = {}): DigestSignal {
 	};
 }
 
-test(
-	"policy: supervisor-main only escalates security/db/data-loss to immediate",
-	() => {
-		// The policy: the supervisor-main profile must explicitly
-		// say "Escalaciones a humano SOLO para riesgo crítico
-		// (seguridad, DB, pérdida de datos). Señales no críticas
-		// dirigidas al digest, nunca interrupciones individuales."
-		const profile = loadRoleProfile("supervisor-main");
-		const allProhibitions = profile.prohibitions.join("\n");
-		assert.match(
-			allProhibitions,
-			/Interrumpir al humano/i,
-			"supervisor-main must prohibit arbitrary interruptions",
-		);
-	},
-);
+test("policy: supervisor-main only escalates security/db/data-loss to immediate", () => {
+	// The policy: the supervisor-main profile must explicitly
+	// say "Escalaciones a humano SOLO para riesgo crítico
+	// (seguridad, DB, pérdida de datos). Señales no críticas
+	// dirigidas al digest, nunca interrupciones individuales."
+	const profile = loadRoleProfile("supervisor-main");
+	const allProhibitions = profile.prohibitions.join("\n");
+	assert.match(
+		allProhibitions,
+		/Interrumpir al humano/i,
+		"supervisor-main must prohibit arbitrary interruptions",
+	);
+});
 
 test("classifyInterrupt: high riskLevel does NOT interrupt (digest)", () => {
 	const result = classifyInterrupt(signal({ riskLevel: "high" }));
@@ -43,9 +40,7 @@ test("classifyInterrupt: blocker riskLevel does NOT interrupt (digest)", () => {
 });
 
 test("classifyInterrupt: high riskLevel + ui domain still goes to digest", () => {
-	const result = classifyInterrupt(
-		signal({ riskLevel: "high", domain: "ui" }),
-	);
+	const result = classifyInterrupt(signal({ riskLevel: "high", domain: "ui" }));
 	assert.equal(result, "digest");
 });
 
@@ -67,15 +62,11 @@ test("classifyInterrupt: db domain interrupts (immediate)", () => {
 });
 
 test("classifyInterrupt: data_loss riskHint interrupts (immediate)", () => {
-	const result = classifyInterrupt(
-		signal({ riskHints: ["data_loss"] }),
-	);
+	const result = classifyInterrupt(signal({ riskHints: ["data_loss"] }));
 	assert.equal(result, "immediate");
 });
 
 test("classifyInterrupt: low severity + ui domain stays in digest", () => {
-	const result = classifyInterrupt(
-		signal({ riskLevel: "low", domain: "ui" }),
-	);
+	const result = classifyInterrupt(signal({ riskLevel: "low", domain: "ui" }));
 	assert.equal(result, "digest");
 });

@@ -1,9 +1,4 @@
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type PruneOptions = {
@@ -53,9 +48,7 @@ function readJsonlEntries(path: string): string[] {
 	return raw.split(/\r?\n/u).filter(Boolean);
 }
 
-function parseEntry(
-	line: string,
-): { id: string; createdAt: string } | null {
+function parseEntry(line: string): { id: string; createdAt: string } | null {
 	try {
 		const parsed = JSON.parse(line) as Record<string, unknown>;
 		if (typeof parsed === "object" && parsed !== null) {
@@ -66,8 +59,7 @@ function parseEntry(
 					parsed.envelope !== null &&
 					typeof (parsed.envelope as Record<string, unknown>).createdAt ===
 						"string" &&
-					(parsed.envelope as Record<string, unknown>)
-						.createdAt as string) ||
+					((parsed.envelope as Record<string, unknown>).createdAt as string)) ||
 				"";
 			if (typeof id === "string" && id.length > 0 && createdAt.length > 0) {
 				return { id, createdAt };
@@ -79,10 +71,7 @@ function parseEntry(
 	return null;
 }
 
-function collectPrunable(
-	path: string,
-	cutoff: string,
-): PrunableEntry[] {
+function collectPrunable(path: string, cutoff: string): PrunableEntry[] {
 	const out: PrunableEntry[] = [];
 	for (const line of readJsonlEntries(path)) {
 		const entry = parseEntry(line);
@@ -97,10 +86,7 @@ function collectPrunable(
 	return out;
 }
 
-export function planPrune(
-	stateRoot: string,
-	options: PruneOptions,
-): PrunePlan {
+export function planPrune(stateRoot: string, options: PruneOptions): PrunePlan {
 	const cutoff = getCutoff(options);
 	const proposalsPath = join(stateRoot, "reports", "proposals.jsonl");
 	const injectionsPath = join(stateRoot, "injections.jsonl");
@@ -112,10 +98,7 @@ export function planPrune(
 	};
 }
 
-function archiveLines(
-	archivePath: string,
-	entries: PrunableEntry[],
-): void {
+function archiveLines(archivePath: string, entries: PrunableEntry[]): void {
 	if (entries.length === 0) return;
 	mkdirSync(dirname(archivePath), { recursive: true });
 	const block = entries.map((e) => e.raw).join("\n") + "\n";
@@ -130,10 +113,7 @@ function archiveLines(
 	}
 }
 
-function rewriteJsonl(
-	livePath: string,
-	pruneIds: Set<string>,
-): number {
+function rewriteJsonl(livePath: string, pruneIds: Set<string>): number {
 	if (!existsSync(livePath)) return 0;
 	const lines = readJsonlEntries(livePath);
 	const kept: string[] = [];

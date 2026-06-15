@@ -1,9 +1,6 @@
 import { join } from "node:path";
 import { LabDbRepository } from "./lab-db-repository.js";
-import {
-	scoreSkillsForTask,
-	type SkillIndexEntry,
-} from "./skills-index.js";
+import { scoreSkillsForTask, type SkillIndexEntry } from "./skills-index.js";
 
 const SKILLS_INDEX_DEFAULT_RATING = 7;
 

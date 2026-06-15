@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { resolveEventsPath } from "../src/event-bus.js";
 import { markInjectionAcked, appendInjection } from "../src/injection-store.js";
-import { emitOrchestratorTurn, emitAlertsScheduledTick } from "../src/role-events.js";
+import {
+	emitOrchestratorTurn,
+	emitAlertsScheduledTick,
+} from "../src/role-events.js";
 import { listDecisions } from "../src/decision-ledger.js";
 import { buildObjectiveReminderText } from "../src/objective-reminder.js";
 
@@ -31,7 +34,10 @@ test("Wiring 1: buildObjectiveReminderText produces a profile-driven summary", (
 		now: new Date(),
 	});
 	assert.match(text, /Eres: orquestador/);
-	assert.match(text, /Rutina obligatoria|Al iniciar sesi|Entre tareas|Antes de implementar/i);
+	assert.match(
+		text,
+		/Rutina obligatoria|Al iniciar sesi|Entre tareas|Antes de implementar/i,
+	);
 });
 
 test("Wiring 2: emitOrchestratorTurn lands an event in events.jsonl with toolName", () => {
@@ -77,65 +83,56 @@ test("Wiring 3: emitAlertsScheduledTick lands an event in events.jsonl with cron
 	}
 });
 
-test(
-	"Wiring 4: markInjectionAcked records a decision in the ledger with profile_ref",
-	() => {
-		const stateRoot = makeStateRoot();
-		try {
-			appendInjection(stateRoot, {
-				ts: new Date().toISOString(),
-				triggerId: "test_trigger",
-				decisionEnvelope: {
-					severity: "info",
-					summary: "demo injection",
-					options: ["review", "ignore"],
-					evidenceRefs: [],
-					orchestratorDecisionRequired: false,
-				},
-				injectionId: "inj-test-1",
-				acked: false,
-			});
-			markInjectionAcked(stateRoot, "inj-test-1");
-			const dbPath = join(stateRoot, "lab.db");
-			const decisions = listDecisions(dbPath, { projectId: "default" });
-			const ackDecision = decisions.find(
-				(d) => d.targetId === "inj-test-1" && d.decision === "ack",
-			);
-			assert.ok(ackDecision, "decision for inj-test-1 must be recorded");
-			assert.equal(ackDecision?.profileRef, "config/profiles/orchestrator.md");
-		} finally {
-			rmSync(stateRoot, { recursive: true, force: true });
-		}
-	},
-);
+test("Wiring 4: markInjectionAcked records a decision in the ledger with profile_ref", () => {
+	const stateRoot = makeStateRoot();
+	try {
+		appendInjection(stateRoot, {
+			ts: new Date().toISOString(),
+			triggerId: "test_trigger",
+			decisionEnvelope: {
+				severity: "info",
+				summary: "demo injection",
+				options: ["review", "ignore"],
+				evidenceRefs: [],
+				orchestratorDecisionRequired: false,
+			},
+			injectionId: "inj-test-1",
+			acked: false,
+		});
+		markInjectionAcked(stateRoot, "inj-test-1");
+		const dbPath = join(stateRoot, "lab.db");
+		const decisions = listDecisions(dbPath, { projectId: "default" });
+		const ackDecision = decisions.find(
+			(d) => d.targetId === "inj-test-1" && d.decision === "ack",
+		);
+		assert.ok(ackDecision, "decision for inj-test-1 must be recorded");
+		assert.equal(ackDecision?.profileRef, "config/profiles/orchestrator.md");
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
 
-test(
-	"Wiring 5: when orchestrator_turn + alerts_scheduled_tick fire, both events coexist in events.jsonl",
-	() => {
-		const stateRoot = makeStateRoot();
-		try {
-			emitOrchestratorTurn({
-				stateRoot,
-				projectId: "demo",
-				toolName: "idu_status",
-				now: new Date("2026-06-15T00:00:00Z"),
-			});
-			emitAlertsScheduledTick({
-				stateRoot,
-				projectId: "demo",
-				cronExpr: "*/15 * * * *",
-				source: "cron",
-				now: new Date("2026-06-15T00:00:01Z"),
-			});
-			const events = readEventsJsonl(stateRoot);
-			assert.equal(events.length, 2);
-			const kinds = events.map((e) => e.kind).sort();
-			assert.deepEqual(kinds, [
-				"alerts_scheduled_tick",
-				"orchestrator_turn",
-			]);
-		} finally {
-			rmSync(stateRoot, { recursive: true, force: true });
-		}
-	},
-);
+test("Wiring 5: when orchestrator_turn + alerts_scheduled_tick fire, both events coexist in events.jsonl", () => {
+	const stateRoot = makeStateRoot();
+	try {
+		emitOrchestratorTurn({
+			stateRoot,
+			projectId: "demo",
+			toolName: "idu_status",
+			now: new Date("2026-06-15T00:00:00Z"),
+		});
+		emitAlertsScheduledTick({
+			stateRoot,
+			projectId: "demo",
+			cronExpr: "*/15 * * * *",
+			source: "cron",
+			now: new Date("2026-06-15T00:00:01Z"),
+		});
+		const events = readEventsJsonl(stateRoot);
+		assert.equal(events.length, 2);
+		const kinds = events.map((e) => e.kind).sort();
+		assert.deepEqual(kinds, ["alerts_scheduled_tick", "orchestrator_turn"]);
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});

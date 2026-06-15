@@ -30,10 +30,7 @@ test("loadRoleProfile returns a profile for agentlab-bibliotecario with the fetc
 	assert.equal(profile.modeloDefecto, "opencode-go/kimi-k2.5");
 	assert.ok(profile.prohibitions.length > 0);
 	// The bibliotecario's prohibitions include the fetch restriction.
-	assert.match(
-		profile.prohibitions.join("\n"),
-		/fetch/i,
-	);
+	assert.match(profile.prohibitions.join("\n"), /fetch/i);
 });
 
 test("loadRoleProfile returns a profile for orchestrator with the variable model", () => {

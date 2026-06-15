@@ -1,8 +1,4 @@
-import {
-	existsSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { initLabDb, runSql } from "./lab-db.js";
@@ -79,10 +75,7 @@ export function recordDecision(
 		);
 	`;
 	runSql(dbPath, sql);
-	const idOutput = runSql(
-		dbPath,
-		"SELECT last_insert_rowid() AS id;",
-	).trim();
+	const idOutput = runSql(dbPath, "SELECT last_insert_rowid() AS id;").trim();
 	// last_insert_rowid is per-connection; since runSql spawns a
 	// fresh sqlite3 process for each call, the rowid does not
 	// survive between calls. As a fallback, count rows for the
@@ -138,7 +131,8 @@ export function listDecisions(
 		targetKind: String(row.target_kind ?? ""),
 		targetId: String(row.target_id ?? ""),
 		rationale: typeof row.rationale === "string" ? row.rationale : undefined,
-		profileRef: typeof row.profile_ref === "string" ? row.profile_ref : undefined,
+		profileRef:
+			typeof row.profile_ref === "string" ? row.profile_ref : undefined,
 	}));
 }
 

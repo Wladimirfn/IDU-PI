@@ -772,7 +772,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Archiva propuestas e inyecciones más viejas que N días. Sin confirm=true es dry-run. StateRoot-only writes.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
-			olderThanDays: optionalEnum("Días de antiguedad; default 30.", ["7", "14", "30", "60", "90"]),
+			olderThanDays: optionalEnum("Días de antiguedad; default 30.", [
+				"7",
+				"14",
+				"30",
+				"60",
+				"90",
+			]),
 			confirm: optionalBoolean("Si true, aplica el archive; si no, dry-run."),
 		},
 	),
@@ -4125,7 +4131,10 @@ async function dispatchTool(
 		}
 		case "idu_outbox_prune": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const params = args as { olderThanDays?: string | number; confirm?: boolean };
+			const params = args as {
+				olderThanDays?: string | number;
+				confirm?: boolean;
+			};
 			const olderThanDays =
 				typeof params.olderThanDays === "string"
 					? Number(params.olderThanDays)

@@ -93,10 +93,7 @@ export function buildDigestInjection(
 		decisionEnvelope: {
 			severity: "info",
 			summary,
-			options: [
-				"Review digest items",
-				"No immediate interrupt required",
-			],
+			options: ["Review digest items", "No immediate interrupt required"],
 			evidenceRefs: uniqueEvidenceRefs(signals),
 			orchestratorDecisionRequired: false,
 		},
@@ -181,7 +178,10 @@ export function maybeFlushDigest(opts: MaybeFlushDigestOptions): FlushResult {
 	const schedule = readDigestSchedule(opts.stateRoot);
 	const dueSlot = latestDueSlot(schedule.slotsLocal, opts.now);
 	if (!dueSlot) {
-		return { flushed: false, signalCount: readDigestQueue(opts.stateRoot).length };
+		return {
+			flushed: false,
+			signalCount: readDigestQueue(opts.stateRoot).length,
+		};
 	}
 	const lastFlushMs = schedule.lastFlushAt
 		? Date.parse(schedule.lastFlushAt)
@@ -191,7 +191,10 @@ export function maybeFlushDigest(opts: MaybeFlushDigestOptions): FlushResult {
 		Number.isFinite(lastFlushMs) &&
 		lastFlushMs >= dueSlot.getTime()
 	) {
-		return { flushed: false, signalCount: readDigestQueue(opts.stateRoot).length };
+		return {
+			flushed: false,
+			signalCount: readDigestQueue(opts.stateRoot).length,
+		};
 	}
 	const signals = readDigestQueue(opts.stateRoot);
 	const nextSchedule = { ...schedule, lastFlushAt: opts.now.toISOString() };
@@ -234,8 +237,10 @@ function buildDigestSummary(signals: DigestSignal[]): string {
 	}
 	const lines = signals.map((signal, index) => {
 		const type = signal.kind ?? signal.domain ?? "signal";
-		const risk = signal.riskLevel ?? signal.guardRisk ?? signal.severity ?? "unknown";
-		const action = signal.requiredAction ?? signal.recommendedAction ?? "nothing required";
+		const risk =
+			signal.riskLevel ?? signal.guardRisk ?? signal.severity ?? "unknown";
+		const action =
+			signal.requiredAction ?? signal.recommendedAction ?? "nothing required";
 		const summary = signal.summary ?? signal.id;
 		return `${index + 1}. ${type}: ${summary} (risk: ${risk}; action: ${action})`;
 	});
@@ -258,13 +263,21 @@ function digestInjectionId(signals: DigestSignal[], ts: string): string {
 		evidenceRefs: [...(signal.evidenceRefs ?? [])].sort(),
 	}));
 	return createHash("sha1")
-		.update(JSON.stringify({ triggerId: DIGEST_TRIGGER_ID, ts, signals: stableSignals }))
+		.update(
+			JSON.stringify({
+				triggerId: DIGEST_TRIGGER_ID,
+				ts,
+				signals: stableSignals,
+			}),
+		)
 		.digest("hex");
 }
 
 function isValidSlot(value: unknown): value is string {
 	if (typeof value !== "string") return false;
-	return /^\d{2}:\d{2}$/u.test(value) && slotDate(value, new Date()) !== undefined;
+	return (
+		/^\d{2}:\d{2}$/u.test(value) && slotDate(value, new Date()) !== undefined
+	);
 }
 
 function latestDueSlot(slots: string[], now: Date): Date | undefined {

@@ -65,9 +65,7 @@ export function buildStateSummary(
  */
 export function buildRoleIdentity(roleId: string): string {
 	const profile: RoleProfile = loadRoleProfile(roleId);
-	const prohibitions = profile.prohibitions
-		.map((p) => `  - ${p}`)
-		.join("\n");
+	const prohibitions = profile.prohibitions.map((p) => `  - ${p}`).join("\n");
 	return [
 		`# Role: ${profile.nombre} (${profile.rolId})`,
 		`type: ${profile.tipo}`,

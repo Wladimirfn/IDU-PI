@@ -1,16 +1,14 @@
 import assert from "node:assert/strict";
-import {
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runOnboardProject } from "../src/cli-onboard-project.js";
 import { readBirthArtifact } from "../src/birth-artifacts.js";
-import type { BlueprintArtifact, MissionDraft } from "../src/genesis-mission.js";
+import type {
+	BlueprintArtifact,
+	MissionDraft,
+} from "../src/genesis-mission.js";
 
 test("runOnboardProject performs a real scan and returns a truthful mission draft", () => {
 	const stateRoot = mkdtempSync(join(tmpdir(), "idu-onboard-truthful-"));
@@ -30,9 +28,17 @@ test("runOnboardProject performs a real scan and returns a truthful mission draf
 			)}\n`,
 			"utf8",
 		);
-		writeFileSync(join(projectPath, "tsconfig.json"), "{ \"strict\": true }\n", "utf8");
+		writeFileSync(
+			join(projectPath, "tsconfig.json"),
+			'{ "strict": true }\n',
+			"utf8",
+		);
 		mkdirSync(join(projectPath, "test"), { recursive: true });
-		writeFileSync(join(projectPath, "test", "app.test.ts"), "export {};\n", "utf8");
+		writeFileSync(
+			join(projectPath, "test", "app.test.ts"),
+			"export {};\n",
+			"utf8",
+		);
 
 		const report = runOnboardProject(stateRoot, "demo", {
 			projectPath,
@@ -59,7 +65,8 @@ test("runOnboardProject performs a real scan and returns a truthful mission draf
 		);
 		assert.equal(
 			report.steps.some(
-				(step) => step.id === "scanExistingProject" && step.status === "success",
+				(step) =>
+					step.id === "scanExistingProject" && step.status === "success",
 			),
 			true,
 		);
@@ -100,7 +107,10 @@ test("runOnboardProject persists the confirmed mission when owner accepts it", (
 
 		assert.equal(report.ok, true, JSON.stringify(report, null, 2));
 		assert.equal(report.exitCode, 0);
-		const persisted = readBirthArtifact<BlueprintArtifact>(stateRoot, "blueprint");
+		const persisted = readBirthArtifact<BlueprintArtifact>(
+			stateRoot,
+			"blueprint",
+		);
 		assert.ok(persisted, "blueprint must be persisted");
 		assert.equal(persisted.confirmedBy, "owner");
 		assert.equal(persisted.confirmedAt, "2026-06-14T00:00:00.000Z");
@@ -127,7 +137,10 @@ test("runOnboardProject persists mission draft and skips blueprint when not conf
 		const draft = readBirthArtifact<MissionDraft>(stateRoot, "mission-draft");
 		assert.ok(draft, "draft must be persisted");
 		assert.equal(draft?.status, "draft");
-		const blueprint = readBirthArtifact<BlueprintArtifact>(stateRoot, "blueprint");
+		const blueprint = readBirthArtifact<BlueprintArtifact>(
+			stateRoot,
+			"blueprint",
+		);
 		assert.equal(blueprint, undefined);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });

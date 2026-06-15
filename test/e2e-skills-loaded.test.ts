@@ -20,29 +20,26 @@ test("e2e: every listed role profile has a non-empty body and at least one prohi
 	}
 });
 
-test(
-	"e2e: the profile frontmatter matches the model-assignments.json model (no drift)",
-	() => {
-		// For the 13 supervised roles, the profile's modelo-defecto
-		// should match the live assignment in
-		// Documents/bridge-agents/projects/idu-pi/model-assignments.json.
-		// The orchestrator is excluded (model is the active session).
-		const allProfiles = listAvailableRoleProfiles();
-		const supervised = allProfiles.filter((id) => id !== "orchestrator");
-		for (const roleId of supervised) {
-			const profile = loadRoleProfile(roleId);
-			// The loader only returns the *default* model from the
-			// profile. The actual assigned model is resolved at
-			// runtime from model-assignments.json. This test only
-			// asserts the profile parses without error and has a
-			// non-empty default.
-			assert.ok(
-				profile.modeloDefecto.length > 0,
-				`${roleId}: default model must be non-empty`,
-			);
-		}
-	},
-);
+test("e2e: the profile frontmatter matches the model-assignments.json model (no drift)", () => {
+	// For the 13 supervised roles, the profile's modelo-defecto
+	// should match the live assignment in
+	// Documents/bridge-agents/projects/idu-pi/model-assignments.json.
+	// The orchestrator is excluded (model is the active session).
+	const allProfiles = listAvailableRoleProfiles();
+	const supervised = allProfiles.filter((id) => id !== "orchestrator");
+	for (const roleId of supervised) {
+		const profile = loadRoleProfile(roleId);
+		// The loader only returns the *default* model from the
+		// profile. The actual assigned model is resolved at
+		// runtime from model-assignments.json. This test only
+		// asserts the profile parses without error and has a
+		// non-empty default.
+		assert.ok(
+			profile.modeloDefecto.length > 0,
+			`${roleId}: default model must be non-empty`,
+		);
+	}
+});
 
 test("e2e: orchestrator profile has the anti-drift reminder section", () => {
 	const profile = loadRoleProfile("orchestrator");
