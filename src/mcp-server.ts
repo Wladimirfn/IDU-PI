@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
 import { runSensorImpulses } from "./sensor-impulses.js";
+import { categorizeFindings } from "./supervisor-categorize.js";
 import {
 	formatBibliotecarioInit,
 	runBibliotecarioInit,
@@ -3104,6 +3105,25 @@ async function dispatchTool(
 					});
 				},
 			});
+			const supervisorAdvisory = await categorizeFindings({
+				stateRoot: sensorStateRoot,
+				findings: sensorImpulses
+					.filter((s) => s.consult.ok)
+					.map((s) => ({
+						match: s.match,
+						ok: s.consult.ok,
+						response: s.consult.response.slice(0, 500),
+					})),
+				promptForRole: (role, message, _options) => {
+					if (!runtime.promptForRole) {
+						throw new Error("runtime.promptForRole is not configured");
+					}
+					return runtime.promptForRole(role, message, {
+						projectId: runtime.projectId,
+						stateRoot: sensorStateRoot,
+					});
+				},
+			});
 			const actionId = stringArg(args, "actionId");
 			const taskPackageId = stringArg(args, "taskPackageId");
 			const expectedContracts = stringListArg(args, "expectedContracts");
@@ -3216,6 +3236,15 @@ async function dispatchTool(
 						},
 						fileContentTruncated: !!s.fileContent,
 					})),
+					supervisorAdvisory: supervisorAdvisory
+						? {
+								ok: supervisorAdvisory.ok,
+								counts: supervisorAdvisory.counts,
+								summary: supervisorAdvisory.advisory?.summary ?? null,
+								advisoryId: supervisorAdvisory.advisory?.advisoryId ?? null,
+								reason: supervisorAdvisory.reason ?? null,
+							}
+						: null,
 					taskTrace,
 					report,
 				},
@@ -3225,6 +3254,7 @@ async function dispatchTool(
 					"Physical gates reportan evidencia disponible; Idu-pi no ejecutó build/test automáticamente.",
 					"Trazabilidad advisory: no cierra ni aplica cambios automáticamente.",
 					`Sensor impulses: ${sensorImpulses.length} fire (${sensorImpulses.filter((s) => s.consult.ok).length} ok, ${sensorImpulses.filter((s) => !s.consult.ok).length} blocked).`,
+					`Supervisor advisory: ${supervisorAdvisory?.advisory?.summary ?? "no findings"}.`,
 				],
 			});
 		}
