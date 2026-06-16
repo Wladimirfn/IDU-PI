@@ -1647,6 +1647,29 @@ function fakeRuntime(projectPath: string, workspaceRoot: string): CliRuntime {
 		formatRoleEngineStatus: () => "role engine status unavailable",
 		saveRoleEngineConfig: (patch) =>
 			saveRoleEngineConfig(runtime.workspaceRoot, patch),
+		supervisorConsult: async () => ({
+			ok: false,
+			role: "supervisor-main" as const,
+			response: "",
+			model: "",
+			provider: "",
+			rail: {
+				role: "supervisor-main" as const,
+				enabled: true,
+				tokenBudget: 800,
+				minTokenBudget: 100,
+				maxTokenBudget: 2000,
+				cooldownMs: 30_000,
+				cooldownRemainingMs: 0,
+				wakeCount: 0,
+				successStreak: 0,
+				failureStreak: 0,
+				emergencyTimeoutMs: 600_000,
+			},
+			reason: "role_not_enabled" as const,
+			promptChars: 0,
+			elapsedMs: 0,
+		}),
 	};
 	return runtime;
 }

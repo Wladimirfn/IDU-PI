@@ -672,6 +672,11 @@ export type CliRuntime = {
 		allowAgentTaskPlan?: boolean;
 	}) => IduSupervisorLoopResult;
 	supervisorCronPlan: () => IduSupervisorCronPlanResult;
+	supervisorConsult: (input: {
+		role: import("./model-assignments.js").IduModelRoleId;
+		question: string;
+		context?: string;
+	}) => Promise<import("./supervisor-consult.js").ConsultResult>;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
 	executionDirectorTick?: () => ExecutionDirectorCliResult;
 	formatExecutionDirectorTick?: (result: ExecutionDirectorCliResult) => string;
@@ -1243,6 +1248,21 @@ export function createCliRuntime(
 				}),
 			);
 			return result;
+		},
+		supervisorConsult: async (consultInput) => {
+			const { consultSupervisor } = await import("./supervisor-consult.js");
+			return consultSupervisor({
+				stateRoot: runtimeStateRoot,
+				role: consultInput.role,
+				question: consultInput.question,
+				context: consultInput.context,
+				promptForRole: (role, message, options) =>
+					agentRouter.promptForRole(role, message, {
+						projectId: activeProject.id,
+						stateRoot: runtimeStateRoot,
+						invocationSink: labDbRepository.appendInvocation.bind(labDbRepository),
+					}),
+			});
 		},
 		supervisorCronPlan: () =>
 			planIduSupervisorCron({
