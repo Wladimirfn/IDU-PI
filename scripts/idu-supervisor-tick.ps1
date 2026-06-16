@@ -141,6 +141,37 @@ try {
 	Log ('automaticov1_failed: ' + $_)
 }
 
+# Step 2.5: run cron preflight. Fires the postflight -> sensor -> AgentLab
+# -> supervisor chain and writes supervisor_advisory to injections.jsonl
+# (PR-105a + PR-105b). The changedFiles arg is the list of files modified
+# since the last commit. If the repo has no HEAD~1 (first commit) or git is
+# unavailable, the preflight runs with no changed files and produces no
+# sensor impulses — this is the safe no-op path.
+try {
+	$cliPath = Join-Path $Root 'dist/src/cli.js'
+	$changedFiles = @()
+	try {
+		# git diff against the previous commit. Excludes untracked, staged-only,
+		# and the diff line numbers — we only want the filenames.
+		$diffOutput = git diff --name-only HEAD~1 HEAD 2>$null
+		if ($diffOutput) {
+			$changedFiles = $diffOutput -split "`n" | Where-Object { $_ -ne '' }
+		}
+	} catch {
+		Log ('changed_files_git_failed: ' + $_)
+	}
+	$env:IDU_PI_TRIGGER_ENGINE = $EnvTriggerEngine
+	$preflightArgs = @('idu-run-cron-preflight') + $changedFiles
+	$preflightOutput = & node $cliPath @preflightArgs 2>&1
+	$preflightExit = $LASTEXITCODE
+	Log ('cron_preflight_exit=' + $preflightExit + ' changed_files=' + $changedFiles.Count)
+	Log ('cron_preflight_output: ' + ($preflightOutput -join ' | '))
+	Write-Host $preflightOutput
+} catch {
+	Write-Host ('cron preflight falló: ' + $_) -ForegroundColor Red
+	Log ('cron_preflight_failed: ' + $_)
+}
+
 # Step 3: read pending injections and surface them in the log so the
 # orchestrator can pick them up.
 try {
