@@ -3381,6 +3381,9 @@ test("idu-birth-general-spec-derive updates visual fields on enrolled project pa
 						},
 					],
 				}),
+				provider: "test",
+				model: "test-model",
+				role: "supervisor-main" as const,
 			}),
 		};
 

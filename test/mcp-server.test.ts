@@ -1201,6 +1201,9 @@ test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled s
 					},
 				],
 			}),
+			provider: "test",
+			model: "test-model",
+			role: "supervisor-main" as const,
 		}),
 	};
 
