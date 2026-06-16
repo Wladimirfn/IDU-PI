@@ -25,6 +25,10 @@ export type Injection = {
 	decisionEnvelope: DecisionEnvelope;
 	injectionId: string;
 	acked: boolean;
+	// Optional kind discriminator. The supervisor_advisory injections
+	// are written with kind="supervisor_advisory". Other callers
+	// (e.g. proposal outbox) may omit it.
+	kind?: string;
 };
 
 export type ReadPendingInjectionsOptions = {

@@ -27,19 +27,21 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { readPendingInjections } from "./injection-store.js";
+import type { Injection } from "./injection-store.js";
 
 export const ESCALATION_FILE = "user-escalations.jsonl";
 
+export const ESCALATION_WINDOW_HOURS = 24;
+
 export const ESCALATION_THRESHOLDS = {
-	unackedCritical: 3,
-	unackedTotal: 10,
+	recentCritical: 3,
+	recentTotal: 10,
 	hoursSinceLastInteraction: 6,
 } as const;
 
 export type EscalationReason =
-	| "unacked_critical_threshold"
-	| "unacked_total_threshold"
+	| "recent_critical_threshold"
+	| "recent_total_threshold"
 	| "hours_since_interaction";
 
 export type UserEscalationEvent = {
@@ -79,20 +81,55 @@ export function resolveEscalationPath(stateRoot: string): string {
 	return join(stateRoot, ESCALATION_FILE);
 }
 
-function countBySeverity(pending: ReturnType<typeof readPendingInjections>): {
+function countBySeverity(recent: readonly Injection[]): {
 	critical: number;
 	warning: number;
 	info: number;
 	total: number;
 } {
-	const counts = { critical: 0, warning: 0, info: 0, total: pending.length };
-	for (const inj of pending) {
+	const counts = { critical: 0, warning: 0, info: 0, total: recent.length };
+	for (const inj of recent) {
 		const sev = inj.decisionEnvelope.severity;
 		if (sev === "critical") counts.critical++;
 		else if (sev === "warning") counts.warning++;
 		else if (sev === "info") counts.info++;
 	}
 	return counts;
+}
+
+/**
+ * Read supervisor_advisory injections within the last
+ * `ESCALATION_WINDOW_HOURS` hours, regardless of acked state.
+ * This decouples user-escalation from the cron auto-ack: the cron
+ * can keep auto-acking (to prevent the pending list from growing
+ * forever) while the user-escalation still surfaces the volume
+ * of recent noise.
+ */
+function readRecentSupervisorAdvisories(
+	stateRoot: string,
+	now: Date,
+): Injection[] {
+	const filePath = join(stateRoot, "injections.jsonl");
+	if (!existsSync(filePath)) return [];
+	const raw = readFileSync(filePath, "utf8");
+	if (!raw.trim()) return [];
+	const windowStart = now.getTime() - ESCALATION_WINDOW_HOURS * 60 * 60 * 1000;
+	const out: Injection[] = [];
+	for (const line of raw.split("\n")) {
+		if (!line.trim()) continue;
+		let parsed: Injection;
+		try {
+			parsed = JSON.parse(line) as Injection;
+		} catch {
+			continue;
+		}
+		if (parsed.kind !== "supervisor_advisory") continue;
+		const ts = Date.parse(parsed.ts);
+		if (!Number.isFinite(ts)) continue;
+		if (ts < windowStart) continue;
+		out.push(parsed);
+	}
+	return out;
 }
 
 function writeEscalationEvent(
@@ -109,19 +146,19 @@ function writeEscalationEvent(
 
 export function checkUserEscalation(input: UserEscalationInput): EscalationResult {
 	const now = input.now ?? new Date();
-	const pending = readPendingInjections(input.stateRoot);
-	const counts = countBySeverity(pending);
+	const recent = readRecentSupervisorAdvisories(input.stateRoot, now);
+	const counts = countBySeverity(recent);
 
 	const lastInteraction = new Date(input.lastUserInteractionAt);
 	const hoursSince =
 		(now.getTime() - lastInteraction.getTime()) / (1000 * 60 * 60);
 
 	const reasons: EscalationReason[] = [];
-	if (counts.critical >= ESCALATION_THRESHOLDS.unackedCritical) {
-		reasons.push("unacked_critical_threshold");
+	if (counts.critical >= ESCALATION_THRESHOLDS.recentCritical) {
+		reasons.push("recent_critical_threshold");
 	}
-	if (counts.total >= ESCALATION_THRESHOLDS.unackedTotal) {
-		reasons.push("unacked_total_threshold");
+	if (counts.total >= ESCALATION_THRESHOLDS.recentTotal) {
+		reasons.push("recent_total_threshold");
 	}
 	if (hoursSince >= ESCALATION_THRESHOLDS.hoursSinceLastInteraction) {
 		reasons.push("hours_since_interaction");
