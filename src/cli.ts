@@ -696,6 +696,9 @@ export type CliRuntime = {
 	runCronPreflight?: (input: {
 		changedFiles: readonly string[];
 	}) => Promise<import("./cron-preflight.js").CronPreflightResult>;
+	checkUserEscalation?: (input: {
+		lastUserInteractionAt?: string;
+	}) => Promise<import("./user-escalation.js").EscalationResult>;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
 	executionDirectorTick?: () => ExecutionDirectorCliResult;
 	formatExecutionDirectorTick?: (result: ExecutionDirectorCliResult) => string;
@@ -1297,6 +1300,28 @@ export function createCliRuntime(
 						invocationSink:
 							labDbRepository.appendInvocation.bind(labDbRepository),
 					}),
+			});
+		},
+		checkUserEscalation: async (escalationInput) => {
+			const { checkUserEscalation, resolveEscalationPath } = await import("./user-escalation.js");
+			const interactionFile = join(runtimeStateRoot, "last-user-interaction.json");
+			let lastUserInteractionAt = escalationInput.lastUserInteractionAt;
+			if (!lastUserInteractionAt && existsSync(interactionFile)) {
+				try {
+					const raw = JSON.parse(readFileSync(interactionFile, "utf8"));
+					lastUserInteractionAt = raw.lastInteractionAt;
+				} catch {
+					// ignore parse errors, fall through to default
+				}
+			}
+			if (!lastUserInteractionAt) {
+				// Default: treat as "now" so the hours-since rule does not fire
+				// spuriously when the state file is missing.
+				lastUserInteractionAt = new Date().toISOString();
+			}
+			return checkUserEscalation({
+				stateRoot: runtimeStateRoot,
+				lastUserInteractionAt,
 			});
 		},
 		supervisorCronPlan: () =>
@@ -2174,6 +2199,23 @@ export async function runCliCommand(
 					: "null";
 				return ok(
 					`Cron preflight: sensorImpulses=${result.sensorImpulses.length} supervisorAdvisory=${advisoryLine}\n`,
+				);
+			}
+			case "idu-check-user-escalation": {
+				// PR-105c. Reads last-user-interaction.json (if present) and
+				// runs the user escalation check. Writes user-escalations.jsonl
+				// if any threshold is breached.
+				const result = await activeRuntime.checkUserEscalation?.({});
+				if (!result) {
+					return ok("User escalation: not available in this runtime\n");
+				}
+				if (result.shouldEscalate) {
+					return ok(
+						`User escalation: shouldEscalate=true reasons=${result.reasons.join(",")} critical=${result.counts.critical} total=${result.counts.total} hoursSince=${result.hoursSinceLastInteraction.toFixed(1)} escalationId=${result.escalationId}\n`,
+					);
+				}
+				return ok(
+					`User escalation: shouldEscalate=false critical=${result.counts.critical} total=${result.counts.total} hoursSince=${result.hoursSinceLastInteraction.toFixed(1)}\n`,
 				);
 			}
 			case "idu-usage-status":
