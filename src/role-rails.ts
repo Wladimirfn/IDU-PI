@@ -265,3 +265,34 @@ export function recordRoleWake(
 export function isCooldownActive(rail: RoleRail): boolean {
 	return rail.cooldownRemainingMs > 0;
 }
+
+/**
+ * Returns true if at least one role has tokens remaining above
+ * the minimum budget. Used by the automaticov1 cycle to decide
+ * whether the self-repair bypass can fire (Layer 2).
+ */
+export function anyRailHasTokensAvailable(
+	stateRoot: string,
+	now: Date = new Date(),
+): boolean {
+	const rails = loadRoleRails(stateRoot);
+	for (const role of KNOWN_ROLES) {
+		const rail = rails[role];
+		if (!rail) continue;
+		// A rail is "available" if the role is enabled, the
+		// budget is above the floor, and not in cooldown.
+		if (rail.enabled && rail.tokenBudget > rail.minTokenBudget) {
+			// Compute live cooldown
+			if (rail.lastWakeAt) {
+				const lastMs = Date.parse(rail.lastWakeAt);
+				if (Number.isFinite(lastMs)) {
+					const elapsed = now.getTime() - lastMs;
+					const remaining = Math.max(0, rail.cooldownMs - elapsed);
+					if (remaining > 0) continue;
+				}
+			}
+			return true;
+		}
+	}
+	return false;
+}
