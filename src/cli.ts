@@ -693,6 +693,9 @@ export type CliRuntime = {
 		question: string;
 		context?: string;
 	}) => Promise<import("./supervisor-consult.js").ConsultResult>;
+	runCronPreflight?: (input: {
+		changedFiles: readonly string[];
+	}) => Promise<import("./cron-preflight.js").CronPreflightResult>;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
 	executionDirectorTick?: () => ExecutionDirectorCliResult;
 	formatExecutionDirectorTick?: (result: ExecutionDirectorCliResult) => string;
@@ -1276,7 +1279,23 @@ export function createCliRuntime(
 					agentRouter.promptForRole(role, message, {
 						projectId: activeProject.id,
 						stateRoot: runtimeStateRoot,
-						invocationSink: labDbRepository.appendInvocation.bind(labDbRepository),
+						invocationSink:
+							labDbRepository.appendInvocation.bind(labDbRepository),
+					}),
+			});
+		},
+		runCronPreflight: async (preflightInput) => {
+			const { runCronPreflight } = await import("./cron-preflight.js");
+			return runCronPreflight({
+				projectPath: activeProject.path,
+				stateRoot: runtimeStateRoot,
+				changedFiles: preflightInput.changedFiles,
+				promptForRole: (role, message, options) =>
+					agentRouter.promptForRole(role, message, {
+						projectId: activeProject.id,
+						stateRoot: runtimeStateRoot,
+						invocationSink:
+							labDbRepository.appendInvocation.bind(labDbRepository),
 					}),
 			});
 		},
@@ -2136,6 +2155,26 @@ export async function runCliCommand(
 					ok: !report.requiresHumanConfirmation,
 				});
 				return ok(activeRuntime.formatPostflight(report));
+			}
+			case "idu-run-cron-preflight": {
+				// Cron entry point: runs postflight → sensor → AgentLab →
+				// supervisor chain and writes a supervisor_advisory to
+				// injections.jsonl. Reuses the same promptForRole as the
+				// MCP path so role-rails and cooldowns are shared.
+				const result = await activeRuntime.runCronPreflight?.({
+					changedFiles: rest,
+				});
+				if (!result) {
+					return ok("Cron preflight: not available in this runtime\n");
+				}
+				const advisoryLine = result.supervisorAdvisory
+					? result.supervisorAdvisory.advisory?.summary ??
+						result.supervisorAdvisory.reason ??
+						"ok"
+					: "null";
+				return ok(
+					`Cron preflight: sensorImpulses=${result.sensorImpulses.length} supervisorAdvisory=${advisoryLine}\n`,
+				);
 			}
 			case "idu-usage-status":
 			case "usage-status":
