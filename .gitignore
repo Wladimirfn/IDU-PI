@@ -64,8 +64,13 @@ config/project-*.backup-*.json
 .pi/extensions/*.backup-*.bak
 !.pi/skills/
 !.pi/skills/**
-.atl/*
-!.atl/skill-registry.md
+# .atl/ holds the skill-registry, an auto-generated per-machine
+# index scanned from the user's global skill directories
+# (~/.pi/agent/skills, ~/.agents/skills, etc.). It is regenerated
+# by `gentle-ai skill-registry refresh --force` and re-appears as
+# modified whenever the global set changes, so it must be
+# machine-local.
+.atl/
 openspec/
 .mcp/config.local.json
 
@@ -77,6 +82,12 @@ openspec/
 # Local notes / generated plans
 plan.md
 subagent-artifacts/
+# Inter-AI working notes (scout output, handoff docs, work plans
+# the auditor writes for the implementing AI). They are not
+# user-facing product docs and must not ship in a fresh clone.
+async/
+.agent-notes/
+birth-real-mcp-test.md
 
 # Logs and temp files
 *.log

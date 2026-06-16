@@ -299,21 +299,40 @@ test("B5 E2E — idu-model-invocation-status reads back the recorded invocation"
 	}
 });
 
-test("B5 E2E — model-assignments.json in the real stateRoot is intact (skips in CI)", () => {
+test("B5 E2E — model-assignments.json in the real stateRoot stays structurally valid (skips in CI)", () => {
 	const realPath =
 		"C:/Users/elmas/Documents/bridge-agents/projects/idu-pi/model-assignments.json";
 	if (!existsSync(realPath)) {
-		// In CI the local stateRoot does not exist; this test is a
-		// developer-local smoke only.
+		// In CI (and on any other machine) the local stateRoot does not
+		// exist; this test is a developer-local smoke only.
 		return;
 	}
-	const text = readFileSync(realPath, "utf8");
-	const json = JSON.parse(text);
-	const assignments = json.assignments as Record<string, string>;
-	assert.equal(assignments["supervisor-main"], "opencode-go/deepseek-v4-pro");
-	assert.equal(assignments["agentlab-security"], "opencode-go/deepseek-v4-pro");
+	// Models are EDITABLE by design: the live config may reassign any role
+	// to any model at any time, and idu-pi promises that a role's identity
+	// does not change when its model changes. Pinning specific model strings
+	// here would punish that editability and break the moment a model is
+	// reconfigured. We only guard the invariant that the live config stays
+	// structurally valid: parseable JSON, a numeric version, and every
+	// assignment a well-formed `<provider>/<model>` id.
+	const json = JSON.parse(readFileSync(realPath, "utf8"));
 	assert.equal(
-		assignments["agentlab-architecture"],
-		"opencode-go/qwen3.7-plus",
+		typeof json.version,
+		"number",
+		"config must carry a numeric version",
 	);
+	const assignments = json.assignments as Record<string, string>;
+	assert.ok(
+		assignments && typeof assignments === "object",
+		"config must carry an assignments map",
+	);
+	const roles = Object.keys(assignments);
+	assert.ok(roles.length > 0, "config must assign at least one role");
+	for (const role of roles) {
+		const parsed = parseModelAssignment(assignments[role]);
+		assert.equal(
+			parsed.canonicalId,
+			`${parsed.provider}/${parsed.model}`,
+			`role ${role}: assignment must be a well-formed provider/model id`,
+		);
+	}
 });
