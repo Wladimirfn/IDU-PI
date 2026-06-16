@@ -1029,6 +1029,29 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 			},
 		}),
 		formatRoleEngineStatus: () => "role engine status unavailable",
+		supervisorConsult: async () => ({
+			ok: false,
+			role: "supervisor-main" as const,
+			response: "",
+			model: "",
+			provider: "",
+			rail: {
+				role: "supervisor-main" as const,
+				enabled: true,
+				tokenBudget: 800,
+				minTokenBudget: 100,
+				maxTokenBudget: 2000,
+				cooldownMs: 30_000,
+				cooldownRemainingMs: 0,
+				wakeCount: 0,
+				successStreak: 0,
+				failureStreak: 0,
+				emergencyTimeoutMs: 600_000,
+			},
+			reason: "role_not_enabled" as const,
+			promptChars: 0,
+			elapsedMs: 0,
+		}),
 	} satisfies CliRuntime & {
 		listTasks: () => StructuredTask[];
 		queueComplete: (
@@ -1135,7 +1158,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 83);
+	assert.equal(tools.length, 84);
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {

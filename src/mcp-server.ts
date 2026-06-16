@@ -217,6 +217,7 @@ export type IduMcpToolName =
 	| "idu_postflight"
 	| "idu_supervisor_tick"
 	| "idu_supervisor_cron_plan"
+	| "idu_supervisor_consult"
 	| "idu_execution_director_tick"
 	| "idu_proposal_outbox"
 	| "idu_proposal_detail"
@@ -635,6 +636,17 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Propone un tick cron advisory-only del supervisor; no escribe, no crea drafts, no ejecuta AgentLabs.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_supervisor_consult",
+		"Consulta un rol del role engine con un question concreto; devuelve respuesta real del modelo, respeta cooldowns y token budgets (rails).",
+		{
+			question: requiredString("Pregunta concreta para el rol."),
+			role: optionalString(
+				"Rol del role engine (default: supervisor-main). El rol debe estar habilitado en role-engine.json.",
+			),
+			context: optionalString("Contexto adicional para la pregunta."),
 		},
 	),
 	tool(
@@ -3339,6 +3351,73 @@ async function dispatchTool(
 					"Proposal detail is advisory; Idu-pi does not implement it.",
 				],
 				errors: proposal ? [] : [`Proposal not found: ${id}`],
+			});
+		}
+		case "idu_supervisor_consult": {
+			const question = requiredText(args, "question");
+			const roleRaw = stringArg(args, "role") ?? "supervisor-main";
+			const context = stringArg(args, "context") ?? "";
+			const result = await runtime.supervisorConsult({
+				role: roleRaw as never,
+				question,
+				context,
+			});
+			const decisionEnvelope = buildDecisionEnvelope({
+				tool: name,
+				recommendation: result.ok ? "warn" : "ask_human",
+				severity: result.ok ? "info" : "warning",
+				confidence: 0.7,
+				summary: result.ok
+					? `Supervisor consulted: ${result.role}`
+					: `Consult failed: ${result.reason ?? "unknown"}`,
+				requiresHuman: !result.ok,
+				orchestratorDecisionRequired: true,
+				allowedToProceed: result.ok,
+				evidenceRefs: [
+					`role:${result.role}`,
+					`model:${result.model || "none"}`,
+					`rail:wakeCount=${result.rail.wakeCount}`,
+				],
+				nextActions: result.ok
+					? ["Read response and decide"]
+					: ["Resolve blocker and retry consult"],
+			});
+			return envelope({
+				ok: result.ok,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: result.ok
+					? `Supervisor ${result.role} responded (${result.response.length} chars)`
+					: `Consult blocked: ${result.reason ?? "unknown"}`,
+				data: {
+					decisionEnvelope,
+					consult: {
+						role: result.role,
+						question,
+						context,
+						response: result.response,
+						model: result.model,
+						provider: result.provider,
+						promptChars: result.promptChars,
+						elapsedMs: result.elapsedMs,
+						rail: {
+							tokenBudget: result.rail.tokenBudget,
+							successStreak: result.rail.successStreak,
+							failureStreak: result.rail.failureStreak,
+							wakeCount: result.rail.wakeCount,
+							cooldownMs: result.rail.cooldownMs,
+							cooldownRemainingMs: result.rail.cooldownRemainingMs,
+						},
+						reason: result.reason,
+					},
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Consult invokes a real model via promptForRole.",
+					"Role must be enabled in role-engine.json; consult respects rail cooldowns and token budgets.",
+					"No commit/push, no Telegram, no AgentLab auto-run.",
+				],
 			});
 		}
 		case "idu_supervisor_cron_plan": {
