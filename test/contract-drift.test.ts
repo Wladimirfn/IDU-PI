@@ -8,7 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import type { BridgeConfig } from "../src/config.js";
 import { detectContractDrift } from "../src/contract-drift.js";
@@ -201,9 +201,16 @@ test("runIduBootstrap writes idu-ready.json to the stateRoot", () => {
 		const projectPath = join(root, "project");
 		mkdirSync(projectPath, { recursive: true });
 		writeFileSync(join(projectPath, "package.json"), "{}", "utf8");
+		// Pass an explicit registryPath so the test does not pollute the
+		// project's real data/projects.json (which is process.cwd()/data/projects.json
+		// by default). The bug caused the live registry to be overwritten with
+		// the temp project on every contract-drift test run.
+		const registryPath = join(root, "data", "projects.json");
+		mkdirSync(dirname(registryPath), { recursive: true });
 		const result = runIduBootstrap({
 			projectPath,
 			config: makeConfig(root),
+			registryPath,
 		});
 		const readyPath = join(result.statePaths.stateRoot, "idu-ready.json");
 		assert.ok(existsSync(readyPath), "idu-ready.json must exist");
@@ -216,6 +223,56 @@ test("runIduBootstrap writes idu-ready.json to the stateRoot", () => {
 		assert.equal(ready.version, 1);
 		assert.equal(ready.projectId, result.project.id);
 		assert.ok(typeof ready.readyAt === "string");
+	} finally {
+		cleanup();
+	}
+});
+
+test("runIduBootstrap does NOT pollute the project's real registry (regression)", () => {
+	// This test guards against a real bug: the previous version of
+	// runIduBootstrap used process.cwd()/data/projects.json as the
+	// default registry path. Tests that called bootstrap with a temp
+	// projectPath would overwrite the project's real registry with
+	// the temp project. This regression test ensures the new contract
+	// (explicit registryPath) is respected.
+	const { root, cleanup } = makeRoot();
+	try {
+		const projectPath = join(root, "project");
+		mkdirSync(projectPath, { recursive: true });
+		writeFileSync(join(projectPath, "package.json"), "{}", "utf8");
+		const registryPath = join(root, "data", "projects.json");
+		mkdirSync(dirname(registryPath), { recursive: true });
+		// Run with the EXPLICIT registryPath
+		runIduBootstrap({
+			projectPath,
+			config: makeConfig(root),
+			registryPath,
+		});
+		// The TEMP registry should have the temp project
+		const tempRegistry = JSON.parse(readFileSync(registryPath, "utf8")) as {
+			projects?: { id: string; path: string }[];
+		};
+		assert.ok(
+			tempRegistry.projects?.some((p) => p.path === projectPath),
+			"temp registry should have the temp project",
+		);
+		// The project's REAL registry (process.cwd()/data/projects.json)
+		// should NOT have been touched.
+		const realRegistryPath = join(process.cwd(), "data", "projects.json");
+		if (existsSync(realRegistryPath)) {
+			const realRegistry = JSON.parse(readFileSync(realRegistryPath, "utf8")) as {
+				projects?: { id: string; path: string }[];
+				activeProjectId?: string;
+			};
+			const polluted = realRegistry.projects?.some((p) =>
+				p.path.includes("idu-drift-"),
+			);
+			assert.equal(
+				polluted,
+				false,
+				`project's real registry was polluted with a temp project: ${JSON.stringify(realRegistry)}`,
+			);
+		}
 	} finally {
 		cleanup();
 	}
