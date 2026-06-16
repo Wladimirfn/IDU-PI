@@ -45,3 +45,6 @@ La disciplina de tool-use varía por modelo. Regla práctica:
 - Modelos con tool-use fuerte: releer este skill y refrescar contexto cada ~10 tareas.
 - Modelos con tool-use débil o errático: cada ~5 tareas, y ante CUALQUIER duda sobre qué tool usar, consultar la tabla de arriba en lugar de improvisar.
 El operador puede ajustar esta cadencia; ante errores repetidos de herramienta, acortarla.
+
+## Auto-ack del cron (inacción = ack implícito)
+El cron (`scripts/idu-supervisor-tick.ps1`, corre cada ~1 hora) llama `idu-pending-injections`, que por defecto auto-ackea toda injection pendiente. Por lo tanto, **si no actúo sobre una injection dentro de ~1 hora, el cron la marca como acked implícitamente**. No debo confiar en que la lista de pending refleje un estado que yo pueda revisar más tarde. La escalación al humano (`idu-check-user-escalation`) NO usa el flag `acked` — lee por timestamp (ventana de 24 h) y dispara aunque el cron ya haya auto-ackeado. Por eso, si veo una injection crítica, la decisión debe ser inmediata o documentar en `events.jsonl` que voy a tratarla.
