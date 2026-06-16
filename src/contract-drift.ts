@@ -8,13 +8,33 @@
  * plan as stale. What code changes CAN do is violate an approved
  * contract; that is the signal this module produces.
  *
- * For now, the function is a placeholder: it reads
- * `plan.approvedContracts` (currently empty in every project) and
- * returns zero violations. As the user approves contracts through
- * `/idu revise`, the claim-based checks will be added. The wire
- * (postflight + cron) is in place so that when contracts are
- * approved, the next tick catches drift.
+ * Architecture:
+ *
+ *   1. The user adds approved contracts to master-plan.json under
+ *      `approvedContracts: [{ contractId, claim, severity }]`.
+ *   2. On every postflight and on every cron auto-refresh tick,
+ *      `detectContractDrift` is called.
+ *   3. For each approved contract, the matching `claim checker` in
+ *      `claim-checkers.ts` is run against the real state under
+ *      stateRoot. If the claim is no longer satisfied, a violation
+ *      is appended to `events.jsonl` with kind
+ *      `contract_drift_violation`.
+ *   4. The orchestrator (Pi) reads the violation events and decides
+ *      whether to fix, override, or escalate.
+ *
+ * The available claim checkers today:
+ *
+ *   - `data-retention` (severity: critical) — the stateRoot must
+ *     declare a retention policy via `retention.json` so SQLite /
+ *     JSON / JSONL stores have an explicit lifecycle. Matches the
+ *     "Datos/DB" contract from the canonical plan.
+ *
+ * To add a new checker, register it in CLAIM_CHECKERS. Each checker
+ * returns `null` when the claim is satisfied and a non-empty
+ * `evidence` string when it is violated.
  */
+
+import { claimCheckers, type ClaimCheckInput } from "./claim-checkers.js";
 
 export type ContractSeverity = "info" | "warning" | "critical";
 
@@ -57,7 +77,9 @@ function readApprovedContracts(plan: unknown): ContractClaim[] {
 		if (
 			typeof c.contractId === "string" &&
 			typeof c.claim === "string" &&
-			(c.severity === "info" || c.severity === "warning" || c.severity === "critical")
+			(c.severity === "info" ||
+				c.severity === "warning" ||
+				c.severity === "critical")
 		) {
 			out.push({
 				contractId: c.contractId,
@@ -76,10 +98,25 @@ export function detectContractDrift(
 	if (approved.length === 0) {
 		return { violations: [], scannedContracts: 0 };
 	}
-	// Future: for each approved contract, run the matching claim
-	// checker against the real code/state under stateRoot and emit
-	// a violation when the claim is no longer satisfied. For now
-	// the function is a no-op (zero violations) but the wire is
-	// present so callers can already integrate the result.
-	return { violations: [], scannedContracts: approved.length };
+	const violations: ContractViolation[] = [];
+	const observedAt = new Date().toISOString();
+	for (const claim of approved) {
+		const checker = claimCheckers[claim.contractId];
+		if (!checker) continue;
+		const checkInput: ClaimCheckInput = {
+			stateRoot: input.stateRoot,
+			claim,
+		};
+		const evidence = checker(checkInput);
+		if (evidence) {
+			violations.push({
+				contractId: claim.contractId,
+				claim: claim.claim,
+				severity: claim.severity,
+				evidence,
+				observedAt,
+			});
+		}
+	}
+	return { violations, scannedContracts: approved.length };
 }
