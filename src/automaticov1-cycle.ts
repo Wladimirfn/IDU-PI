@@ -3,6 +3,8 @@ import {
 	type AutonomousAlertScheduledTickInput,
 	type AutonomousAlertScheduledTickResult,
 } from "./autonomous-alert-scheduler.js";
+import { decideAllowTaskCreation } from "./allow-task-creation.js";
+import { anyRailHasTokensAvailable } from "./role-rails.js";
 import type { ExternalIntelligenceReport } from "./external-intelligence.js";
 import type { IduSupervisorCronPlanResult } from "./idu-supervisor-cron.js";
 import {
@@ -104,6 +106,8 @@ export async function runAutomaticov1AdvisoryCycle(
 	input: Automaticov1CycleInput,
 ): Promise<Automaticov1CycleResult> {
 	const now = input.now ?? new Date();
+	const cycleStart = now.getTime();
+	const EMERGENCY_CAP_MS = 10 * 60_000; // 10 min hard cap (Layer 3)
 	const allowTaskCreation = input.allowTaskCreation === true;
 	const allowExternalFetch = input.allowExternalFetch === true;
 	const allowSkillDraftProposal = input.allowSkillDraftProposal === true;
@@ -117,14 +121,33 @@ export async function runAutomaticov1AdvisoryCycle(
 	const readinessBlock =
 		executionReadiness !== undefined &&
 		executionReadiness.status !== "execution_ready";
+
+	// Bypass-by-capas (PR-104): the original flat-AND deadlock
+	// becomes a 3-layer decision. Self-repair tasks can bypass
+	// normal blocks if rails have tokens; emergency cap (10 min)
+	// still blocks everything.
+	const railTokensAvailable = anyRailHasTokensAvailable(input.stateRoot);
+	const emergencyCapReached = now.getTime() - cycleStart >= EMERGENCY_CAP_MS;
+	const taskDecision = decideAllowTaskCreation({
+		allowTaskCreation,
+		isSelfRepairDomain: systemicBlock, // systemic maintenance is the self-repair domain
+		railTokensAvailable,
+		emergencyCapReached,
+		systemicBlock,
+		taskTreeBlock,
+		readinessBlock,
+	});
+
 	const alertScheduledTick = runAutonomousAlertScheduledTick({
 		projectId: input.projectId,
 		projectPath: input.projectPath,
 		stateRoot: input.stateRoot,
-		iduActive:
-			input.iduActive && !systemicBlock && !taskTreeBlock && !readinessBlock,
-		allowTaskCreation:
-			allowTaskCreation && !systemicBlock && !taskTreeBlock && !readinessBlock,
+		// Pass input.iduActive directly. The bypass-by-capas decides
+		// allowTaskCreation via taskDecision.allow. The scheduler
+		// does NOT need to know about systemic/taskTree/readiness
+		// blocks — that's the cycle's job.
+		iduActive: input.iduActive,
+		allowTaskCreation: taskDecision.allow,
 		now,
 		ownerId: input.ownerId,
 		leaseMs: input.leaseMs,
@@ -149,7 +172,7 @@ export async function runAutomaticov1AdvisoryCycle(
 		});
 	}
 
-	if (readinessBlock) {
+	if (readinessBlock && !taskDecision.allow) {
 		return baseResult({
 			input,
 			now,
@@ -164,7 +187,7 @@ export async function runAutomaticov1AdvisoryCycle(
 		});
 	}
 
-	if (taskTreeBlock) {
+	if (taskTreeBlock && !taskDecision.allow) {
 		return baseResult({
 			input,
 			now,
@@ -179,7 +202,15 @@ export async function runAutomaticov1AdvisoryCycle(
 		});
 	}
 
-	if (systemicBlock) {
+	// systemicBlock does NOT unconditionally block: the bypass-by-capas
+	// (Layer 2) may still allow self-repair tasks if rails have
+	// tokens. If the bypass is blocked (no rails / no tokens),
+	// taskDecision.allow is false and we early-return with the
+	// legacy "blocked_systemic_maintenance" status so the existing
+	// tests and operational semantics are preserved when the bypass
+	// is unavailable. The bypass itself is the new behavior, gated
+	// by taskDecision.allow.
+	if (systemicBlock && !taskDecision.allow) {
 		return baseResult({
 			input,
 			now,

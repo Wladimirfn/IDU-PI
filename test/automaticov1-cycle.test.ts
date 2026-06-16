@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,32 @@ import type { SupervisorSelfMaintenanceSignal } from "../src/supervisor-self-mai
 
 function tempRoot(): string {
 	return mkdtempSync(join(tmpdir(), "idu-automaticov1-cycle-"));
+}
+
+function seedRailsWithTokensAvailable(stateRoot: string): void {
+	mkdirSync(stateRoot, { recursive: true });
+	writeFileSync(
+		join(stateRoot, "role-rails.json"),
+		JSON.stringify({
+			rails: {
+				"supervisor-main": {
+					role: "supervisor-main",
+					enabled: true,
+					tokenBudget: 800,
+					minTokenBudget: 100,
+					maxTokenBudget: 2000,
+					cooldownMs: 30_000,
+					cooldownRemainingMs: 0,
+					lastWakeAt: "2026-06-04T23:59:00.000Z", // 1 min before now
+					wakeCount: 1,
+					successStreak: 0,
+					failureStreak: 0,
+					emergencyTimeoutMs: 600_000,
+				},
+			},
+		}),
+		"utf8",
+	);
 }
 
 function task(id: string): StructuredTask {
@@ -519,6 +545,7 @@ test("automaticov1 cycle does not hard-block on pending open tasks alone", async
 
 test("automaticov1 cycle delegates bounded task creation to scheduled alert executor", async () => {
 	const stateRoot = tempRoot();
+	seedRailsWithTokensAvailable(stateRoot);
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -540,6 +567,54 @@ test("automaticov1 cycle delegates bounded task creation to scheduled alert exec
 	assert.equal(result.alertScheduledTick.allowTaskCreation, true);
 	assert.equal(created, 3);
 	assert.equal(result.alertScheduledTick.tasksCreated.length, 3);
+});
+
+test("automaticov1 cycle: self-repair bypass fires when systemicBlock + rails have tokens", async () => {
+	const stateRoot = tempRoot();
+	seedRailsWithTokensAvailable(stateRoot);
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadSelfMaintenanceSignals: () => [
+				{
+					id: "s1",
+					category: "repeated_failure_patterns",
+					severity: "high",
+					confidence: 0.9,
+					evidenceRefs: ["signal:s1"],
+					summary: "Repeated failure pattern",
+					recommendedActions: ["Fix"],
+				},
+			],
+			createTask: () => ({ id: "t1" }),
+		}),
+	);
+	assert.equal(result.status, "ran");
+	assert.equal(result.alertScheduledTick.allowTaskCreation, true);
+});
+
+test("automaticov1 cycle: self-repair BLOCKED when rails have NO tokens (no_rail_tokens)", async () => {
+	const stateRoot = tempRoot();
+	// Do NOT seed rails → anyRailHasTokensAvailable returns false
+	const result = await runAutomaticov1AdvisoryCycle(
+		input(stateRoot, {
+			allowTaskCreation: true,
+			loadSelfMaintenanceSignals: () => [
+				{
+					id: "s1",
+					category: "repeated_failure_patterns",
+					severity: "high",
+					confidence: 0.9,
+					evidenceRefs: ["signal:s1"],
+					summary: "Repeated failure pattern",
+					recommendedActions: ["Fix"],
+				},
+			],
+			createTask: () => ({ id: "t1" }),
+		}),
+	);
+	// Without rails, the bypass is blocked
+	assert.equal(result.alertScheduledTick.allowTaskCreation, false);
 });
 
 test("automaticov1 cycle preserves protected human escalations", async () => {
