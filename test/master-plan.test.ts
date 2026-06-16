@@ -1545,7 +1545,7 @@ test("approve reject y redraft actualizan current sin borrar drafts anteriores",
 	}
 });
 
-test("status detecta approved vigente y marca stale si gitHead cambia", () => {
+test("status approved is durable: keeps status after git HEAD diff and surfaces observedGitHead", () => {
 	const root = tempRoot();
 	try {
 		const projectPath = join(root, "project");
@@ -1569,20 +1569,22 @@ test("status detecta approved vigente y marca stale si gitHead cambia", () => {
 			}),
 			/Continuar con prepare\/flows según corresponda/u,
 		);
-		const stale = getMasterPlanStatus({ stateRoot, currentGitHead: "changed" });
-		assert.equal(stale.status, "stale");
-		assert.match(
-			formatMasterPlanSummaryForIdu({
-				status: stale,
-				plan: reviewMasterPlan({ stateRoot, pathOrLatest: "latest" }).plan,
-			}),
-			/master-plan-redraft latest/u,
-		);
+		// Git HEAD changes: status must STAY "approved" (plan is durable).
+		// The diff is surfaced through observedGitHead/planGitHead so
+		// callers can run a separate contract-drift check.
+		const drifted = getMasterPlanStatus({
+			stateRoot,
+			currentGitHead: "changed",
+		});
+		assert.equal(drifted.status, "approved");
+		assert.equal(drifted.observedGitHead, "changed");
+		assert.equal(drifted.planGitHead, "same");
 		assert.equal(
 			JSON.parse(
 				readFileSync(join(stateRoot, "master-plan.current.json"), "utf8"),
 			).status,
-			"stale",
+			"approved",
+			"master-plan.current.json must NOT auto-flip to stale on git HEAD diff",
 		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });

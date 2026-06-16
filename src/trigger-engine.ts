@@ -251,6 +251,7 @@ export const TRIGGER_DEFINITIONS: TriggerDefinition[] = [
 
 export function runTriggerEngineTick(
 	context: TriggerContext,
+	definitions: TriggerDefinition[] = TRIGGER_DEFINITIONS,
 ): TriggerEngineResult {
 	const events = readEvents(context.stateRoot, {});
 	let injectedCount = 0;
@@ -258,7 +259,7 @@ export function runTriggerEngineTick(
 	const existing = readPendingInjections(context.stateRoot, {});
 	const existingIds = new Set(existing.map((i) => i.injectionId));
 
-	for (const def of TRIGGER_DEFINITIONS) {
+	for (const def of definitions) {
 		const result = def.match(events, context);
 		if (result.matches.length === 0) continue;
 		const fromTs = new Date(context.now.getTime() - ONE_HOUR_MS).toISOString();
@@ -273,7 +274,32 @@ export function runTriggerEngineTick(
 			skippedByIdempotency += 1;
 			continue;
 		}
-		const built = def.build(result, context);
+		// Defensive guard: if a trigger's `build` throws (e.g. the
+		// orchestrator profile is missing or corrupt), we must NOT
+		// crash the whole tick — other triggers still deserve a
+		// chance to fire. Emit a `trigger_build_failed` event and
+		// continue.
+		let built: ReturnType<TriggerDefinition["build"]>;
+		try {
+			built = def.build(result, context);
+		} catch (error) {
+			try {
+				appendEvent(context.stateRoot, {
+					ts: context.now.toISOString(),
+					kind: "trigger_build_failed",
+					projectId: context.projectId,
+					payload: {
+						triggerId: def.id,
+						reason: error instanceof Error ? error.message : String(error),
+					},
+					sourceRef: "trigger-engine-guard",
+					evidenceRefs: [],
+				});
+			} catch {
+				// best-effort
+			}
+			continue;
+		}
 		const envelope: Injection = {
 			ts: context.now.toISOString(),
 			triggerId: def.id,
@@ -287,6 +313,6 @@ export function runTriggerEngineTick(
 	return {
 		injectedCount,
 		skippedByIdempotency,
-		evaluatedTriggers: TRIGGER_DEFINITIONS.map((d) => d.id),
+		evaluatedTriggers: definitions.map((d) => d.id),
 	};
 }
