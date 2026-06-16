@@ -478,6 +478,7 @@ import {
 	recommendAgentLabModelAssignments,
 	saveModelAssignment,
 	saveModelAssignments,
+	type IduModelRoleId,
 } from "./model-assignments.js";
 import {
 	buildUnifiedModelCatalog,
@@ -571,7 +572,22 @@ export type CliRuntime = {
 	labDbPath?: string;
 	digestNotify?: (text: string) => void;
 	sessionStatePath?: string;
-	promptForRole?: VisualDerivationPrompt;
+	promptForRole?: (
+		role: IduModelRoleId,
+		message: string,
+		options?: {
+			stateRoot?: string;
+			projectId?: string;
+			invocationSink?: (record: unknown) => void;
+			onProgress?: (event: unknown) => void;
+		},
+	) => Promise<{
+		ok: boolean;
+		output: string;
+		provider: string;
+		model: string;
+		role: IduModelRoleId;
+	}>;
 	inspectConnection: () => ProjectConnectionReport;
 	formatConnection: (report: ProjectConnectionReport) => string;
 	formatDashboard: (report: ProjectConnectionReport) => string;

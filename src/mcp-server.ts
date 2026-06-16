@@ -5,6 +5,7 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
+import { runSensorImpulses } from "./sensor-impulses.js";
 import {
 	formatBibliotecarioInit,
 	runBibliotecarioInit,
@@ -3087,6 +3088,22 @@ async function dispatchTool(
 		}
 		case "idu_postflight": {
 			const report = runtime.postflight();
+			const sensorStateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const sensorImpulses = await runSensorImpulses({
+				stateRoot: sensorStateRoot,
+				projectRoot: runtime.projectPath,
+				changedFiles: report.changedFiles,
+				promptForRole: (role, message, options) => {
+					if (!runtime.promptForRole) {
+						throw new Error("runtime.promptForRole is not configured");
+					}
+					return runtime.promptForRole(role, message, {
+						projectId: runtime.projectId,
+						stateRoot: sensorStateRoot,
+						invocationSink: options.invocationSink,
+					});
+				},
+			});
 			const actionId = stringArg(args, "actionId");
 			const taskPackageId = stringArg(args, "taskPackageId");
 			const expectedContracts = stringListArg(args, "expectedContracts");
@@ -3181,6 +3198,24 @@ async function dispatchTool(
 					evidenceGateways,
 					suggestedAgentLabs: report.suggestedAgentLabs,
 					requiresHumanConfirmation: report.requiresHumanConfirmation,
+					sensorImpulses: sensorImpulses.map((s) => ({
+						match: {
+							file: s.match.file,
+							role: s.match.role,
+							description: s.match.description,
+						},
+						ok: s.consult.ok,
+						response: s.consult.response,
+						model: s.consult.model,
+						reason: s.consult.reason,
+						rail: {
+							wakeCount: s.consult.rail.wakeCount,
+							tokenBudget: s.consult.rail.tokenBudget,
+							cooldownRemainingMs:
+								s.consult.rail.cooldownRemainingMs,
+						},
+						fileContentTruncated: !!s.fileContent,
+					})),
 					taskTrace,
 					report,
 				},
@@ -3189,6 +3224,7 @@ async function dispatchTool(
 					"Postflight lee estado git; no hace commit ni push.",
 					"Physical gates reportan evidencia disponible; Idu-pi no ejecutó build/test automáticamente.",
 					"Trazabilidad advisory: no cierra ni aplica cambios automáticamente.",
+					`Sensor impulses: ${sensorImpulses.length} fire (${sensorImpulses.filter((s) => s.consult.ok).length} ok, ${sensorImpulses.filter((s) => !s.consult.ok).length} blocked).`,
 				],
 			});
 		}
