@@ -182,6 +182,24 @@ try {
 	Log ('pending_injections_query_failed: ' + $_)
 }
 
+# Step 3.5: user escalation check. PR-105c. Reads last-user-interaction.json
+# (if present) and the pending injections file. Escalation fires when:
+#   - unacked_critical_threshold (3+ critical)
+#   - unacked_total_threshold (10+ total)
+#   - hours_since_interaction (6h+ since last user touch)
+# If the state file is missing, treat last interaction as now (no escalation
+# from the hours-since rule).
+try {
+	$cliPath = Join-Path $Root 'dist/src/cli.js'
+	$escalationOutput = & node $cliPath idu-check-user-escalation 2>&1
+	$escalationExit = $LASTEXITCODE
+	Log ('user_escalation_exit=' + $escalationExit)
+	Log ('user_escalation_output: ' + ($escalationOutput -join ' | '))
+	Write-Host $escalationOutput
+} catch {
+	Log ('user_escalation_check_failed: ' + $_)
+}
+
 # Step 4: log next-scheduled run.
 $nextRun = (Get-Date).AddMinutes($IntervalMinutes).ToString('o')
 Write-Host ('Proximo tick programado: ' + $nextRun) -ForegroundColor DarkGray
