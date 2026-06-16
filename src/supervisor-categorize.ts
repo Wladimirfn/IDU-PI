@@ -21,10 +21,7 @@
  * malformed, the function returns zeros (defensive).
  */
 
-import {
-	appendFileSync,
-	mkdirSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { consultSupervisor, type ConsultResult } from "./supervisor-consult.js";
 import type { SensorMatch } from "./sensors.js";
@@ -55,13 +52,19 @@ export type CategorizeResult = {
 	ok: boolean;
 	counts: CategorizedCounts;
 	advisory?: SupervisorAdvisory;
-	reason?: "role_not_enabled" | "cooldown_active" | "consult_failed" | "parse_failed" | "no_findings";
+	reason?:
+		| "role_not_enabled"
+		| "cooldown_active"
+		| "consult_failed"
+		| "parse_failed"
+		| "no_findings";
 };
 
-const COUNT_RE =
-	/(?:(\d+)\s*critical|(\d+)\s*medium|(\d+)\s*low)/giu;
+const COUNT_RE = /(?:(\d+)\s*critical|(\d+)\s*medium|(\d+)\s*low)/giu;
 
-export function parseCategorizedCounts(input: string): CategorizedCounts | null {
+export function parseCategorizedCounts(
+	input: string,
+): CategorizedCounts | null {
 	if (!input || typeof input !== "string") return null;
 
 	// Strategy 1: try the canonical format directly.
@@ -101,9 +104,8 @@ export function parseCategorizedCounts(input: string): CategorizedCounts | null 
 	}
 
 	// Strategy 3: extract counts from tool-call JSON payloads.
-	const toolCall = /"tool"\s*:\s*"[a-z_]+"\s*,\s*"args"\s*:\s*\{[\s\S]*?\}/iu.exec(
-		input,
-	);
+	const toolCall =
+		/"tool"\s*:\s*"[a-z_]+"\s*,\s*"args"\s*:\s*\{[\s\S]*?\}/iu.exec(input);
 	if (toolCall) {
 		const counts = tryParseCounts(toolCall[0]);
 		if (counts) return counts;
@@ -158,7 +160,9 @@ export async function categorizeFindings(input: {
 
 	const now = input.now ?? new Date();
 	const summary = input.findings
-		.map((f) => `[${f.match.role}] ${f.match.file}: ${f.response.slice(0, 300)}`)
+		.map(
+			(f) => `[${f.match.role}] ${f.match.file}: ${f.response.slice(0, 300)}`,
+		)
 		.join("\n");
 	const question = `Categorize these ${input.findings.length} AgentLab findings.
 

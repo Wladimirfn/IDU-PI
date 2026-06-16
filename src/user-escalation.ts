@@ -144,7 +144,9 @@ function writeEscalationEvent(
 	appendFileSync(filePath, `${JSON.stringify(event)}\n`, "utf8");
 }
 
-export function checkUserEscalation(input: UserEscalationInput): EscalationResult {
+export function checkUserEscalation(
+	input: UserEscalationInput,
+): EscalationResult {
 	const now = input.now ?? new Date();
 	const recent = readRecentSupervisorAdvisories(input.stateRoot, now);
 	const counts = countBySeverity(recent);

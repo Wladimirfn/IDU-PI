@@ -161,7 +161,9 @@ test("checkUserEscalation: does NOT escalate on hours if recent interaction", ()
 	const { stateRoot, cleanup } = makeRoot();
 	try {
 		// Last interaction 5h ago
-		const fiveHoursAgo = new Date(NOW.getTime() - 5 * 60 * 60 * 1000).toISOString();
+		const fiveHoursAgo = new Date(
+			NOW.getTime() - 5 * 60 * 60 * 1000,
+		).toISOString();
 		const result = checkUserEscalation({
 			stateRoot,
 			lastUserInteractionAt: fiveHoursAgo,

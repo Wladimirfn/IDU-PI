@@ -97,7 +97,9 @@ test("parseCategorizedCounts recovers from markdown code blocks", () => {
 		{ critical: 2, medium: 3, low: 1 },
 	);
 	assert.deepEqual(
-		parseCategorizedCounts("```json\n{\"critical\": 1, \"medium\": 2, \"low\": 3}\n```"),
+		parseCategorizedCounts(
+			'```json\n{"critical": 1, "medium": 2, "low": 3}\n```',
+		),
 		{ critical: 1, medium: 2, low: 3 },
 	);
 });
@@ -115,7 +117,9 @@ test("parseCategorizedCounts recovers from tool-call payloads", () => {
 	// When the LLM makes a tool call instead of answering, the output is
 	// the JSON payload. Look for the format inside the JSON.
 	assert.deepEqual(
-		parseCategorizedCounts('{"tool":"bash","args":{"command":"echo 3 critical, 1 medium, 0 low"}}'),
+		parseCategorizedCounts(
+			'{"tool":"bash","args":{"command":"echo 3 critical, 1 medium, 0 low"}}',
+		),
 		{ critical: 3, medium: 1, low: 0 },
 	);
 });
@@ -126,7 +130,9 @@ test("parseCategorizedCounts returns null when truly unparseable", () => {
 	// which made it impossible to distinguish "all zero findings" from
 	// "the LLM is broken".
 	assert.equal(
-		parseCategorizedCounts("I am el Gentleman, let me check the model catalog..."),
+		parseCategorizedCounts(
+			"I am el Gentleman, let me check the model catalog...",
+		),
 		null,
 	);
 	assert.equal(parseCategorizedCounts(""), null);
@@ -137,10 +143,11 @@ test("parseCategorizedCounts distinguishes zero findings from parse failure", ()
 	// "0 critical, 0 medium, 0 low" is a valid response (no findings).
 	// It should return zeros (not null), so the supervisor can still
 	// emit an informational advisory.
-	assert.deepEqual(
-		parseCategorizedCounts("0 critical, 0 medium, 0 low"),
-		{ critical: 0, medium: 0, low: 0 },
-	);
+	assert.deepEqual(parseCategorizedCounts("0 critical, 0 medium, 0 low"), {
+		critical: 0,
+		medium: 0,
+		low: 0,
+	});
 });
 
 test("formatCategorizedCounts produces the expected text", () => {
@@ -250,7 +257,9 @@ test("writeSupervisorAdvisory: appends to injections.jsonl", async () => {
 		writeSupervisorAdvisory(stateRoot, advisory);
 		const path = join(stateRoot, "injections.jsonl");
 		assert.ok(readFileSync(path, "utf8").includes("supervisor_advisory"));
-		assert.ok(readFileSync(path, "utf8").includes("2 critical, 1 medium, 0 low"));
+		assert.ok(
+			readFileSync(path, "utf8").includes("2 critical, 1 medium, 0 low"),
+		);
 	} finally {
 		cleanup();
 	}
