@@ -48,7 +48,7 @@ $Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$BootstrapScript`""
 $Action = New-ScheduledTaskAction -Execute $PowerShell -Argument $Arguments -WorkingDirectory $Root
 
 $RepetitionDuration = (New-TimeSpan -Days 365)
-$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration $RepetitionDuration
+$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1) -RepetitionDuration $RepetitionDuration
 
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -WakeToRun -MultipleInstances IgnoreNew -StartWhenAvailable
 
@@ -58,7 +58,7 @@ Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Se
 
 Write-Host "Tarea instalada: $TaskName" -ForegroundColor Green
 Write-Host "Script: $TickScript"
-Write-Host "Intervalo: cada 15 minutos"
+Write-Host "Intervalo: cada 1 hora"
 Write-Host "stateRoot: $StateRoot"
 Write-Host "Trigger engine opt-in: IDU_PI_TRIGGER_ENGINE=1 (default)"
 Write-Host ""

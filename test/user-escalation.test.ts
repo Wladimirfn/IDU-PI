@@ -36,6 +36,7 @@ function makeInjection(
 	const injection = {
 		ts: new Date().toISOString(),
 		triggerId: `test-${Date.now()}-${Math.random()}`,
+		kind: "supervisor_advisory",
 		decisionEnvelope: {
 			severity,
 			summary: `Test ${severity} finding`,
@@ -78,7 +79,7 @@ test("checkUserEscalation: escalates when unacked critical count >= threshold", 
 	const { stateRoot, cleanup } = makeRoot();
 	try {
 		// Create 3 critical un-acked injections
-		for (let i = 0; i < ESCALATION_THRESHOLDS.unackedCritical; i++) {
+		for (let i = 0; i < ESCALATION_THRESHOLDS.recentCritical; i++) {
 			makeInjection(stateRoot, "critical", false);
 		}
 		const result = checkUserEscalation({
@@ -87,13 +88,13 @@ test("checkUserEscalation: escalates when unacked critical count >= threshold", 
 			now: NOW,
 		});
 		assert.equal(result.shouldEscalate, true);
-		assert.ok(result.reasons.includes("unacked_critical_threshold"));
+		assert.ok(result.reasons.includes("recent_critical_threshold"));
 		assert.ok(result.escalationId);
 		// Escalation file written
 		const events = readEscalationEvents(stateRoot);
 		assert.equal(events.length, 1);
 		assert.equal(events[0]?.escalationId, result.escalationId);
-		assert.ok(events[0]?.reasons.includes("unacked_critical_threshold"));
+		assert.ok(events[0]?.reasons.includes("recent_critical_threshold"));
 	} finally {
 		cleanup();
 	}
@@ -121,7 +122,7 @@ test("checkUserEscalation: escalates when unacked total >= threshold", () => {
 	const { stateRoot, cleanup } = makeRoot();
 	try {
 		// Create 10 warning un-acked (below critical threshold, above total threshold)
-		for (let i = 0; i < ESCALATION_THRESHOLDS.unackedTotal; i++) {
+		for (let i = 0; i < ESCALATION_THRESHOLDS.recentTotal; i++) {
 			makeInjection(stateRoot, "warning", false);
 		}
 		const result = checkUserEscalation({
@@ -130,9 +131,9 @@ test("checkUserEscalation: escalates when unacked total >= threshold", () => {
 			now: NOW,
 		});
 		assert.equal(result.shouldEscalate, true);
-		assert.ok(result.reasons.includes("unacked_total_threshold"));
+		assert.ok(result.reasons.includes("recent_total_threshold"));
 		assert.equal(result.counts.critical, 0);
-		assert.equal(result.counts.total, ESCALATION_THRESHOLDS.unackedTotal);
+		assert.equal(result.counts.total, ESCALATION_THRESHOLDS.recentTotal);
 	} finally {
 		cleanup();
 	}
@@ -172,10 +173,14 @@ test("checkUserEscalation: does NOT escalate on hours if recent interaction", ()
 	}
 });
 
-test("checkUserEscalation: ack'd injections don't count toward thresholds", () => {
+test("checkUserEscalation: counts by ts, not by ack state (cron can auto-ack without breaking escalation)", () => {
+	// This is a design change: the cron auto-acks all advisories, so
+	// the user-escalation must use a different signal. We count
+	// advisories by timestamp (within the last 24h) so the escalation
+	// fires even when the cron has already acked everything.
 	const { stateRoot, cleanup } = makeRoot();
 	try {
-		// 3 critical but all acked
+		// 3 critical advisories, all acked, all in the last hour
 		for (let i = 0; i < 3; i++) {
 			makeInjection(stateRoot, "critical", true);
 		}
@@ -184,8 +189,46 @@ test("checkUserEscalation: ack'd injections don't count toward thresholds", () =
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
+		// Now counts: even though acked, the advisories are within
+		// the last 24h, so the user-escalation sees them.
+		assert.equal(result.counts.critical, 3);
+		assert.equal(result.counts.total, 3);
+		assert.equal(result.shouldEscalate, true);
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: ignores advisories older than 24h (stale noise)", () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		// 3 critical advisories, acked=false, but timestamped 25h ago
+		for (let i = 0; i < 3; i++) {
+			const stale = new Date(NOW.getTime() - 25 * 60 * 60 * 1000).toISOString();
+			const inj = {
+				ts: stale,
+				triggerId: `stale-critical-${i}`,
+				decisionEnvelope: {
+					severity: "critical",
+					summary: `Stale critical ${i}`,
+					options: ["ack"],
+					evidenceRefs: [],
+					orchestratorDecisionRequired: true,
+				},
+				injectionId: `inj-stale-${i}-${Date.now()}`,
+				acked: false,
+			};
+			const path = resolveInjectionsPath(stateRoot);
+			if (!existsSync(path)) writeFileSync(path, "", "utf8");
+			appendFileSync(path, `${JSON.stringify(inj)}\n`, "utf8");
+		}
+		const result = checkUserEscalation({
+			stateRoot,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// Stale advisories (older than 24h) are ignored.
 		assert.equal(result.counts.critical, 0);
-		assert.equal(result.counts.total, 0);
 		assert.equal(result.shouldEscalate, false);
 	} finally {
 		cleanup();
@@ -210,8 +253,8 @@ test("checkUserEscalation: multiple reasons in one escalation", () => {
 		});
 		assert.equal(result.shouldEscalate, true);
 		assert.equal(result.reasons.length, 3);
-		assert.ok(result.reasons.includes("unacked_critical_threshold"));
-		assert.ok(result.reasons.includes("unacked_total_threshold"));
+		assert.ok(result.reasons.includes("recent_critical_threshold"));
+		assert.ok(result.reasons.includes("recent_total_threshold"));
 		assert.ok(result.reasons.includes("hours_since_interaction"));
 	} finally {
 		cleanup();

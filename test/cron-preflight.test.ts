@@ -106,13 +106,13 @@ test("runCronPreflight: writes supervisor_advisory to injections.jsonl when role
 			projectPath: projectRoot,
 			stateRoot,
 			changedFiles: ["src/Button.tsx"],
-			promptForRole: successPrompt("ok"),
+			promptForRole: successPrompt("1 critical, 0 medium, 0 low"),
 		});
 		assert.equal(result.sensorImpulses.length, 1);
 		assert.ok(result.supervisorAdvisory);
 		assert.equal(
 			result.supervisorAdvisory?.advisory?.summary,
-			"0 critical, 0 medium, 0 low",
+			"1 critical, 0 medium, 0 low",
 		);
 		// injections.jsonl should have the supervisor advisory
 		const injectionsPath = join(stateRoot, "injections.jsonl");

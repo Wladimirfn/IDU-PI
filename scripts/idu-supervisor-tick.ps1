@@ -33,10 +33,10 @@ function Step($Message) {
 	Log ('STEP ' + $Message)
 }
 
-# Read interval from env var, default 15 minutes.
-$IntervalMinutes = 15
+# Read interval from env var, default 60 minutes (1 hour).
+$IntervalMinutes = 60
 if ($env:IDU_PI_TICK_INTERVAL_MINUTES) {
-	try { $IntervalMinutes = [int]$env:IDU_PI_TICK_INTERVAL_MINUTES } catch { $IntervalMinutes = 15 }
+	try { $IntervalMinutes = [int]$env:IDU_PI_TICK_INTERVAL_MINUTES } catch { $IntervalMinutes = 60 }
 }
 
 # Read trigger engine opt-in.
