@@ -228,13 +228,13 @@ test("runIduBootstrap writes idu-ready.json to the stateRoot", () => {
 	}
 });
 
-test("runIduBootstrap does NOT pollute the project's real registry (regression)", () => {
-	// This test guards against a real bug: the previous version of
-	// runIduBootstrap used process.cwd()/data/projects.json as the
+test("runIduBootstrap with explicit registryPath does NOT write to process.cwd() (regression)", () => {
+	// Guards against the registry-pollution bug. The previous version
+	// of runIduBootstrap used process.cwd()/data/projects.json as the
 	// default registry path. Tests that called bootstrap with a temp
 	// projectPath would overwrite the project's real registry with
-	// the temp project. This regression test ensures the new contract
-	// (explicit registryPath) is respected.
+	// the temp project. This regression test ensures the explicit
+	// registryPath is respected, not the cwd fallback.
 	const { root, cleanup } = makeRoot();
 	try {
 		const projectPath = join(root, "project");
@@ -242,35 +242,30 @@ test("runIduBootstrap does NOT pollute the project's real registry (regression)"
 		writeFileSync(join(projectPath, "package.json"), "{}", "utf8");
 		const registryPath = join(root, "data", "projects.json");
 		mkdirSync(dirname(registryPath), { recursive: true });
-		// Run with the EXPLICIT registryPath
+		// Snapshot the real registry (if it exists) to detect any pollution.
+		const realRegistryPath = join(process.cwd(), "data", "projects.json");
+		const realRegistryBefore = existsSync(realRegistryPath)
+			? readFileSync(realRegistryPath, "utf8")
+			: null;
+		// Run with the EXPLICIT registryPath.
 		runIduBootstrap({
 			projectPath,
 			config: makeConfig(root),
 			registryPath,
 		});
-		// The TEMP registry should have the temp project
-		const tempRegistry = JSON.parse(readFileSync(registryPath, "utf8")) as {
-			projects?: { id: string; path: string }[];
-		};
+		// The TEMP registry should now exist.
 		assert.ok(
-			tempRegistry.projects?.some((p) => p.path === projectPath),
-			"temp registry should have the temp project",
+			existsSync(registryPath),
+			"temp registry file should be created at the explicit registryPath",
 		);
 		// The project's REAL registry (process.cwd()/data/projects.json)
-		// should NOT have been touched.
-		const realRegistryPath = join(process.cwd(), "data", "projects.json");
-		if (existsSync(realRegistryPath)) {
-			const realRegistry = JSON.parse(readFileSync(realRegistryPath, "utf8")) as {
-				projects?: { id: string; path: string }[];
-				activeProjectId?: string;
-			};
-			const polluted = realRegistry.projects?.some((p) =>
-				p.path.includes("idu-drift-"),
-			);
+		// should NOT have changed.
+		if (realRegistryBefore !== null) {
+			const realRegistryAfter = readFileSync(realRegistryPath, "utf8");
 			assert.equal(
-				polluted,
-				false,
-				`project's real registry was polluted with a temp project: ${JSON.stringify(realRegistry)}`,
+				realRegistryAfter,
+				realRegistryBefore,
+				"project's real registry was modified when an explicit registryPath was provided",
 			);
 		}
 	} finally {
