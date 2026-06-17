@@ -118,7 +118,11 @@ export function readLifecycleLog(stateRoot: string): LifecycleEvent[] {
 		} catch {
 			continue;
 		}
-		if (parsed && typeof parsed.phase === "string" && typeof parsed.injectionId === "string") {
+		if (
+			parsed &&
+			typeof parsed.phase === "string" &&
+			typeof parsed.injectionId === "string"
+		) {
 			out.push(parsed);
 		}
 	}
@@ -171,7 +175,9 @@ export function rolloverIfNeeded(stateRoot: string): void {
 	if (!existsSync(path)) return;
 	let lines: string[];
 	try {
-		lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
+		lines = readFileSync(path, "utf8")
+			.split("\n")
+			.filter((l) => l.trim());
 	} catch {
 		return;
 	}
@@ -205,10 +211,7 @@ export function rolloverIfNeeded(stateRoot: string): void {
 
 // ----- internal helpers -----
 
-function appendLifecycleLog(
-	stateRoot: string,
-	event: LifecycleEvent,
-): void {
+function appendLifecycleLog(stateRoot: string, event: LifecycleEvent): void {
 	const path = resolveTelemetryPath(stateRoot);
 	if (!existsSync(path)) {
 		mkdirSync(dirname(path), { recursive: true });

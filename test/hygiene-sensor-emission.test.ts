@@ -185,7 +185,11 @@ test("cron preflight: escalation — a 1h+ un-acked finding becomes blocking", a
 		const injs = readInjections(stateRoot).filter(
 			(i) => i.kind === "hygiene_junk_file",
 		);
-		assert.equal(injs.length, 1, "still only one injection (escalated, not appended)");
+		assert.equal(
+			injs.length,
+			1,
+			"still only one injection (escalated, not appended)",
+		);
 		const env = injs[0].decisionEnvelope as Record<string, unknown>;
 		assert.equal(
 			env.orchestratorDecisionRequired,
@@ -280,7 +284,10 @@ test("cron preflight: runs the satisfaction evaluator and appends a line to supe
 			content.includes("hygiene_satisfaction"),
 			"log line must include the satisfaction header",
 		);
-		assert.ok(/emitted=\d+/.test(content), "log line must include emitted count");
+		assert.ok(
+			/emitted=\d+/.test(content),
+			"log line must include emitted count",
+		);
 	} finally {
 		cleanup();
 	}

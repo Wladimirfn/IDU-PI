@@ -281,7 +281,8 @@ export function enqueueInjectionReminder(input: {
 	now?: Date;
 }): EnqueueResult {
 	const now = input.now ?? new Date();
-	const escalateAfter = input.escalateAfterMs ?? OBJECTIVE_REMINDER_ESCALATE_AFTER_MS;
+	const escalateAfter =
+		input.escalateAfterMs ?? OBJECTIVE_REMINDER_ESCALATE_AFTER_MS;
 	const dedupWindow = input.dedupWindowMs ?? OBJECTIVE_REMINDER_DEDUP_WINDOW_MS;
 	const fingerprintRef = `${INJECTION_FINGERPRINT_REF_PREFIX}${input.fingerprint}`;
 
@@ -303,9 +304,7 @@ export function enqueueInjectionReminder(input: {
 	const legacyMatch =
 		fpMatch || !input.legacyId
 			? null
-			: (all.find(
-					(i) => i.injectionId === input.legacyId && !i.acked,
-				) ?? null);
+			: (all.find((i) => i.injectionId === input.legacyId && !i.acked) ?? null);
 	const existing = fpMatch ?? legacyMatch;
 	const existingTs = existing?.ts ? Date.parse(existing.ts) : null;
 	const ageMs =

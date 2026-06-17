@@ -172,10 +172,7 @@ export async function runCronPreflight(
 					});
 				}
 			} catch (err) {
-				console.error(
-					"[cron-preflight] enqueueHygieneReminder failed:",
-					err,
-				);
+				console.error("[cron-preflight] enqueueHygieneReminder failed:", err);
 			}
 		}
 	}

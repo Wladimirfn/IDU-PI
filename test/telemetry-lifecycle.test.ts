@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
-import {
-	existsSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -68,10 +63,7 @@ test("recordLifecycleEvent: accepts each fixed phase (emitted, delivered, resolv
 		}
 		const events = readLifecycleLog(stateRoot);
 		assert.equal(events.length, 5);
-		assert.deepEqual(
-			events.map((e) => e.phase).sort(),
-			[...phases].sort(),
-		);
+		assert.deepEqual(events.map((e) => e.phase).sort(), [...phases].sort());
 	} finally {
 		cleanup();
 	}
@@ -199,7 +191,10 @@ test("rolloverIfNeeded: rolls over at 1000 events, keeps last 1k, creates .bak",
 		const path = resolveTelemetryPath(stateRoot);
 		const bakPath = `${path}.bak`;
 		assert.ok(existsSync(path), "live telemetry file must exist");
-		assert.ok(existsSync(bakPath), "telemetry .bak file must exist after rollover");
+		assert.ok(
+			existsSync(bakPath),
+			"telemetry .bak file must exist after rollover",
+		);
 		const liveLines = readFileSync(path, "utf8")
 			.split("\n")
 			.filter((l) => l.trim());
