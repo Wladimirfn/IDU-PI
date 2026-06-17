@@ -46,10 +46,10 @@ export type HygieneStatus = {
 export function readHygieneStatus(stateRoot: string): HygieneStatus {
 	const snapshotPath = join(stateRoot, "hygiene-sensor-last.json");
 	let lastRun: SensorSnapshot | null = null;
-	if (existsSync(snapshotPath)) {
+if (existsSync(snapshotPath)) {
 		try {
 			const raw = readFileSync(snapshotPath, "utf8");
-			const parsed = JSON.parse(raw) as SensorSnapshot;
+			const parsed = JSON.parse(raw) as { ts?: unknown; now?: unknown; scannedPaths?: unknown; matchedPaths?: unknown; truncated?: unknown; findings?: unknown };
 			if (
 				typeof parsed.ts === "string" &&
 				typeof parsed.scannedPaths === "number" &&
@@ -57,7 +57,22 @@ export function readHygieneStatus(stateRoot: string): HygieneStatus {
 				typeof parsed.truncated === "boolean" &&
 				Array.isArray(parsed.findings)
 			) {
-				lastRun = parsed;
+				lastRun = parsed as SensorSnapshot;
+			} else if (
+				typeof parsed.now === "string" &&
+				typeof parsed.scannedPaths === "number" &&
+				typeof parsed.matchedPaths === "number" &&
+				typeof parsed.truncated === "boolean" &&
+				Array.isArray(parsed.findings)
+			) {
+				// Sensor output uses 'now' instead of 'ts'. Normalize.
+				lastRun = {
+			ts: parsed.now,
+			scannedPaths: parsed.scannedPaths,
+			matchedPaths: parsed.matchedPaths,
+			truncated: parsed.truncated,
+			findings: parsed.findings as Finding[],
+				};
 			}
 		} catch {
 			// malformed JSON — fail safe to null
