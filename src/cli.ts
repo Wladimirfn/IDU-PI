@@ -12,6 +12,7 @@ import {
 	type BridgeConfig,
 } from "./config.js";
 import { AgentRouter, profileModelLabel } from "./agent-router.js";
+import { readPendingBlockingInjection } from "./objective-injection.js";
 import {
 	applyPackageEnvDefaults,
 	buildCliHomeStatus,
@@ -1798,6 +1799,13 @@ export function parseAgentLabRequestCreateArgs(rawArgs: readonly string[]): {
 	};
 }
 
+function pisoBannerLine(workspaceRoot: string): string {
+	const blocking = readPendingBlockingInjection(workspaceRoot);
+	if (!blocking) return "";
+	const mins = Math.floor(blocking.ageMs / 60_000);
+	return `\u26a0 BLOCKING: ${blocking.severity} ${blocking.kind} — ${blocking.summary} (acked=${blocking.acked}, ageMs=${blocking.ageMs} ~${mins}m) — pull \`idu_pending_injections\` and act\n`;
+}
+
 function recordCliUsage(
 	runtime: CliRuntime,
 	action: string,
@@ -1927,7 +1935,8 @@ export async function runCliCommand(
 			case "idu-status": {
 				const status = getIduSessionStatus(activeRuntime.projectId);
 				recordCliUsage(activeRuntime, command, { ok: true });
-				return ok(formatIduSessionStatus(status));
+				const banner = pisoBannerLine(activeRuntime.workspaceRoot);
+				return ok(banner + formatIduSessionStatus(status));
 			}
 			case "alerts":
 			case "idu-alerts":
@@ -2204,6 +2213,19 @@ export async function runCliCommand(
 					: "null";
 				return ok(
 					`Cron preflight: sensorImpulses=${result.sensorImpulses.length} supervisorAdvisory=${advisoryLine}\n`,
+				);
+			}
+			case "idu-objective-status": {
+				// PR-A of objective-injection (PISO gate read path).
+				// Read-only: no side effects, no enqueue. Use this to verify
+				// the current PISO gate state from the CLI.
+				const blocking = readPendingBlockingInjection(activeRuntime.workspaceRoot);
+				const statePath = join(activeRuntime.workspaceRoot, "objective-reminder.json");
+				const reminderExists = existsSync(statePath);
+				return ok(
+					`objective_reminder state:\n` +
+						`  blocking: ${blocking ? `${blocking.severity} ${blocking.kind} (acked=${blocking.acked}, ageMs=${blocking.ageMs})` : "none"}\n` +
+						`  state_file: ${reminderExists ? statePath : "not created yet"}\n`,
 				);
 			}
 			case "idu-check-user-escalation": {
@@ -2857,7 +2879,8 @@ export async function runCliCommand(
 						markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
 					}
 				}
-				return ok(formatPendingInjections(pending, ack));
+				const banner = pisoBannerLine(activeRuntime.workspaceRoot);
+				return ok(banner + formatPendingInjections(pending, ack));
 			}
 			case "idu-decision-ledger":
 			case "decision-ledger": {

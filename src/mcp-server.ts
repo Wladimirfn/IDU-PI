@@ -7,6 +7,7 @@ import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
 import { runSensorImpulses } from "./sensor-impulses.js";
 import { categorizeFindings } from "./supervisor-categorize.js";
+import { readPendingBlockingInjection } from "./objective-injection.js";
 import {
 	formatBibliotecarioInit,
 	runBibliotecarioInit,
@@ -296,6 +297,11 @@ export type IduMcpToolResult = {
 	data: JsonObject;
 	safeNotes: string[];
 	errors: string[];
+	// PISO gate (PR-A of objective-injection). When non-null, every
+	// orchestrator that consumes this response sees a blocking banner.
+	// The PISO is host-agnostic: it is part of the response surface,
+	// not a host-specific hook.
+	blocking: import("./objective-injection.js").BlockingInjection | null;
 };
 
 export type IduMcpRuntimeFactory = (projectPath?: string) => CliRuntime;
@@ -1392,58 +1398,68 @@ export async function callIduMcpTool(
 	const resolution = (options.projectResolver ?? resolveMcpProjectContext)(
 		stringArg(args, "projectPath"),
 	);
-	if (
-		resolution.status === "unregistered_project" ||
-		resolution.status === "invalid_project"
-	) {
-		return envelope({
-			ok: false,
-			tool: name,
-			projectId: resolution.projectId,
-			projectPath: resolution.projectPath,
-			summary:
-				resolution.status === "unregistered_project"
-					? "Proyecto no registrado para Idu-pi MCP."
-					: "Proyecto inválido para Idu-pi MCP.",
-			data: {
-				resolutionStatus: resolution.status,
-				recommendedNext: resolution.recommendedNext,
-			},
-			safeNotes: resolution.safeNotes,
-			errors: resolution.errors,
-		});
-	}
+	// Set the PISO gate's stateRoot for the duration of this tool dispatch.
+	// The envelope() helper reads envelopeCurrentStateRoot to populate the
+	// `blocking` field on every response. Restored at the end of the
+	// request so a stale stateRoot does not leak across requests.
+	const previousEnvelopeStateRoot = envelopeCurrentStateRoot;
+	envelopeCurrentStateRoot = resolution.stateRoot ?? "";
 	try {
-		const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
-			resolution.projectPath,
-		);
-		const startedAt = Date.now();
-		const result = await dispatchTool(name, args, runtime, resolution);
 		if (
-			!isReadOnlyAlertTelemetryExcludedTool(name) &&
-			runtime.projectId.trim()
+			resolution.status === "unregistered_project" ||
+			resolution.status === "invalid_project"
 		) {
-			await recordMcpUsage(
-				runtime,
-				result,
-				Date.now() - startedAt,
-				resolution.stateRoot,
-			);
-			recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
-			recordMcpContextQuality(runtime, result, resolution.stateRoot);
+			return envelope({
+				ok: false,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary:
+					resolution.status === "unregistered_project"
+						? "Proyecto no registrado para Idu-pi MCP."
+						: "Proyecto inválido para Idu-pi MCP.",
+				data: {
+					resolutionStatus: resolution.status,
+					recommendedNext: resolution.recommendedNext,
+				},
+				safeNotes: resolution.safeNotes,
+				errors: resolution.errors,
+			});
 		}
-		return result;
-	} catch (error) {
-		return envelope({
-			ok: false,
-			tool: name,
-			projectId: resolution.projectId,
-			projectPath: resolution.projectPath,
-			summary: `Falló ${name}: ${redactSecrets(errorMessage(error))}`,
-			data: { resolutionStatus: resolution.status },
-			safeNotes: resolution.safeNotes,
-			errors: [redactSecrets(errorMessage(error))],
-		});
+		try {
+			const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
+				resolution.projectPath,
+			);
+			const startedAt = Date.now();
+			const result = await dispatchTool(name, args, runtime, resolution);
+			if (
+				!isReadOnlyAlertTelemetryExcludedTool(name) &&
+				runtime.projectId.trim()
+			) {
+				await recordMcpUsage(
+					runtime,
+					result,
+					Date.now() - startedAt,
+					resolution.stateRoot,
+				);
+				recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
+				recordMcpContextQuality(runtime, result, resolution.stateRoot);
+			}
+			return result;
+		} catch (error) {
+			return envelope({
+				ok: false,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary: `Falló ${name}: ${redactSecrets(errorMessage(error))}`,
+				data: { resolutionStatus: resolution.status },
+				safeNotes: resolution.safeNotes,
+				errors: [redactSecrets(errorMessage(error))],
+			});
+		}
+	} finally {
+		envelopeCurrentStateRoot = previousEnvelopeStateRoot;
 	}
 }
 
@@ -1508,6 +1524,12 @@ export function parseMcpLine(
 	} catch {
 		return jsonRpcError(null, -32700, "Parse error");
 	}
+}
+
+// Restore the PISO gate's stateRoot to the value from the enclosing scope.
+// Called at the end of every handleMcpRequest.
+function resetEnvelopeStateRoot(previous: string): void {
+	envelopeCurrentStateRoot = previous;
 }
 
 export function runMcpServer(options: IduMcpServerOptions = {}): void {
@@ -2074,6 +2096,7 @@ async function dispatchTool(
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: `${session.active ? "Activo" : "Inactivo"}; config=${connection.configStatus}; alignment=${connection.alignmentStatus}`,
+				stateRoot,
 				data: {
 					resolutionStatus: resolution.status,
 					projectId: runtime.projectId,
@@ -3008,6 +3031,7 @@ async function dispatchTool(
 				alignmentAdvisory,
 				evidenceGateways,
 			);
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const supervisorConsultation = buildConsultationFromAdvisory({
 				source: name,
 				planObjective: planObjectiveForRuntime(runtime),
@@ -3029,6 +3053,7 @@ async function dispatchTool(
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: alignmentAdvisory.summary,
+				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
 				data: {
 					alignmentAdvisory,
 					decisionEnvelope,
@@ -3231,8 +3256,7 @@ async function dispatchTool(
 						rail: {
 							wakeCount: s.consult.rail.wakeCount,
 							tokenBudget: s.consult.rail.tokenBudget,
-							cooldownRemainingMs:
-								s.consult.rail.cooldownRemainingMs,
+							cooldownRemainingMs: s.consult.rail.cooldownRemainingMs,
 						},
 						fileContentTruncated: !!s.fileContent,
 					})),
@@ -6908,7 +6932,10 @@ function envelope(input: {
 	data: JsonObject;
 	safeNotes?: string[];
 	errors?: string[];
+	stateRoot?: string;
 }): IduMcpToolResult {
+	const stateRoot = input.stateRoot ?? envelopeCurrentStateRoot;
+	const blocking = stateRoot ? readPendingBlockingInjection(stateRoot) : null;
 	return {
 		ok: input.ok,
 		tool: input.tool,
@@ -6918,8 +6945,14 @@ function envelope(input: {
 		data: redactObject(input.data),
 		safeNotes: dedupe([...SAFE_BASE_NOTES, ...(input.safeNotes ?? [])]),
 		errors: (input.errors ?? []).map(redactSecrets),
+		blocking,
 	};
 }
+
+// Module-level state: set by the tool dispatcher at the start of each
+// request. The envelope() helper reads this so every tool response carries
+// the PISO gate without needing per-handler changes.
+let envelopeCurrentStateRoot = "";
 
 function tool(
 	name: IduMcpToolName,
