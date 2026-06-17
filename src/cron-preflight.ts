@@ -15,11 +15,16 @@
  * State files read/written:
  *   - {stateRoot}/role-engine-config.json (read)
  *   - {stateRoot}/role-rails.json (read + write)
- *   - {stateRoot}/injections.jsonl (append supervisor_advisory)
+ *   - {stateRoot}/injections.jsonl (append supervisor_advisory, hygiene)
+ *   - {stateRoot}/injection-telemetry.jsonl (append lifecycle events)
+ *   - {stateRoot}/hygiene-sensor-last.json (last sensor snapshot)
+ *   - {stateRoot}/logs/supervisor-tick.log (satisfaction line per tick)
  *   - {stateRoot}/events.jsonl (writes orchestrator_turn)
  *   - Git working directory (read; changedFiles is provided by caller)
  */
 
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
 	runSensorImpulses,
 	type SensorImpulseResult,
@@ -28,8 +33,16 @@ import {
 	categorizeFindings,
 	type CategorizeResult,
 } from "./supervisor-categorize.js";
-import { enqueueObjectiveReminder } from "./objective-injection.js";
+import {
+	enqueueHygieneReminder,
+	enqueueObjectiveReminder,
+} from "./objective-injection.js";
 import { readPlanObjective } from "./plan-objective-reader.js";
+import { runHygieneSensor, type SensorResult } from "./hygiene-sensor.js";
+import {
+	evaluateSatisfaction,
+	recordLifecycleEvent,
+} from "./telemetry-lifecycle.js";
 import type { IduModelRoleId } from "./model-assignments.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
@@ -43,6 +56,9 @@ export type CronPreflightInput = {
 		message: string,
 		options: { projectId: string; stateRoot: string },
 	) => Promise<PromptForRoleResult>;
+	/** Optional override for the repo path the sensor scans. Defaults
+	 *  to `projectPath`. */
+	repoPath?: string;
 	now?: Date;
 };
 
@@ -106,6 +122,83 @@ export async function runCronPreflight(
 		planObjective: readPlanObjective(input.stateRoot),
 		now: input.now,
 	});
+
+	// ===== Sub-PR B: hygiene sensor + telemetry + emission =====
+
+	// Step 4: run the hygiene sensor against the repo. Best-effort:
+	// a sensor crash must not abort the cron tick.
+	let sensorResult: SensorResult | null = null;
+	try {
+		sensorResult = runHygieneSensor({
+			stateRoot: input.stateRoot,
+			repoPath: input.repoPath ?? input.projectPath,
+			now: input.now,
+		});
+		// Snapshot the last-run result so the bridge UI / MCP can
+		// introspect it later. Failures here are non-fatal.
+		try {
+			mkdirSync(input.stateRoot, { recursive: true });
+			writeFileSync(
+				join(input.stateRoot, "hygiene-sensor-last.json"),
+				JSON.stringify(sensorResult, null, 2),
+				"utf8",
+			);
+		} catch {
+			// best-effort
+		}
+	} catch (err) {
+		// best-effort: log via console; the cron wrapper can capture it
+		console.error("[cron-preflight] hygiene sensor failed:", err);
+	}
+
+	// Step 5: emit a hygiene injection per finding. Each emission
+	// records an "emitted" lifecycle event. Wrapped in try/catch so a
+	// single failure does not poison the rest of the loop.
+	if (sensorResult) {
+		for (const finding of sensorResult.findings) {
+			try {
+				const result = enqueueHygieneReminder({
+					stateRoot: input.stateRoot,
+					finding,
+					now: input.now,
+				});
+				if (result.enqueued) {
+					recordLifecycleEvent({
+						stateRoot: input.stateRoot,
+						injectionId: result.injectionId ?? `hyg-${finding.fingerprint}`,
+						phase: "emitted",
+						kind: "hygiene_junk_file",
+						now: input.now,
+					});
+				}
+			} catch (err) {
+				console.error(
+					"[cron-preflight] enqueueHygieneReminder failed:",
+					err,
+				);
+			}
+		}
+	}
+
+	// Step 6: run the satisfaction evaluator and append a line to the
+	// supervisor-tick log. This is the audit trail for the operator.
+	try {
+		const now = input.now ?? new Date();
+		const satisfaction = evaluateSatisfaction({
+			stateRoot: input.stateRoot,
+			windowMs: 24 * 60 * 60 * 1000,
+			now,
+		});
+		const logPath = join(input.stateRoot, "logs", "supervisor-tick.log");
+		mkdirSync(dirname(logPath), { recursive: true });
+		appendFileSync(
+			logPath,
+			`${now.toISOString()} hygiene_satisfaction emitted=${satisfaction.emitted} delivered=${satisfaction.delivered} resolved=${satisfaction.resolved} expired=${satisfaction.expired} superseded=${satisfaction.superseded}\n`,
+			"utf8",
+		);
+	} catch (err) {
+		console.error("[cron-preflight] evaluateSatisfaction failed:", err);
+	}
 
 	return {
 		report: null, // postflight report is owned by the MCP/CLI caller; cron doesn't need it
