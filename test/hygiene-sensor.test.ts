@@ -1,18 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import {
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { test } from "node:test";
-import {
-	runHygieneSensor,
-	type SensorResult,
-} from "../src/hygiene-sensor.js";
+import { runHygieneSensor, type SensorResult } from "../src/hygiene-sensor.js";
 
 /**
  * Build a sandbox with a fresh stateRoot and repoPath. stateRoot is
@@ -38,7 +30,11 @@ function makeSandbox(): {
 	};
 }
 
-function writeRepoFile(repoPath: string, relPath: string, content = ""): string {
+function writeRepoFile(
+	repoPath: string,
+	relPath: string,
+	content = "",
+): string {
 	const fullPath = join(repoPath, relPath);
 	mkdirSync(join(fullPath, ".."), { recursive: true });
 	writeFileSync(fullPath, content);
@@ -185,13 +181,16 @@ test("runHygieneSensor: bounded by maxDepth (11 levels deep should NOT be scanne
 		// Build a deep path: a/a/a/a/a/a/a/a/a/a/a (11 levels) + .DS_Store
 		// The walker starts at depth 0 (the repo root). Default maxDepth=10,
 		// so depth 11 must be unreachable.
-		const deepRel = Array.from({ length: 11 }, () => "a").join(sep) + sep + ".DS_Store";
+		const deepRel =
+			Array.from({ length: 11 }, () => "a").join(sep) + sep + ".DS_Store";
 		writeRepoFile(repoPath, deepRel);
 		// Also place a junk file at depth 1 that SHOULD be found.
 		writeRepoFile(repoPath, "b" + sep + ".DS_Store");
 
 		const result = runSensor(stateRoot, repoPath);
-		const deepHit = result.findings.some((f) => f.path.includes(`a${sep}a${sep}a`));
+		const deepHit = result.findings.some((f) =>
+			f.path.includes(`a${sep}a${sep}a`),
+		);
 		const shallowHit = result.findings.some(
 			(f) => f.pattern === ".DS_Store" && f.path.endsWith(`b${sep}.DS_Store`),
 		);
