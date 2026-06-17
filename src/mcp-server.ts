@@ -7,6 +7,7 @@ import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
 import { runSensorImpulses } from "./sensor-impulses.js";
 import { categorizeFindings } from "./supervisor-categorize.js";
+import { readPendingBlockingInjection } from "./objective-injection.js";
 import {
 	formatBibliotecarioInit,
 	runBibliotecarioInit,
@@ -296,6 +297,11 @@ export type IduMcpToolResult = {
 	data: JsonObject;
 	safeNotes: string[];
 	errors: string[];
+	// PISO gate (PR-A of objective-injection). When non-null, every
+	// orchestrator that consumes this response sees a blocking banner.
+	// The PISO is host-agnostic: it is part of the response surface,
+	// not a host-specific hook.
+	blocking: import("./objective-injection.js").BlockingInjection | null;
 };
 
 export type IduMcpRuntimeFactory = (projectPath?: string) => CliRuntime;
@@ -1376,6 +1382,8 @@ export async function callIduMcpTool(
 	}
 	if (!isToolName(name)) {
 		return envelope({
+			stateRoot: "",
+
 			ok: false,
 			tool: "idu_status",
 			projectId: null,
@@ -1397,6 +1405,8 @@ export async function callIduMcpTool(
 		resolution.status === "invalid_project"
 	) {
 		return envelope({
+			stateRoot: resolution.stateRoot,
+
 			ok: false,
 			tool: name,
 			projectId: resolution.projectId,
@@ -1435,6 +1445,8 @@ export async function callIduMcpTool(
 		return result;
 	} catch (error) {
 		return envelope({
+			stateRoot: "",
+
 			ok: false,
 			tool: name,
 			projectId: resolution.projectId,
@@ -1509,6 +1521,9 @@ export function parseMcpLine(
 		return jsonRpcError(null, -32700, "Parse error");
 	}
 }
+
+// Restore the PISO gate's stateRoot to the value from the enclosing scope.
+// Called at the end of every handleMcpRequest.
 
 export function runMcpServer(options: IduMcpServerOptions = {}): void {
 	let buffer = "";
@@ -1589,6 +1604,8 @@ async function handleProjectLifecycleTool(
 					mcpAvailable: true,
 				});
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId: status.projectId,
@@ -1627,6 +1644,8 @@ async function handleProjectLifecycleTool(
 						activateIduSession(result.project.id);
 					}
 					return envelope({
+						stateRoot: "",
+
 						...projectEnrollEnvelope(name, result),
 						summary: activate
 							? "Proyecto enrolado y guardrails activados; no creé drafts porque allowCreateDrafts=false."
@@ -1647,6 +1666,8 @@ async function handleProjectLifecycleTool(
 					activate,
 				});
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId: result.project.id,
@@ -1678,6 +1699,8 @@ async function handleProjectLifecycleTool(
 				)(stringArg(args, "projectPath"));
 				if (resolution.status === "unregistered_project") {
 					return envelope({
+						stateRoot: resolution.stateRoot,
+
 						ok: false,
 						tool: name,
 						projectId: resolution.projectId,
@@ -1698,6 +1721,8 @@ async function handleProjectLifecycleTool(
 				}
 				if (resolution.status === "invalid_project") {
 					return envelope({
+						stateRoot: resolution.stateRoot,
+
 						ok: false,
 						tool: name,
 						projectId: resolution.projectId,
@@ -1715,6 +1740,8 @@ async function handleProjectLifecycleTool(
 				const supervisorStartup = runtime.supervisorOnIduActivation();
 				const connection = runtime.inspectConnection();
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId: runtime.projectId,
@@ -1739,6 +1766,8 @@ async function handleProjectLifecycleTool(
 		}
 	} catch (error) {
 		return envelope({
+			stateRoot: "",
+
 			ok: false,
 			tool: name,
 			projectId: null,
@@ -2069,6 +2098,8 @@ async function dispatchTool(
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const triggerEngine = getTriggerEngineConfigStatus(stateRoot);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2093,6 +2124,8 @@ async function dispatchTool(
 			const session = activateIduSession(runtime.projectId);
 			const roleEngineBinding = runtime.rebindRoleEngine?.();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2114,6 +2147,8 @@ async function dispatchTool(
 			const session = deactivateIduSession(runtime.projectId);
 			const roleEngineBinding = runtime.unbindRoleEngine?.();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2130,6 +2165,8 @@ async function dispatchTool(
 			const confirmed = booleanArg(args, "confirm", false);
 			if (!confirmed) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2145,6 +2182,8 @@ async function dispatchTool(
 			}
 			const result = runtime.projectStateReset(true);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2161,6 +2200,8 @@ async function dispatchTool(
 		case "idu_prepare": {
 			const result = runtime.prepare();
 			return envelope({
+				stateRoot: "",
+
 				ok: result.errors.length === 0,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2191,6 +2232,8 @@ async function dispatchTool(
 				});
 			}
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2241,6 +2284,8 @@ async function dispatchTool(
 				runtime.formatModelInvocationStatus ?? formatModelInvocationStatus;
 			const output = `lab.db path: ${labDbPath}\n${formatter(result.report)}`;
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2285,6 +2330,8 @@ async function dispatchTool(
 				});
 			}
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2321,6 +2368,8 @@ async function dispatchTool(
 			if (action === "enable") {
 				const result = enableSupervisorTrigger(stateRoot, { source: "cli" });
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId,
@@ -2337,6 +2386,8 @@ async function dispatchTool(
 			if (action === "disable") {
 				const result = disableSupervisorTrigger(stateRoot, { source: "cli" });
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId,
@@ -2352,6 +2403,8 @@ async function dispatchTool(
 			}
 			const status = getSupervisorTriggerStatus(stateRoot);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2383,6 +2436,8 @@ async function dispatchTool(
 			if (action === "enable") {
 				const result = enableTriggerEngineConfig(stateRoot, { source: "cli" });
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId,
@@ -2399,6 +2454,8 @@ async function dispatchTool(
 			if (action === "disable") {
 				const result = disableTriggerEngineConfig(stateRoot, { source: "cli" });
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId,
@@ -2414,6 +2471,8 @@ async function dispatchTool(
 			}
 			const status = getTriggerEngineConfigStatus(stateRoot);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2461,6 +2520,8 @@ async function dispatchTool(
 					: disableRoleEngineConfig(stateRoot, role);
 			const roleEngineBinding = runtime.rebindRoleEngine?.();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2501,6 +2562,8 @@ async function dispatchTool(
 			const status = getRoleEngineConfigStatus(stateRoot);
 			const runtimeStatus = runtime.getRoleEngineStatus?.();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId,
@@ -2521,6 +2584,8 @@ async function dispatchTool(
 		case "idu_master_plan_status": {
 			if (!runtime.masterPlanStatus) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2533,6 +2598,8 @@ async function dispatchTool(
 			}
 			const status = runtime.masterPlanStatus();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2545,6 +2612,8 @@ async function dispatchTool(
 		case "idu_master_plan_create": {
 			if (!runtime.masterPlanRedraft) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2557,6 +2626,8 @@ async function dispatchTool(
 			}
 			const result = runtime.masterPlanRedraft(stringArg(args, "reason"));
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2579,6 +2650,8 @@ async function dispatchTool(
 		case "idu_master_plan_review": {
 			if (!runtime.masterPlanReview) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2593,6 +2666,8 @@ async function dispatchTool(
 				stringArg(args, "selector") ?? "latest",
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: review.plan.status !== "incompatible",
 				tool: name,
 				projectId: runtime.projectId,
@@ -2612,6 +2687,8 @@ async function dispatchTool(
 		case "idu_master_plan_approve": {
 			if (!runtime.masterPlanApprove) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2628,6 +2705,8 @@ async function dispatchTool(
 				"mcp",
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2651,6 +2730,8 @@ async function dispatchTool(
 		case "idu_master_plan_reject": {
 			if (!runtime.masterPlanReject) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2666,6 +2747,8 @@ async function dispatchTool(
 				stringArg(args, "reason"),
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2689,6 +2772,8 @@ async function dispatchTool(
 		case "idu_plan_snapshot": {
 			if (!runtime.masterPlanReview) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2704,6 +2789,8 @@ async function dispatchTool(
 			);
 			const snapshot = buildPlanSnapshot(review, runtime);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2719,6 +2806,8 @@ async function dispatchTool(
 		case "idu_next_advisory_action": {
 			if (!runtime.masterPlanReview) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2752,6 +2841,8 @@ async function dispatchTool(
 				nextActions: [String(advisoryAction.recommendation)],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2768,6 +2859,8 @@ async function dispatchTool(
 		case "idu_continuation_proposal": {
 			if (!runtime.masterPlanReview) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2787,6 +2880,8 @@ async function dispatchTool(
 				stringArg(args, "maxScope") ?? "small",
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2804,6 +2899,8 @@ async function dispatchTool(
 		case "idu_task_package_create": {
 			if (!runtime.masterPlanReview) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2851,6 +2948,8 @@ async function dispatchTool(
 				},
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2867,6 +2966,8 @@ async function dispatchTool(
 		case "idu_supervisor_context_pack": {
 			if (!runtime.masterPlanReview) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -2904,6 +3005,8 @@ async function dispatchTool(
 				nextActions: arrayField(pack, "autonomyGates").map(String),
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2944,6 +3047,8 @@ async function dispatchTool(
 				nextActions: [String(procedure.recommendedNext)],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -2978,6 +3083,8 @@ async function dispatchTool(
 				gates: ["Preflight antes de delegar", "Orquestador decide si procede"],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3008,6 +3115,7 @@ async function dispatchTool(
 				alignmentAdvisory,
 				evidenceGateways,
 			);
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const supervisorConsultation = buildConsultationFromAdvisory({
 				source: name,
 				planObjective: planObjectiveForRuntime(runtime),
@@ -3029,6 +3137,7 @@ async function dispatchTool(
 				projectId: runtime.projectId,
 				projectPath: runtime.projectPath,
 				summary: alignmentAdvisory.summary,
+				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
 				data: {
 					alignmentAdvisory,
 					decisionEnvelope,
@@ -3066,6 +3175,8 @@ async function dispatchTool(
 				gates: ["Advisory al orquestador", "Sin scan/IA/AgentLab automático"],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3198,6 +3309,8 @@ async function dispatchTool(
 				suggestedAgentLabs: report.suggestedAgentLabs,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3231,8 +3344,7 @@ async function dispatchTool(
 						rail: {
 							wakeCount: s.consult.rail.wakeCount,
 							tokenBudget: s.consult.rail.tokenBudget,
-							cooldownRemainingMs:
-								s.consult.rail.cooldownRemainingMs,
+							cooldownRemainingMs: s.consult.rail.cooldownRemainingMs,
 						},
 						fileContentTruncated: !!s.fileContent,
 					})),
@@ -3271,6 +3383,8 @@ async function dispatchTool(
 				alignmentAdvisory,
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3304,6 +3418,8 @@ async function dispatchTool(
 		case "idu_execution_director_tick": {
 			if (!runtime.executionDirectorTick) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -3333,6 +3449,8 @@ async function dispatchTool(
 					: ["No proposal action required from this tick."],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3362,6 +3480,8 @@ async function dispatchTool(
 		case "idu_proposal_outbox": {
 			if (!runtime.proposalOutbox) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -3374,6 +3494,8 @@ async function dispatchTool(
 			}
 			const proposals = runtime.proposalOutbox();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3390,6 +3512,8 @@ async function dispatchTool(
 		case "idu_proposal_detail": {
 			if (!runtime.proposalDetail) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -3403,6 +3527,8 @@ async function dispatchTool(
 			const id = requiredText(args, "id");
 			const proposal = runtime.proposalDetail(id);
 			return envelope({
+				stateRoot: "",
+
 				ok: Boolean(proposal),
 				tool: name,
 				projectId: runtime.projectId,
@@ -3449,6 +3575,8 @@ async function dispatchTool(
 					: ["Resolve blocker and retry consult"],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: result.ok,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3496,6 +3624,8 @@ async function dispatchTool(
 				alignmentAdvisory,
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3547,6 +3677,8 @@ async function dispatchTool(
 				],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3603,6 +3735,8 @@ async function dispatchTool(
 					: [],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3640,6 +3774,8 @@ async function dispatchTool(
 				cooldowns: state.cooldowns,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3705,6 +3841,8 @@ async function dispatchTool(
 			}
 			const finalReport = { ...report, tasksCreated };
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3726,6 +3864,8 @@ async function dispatchTool(
 		case "idu_autonomous_alerts_control": {
 			if (!resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -3787,6 +3927,8 @@ async function dispatchTool(
 				now,
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3840,6 +3982,8 @@ async function dispatchTool(
 				...taskRead.safeNotes,
 			];
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3863,6 +4007,8 @@ async function dispatchTool(
 				stateRoot,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3880,6 +4026,8 @@ async function dispatchTool(
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			if (!runtime.projectPath) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -3896,6 +4044,8 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3927,6 +4077,8 @@ async function dispatchTool(
 				masterPlanSummary: "",
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3956,6 +4108,8 @@ async function dispatchTool(
 				...(params.approvedBy ? { approvedBy: params.approvedBy } : {}),
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -3972,6 +4126,8 @@ async function dispatchTool(
 		case "idu_birth_general_spec": {
 			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -3996,6 +4152,8 @@ async function dispatchTool(
 				stateRoot: resolution.stateRoot,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4012,6 +4170,8 @@ async function dispatchTool(
 		case "idu_birth_general_spec_derive": {
 			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4032,6 +4192,8 @@ async function dispatchTool(
 					promptForRole ?? (async () => ({ ok: false, output: "" })),
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4048,6 +4210,8 @@ async function dispatchTool(
 		case "idu_genesis_mission_draft": {
 			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4064,6 +4228,8 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4080,6 +4246,8 @@ async function dispatchTool(
 		case "idu_genesis_mission_confirm": {
 			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4094,6 +4262,8 @@ async function dispatchTool(
 			const owner = stringArg(args, "owner");
 			if (!owner) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4115,6 +4285,8 @@ async function dispatchTool(
 			});
 			if (!result.ok) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4126,6 +4298,8 @@ async function dispatchTool(
 				});
 			}
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4142,6 +4316,8 @@ async function dispatchTool(
 		case "idu_skill_for_task": {
 			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4155,6 +4331,8 @@ async function dispatchTool(
 			const request = requiredText(args, "request");
 			const skills = loadSkillsForTask(resolution.stateRoot, request);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4172,6 +4350,8 @@ async function dispatchTool(
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			if (!runtime.projectPath) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4188,6 +4368,8 @@ async function dispatchTool(
 				projectPath: runtime.projectPath,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4230,6 +4412,8 @@ async function dispatchTool(
 				repoPlan: plan,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: env.decision.repoWritesAllowed,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4254,6 +4438,8 @@ async function dispatchTool(
 				}
 			}
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4290,6 +4476,8 @@ async function dispatchTool(
 			const plan = planPrune(stateRoot, { olderThanDays });
 			if (!confirm) {
 				return envelope({
+					stateRoot: "",
+
 					ok: true,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4317,6 +4505,8 @@ async function dispatchTool(
 			}
 			const result = applyPrune(stateRoot, plan, { olderThanDays });
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4339,6 +4529,8 @@ async function dispatchTool(
 		}
 		case "idu_subscribe_triggers": {
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4499,6 +4691,8 @@ async function dispatchTool(
 				],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4710,6 +4904,8 @@ async function dispatchTool(
 				],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4738,6 +4934,8 @@ async function dispatchTool(
 		case "idu_external_intelligence_report": {
 			if (!resolution.stateRoot) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4797,6 +4995,8 @@ async function dispatchTool(
 					: [],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4846,6 +5046,8 @@ async function dispatchTool(
 				],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4871,6 +5073,8 @@ async function dispatchTool(
 			const kind = inferTaskTemplateKind(text);
 			const task = runtime.createTask(kind, text);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4891,6 +5095,8 @@ async function dispatchTool(
 				? runtimeWithList.listTasks()
 				: parseTaskList(runtime.queueDetail());
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4931,6 +5137,8 @@ async function dispatchTool(
 			const task = runtimeWithComplete.queueComplete?.(taskId, evidence);
 			if (!task) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -4942,6 +5150,8 @@ async function dispatchTool(
 				});
 			}
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4962,6 +5172,8 @@ async function dispatchTool(
 		case "idu_semantic_audit_status": {
 			const report = runtime.semanticAuditStatus();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -4983,6 +5195,8 @@ async function dispatchTool(
 		case "idu_source_status": {
 			const status = runtime.sourceLibraryStatus();
 			return envelope({
+				stateRoot: "",
+
 				ok: status.errors.length === 0,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5000,6 +5214,8 @@ async function dispatchTool(
 		case "idu_source_add": {
 			const result = runtime.sourceLibraryAdd(requiredText(args, "path"));
 			return envelope({
+				stateRoot: "",
+
 				ok: result.errors.length === 0,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5020,6 +5236,8 @@ async function dispatchTool(
 				requiredText(args, "sourceId"),
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: result.errors.length === 0,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5042,6 +5260,8 @@ async function dispatchTool(
 				"result.content",
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5061,6 +5281,8 @@ async function dispatchTool(
 				requiredText(args, "sourceId"),
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5080,6 +5302,8 @@ async function dispatchTool(
 				requiredText(args, "sourceId"),
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5098,6 +5322,8 @@ async function dispatchTool(
 				runtime.sourceLibraryResearch(requiredText(args, "query")),
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5115,6 +5341,8 @@ async function dispatchTool(
 		case "idu_source_digest": {
 			const result = runtime.sourceDigest(requiredText(args, "sourceId"));
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5132,6 +5360,8 @@ async function dispatchTool(
 		case "idu_source_digest_status": {
 			const result = runtime.sourceDigestStatus();
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5155,6 +5385,8 @@ async function dispatchTool(
 				"result.content",
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5189,6 +5421,8 @@ async function dispatchTool(
 				),
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5224,6 +5458,8 @@ async function dispatchTool(
 				},
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5267,6 +5503,8 @@ async function dispatchTool(
 				],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5286,6 +5524,8 @@ async function dispatchTool(
 				stringArg(args, "pathOrLatest") ?? "latest",
 			);
 			return envelope({
+				stateRoot: "",
+
 				ok: review.ok,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5307,6 +5547,8 @@ async function dispatchTool(
 			const mode = rawMode as SkillDraftFromLessonsMode;
 			if (mode !== "proposal-only" && mode !== "approved-only") {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -5362,6 +5604,8 @@ async function dispatchTool(
 				nextActions: result.nextActions,
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5377,6 +5621,8 @@ async function dispatchTool(
 		case "idu_source_refresh": {
 			const status = runtime.sourceLibraryRefresh();
 			return envelope({
+				stateRoot: "",
+
 				ok: status.errors.length === 0,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5404,6 +5650,8 @@ async function dispatchTool(
 			const specialties = agentLabSpecialtiesArg(args, "specialties");
 			if (source === "specialist-audit-plan" && specialties.errors.length > 0) {
 				return envelope({
+					stateRoot: "",
+
 					ok: false,
 					tool: name,
 					projectId: runtime.projectId,
@@ -5470,6 +5718,8 @@ async function dispatchTool(
 				],
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: plan.errors.length === 0,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5521,6 +5771,8 @@ async function dispatchTool(
 					runs: result.runs,
 				});
 			return envelope({
+				stateRoot: "",
+
 				ok: true,
 				tool: name,
 				projectId: runtime.projectId,
@@ -5601,6 +5853,8 @@ async function dispatchTool(
 				),
 			});
 			return envelope({
+				stateRoot: "",
+
 				ok: status.valid,
 				tool: name,
 				projectId: runtime.projectId,
@@ -6908,7 +7162,18 @@ function envelope(input: {
 	data: JsonObject;
 	safeNotes?: string[];
 	errors?: string[];
+	stateRoot?: string;
 }): IduMcpToolResult {
+	// PR-A.2 follow-up: when `stateRoot` is undefined, callers fall back to
+	// `runtime.workspaceRoot`. That is correct for the enrolled-project mode
+	// (workspaceRoot === stateRoot) but NOT for the global / multi-project
+	// mode where stateRoot = workspaceRoot/projects/<id>. In that case the
+	// fallback reads `workspaceRoot/injections.jsonl`, which does not exist,
+	// and the gate silently drops. PR-B (objective-injection cadence) is
+	// where the write path is defined; the fix lives there to guarantee
+	// read/write use the same canonical path. See PR #138 review thread.
+	const stateRoot = input.stateRoot ?? "";
+	const blocking = stateRoot ? readPendingBlockingInjection(stateRoot) : null;
 	return {
 		ok: input.ok,
 		tool: input.tool,
@@ -6918,8 +7183,13 @@ function envelope(input: {
 		data: redactObject(input.data),
 		safeNotes: dedupe([...SAFE_BASE_NOTES, ...(input.safeNotes ?? [])]),
 		errors: (input.errors ?? []).map(redactSecrets),
+		blocking,
 	};
 }
+
+// PR-A.2: removed the module-level envelopeCurrentStateRoot (race fix).
+// The PISO gate is now threaded explicitly per envelope() call via
+// input.stateRoot. See PR #138 follow-up.
 
 function tool(
 	name: IduMcpToolName,
@@ -7105,6 +7375,8 @@ function invalidMcpInput(
 	data: JsonObject = {},
 ): IduMcpToolResult {
 	return envelope({
+		stateRoot: "",
+
 		ok: false,
 		tool: name,
 		projectId: activeMcpProjectId(runtime, resolution) ?? null,
