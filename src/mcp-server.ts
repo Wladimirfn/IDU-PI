@@ -43,6 +43,10 @@ import type { SkillDraftFromLessonsMode } from "./skill-draft-from-lessons.js";
 import { applyPackageEnvDefaults, resolveIduRegistryPath } from "./cli-home.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
 import {
+	migrateHygieneLayout,
+	type MigrationResult,
+} from "./hygiene-migrate.js";
+import {
 	projectEnroll,
 	projectInstallStatus,
 	type ProjectEnrollResult,
@@ -238,6 +242,7 @@ export type IduMcpToolName =
 	| "idu_skill_for_task"
 	| "idu_pending_injections"
 	| "idu_outbox_prune"
+	| "idu_hygiene_migrate"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
@@ -785,6 +790,15 @@ const TOOLS: IduMcpToolDefinition[] = [
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 			ack: optionalBoolean(
 				"Si true (default), marca las inyecciones devueltas como acked.",
+			),
+		},
+	),
+	tool(
+		"idu_hygiene_migrate",
+		"Migración one-time desde <repo>/config/ y <repo>/.agents/skills/ legacy a <repo>/.idu/. Idempotente. Sin repoRoot usa el proyecto activo.",
+		{
+			projectPath: optionalString(
+				"Ruta opcional del repo a migrar; por defecto el proyecto activo.",
 			),
 		},
 	),
@@ -1677,6 +1691,7 @@ async function handleProjectLifecycleTool(
 					config,
 					registryPath,
 					activate,
+					consentGiven: true,
 				});
 				return envelope({
 					stateRoot: "",
@@ -4500,6 +4515,68 @@ async function dispatchTool(
 						? "Side effect: mark-as-acked happened on disk."
 						: "Side effect: read-only, no disk write.",
 				],
+			});
+		}
+		case "idu_hygiene_migrate": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as { projectPath?: string };
+			const repoRoot =
+				(params.projectPath ?? runtime.projectPath ?? "").trim();
+			if (!repoRoot) {
+				return envelope({
+					stateRoot,
+
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary:
+						"idu_hygiene_migrate requires --projectPath or an active project.",
+					data: {},
+					safeNotes: [
+						...resolution.safeNotes,
+						"No migration executed: missing target repo root.",
+					],
+					errors: [
+						"projectPath is required when no active project is registered",
+					],
+				});
+			}
+			const migration: MigrationResult = migrateHygieneLayout({
+				repoRoot,
+				stateRoot,
+			});
+			return envelope({
+				stateRoot,
+
+				ok: migration.errors.length === 0,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: repoRoot,
+				summary: `moved=${migration.moved.length} skipped=${migration.skipped.length} errors=${migration.errors.length}`,
+				data: {
+					hygiene: {
+						repoRoot,
+						moved: migration.moved,
+						skipped: migration.skipped,
+						errors: migration.errors,
+					},
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Territory model: migration only moves files idu-pi owns (manifest-driven).",
+					"Idempotent: running twice does not double-move.",
+					migration.errors.length > 0
+						? `Side effect: ${migration.moved.length} moves applied; ${migration.errors.length} errors recorded in <stateRoot>/events.jsonl.`
+						: `Side effect: ${migration.moved.length} moves applied; logged to <stateRoot>/events.jsonl.`,
+				],
+				...(migration.errors.length > 0
+					? {
+							errors: migration.errors.map(
+									(e) => `${e.from}: ${e.message}`,
+								),
+						}
+					: {}),
 			});
 		}
 		case "idu_outbox_prune": {

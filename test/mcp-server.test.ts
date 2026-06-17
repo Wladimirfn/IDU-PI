@@ -1158,7 +1158,8 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(
 		tools.some((tool) => tool.name === "idu_bibliotecario_proactive_advisory"),
 	);
-	assert.equal(tools.length, 84);
+	// 84 baseline + 1 for idu_hygiene_migrate (sub-PR 3 of self-hygiene)
+	assert.equal(tools.length, 85);
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {

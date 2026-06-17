@@ -7,6 +7,14 @@ modelo-defecto: (el modelo de la sesión activa — variable)
 
 # Skill — Orquestador (el ejecutor que Idu-pi supervisa)
 
+## Territory model
+
+- **idu-pi writes ONLY to two roots**: `stateRoot/**` (runtime state, scratch, sync mirror) and `<repo>/.idu/**` (governance + project skills, version-controlled).
+- **idu-pi never writes to** `<repo>/{src,docs,scripts,tests,config,package.json,...}`. The only allowed repo location is `.idu/`. Writes outside `stateRoot/**` AND `.idu/**` are **rejected** by `assertAllowedWrite` (see `src/idu-scratch.ts`) — auditor-required active rejection, never silent allow.
+- The `.idu/` directory is **owned by idu-pi** and **committed to your repo** (governance travels with the code). The `assertUnderStateRoot` + `assertAllowedWrite` helpers are the regression guard.
+- **Bootstrap will ask for explicit consent before creating `.idu/`** — the dir IS COMMITTED, so the user must opt in (or pre-create the dir for implicit consent). See `runIduBootstrap({ consentGiven?: boolean })`.
+- **Migrating from legacy layouts**: if you have governance files in legacy `<repo>/config/` or project skills in legacy `<repo>/.agents/skills/`, run `idu-hygiene-migrate` (CLI) or call `idu_hygiene_migrate` (MCP). Idempotent. Falls back to copy+delete on cross-device. See `src/hygiene-migrate.ts`.
+
 ## Contrato de PISO gate (objective reminder)
 
 - Cada respuesta de idu-pi (MCP o CLI) puede llevar un campo `blocking` o un banner de una línea. Si está presente, es una inyección **bloqueante** que requiere atención.

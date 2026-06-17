@@ -211,6 +211,7 @@ test("runIduBootstrap writes idu-ready.json to the stateRoot", () => {
 			projectPath,
 			config: makeConfig(root),
 			registryPath,
+			consentGiven: true,
 		});
 		const readyPath = join(result.statePaths.stateRoot, "idu-ready.json");
 		assert.ok(existsSync(readyPath), "idu-ready.json must exist");
@@ -252,6 +253,7 @@ test("runIduBootstrap with explicit registryPath does NOT write to process.cwd()
 			projectPath,
 			config: makeConfig(root),
 			registryPath,
+			consentGiven: true,
 		});
 		// The TEMP registry should now exist.
 		assert.ok(

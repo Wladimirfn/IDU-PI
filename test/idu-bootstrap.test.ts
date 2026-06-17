@@ -45,6 +45,7 @@ test("idu bootstrap enrolls project and creates state, core, constitution, bluep
 			projectPath,
 			config: config(root),
 			registryPath,
+			consentGiven: true,
 		});
 		assert.equal(result.project.id, "project-a");
 		assert.equal(result.shouldRunPrepare, true);
@@ -94,12 +95,14 @@ test("idu bootstrap fast path does not rerun prepare when checkpoint and config 
 			projectPath,
 			config: config(root),
 			registryPath,
+			consentGiven: true,
 		});
 		assert.equal(first.shouldRunPrepare, true);
 		const second = runIduBootstrap({
 			projectPath,
 			config: config(root),
 			registryPath,
+			consentGiven: true,
 		});
 		assert.equal(second.alreadyBootstrapped, true);
 		assert.equal(second.shouldRunPrepare, false);
@@ -120,11 +123,13 @@ test("idu bootstrap allocates unique id instead of hijacking same-basename proje
 			projectPath: firstPath,
 			config: config(root),
 			registryPath,
+			consentGiven: true,
 		});
 		const second = runIduBootstrap({
 			projectPath: secondPath,
 			config: config(root),
 			registryPath,
+			consentGiven: true,
 		});
 		assert.equal(first.project.id, "same-name");
 		assert.equal(second.project.id, "same-name-2");
@@ -155,6 +160,7 @@ test("idu bootstrap refuses paths outside allowed roots", () => {
 					projectPath: outside,
 					config: config(root),
 					registryPath: join(root, "registry.json"),
+					consentGiven: true,
 				}),
 			/Ruta fuera de ALLOWED_ROOTS/u,
 		);

@@ -32,6 +32,19 @@ export type IduBootstrapInput = {
 	config: BridgeConfig;
 	registryPath?: string;
 	activate?: boolean;
+	/**
+	 * Explicit consent to create <projectPath>/.idu/ when it does not
+	 * already exist. The bootstrap is programmatic (no readline prompt),
+	 * so consent is opt-in via this flag.
+	 *
+	 * Effective behavior:
+	 *   - input.consentGiven === true              → consent (explicit).
+	 *   - <projectPath>/.idu/ already exists       → consent (implicit;
+	 *     user created the dir already).
+	 *   - else                                      → throws "Bootstrap
+	 *     cancelled: idu-pi requires consent...".
+	 */
+	consentGiven?: boolean;
 };
 
 export type IduBootstrapResult = {
@@ -59,11 +72,28 @@ type BootstrapState = {
 
 const PROJECT_CORE = ".idu/config/project-core.json";
 const PROJECT_CONSTITUTION = ".idu/config/project-constitution.json";
+const IDU_DIR = ".idu";
+const CONSENT_RECORD_FILE = "idu-bootstrap-consent.json";
 
 export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	const projectPath = canonicalDirectory(input.projectPath);
 	if (!isAllowedCwd(projectPath, input.config.allowedRoots)) {
 		throw new Error(`Ruta fuera de ALLOWED_ROOTS: ${projectPath}`);
+	}
+
+	// Territory consent gate. idu-pi only writes under stateRoot/** or
+	// <repo>/.idu/**. Creating the .idu/ dir is a real repo write that
+	// travels in commits and PRs, so we require explicit or implicit
+	// consent before doing it. The dir existing already means the user
+	// accepted that territory previously — implicit consent.
+	const iduDirAbsolute = join(projectPath, IDU_DIR);
+	const iduDirExists = existsSync(iduDirAbsolute);
+	const effectiveConsent = input.consentGiven ?? iduDirExists;
+	if (!effectiveConsent) {
+		throw new Error(
+			"Bootstrap cancelled: idu-pi requires consent to create .idu/ in the repo. " +
+				"Pass { consentGiven: true } to opt in (the .idu/ directory IS COMMITTED to your repo).",
+		);
 	}
 
 	const registry = loadRegistry(projectPath, input.config.allowedRoots, {
@@ -95,6 +125,14 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 		existing.push("registry project enrollment");
 	}
 
+	// Persist a consent record in stateRoot so the audit trail shows
+	// when and how the .idu/ territory was created (or accepted). The
+	// record lives in stateRoot, never in the repo. The source of
+	// truth for "the user accepted the territory" is this file plus
+	// the explicit consentGiven flag passed by the caller.
+	const consentTimestamp = new Date().toISOString();
+	const consentGivenExplicit = input.consentGiven === true;
+
 	const statePaths = resolveProjectStatePaths({
 		workspaceRoot: input.config.agentWorkspaceRoot,
 		projectId: project.id,
@@ -114,6 +152,18 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	ensureProjectStateDirs(statePaths);
 	if (!existing.includes("state directories ready"))
 		existing.push("state directories ready");
+
+	// Persist a consent record in stateRoot so the audit trail shows
+	// when and how the .idu/ territory was created (or accepted). The
+	// record lives in stateRoot, never in the repo. The source of
+	// truth for "the user accepted the territory" is this file plus
+	// the explicit consentGiven flag passed by the caller.
+	writeBootstrapConsentRecord(statePaths.stateRoot, {
+		consentGiven: true,
+		ts: consentTimestamp,
+		source: consentGivenExplicit ? "explicit" : "implicit",
+		iduDirExisted: iduDirExists,
+	});
 
 	saveRegistry(registry, input.registryPath);
 	configureIduSessionStore({
@@ -286,6 +336,21 @@ function readBootstrapState(path: string): BootstrapState | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+type ConsentRecord = {
+	consentGiven: true;
+	ts: string;
+	source: "explicit" | "implicit";
+	iduDirExisted: boolean;
+};
+
+function writeBootstrapConsentRecord(
+	stateRoot: string,
+	record: ConsentRecord,
+): void {
+	const path = join(stateRoot, CONSENT_RECORD_FILE);
+	writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }
 
 function readGitHead(projectPath: string): string | undefined {
