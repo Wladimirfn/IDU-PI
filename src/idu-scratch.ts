@@ -8,7 +8,8 @@
  * This module exposes the assertion helpers that enforce the territory model
  * by construction. Every writer that needs to leave stateRoot calls
  * `assertAllowedWrite` before `writeFileSync`. The test in
- * `test/idu-scratch-enforcement.test.ts` is the regression guard.
+ * `test/writer-migration.test.ts` (the "writer territory" and
+ * "NEGATIVE (auditor-required)" tests) is the regression guard.
  *
  * The active-rejection behavior (NEGATIVE test, auditor-required): a write
  * outside both roots is REJECTED — `assertAllowedWrite` throws
