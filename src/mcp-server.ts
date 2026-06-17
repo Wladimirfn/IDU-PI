@@ -46,6 +46,8 @@ import {
 	migrateHygieneLayout,
 	type MigrationResult,
 } from "./hygiene-migrate.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
+import { readHygieneStatus } from "./hygiene-status.js";
 import {
 	projectEnroll,
 	projectInstallStatus,
@@ -198,6 +200,7 @@ export type IduMcpToolName =
 	| "idu_start"
 	| "idu_status"
 	| "idu_objective_status"
+	| "idu_hygiene_status"
 	| "idu_activate"
 	| "idu_deactivate"
 	| "idu_prepare"
@@ -3602,6 +3605,31 @@ async function dispatchTool(
 				],
 			});
 		}
+		case "idu_hygiene_status": {
+			// Item 3b sub-PR C: read-only mirror of the hygiene sensor state.
+			// Surfaces the last-run snapshot, the effective patterns
+			// (canonical + per-project override), and the count of un-acked
+			// hygiene_junk_file injections.
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const hygieneStatus = readHygieneStatus(stateRoot);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: hygieneStatus.lastRun
+					? `hygiene sensor: last run ${hygieneStatus.lastRun.ts} (${hygieneStatus.lastRun.matchedPaths} findings, ${hygieneStatus.pendingInjections} pending)`
+					: "hygiene sensor: never run",
+				stateRoot,
+				data: {
+					hygiene: hygieneStatus,
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Read-only: no side effects.",
+				],
+			});
+		}
 		case "idu_supervisor_consult": {
 			const question = requiredText(args, "question");
 			const roleRaw = stringArg(args, "role") ?? "supervisor-main";
@@ -4492,6 +4520,21 @@ async function dispatchTool(
 			if (ack && pending.length > 0) {
 				for (const inj of pending) {
 					markInjectionAcked(stateRoot, inj.injectionId);
+					// Telemetry: recording `delivered` (the act of pulling)
+					// and `resolved` (ack:true). Only when the injection
+					// was actually pulled by the orchestrator.
+					recordLifecycleEvent({
+						stateRoot,
+						injectionId: inj.injectionId,
+						phase: "delivered",
+						kind: inj.kind,
+					});
+					recordLifecycleEvent({
+						stateRoot,
+						injectionId: inj.injectionId,
+						phase: "resolved",
+						kind: inj.kind,
+					});
 				}
 			}
 			return envelope({

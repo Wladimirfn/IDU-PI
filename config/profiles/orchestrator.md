@@ -15,6 +15,16 @@ modelo-defecto: (el modelo de la sesión activa — variable)
 - **Bootstrap will ask for explicit consent before creating `.idu/`** — the dir IS COMMITTED, so the user must opt in (or pre-create the dir for implicit consent). See `runIduBootstrap({ consentGiven?: boolean })`.
 - **Migrating from legacy layouts**: if you have governance files in legacy `<repo>/config/` or project skills in legacy `<repo>/.agents/skills/`, run `idu-hygiene-migrate` (CLI) or call `idu_hygiene_migrate` (MCP). Idempotent. Falls back to copy+delete on cross-device. See `src/hygiene-migrate.ts`.
 
+## Hygiene sensor
+
+The cron preflight runs the hygiene sensor every 1h. Findings become `hygiene_junk_file` injections in the same `<stateRoot>/injections.jsonl` ledger used by objective reminders.
+
+**idu-pi does NOT delete files.** The sensor detects; the orchestrator acts. To clean up, run `find` / `rm` etc. on your own.
+
+**Per-project override**: `<stateRoot>/hygiene-patterns.json` with shape `{ "blocklist": [...], "allowlist": [...] }`. Default: canonical set only (`.DS_Store`, `Thumbs.db`, `*.bak`, `*~`, `*.swp`, `tmp-*.mjs`, `tmp-*.cjs`, `sdd-*-output.md`). `node_modules/`, `__pycache__/`, `.vs/`, `.idea/` are NOT scanned (deps/IDE, not garbage).
+
+**Ack**: `idu_pending_injections ack:true` records lifecycle events (`delivered` + `resolved`) for telemetry. Run `idu_hygiene_status` (MCP) or `idu-hygiene-status` (CLI) to see the current sensor state.
+
 ## Contrato de PISO gate (objective reminder)
 
 - Cada respuesta de idu-pi (MCP o CLI) puede llevar un campo `blocking` o un banner de una línea. Si está presente, es una inyección **bloqueante** que requiere atención.
