@@ -94,7 +94,9 @@ function readInjectionById(
 ): Record<string, unknown> | null {
 	const path = resolveInjectionsPath(stateRoot);
 	if (!existsSync(path)) return null;
-	const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
+	const lines = readFileSync(path, "utf8")
+		.split("\n")
+		.filter((l) => l.trim());
 	for (const line of lines) {
 		try {
 			const obj = JSON.parse(line) as Record<string, unknown>;
