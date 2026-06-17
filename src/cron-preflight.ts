@@ -28,6 +28,8 @@ import {
 	categorizeFindings,
 	type CategorizeResult,
 } from "./supervisor-categorize.js";
+import { enqueueObjectiveReminder } from "./objective-injection.js";
+import { readPlanObjective } from "./plan-objective-reader.js";
 import type { IduModelRoleId } from "./model-assignments.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
@@ -91,6 +93,17 @@ export async function runCronPreflight(
 		stateRoot: input.stateRoot,
 		findings,
 		promptForRole: input.promptForRole,
+		now: input.now,
+	});
+
+	// PR-B: enqueue the objective reminder on cadence. The cron is
+	// the canonical source of objective reminders: every cron tick
+	// re-evaluates the dedup/escalation logic and either dedups
+	// (recent un-acked reminder exists), escalates (1h un-acked),
+	// or enqueues fresh (past dedup or no recent).
+	enqueueObjectiveReminder({
+		stateRoot: input.stateRoot,
+		planObjective: readPlanObjective(input.stateRoot),
 		now: input.now,
 	});
 

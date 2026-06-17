@@ -193,6 +193,7 @@ export type IduMcpToolName =
 	| "idu_bootstrap_project"
 	| "idu_start"
 	| "idu_status"
+	| "idu_objective_status"
 	| "idu_activate"
 	| "idu_deactivate"
 	| "idu_prepare"
@@ -1138,6 +1139,10 @@ export function resolveMcpProjectContext(
 			createIfMissing: false,
 			registryPath: resolveIduRegistryPath(),
 		});
+		// PR-B Finding C: the workspace root is the canonical parent for
+		// project stateRoots. When a project does not have an explicit
+		// stateRoot registered, we derive the canonical one from this.
+		const workspaceRootForProject = config.agentWorkspaceRoot;
 		if (inputProjectPath?.trim()) {
 			const projectPath = canonicalDirectory(inputProjectPath.trim());
 			if (!isAllowedCwd(projectPath, config.allowedRoots)) {
@@ -1165,7 +1170,15 @@ export function resolveMcpProjectContext(
 				status: "registered_project",
 				projectId: registered.id,
 				projectPath: registered.path,
-				...(registered.stateRoot ? { stateRoot: registered.stateRoot } : {}),
+				// PR-B Finding C: always set stateRoot. If the project
+				// registry has a stateRoot, use it; otherwise derive the
+				// canonical path (workspaceRoot/projects/<id>). This
+				// removes the `?? runtime.workspaceRoot` ambiguity in
+				// envelope() callers — read and write paths use the same
+				// canonical path.
+				stateRoot: registered.stateRoot
+					? registered.stateRoot
+					: join(workspaceRootForProject, "projects", registered.id),
 				safeNotes: [],
 				errors: [],
 			};
@@ -1176,9 +1189,9 @@ export function resolveMcpProjectContext(
 				status: "active_project",
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
-				...(activeProject.stateRoot
-					? { stateRoot: activeProject.stateRoot }
-					: {}),
+				stateRoot: activeProject.stateRoot
+					? activeProject.stateRoot
+					: join(workspaceRootForProject, "projects", activeProject.id),
 				safeNotes: [],
 				errors: [],
 			};
@@ -3543,6 +3556,35 @@ async function dispatchTool(
 					"Proposal detail is advisory; Idu-pi does not implement it.",
 				],
 				errors: proposal ? [] : [`Proposal not found: ${id}`],
+			});
+		}
+		case "idu_objective_status": {
+			// PR-B: read-only MCP mirror of `idu-objective-status` CLI.
+			// Surfaces the current PISO gate state for the orchestrator.
+			const blocking = readPendingBlockingInjection(resolution.stateRoot ?? "");
+			const reminderPath = join(
+				resolution.stateRoot ?? "",
+				"objective-reminder.json",
+			);
+			const reminderExists = existsSync(reminderPath);
+			return envelope({
+				ok: true,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary: blocking
+					? `objective reminder active: ${blocking.severity} ${blocking.kind} (acked=${blocking.acked}, ageMs=${blocking.ageMs})`
+					: "objective reminder: no blocking injection",
+				stateRoot: resolution.stateRoot,
+				data: {
+					blocking,
+					reminderStatePath: reminderPath,
+					reminderStateExists: reminderExists,
+				},
+				safeNotes: [
+					...resolution.safeNotes,
+					"Read-only: no side effects, no enqueue.",
+				],
 			});
 		}
 		case "idu_supervisor_consult": {
@@ -7164,14 +7206,12 @@ function envelope(input: {
 	errors?: string[];
 	stateRoot?: string;
 }): IduMcpToolResult {
-	// PR-A.2 follow-up: when `stateRoot` is undefined, callers fall back to
-	// `runtime.workspaceRoot`. That is correct for the enrolled-project mode
-	// (workspaceRoot === stateRoot) but NOT for the global / multi-project
-	// mode where stateRoot = workspaceRoot/projects/<id>. In that case the
-	// fallback reads `workspaceRoot/injections.jsonl`, which does not exist,
-	// and the gate silently drops. PR-B (objective-injection cadence) is
-	// where the write path is defined; the fix lives there to guarantee
-	// read/write use the same canonical path. See PR #138 review thread.
+	// PR-A.2 + PR-B: when `stateRoot` is undefined, callers fall back to
+	// `runtime.workspaceRoot`. After PR-B's `resolveMcpProjectContext`
+	// fix, the registered/active paths always set stateRoot, so this
+	// fallback only fires in the early error path (unregistered_project).
+	// In that case the gate is null, which is correct because the
+	// orchestrator needs to enroll the project first.
 	const stateRoot = input.stateRoot ?? "";
 	const blocking = stateRoot ? readPendingBlockingInjection(stateRoot) : null;
 	return {
