@@ -27,18 +27,25 @@ const tempDirs: string[] = [];
 
 function tempProject(): {
 	projectPath: string;
+	stateRoot: string;
 	reportsDir: string;
 	corePath: string;
 } {
 	const projectPath = mkdtempSync(join(tmpdir(), "pi-core-confirm-"));
-	tempDirs.push(projectPath);
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-core-confirm-state-"));
+	tempDirs.push(projectPath, stateRoot);
 	const reportsDir = join(projectPath, "reports");
-	mkdirSync(join(projectPath, "config"), { recursive: true });
-	mkdirSync(reportsDir, { recursive: true });
+	// Write to <repo>/.idu/config/project-core.json (the new territory) so
+	// tests don't need migration guard. Some tests still write to the
+	// legacy <repo>/config/ to verify migration behavior — those use a
+	// dedicated helper instead.
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	mkdirSync(join(projectPath, "reports"), { recursive: true });
 	return {
 		projectPath,
+		stateRoot,
 		reportsDir,
-		corePath: join(projectPath, "config", "project-core.json"),
+		corePath: join(projectPath, ".idu", "config", "project-core.json"),
 	};
 }
 
@@ -106,9 +113,9 @@ after(() => {
 });
 
 test("confirmProjectCore fails when project-core does not exist", () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 
-	const result = confirmProjectCore({ projectPath, reportsDir });
+	const result = confirmProjectCore({ projectPath, stateRoot, reportsDir });
 
 	assert.equal(result.ok, false);
 	assert.match(
@@ -118,10 +125,10 @@ test("confirmProjectCore fails when project-core does not exist", () => {
 });
 
 test("confirmProjectCore does not confirm with missing critical fields", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore({ targetUsers: [] }));
 
-	const result = confirmProjectCore({ projectPath, reportsDir });
+	const result = confirmProjectCore({ projectPath, stateRoot, reportsDir });
 	const core = readCore(corePath);
 
 	assert.equal(result.ok, false);
@@ -130,11 +137,12 @@ test("confirmProjectCore does not confirm with missing critical fields", () => {
 });
 
 test("confirmProjectCore confirms complete draft core", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 
 	const result = confirmProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-22T12:00:00Z"),
 	});
@@ -146,7 +154,7 @@ test("confirmProjectCore confirms complete draft core", () => {
 });
 
 test("confirmProjectCore does not overwrite confirmed core", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(
 		corePath,
 		completeCore({
@@ -156,7 +164,7 @@ test("confirmProjectCore does not overwrite confirmed core", () => {
 	);
 	const before = readFileSync(corePath, "utf8");
 
-	const result = confirmProjectCore({ projectPath, reportsDir });
+	const result = confirmProjectCore({ projectPath, stateRoot, reportsDir });
 
 	assert.equal(result.ok, true);
 	assert.equal(result.alreadyConfirmed, true);
@@ -168,30 +176,34 @@ test("confirmProjectCore does not overwrite confirmed core", () => {
 });
 
 test("confirmProjectCore creates backup before writing", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 
 	const result = confirmProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-22T12:13:14Z"),
 	});
 
 	assert.equal(result.ok, true);
+	// Territory: backup lives under stateRoot/tmp/ (scratch), not under
+	// <repo>/config/.
 	assert.equal(
 		existsSync(
-			join(projectPath, "config", "project-core.backup-20260522-121314.json"),
+			join(stateRoot, "tmp", "project-core.backup-20260522-121314.json"),
 		),
 		true,
 	);
 });
 
 test("confirmProjectCore records confirmed_project_core human decision", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 
 	confirmProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-22T12:00:00Z"),
 	});
@@ -208,11 +220,12 @@ test("confirmProjectCore records confirmed_project_core human decision", () => {
 });
 
 test("rejectProjectCore marks stale and records rejected_project_core decision", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore({ status: "proposed" }));
 
 	const result = rejectProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		reason: "scope unclear",
 		now: () => new Date("2026-05-22T12:00:00Z"),
@@ -232,7 +245,7 @@ test("rejectProjectCore marks stale and records rejected_project_core decision",
 });
 
 test("diffProjectCore does not write files", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(
 		corePath,
 		completeCore({ openQuestions: ["Who approves releases?"] }),
@@ -241,7 +254,7 @@ test("diffProjectCore does not write files", () => {
 	const before = readFileSync(corePath, "utf8");
 	const beforeReports = readdirSync(reportsDir).join("\n");
 
-	const diff = diffProjectCore({ projectPath, reportsDir });
+	const diff = diffProjectCore({ projectPath, stateRoot, reportsDir });
 
 	assert.equal(readFileSync(corePath, "utf8"), before);
 	assert.equal(readdirSync(reportsDir).join("\n"), beforeReports);
@@ -251,7 +264,7 @@ test("diffProjectCore does not write files", () => {
 });
 
 test("formatProjectCoreDiff surfaces invalid latest research errors", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 	writeFileSync(
 		join(reportsDir, "project-core-research-draft-20260522-101112.json"),
@@ -259,7 +272,7 @@ test("formatProjectCoreDiff surfaces invalid latest research errors", () => {
 		"utf8",
 	);
 
-	const diff = diffProjectCore({ projectPath, reportsDir });
+	const diff = diffProjectCore({ projectPath, stateRoot, reportsDir });
 	const text = formatProjectCoreDiff(diff);
 
 	assert.equal(diff.ok, true);
@@ -267,7 +280,7 @@ test("formatProjectCoreDiff surfaces invalid latest research errors", () => {
 });
 
 test("confirmProjectCore rejects research path outside reports", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 	const outside = join(
 		projectPath,
@@ -277,6 +290,7 @@ test("confirmProjectCore rejects research path outside reports", () => {
 
 	const result = confirmProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		research: outside,
 	});
@@ -286,13 +300,14 @@ test("confirmProjectCore rejects research path outside reports", () => {
 });
 
 test("confirmProjectCore rejects JSON not named as project-core research draft", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 	const wrong = join(reportsDir, "random.json");
 	writeFileSync(wrong, "{}\n", "utf8");
 
 	const result = confirmProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		research: wrong,
 	});
@@ -302,12 +317,13 @@ test("confirmProjectCore rejects JSON not named as project-core research draft",
 });
 
 test("confirmProjectCore latest_research records research path", () => {
-	const { projectPath, reportsDir, corePath } = tempProject();
+	const { projectPath, stateRoot, reportsDir, corePath } = tempProject();
 	writeCore(corePath, completeCore());
 	const researchPath = writeResearchDraft(reportsDir);
 
 	const result = confirmProjectCore({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		research: "latest_research",
 		now: () => new Date("2026-05-22T12:00:00Z"),

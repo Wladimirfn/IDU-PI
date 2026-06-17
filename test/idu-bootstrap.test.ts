@@ -53,24 +53,30 @@ test("idu bootstrap enrolls project and creates state, core, constitution, bluep
 		assert.equal(existsSync(result.statePaths.agentLabReportsDir), true);
 		assert.ok(result.created.includes(result.statePaths.stateRoot));
 		assert.ok(result.created.includes(result.statePaths.reportsDir));
+		// Territory model: governance files live under <repo>/.idu/config/.
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-core.json")),
+			existsSync(join(projectPath, ".idu", "config", "project-core.json")),
 			true,
 		);
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-constitution.json")),
+			existsSync(
+				join(projectPath, ".idu", "config", "project-constitution.json"),
+			),
 			true,
 		);
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-blueprint.json")),
+			existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 			true,
 		);
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-flows.json")),
+			existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
 			true,
 		);
 		const core = JSON.parse(
-			readFileSync(join(projectPath, "config", "project-core.json"), "utf8"),
+			readFileSync(
+				join(projectPath, ".idu", "config", "project-core.json"),
+				"utf8",
+			),
 		) as { status: string };
 		assert.equal(core.status, "draft");
 	} finally {

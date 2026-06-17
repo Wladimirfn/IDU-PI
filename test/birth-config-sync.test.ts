@@ -15,7 +15,7 @@ function makeFixture(): { repoRoot: string; stateRoot: string; cleanup: () => vo
 	const dir = mkdtempSync(join(tmpdir(), "idu-bcs-"));
 	const repoRoot = join(dir, "repo");
 	const stateRoot = join(dir, "state");
-	mkdirSync(join(repoRoot, "config"), { recursive: true });
+	mkdirSync(join(repoRoot, ".idu", "config"), { recursive: true });
 	mkdirSync(stateRoot, { recursive: true });
 	return { repoRoot, stateRoot, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
@@ -23,9 +23,9 @@ function makeFixture(): { repoRoot: string; stateRoot: string; cleanup: () => vo
 test("syncProjectConfigToStateRoot copia project-core.json y project-constitution.json", () => {
 	const { repoRoot, stateRoot, cleanup } = makeFixture();
 	try {
-		writeFileSync(join(repoRoot, "config", "project-core.json"), JSON.stringify({ status: "confirmed" }));
+		writeFileSync(join(repoRoot, ".idu", "config", "project-core.json"), JSON.stringify({ status: "confirmed" }));
 		writeFileSync(
-			join(repoRoot, "config", "project-constitution.json"),
+			join(repoRoot, ".idu", "config", "project-constitution.json"),
 			JSON.stringify({ status: "active" }),
 		);
 		const r = syncProjectConfigToStateRoot({ repoRoot, stateRoot });
@@ -47,7 +47,7 @@ test("syncProjectConfigToStateRoot copia project-core.json y project-constitutio
 test("syncProjectConfigToStateRoot es idempotente (mismo contenido no copia de nuevo)", () => {
 	const { repoRoot, stateRoot, cleanup } = makeFixture();
 	try {
-		writeFileSync(join(repoRoot, "config", "project-core.json"), JSON.stringify({ status: "confirmed" }));
+		writeFileSync(join(repoRoot, ".idu", "config", "project-core.json"), JSON.stringify({ status: "confirmed" }));
 		const r1 = syncProjectConfigToStateRoot({ repoRoot, stateRoot });
 		const r2 = syncProjectConfigToStateRoot({ repoRoot, stateRoot });
 		assert.equal(r1.copied, 1);

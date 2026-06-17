@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 
 export type ProjectCoreComplexityLevel =
 	| "simple"
@@ -112,11 +113,18 @@ const DATA_SENSITIVITY_LEVELS = [
 const STATUSES = ["draft", "proposed", "confirmed", "stale"] as const;
 
 export function loadProjectCore(projectPath: string): ProjectCore {
-	const projectCorePath = join(projectPath, "config", "project-core.json");
-	const corePath = existsSync(projectCorePath)
-		? projectCorePath
-		: defaultCorePath();
-	const raw = readFileSync(corePath, "utf8");
+	// Territory: prefer <repo>/.idu/config/project-core.json, with one-time
+	// migration from <repo>/config/project-core.json.
+	const migrated = readIdPathWithMigration(projectPath, "project-core.json");
+	let corePath: string;
+	let raw: string;
+	if (migrated.content !== null) {
+		raw = migrated.content;
+		corePath = join(projectPath, ".idu", "config", "project-core.json");
+	} else {
+		corePath = defaultCorePath();
+		raw = readFileSync(corePath, "utf8");
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw) as unknown;

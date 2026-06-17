@@ -423,7 +423,9 @@ test("mcp-init can install OpenCode config without Pi slash extension", () => {
 		existsSync(join(root, "extensions", "idu-pi-commands.ts")),
 		false,
 	);
-	const parsed = JSON.parse(readFileSync(join(root, "opencode.json"), "utf8")) as {
+	const parsed = JSON.parse(
+		readFileSync(join(root, "opencode.json"), "utf8"),
+	) as {
 		mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
 	};
 	assert.deepEqual(parsed.mcp["idu-pi"], {
@@ -601,7 +603,12 @@ test("CLI setup mcp-init --target opencode writes OpenCode config only", async (
 		]);
 		assert.equal(result.exitCode, 0);
 		assert.match(result.stdout, /MCP idu-pi configurado para OpenCode/u);
-		const opencodeConfigPath = join(root, ".config", "opencode", "opencode.json");
+		const opencodeConfigPath = join(
+			root,
+			".config",
+			"opencode",
+			"opencode.json",
+		);
 		assert.equal(existsSync(opencodeConfigPath), true);
 		assert.equal(existsSync(join(agentDir, "mcp.json")), false);
 		assert.equal(
@@ -609,7 +616,10 @@ test("CLI setup mcp-init --target opencode writes OpenCode config only", async (
 			false,
 		);
 		const parsed = JSON.parse(readFileSync(opencodeConfigPath, "utf8")) as {
-			mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
+			mcp: Record<
+				string,
+				{ type: string; command: string[]; enabled: boolean }
+			>;
 		};
 		assert.equal(parsed.mcp["idu-pi"].type, "local");
 		assert.equal(parsed.mcp["idu-pi"].command[0], "node");
@@ -644,12 +654,18 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 			first.stdout,
 			/¿Creamos el proyecto base\?|Plan preparado para firma humana/u,
 		);
+		// Territory model: project-core.json lives under <repo>/.idu/config/.
+		// Note: <repo>/config/project-core.json is migrated on first read by
+		// loadProjectCore, so the legacy path may or may not exist depending
+		// on the order of reader calls. We assert the new location.
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-core.json")),
+			existsSync(join(projectPath, ".idu", "config", "project-core.json")),
 			true,
 		);
+		// Territory model: project-blueprint is written to <repo>/.idu/config/
+		// (the new governance location), not <repo>/config/>.
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-blueprint.json")),
+			existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 			true,
 		);
 		const stateRoot = join(workspaceRoot, "projects", "sistema_de_mantencion");
@@ -799,7 +815,10 @@ test("setup mcp-print --target opencode emits OpenCode config", async () => {
 		]);
 		assert.equal(result.exitCode, 0);
 		const parsed = JSON.parse(result.stdout) as {
-			mcp: Record<string, { type: string; command: string[]; enabled: boolean }>;
+			mcp: Record<
+				string,
+				{ type: string; command: string[]; enabled: boolean }
+			>;
 		};
 		assert.equal(parsed.mcp["idu-pi"].type, "local");
 		assert.equal(parsed.mcp["idu-pi"].command[0], "node");

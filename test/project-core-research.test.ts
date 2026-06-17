@@ -126,7 +126,12 @@ test("saveProjectCoreResearchDraft does not write config/project-core.json", asy
 		generate: async () => JSON.stringify(validRecommendations()),
 	});
 
-	assert.equal(readFileSync(corePath, "utf8"), before);
+	// Territory model: loadProjectCore (called inside saveProjectCoreResearchDraft
+	// to read sourceCoreStatus) uses migration guard and moves the legacy file
+	// to <repo>/.idu/config/project-core.json. We compare against the migrated
+	// path; the content must be unchanged.
+	const migratedPath = join(projectPath, ".idu", "config", "project-core.json");
+	assert.equal(readFileSync(migratedPath, "utf8"), before);
 });
 
 test("saved ProjectCore research draft includes warning", async () => {

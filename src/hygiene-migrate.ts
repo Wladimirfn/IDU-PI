@@ -18,7 +18,17 @@
  * user is told to reconcile manually.
  */
 
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync } from "node:fs";
+import {
+	appendFileSync,
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmdirSync,
+	rmSync,
+	statSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 /** Exact 4 governance files (auditor-approved, no more, no less). */
@@ -109,7 +119,10 @@ export function migrateHygieneLayout(input: {
 					safeMove(manifestPath, manifestTo);
 					result.moved.push({ from: manifestPath, to: manifestTo });
 				} catch (err) {
-					result.errors.push({ from: manifestPath, message: (err as Error).message });
+					result.errors.push({
+						from: manifestPath,
+						message: (err as Error).message,
+					});
 				}
 				// .gitkeep is created by initProjectAssets, so it is idu-pi-owned.
 				const gitkeep = join(legacySkillsDir, ".gitkeep");
@@ -119,7 +132,10 @@ export function migrateHygieneLayout(input: {
 						safeMove(gitkeep, gitkeepTo);
 						result.moved.push({ from: gitkeep, to: gitkeepTo });
 					} catch (err) {
-						result.errors.push({ from: gitkeep, message: (err as Error).message });
+						result.errors.push({
+							from: gitkeep,
+							message: (err as Error).message,
+						});
 					}
 				}
 			} catch (err) {
@@ -189,7 +205,10 @@ function safeMove(from: string, to: string): void {
 	}
 }
 
-function appendToEventsLog(stateRoot: string, event: Record<string, unknown>): void {
+function appendToEventsLog(
+	stateRoot: string,
+	event: Record<string, unknown>,
+): void {
 	const eventsPath = join(stateRoot, "events.jsonl");
 	mkdirSync(stateRoot, { recursive: true });
 	appendFileSync(eventsPath, `${JSON.stringify(event)}\n`, "utf8");
@@ -203,4 +222,37 @@ function tryRmdirIfEmpty(dir: string): void {
 	} catch {
 		// Not empty, or not a dir, or no permission. Leave it.
 	}
+}
+
+/**
+ * Read a governance file from <repo>/.idu/config/<name> with an automatic
+ * one-time migration from the legacy location <repo>/config/<name>.
+ *
+ * Territory model: idu-pi only writes under stateRoot/** or <repo>/.idu/**.
+ * Readers should prefer the .idu/ path. If the file is found at the legacy
+ * location instead, this helper moves it atomically to .idu/ before reading.
+ *
+ * Returns:
+ *   - `{ content, migrated: false }` if the file was already in .idu/
+ *   - `{ content, migrated: true  }` if the file was migrated from legacy
+ *   - `{ content: null, migrated: false }` if neither path has the file
+ *
+ * Safe to call multiple times: after the first migration, subsequent calls
+ * hit the .idu/ path directly and return `migrated: false`.
+ */
+export function readIdPathWithMigration(
+	repoRoot: string,
+	name: string,
+): { content: string | null; migrated: boolean } {
+	const newPath = join(repoRoot, ".idu", "config", name);
+	if (existsSync(newPath)) {
+		return { content: readFileSync(newPath, "utf8"), migrated: false };
+	}
+	const legacyPath = join(repoRoot, "config", name);
+	if (existsSync(legacyPath)) {
+		mkdirSync(dirname(newPath), { recursive: true });
+		renameSync(legacyPath, newPath);
+		return { content: readFileSync(newPath, "utf8"), migrated: true };
+	}
+	return { content: null, migrated: false };
 }

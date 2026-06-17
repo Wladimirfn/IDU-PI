@@ -8,6 +8,12 @@ import {
 } from "node:fs";
 import { basename, extname, join, relative, sep } from "node:path";
 import {
+	assertAllowedWrite,
+	ensureScratchDir,
+	scratchPath,
+} from "./idu-scratch.js";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
+import {
 	validateProjectFlows,
 	type DataStoreType,
 	type FlowStepType,
@@ -147,7 +153,9 @@ export function scanProjectMap(
 	const scannedFiles = listScannableFiles(projectPath);
 	const result: ProjectMapScanResult = {
 		projectPath,
-		mapSource: existsSync(join(projectPath, "config", "project-flows.json"))
+		mapSource: existsSync(
+			join(projectPath, ".idu", "config", "project-flows.json"),
+		)
 			? "project-local"
 			: "default",
 		definedFlows: flows.flows.length,
@@ -356,6 +364,7 @@ Solo lectura: No escribí archivos, no modifiqué project-flows, no usé IA, no 
 
 export function applyProjectFlowsDraft(
 	projectPath: string,
+	stateRoot: string,
 	draftPath: string,
 	now = new Date(),
 ): ProjectFlowsDraftApplyResult {
@@ -377,10 +386,19 @@ export function applyProjectFlowsDraft(
 		);
 		return result;
 	}
-	const configPath = join(projectPath, "config", "project-flows.json");
+	// Territory: read <repo>/.idu/config/project-flows.json with one-time
+	// migration from <repo>/config/project-flows.json (atomic rename).
+	const migrated = readIdPathWithMigration(projectPath, "project-flows.json");
+	if (migrated.content === null) {
+		result.errors.push(
+			"project-flows.json no existe en .idu/config/ ni en config/",
+		);
+		return result;
+	}
+	const configPath = join(projectPath, ".idu", "config", "project-flows.json");
 	let current: ProjectFlows;
 	try {
-		current = readProjectFlowsFile(configPath);
+		current = readProjectFlowsFileFromString(migrated.content);
 	} catch (error) {
 		result.errors.push(error instanceof Error ? error.message : String(error));
 		return result;
@@ -418,8 +436,14 @@ export function applyProjectFlowsDraft(
 		return result;
 	}
 	result.finalValidationOk = true;
-	const backupPath = uniqueBackupPath(projectPath, now);
-	writeFileSync(backupPath, readFileSync(configPath, "utf8"), "utf8");
+	const backupPath = uniqueBackupPath(stateRoot, now);
+	// Territory: backup lives under stateRoot/tmp/ (scratch).
+	ensureScratchDir(stateRoot);
+	assertAllowedWrite(backupPath, { stateRoot, repoRoot: projectPath });
+	writeFileSync(backupPath, migrated.content, "utf8");
+	// Territory: the actual flows file lives under <repo>/.idu/config/.
+	assertAllowedWrite(configPath, { stateRoot, repoRoot: projectPath });
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(
 		configPath,
 		`${JSON.stringify(validation.flows, null, 2)}\n`,
@@ -651,8 +675,8 @@ Esto es un borrador sugerido, no es fuente de verdad: revisalo antes de copiarlo
 No modifiqué config/project-flows.json, no usé IA, no ejecuté código del proyecto.`;
 }
 
-function readProjectFlowsFile(path: string): ProjectFlows {
-	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+function readProjectFlowsFileFromString(content: string): ProjectFlows {
+	const parsed = JSON.parse(content) as unknown;
 	const validation = validateProjectFlows(parsed);
 	if (!validation.ok) {
 		throw new Error(
@@ -684,22 +708,20 @@ function mergeById<T extends { id: string }>(
 	}
 }
 
-function uniqueBackupPath(projectPath: string, now: Date): string {
+function uniqueBackupPath(stateRoot: string, now: Date): string {
 	const timestamp = now
 		.toISOString()
 		.replace(/[-:]/gu, "")
 		.replace(/T/u, "-")
 		.slice(0, 15);
-	let candidate = join(
-		projectPath,
-		"config",
+	let candidate = scratchPath(
+		stateRoot,
 		`project-flows.backup-${timestamp}.json`,
 	);
 	let suffix = 2;
 	while (existsSync(candidate)) {
-		candidate = join(
-			projectPath,
-			"config",
+		candidate = scratchPath(
+			stateRoot,
 			`project-flows.backup-${timestamp}-${suffix}.json`,
 		);
 		suffix += 1;

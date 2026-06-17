@@ -56,6 +56,13 @@ config/project-blueprint.json
 config/project-flows.json
 config/project-*.backup-*.json
 
+# New territory: governance lives under <repo>/.idu/ which is generated
+# per-project by idu-pi bootstrap. Same rationale as config/project-*.json
+# (machine-local, regenerable). The migration in sub-PR 1 moves legacy
+# files into .idu/ on first read.
+.idu/
+.idu/**
+
 # Pi/OpenSpec local runtime state, with source templates explicitly allowed
 .pi/*
 !.pi/extensions/

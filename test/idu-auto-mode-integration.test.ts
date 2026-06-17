@@ -48,16 +48,23 @@ import {
 async function withTempProject(
 	fn: (paths: {
 		projectPath: string;
+		stateRoot: string;
 		reportsDir: string;
 	}) => Promise<void> | void,
 ): Promise<void> {
 	const projectPath = mkdtempSync(join(tmpdir(), "idu-auto-mode-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-auto-mode-state-"));
 	try {
 		mkdirSync(join(projectPath, "config"), { recursive: true });
 		mkdirSync(join(projectPath, "reports"), { recursive: true });
-		await fn({ projectPath, reportsDir: join(projectPath, "reports") });
+		await fn({
+			projectPath,
+			stateRoot,
+			reportsDir: join(projectPath, "reports"),
+		});
 	} finally {
 		await rm(projectPath, { recursive: true, force: true });
+		await rm(stateRoot, { recursive: true, force: true });
 	}
 }
 
@@ -216,7 +223,7 @@ function applyAutoGuardIfActive(
 }
 
 test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and guarded queue", async () => {
-	await withTempProject(async ({ projectPath, reportsDir }) => {
+	await withTempProject(async ({ projectPath, stateRoot, reportsDir }) => {
 		const corePath = join(projectPath, "config", "project-core.json");
 		writeFileSync(
 			corePath,
@@ -225,14 +232,17 @@ test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and gua
 
 		const confirmResult = confirmProjectCore({
 			projectPath,
+			stateRoot,
 			reportsDir,
 			now: () => new Date("2026-05-22T12:00:00.000Z"),
 		});
 		assert.equal(confirmResult.ok, true);
 		assert.equal(confirmResult.status, "confirmed");
 		assert.ok(confirmResult.backupPath?.endsWith(".json"));
+		// Territory: backup lives under stateRoot/tmp/ (scratch), not under
+		// <repo>/config/.
 		assert.ok(
-			readdirSync(join(projectPath, "config")).some((entry) =>
+			readdirSync(join(stateRoot, "tmp")).some((entry) =>
 				/^project-core\.backup-/u.test(entry),
 			),
 		);

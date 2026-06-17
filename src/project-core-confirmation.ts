@@ -19,6 +19,12 @@ import {
 	validateProjectCore,
 } from "./project-core.js";
 import { reviewProjectCoreResearchDraft } from "./project-core-research.js";
+import {
+	assertAllowedWrite,
+	ensureScratchDir,
+	scratchPath,
+} from "./idu-scratch.js";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 
 const DRAFT_PREFIX = "project-core-research-draft-";
 const DRAFT_SUFFIX = ".json";
@@ -64,6 +70,7 @@ export type ProjectCoreDiffResult = {
 
 export type ProjectCoreConfirmationOptions = {
 	projectPath: string;
+	stateRoot: string;
 	reportsDir: string;
 	research?: string;
 	reason?: string;
@@ -76,7 +83,13 @@ export function confirmProjectCore(
 	const corePath = projectCorePath(options.projectPath);
 	const now = (options.now ?? (() => new Date()))();
 	const base = baseResult("blocked", corePath);
-	if (!existsSync(corePath)) {
+	// Migration guard: prefer <repo>/.idu/config/project-core.json; if not
+	// found, attempt to migrate from <repo>/config/project-core.json.
+	const migrated = readIdPathWithMigration(
+		options.projectPath,
+		"project-core.json",
+	);
+	if (migrated.content === null) {
 		return {
 			...base,
 			errors: [
@@ -161,8 +174,12 @@ export function confirmProjectCore(
 			message: `Project Core inválido: ${validation.errors.join("; ")}`,
 		};
 	}
-	const backupPath = backupProjectCore(corePath, now);
-	writeProjectCore(corePath, validation.core);
+	const backupPath = backupProjectCore(
+		options.projectPath,
+		options.stateRoot,
+		now,
+	);
+	writeProjectCore(options.projectPath, options.stateRoot, validation.core);
 	return {
 		...baseResult("confirmed", corePath),
 		ok: true,
@@ -214,8 +231,12 @@ export function rejectProjectCore(
 			message: `Project Core inválido: ${validation.errors.join("; ")}`,
 		};
 	}
-	const backupPath = backupProjectCore(corePath, now);
-	writeProjectCore(corePath, validation.core);
+	const backupPath = backupProjectCore(
+		options.projectPath,
+		options.stateRoot,
+		now,
+	);
+	writeProjectCore(options.projectPath, options.stateRoot, validation.core);
 	return {
 		...baseResult("rejected", corePath),
 		ok: true,
@@ -337,20 +358,35 @@ function baseResult(
 }
 
 function projectCorePath(projectPath: string): string {
-	return join(projectPath, "config", "project-core.json");
+	return join(projectPath, ".idu", "config", "project-core.json");
 }
 
-function writeProjectCore(path: string, core: ProjectCore): void {
+function writeProjectCore(
+	projectPath: string,
+	stateRoot: string,
+	core: ProjectCore,
+): void {
+	const path = projectCorePath(projectPath);
+	assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(core, null, 2)}\n`, "utf8");
 }
 
-function backupProjectCore(path: string, now: Date): string {
-	const backupPath = join(
-		dirname(path),
+function backupProjectCore(
+	projectPath: string,
+	stateRoot: string,
+	now: Date,
+): string {
+	ensureScratchDir(stateRoot);
+	const backupPath = scratchPath(
+		stateRoot,
 		`project-core.backup-${timestamp(now)}.json`,
 	);
-	writeFileSync(backupPath, readFileSync(path, "utf8"), "utf8");
+	assertAllowedWrite(backupPath, { stateRoot, repoRoot: projectPath });
+	const migrated = readIdPathWithMigration(projectPath, "project-core.json");
+	if (migrated.content !== null) {
+		writeFileSync(backupPath, migrated.content, "utf8");
+	}
 	return backupPath;
 }
 

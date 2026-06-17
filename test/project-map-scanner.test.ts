@@ -36,6 +36,12 @@ function tempProject(): string {
 	return dir;
 }
 
+function tempStateRoot(): string {
+	const dir = mkdtempSync(join(tmpdir(), "pi-project-map-scan-state-"));
+	tempDirs.push(dir);
+	return dir;
+}
+
 function writeFixture(projectPath: string): void {
 	writeFileSync(
 		join(projectPath, "index.html"),
@@ -1065,9 +1071,10 @@ function writeDraft(
 
 test("applyProjectFlowsDraft rejects missing explicit path", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 
-	const result = applyProjectFlowsDraft(projectPath, "");
+	const result = applyProjectFlowsDraft(projectPath, stateRoot, "");
 
 	assert.equal(result.applied, false);
 	assert.match(result.errors.join("\n"), /ruta explícita/u);
@@ -1075,9 +1082,10 @@ test("applyProjectFlowsDraft rejects missing explicit path", () => {
 
 test("applyProjectFlowsDraft rejects latest", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 
-	const result = applyProjectFlowsDraft(projectPath, "latest");
+	const result = applyProjectFlowsDraft(projectPath, stateRoot, "latest");
 
 	assert.equal(result.applied, false);
 	assert.match(result.errors.join("\n"), /latest/u);
@@ -1085,10 +1093,11 @@ test("applyProjectFlowsDraft rejects latest", () => {
 
 test("applyProjectFlowsDraft rejects invalid draft", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 	const draftPath = writeDraft(projectPath, { warning: "bad" });
 
-	const result = applyProjectFlowsDraft(projectPath, draftPath);
+	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
 
 	assert.equal(result.applied, false);
 	assert.match(result.errors.join("\n"), /generatedAt/u);
@@ -1096,6 +1105,7 @@ test("applyProjectFlowsDraft rejects invalid draft", () => {
 
 test("applyProjectFlowsDraft rejects different projectPath", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
@@ -1107,7 +1117,7 @@ test("applyProjectFlowsDraft rejects different projectPath", () => {
 		suggestedFlows: [],
 	});
 
-	const result = applyProjectFlowsDraft(projectPath, draftPath);
+	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
 
 	assert.equal(result.applied, false);
 	assert.match(result.errors.join("\n"), /projectPath no coincide/u);
@@ -1115,6 +1125,7 @@ test("applyProjectFlowsDraft rejects different projectPath", () => {
 
 test("applyProjectFlowsDraft creates backup before writing", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
@@ -1136,6 +1147,7 @@ test("applyProjectFlowsDraft creates backup before writing", () => {
 
 	const result = applyProjectFlowsDraft(
 		projectPath,
+		stateRoot,
 		draftPath,
 		new Date("2026-01-02T03:04:05Z"),
 	);
@@ -1150,6 +1162,7 @@ test("applyProjectFlowsDraft creates backup before writing", () => {
 
 test("applyProjectFlowsDraft merges new screens and uiElements", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
@@ -1176,7 +1189,7 @@ test("applyProjectFlowsDraft merges new screens and uiElements", () => {
 		suggestedFlows: [],
 	});
 
-	applyProjectFlowsDraft(projectPath, draftPath);
+	applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
 	const flows = loadProjectFlows(projectPath);
 
 	assert.ok(flows.screens.some((screen) => screen.id === "reports"));
@@ -1185,6 +1198,7 @@ test("applyProjectFlowsDraft merges new screens and uiElements", () => {
 
 test("applyProjectFlowsDraft does not duplicate existing ids", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeProjectFlows(projectPath, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
@@ -1206,7 +1220,7 @@ test("applyProjectFlowsDraft does not duplicate existing ids", () => {
 		suggestedFlows: [],
 	});
 
-	const result = applyProjectFlowsDraft(projectPath, draftPath);
+	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
 	const flows = loadProjectFlows(projectPath);
 
 	assert.equal(
@@ -1224,6 +1238,7 @@ test("applyProjectFlowsDraft does not duplicate existing ids", () => {
 
 test("applyProjectFlowsDraft does not delete existing content and validates final flows", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const original = mappedFlows();
 	writeProjectFlows(projectPath, original);
 	const draftPath = writeDraft(projectPath, {
@@ -1261,7 +1276,7 @@ test("applyProjectFlowsDraft does not delete existing content and validates fina
 		],
 	});
 
-	const result = applyProjectFlowsDraft(projectPath, draftPath);
+	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
 	const flows = loadProjectFlows(projectPath);
 
 	assert.equal(result.applied, true);
