@@ -4401,7 +4401,7 @@ test("idu_project_enroll registers project and creates isolated state only", asy
 			false,
 		);
 		assert.equal(
-			existsSync(join(projectPath, "config", "project-constitution.json")),
+			existsSync(join(projectPath, ".idu", "config", "project-constitution.json")),
 			false,
 		);
 	} finally {
@@ -4461,7 +4461,7 @@ test("idu_bootstrap_project creates drafts only when explicitly allowed and acti
 		});
 		assert.equal(noDrafts.ok, true);
 		assert.equal(
-			existsSync(join(noDraftsPath, "config", "project-core.json")),
+			existsSync(join(noDraftsPath, ".idu", "config", "project-core.json")),
 			false,
 		);
 
@@ -4472,11 +4472,11 @@ test("idu_bootstrap_project creates drafts only when explicitly allowed and acti
 		});
 		assert.equal(withDraftsInactive.ok, true);
 		assert.equal(
-			existsSync(join(draftsPath, "config", "project-core.json")),
+			existsSync(join(draftsPath, ".idu", "config", "project-core.json")),
 			true,
 		);
 		assert.equal(
-			existsSync(join(draftsPath, "config", "project-constitution.json")),
+			existsSync(join(draftsPath, ".idu", "config", "project-constitution.json")),
 			true,
 		);
 		assert.equal(

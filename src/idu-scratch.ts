@@ -8,7 +8,8 @@
  * This module exposes the assertion helpers that enforce the territory model
  * by construction. Every writer that needs to leave stateRoot calls
  * `assertAllowedWrite` before `writeFileSync`. The test in
- * `test/idu-scratch-enforcement.test.ts` is the regression guard.
+ * `test/writer-migration.test.ts` (the "writer territory" and
+ * "NEGATIVE (auditor-required)" tests) is the regression guard.
  *
  * The active-rejection behavior (NEGATIVE test, auditor-required): a write
  * outside both roots is REJECTED — `assertAllowedWrite` throws
@@ -36,7 +37,12 @@ export class ScratchPathError extends Error {
 
 /** Resolve a scratch path under <stateRoot>/tmp/<name>. */
 export function scratchPath(stateRoot: string, name: string): string {
-	if (!name || name.includes("..") || name.includes("/") || name.includes("\\")) {
+	if (
+		!name ||
+		name.includes("..") ||
+		name.includes("/") ||
+		name.includes("\\")
+	) {
 		throw new Error(`scratchPath: invalid name "${name}"`);
 	}
 	return join(stateRoot, "tmp", name);
@@ -50,9 +56,14 @@ export function ensureScratchDir(stateRoot: string): string {
 }
 
 /** Throws if the given absolute path is not under stateRoot. */
-export function assertUnderStateRoot(absolutePath: string, stateRoot: string): void {
+export function assertUnderStateRoot(
+	absolutePath: string,
+	stateRoot: string,
+): void {
 	if (!isAbsolute(absolutePath)) {
-		throw new Error(`assertUnderStateRoot: path must be absolute, got "${absolutePath}"`);
+		throw new Error(
+			`assertUnderStateRoot: path must be absolute, got "${absolutePath}"`,
+		);
 	}
 	const normPath = normalizePath(absolutePath);
 	const normRoot = normalizePath(resolve(stateRoot));
@@ -73,7 +84,9 @@ export function assertAllowedWrite(
 	options: { stateRoot: string; repoRoot: string; allowRepoDir?: string },
 ): void {
 	if (!isAbsolute(absolutePath)) {
-		throw new Error(`assertAllowedWrite: path must be absolute, got "${absolutePath}"`);
+		throw new Error(
+			`assertAllowedWrite: path must be absolute, got "${absolutePath}"`,
+		);
 	}
 	const allowDir = options.allowRepoDir ?? ".idu";
 	const stateRootNorm = normalizePath(resolve(options.stateRoot));

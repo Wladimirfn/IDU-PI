@@ -22,22 +22,29 @@ import {
 async function withTempPaths(
 	fn: (paths: {
 		projectPath: string;
+		stateRoot: string;
 		workspaceRoot: string;
 	}) => void | Promise<void>,
 ): Promise<void> {
 	const root = mkdtempSync(join(tmpdir(), "idu-core-wizard-"));
 	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state");
 	const workspaceRoot = join(root, "workspace");
 	mkdirSync(projectPath, { recursive: true });
+	mkdirSync(stateRoot, { recursive: true });
 	mkdirSync(workspaceRoot, { recursive: true });
 	try {
-		await fn({ projectPath, workspaceRoot });
+		await fn({ projectPath, stateRoot, workspaceRoot });
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 }
 
-function options(paths: { projectPath: string; workspaceRoot: string }) {
+function options(paths: {
+	projectPath: string;
+	stateRoot: string;
+	workspaceRoot: string;
+}) {
 	return {
 		...paths,
 		projectId: "demo",
@@ -99,7 +106,13 @@ test("answerProjectCoreWizard creates ProjectCore draft when complete", async ()
 			result = answerProjectCoreWizard(options(paths), answer);
 
 		assert.equal(result?.completed, true);
-		const corePath = join(paths.projectPath, "config", "project-core.json");
+		// Territory model: project-core.json lives under <repo>/.idu/config/.
+		const corePath = join(
+			paths.projectPath,
+			".idu",
+			"config",
+			"project-core.json",
+		);
 		assert.ok(existsSync(corePath));
 		const core = loadProjectCore(paths.projectPath);
 		assert.equal(core.status, "draft");
@@ -123,9 +136,9 @@ test("answerProjectCoreWizard creates ProjectCore draft when complete", async ()
 
 test("answerProjectCoreWizard does not overwrite confirmed ProjectCore", async () => {
 	await withTempPaths((paths) => {
-		mkdirSync(join(paths.projectPath, "config"), { recursive: true });
+		mkdirSync(join(paths.projectPath, ".idu", "config"), { recursive: true });
 		writeFileSync(
-			join(paths.projectPath, "config", "project-core.json"),
+			join(paths.projectPath, ".idu", "config", "project-core.json"),
 			JSON.stringify({
 				version: "1.0.0",
 				projectName: "Confirmed",

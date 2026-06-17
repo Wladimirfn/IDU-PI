@@ -11,6 +11,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentProfile, AgentWorkspaceMode } from "./config.js";
 import { isAllowedCwd } from "./config.js";
+import { assertAllowedWrite } from "./idu-scratch.js";
 import {
 	loadProjectBlueprint,
 	validateProjectBlueprint,
@@ -139,13 +140,13 @@ export const NECESSARY_PROJECT_SKILLS = [
 	"jq",
 ] as const;
 
-const SKILLS_DIR = ".agents/skills";
-const SKILLS_KEEP = ".agents/skills/.gitkeep";
-const SKILL_INDEX = ".agents/skills/INDEX.md";
+const SKILLS_DIR = ".idu/skills";
+const SKILLS_KEEP = ".idu/skills/.gitkeep";
+const SKILL_INDEX = ".idu/skills/INDEX.md";
 const REGISTRY_FILE = ".atl/skill-registry.md";
 const MCP_CONFIG = ".mcp/config.json";
-const PROJECT_BLUEPRINT = "config/project-blueprint.json";
-const PROJECT_FLOWS = "config/project-flows.json";
+const PROJECT_BLUEPRINT = ".idu/config/project-blueprint.json";
+const PROJECT_FLOWS = ".idu/config/project-flows.json";
 const DEFAULT_BLUEPRINT = "config/default-blueprint.json";
 const DEFAULT_FLOWS = "config/default-flows.json";
 const PACKAGE_ROOT = resolve(
@@ -195,6 +196,7 @@ function marker(ok: boolean): string {
 
 function createFileIfMissing(
 	projectPath: string,
+	stateRoot: string,
 	relativePath: string,
 	content: string,
 	result: InitAssetsResult,
@@ -205,12 +207,19 @@ function createFileIfMissing(
 		result.existing.push(relativePath);
 		return;
 	}
+	// Territory enforcement: project-local files (skills, registry, MCP config)
+	// are owned by the project; the registry and MCP config templates are
+	// emitted as starting scaffolding only and are NOT idu-pi governance.
+	if (relativePath.startsWith(".idu/")) {
+		assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
+	}
 	writeFileSync(path, content, "utf8");
 	result.created.push(relativePath);
 }
 
 function createProjectConfigFileIfMissing(
 	projectPath: string,
+	stateRoot: string,
 	relativePath: string,
 	content: () => string,
 	result: InitProjectConfigResult,
@@ -221,6 +230,8 @@ function createProjectConfigFileIfMissing(
 		result.existing.push(relativePath);
 		return;
 	}
+	// Territory: governance files always live under <repo>/.idu/config/.
+	assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
 	writeFileSync(path, content(), "utf8");
 	result.created.push(relativePath);
 }
@@ -255,7 +266,7 @@ function writeLocalSkillIndex(projectPath: string): string {
 				.filter((name) => existsSync(join(skillsRoot, name, "SKILL.md")))
 				.sort()
 		: [];
-	const content = `# Project Skill Index\n\nRead this index first, then open only the matching SKILL.md.\n\n| Skill | Path |\n| --- | --- |\n${entries.map((name) => `| ${name} | .agents/skills/${name}/SKILL.md |`).join("\n")}\n`;
+	const content = `# Project Skill Index\n\nRead this index first, then open only the matching SKILL.md.\n\n| Skill | Path |\n| --- | --- |\n${entries.map((name) => `| ${name} | .idu/skills/${name}/SKILL.md |`).join("\n")}\n`;
 	const indexPath = join(projectPath, SKILL_INDEX);
 	writeFileSync(indexPath, content, "utf8");
 	return indexPath;
@@ -424,22 +435,35 @@ export function inspectProjectConfig(
 	};
 }
 
-export function initProjectAssets(projectPath: string): InitAssetsResult {
+export function initProjectAssets(
+	projectPath: string,
+	stateRoot: string,
+): InitAssetsResult {
 	const result: InitAssetsResult = { projectPath, created: [], existing: [] };
-	mkdirSync(join(projectPath, SKILLS_DIR), { recursive: true });
-	createFileIfMissing(projectPath, SKILLS_KEEP, "", result);
-	createFileIfMissing(projectPath, REGISTRY_FILE, REGISTRY_TEMPLATE, result);
-	createFileIfMissing(projectPath, MCP_CONFIG, MCP_TEMPLATE, result);
+	const skillsDir = join(projectPath, SKILLS_DIR);
+	assertAllowedWrite(skillsDir, { stateRoot, repoRoot: projectPath });
+	mkdirSync(skillsDir, { recursive: true });
+	createFileIfMissing(projectPath, stateRoot, SKILLS_KEEP, "", result);
+	createFileIfMissing(
+		projectPath,
+		stateRoot,
+		REGISTRY_FILE,
+		REGISTRY_TEMPLATE,
+		result,
+	);
+	createFileIfMissing(projectPath, stateRoot, MCP_CONFIG, MCP_TEMPLATE, result);
 	return result;
 }
 
 export function initProjectBlueprint(
 	projectPath: string,
+	stateRoot: string,
 	projectId?: string,
 ): InitProjectConfigResult {
 	const result = emptyProjectConfigResult(projectPath, projectId);
 	createProjectConfigFileIfMissing(
 		projectPath,
+		stateRoot,
 		PROJECT_BLUEPRINT,
 		() => blueprintContent(result.projectName),
 		result,
@@ -447,10 +471,14 @@ export function initProjectBlueprint(
 	return result;
 }
 
-export function initProjectFlows(projectPath: string): InitProjectConfigResult {
+export function initProjectFlows(
+	projectPath: string,
+	stateRoot: string,
+): InitProjectConfigResult {
 	const result = emptyProjectConfigResult(projectPath);
 	createProjectConfigFileIfMissing(
 		projectPath,
+		stateRoot,
 		PROJECT_FLOWS,
 		flowsContent,
 		result,
@@ -460,17 +488,20 @@ export function initProjectFlows(projectPath: string): InitProjectConfigResult {
 
 export function initProjectConfig(
 	projectPath: string,
+	stateRoot: string,
 	projectId?: string,
 ): InitProjectConfigResult {
 	const result = emptyProjectConfigResult(projectPath, projectId);
 	createProjectConfigFileIfMissing(
 		projectPath,
+		stateRoot,
 		PROJECT_BLUEPRINT,
 		() => blueprintContent(result.projectName),
 		result,
 	);
 	createProjectConfigFileIfMissing(
 		projectPath,
+		stateRoot,
 		PROJECT_FLOWS,
 		flowsContent,
 		result,
@@ -696,6 +727,7 @@ export function initWorkspaceRoot(workspaceRoot: string): InitWorkspaceResult {
 export function syncNecessarySkills(
 	sourceSkillsDir: string,
 	projectPath: string,
+	stateRoot: string,
 ): SkillsSyncResult {
 	const result: SkillsSyncResult = {
 		projectPath,
@@ -705,7 +737,9 @@ export function syncNecessarySkills(
 		missing: [],
 		indexPath: join(projectPath, SKILL_INDEX),
 	};
-	mkdirSync(join(projectPath, SKILLS_DIR), { recursive: true });
+	const skillsDir = join(projectPath, SKILLS_DIR);
+	assertAllowedWrite(skillsDir, { stateRoot, repoRoot: projectPath });
+	mkdirSync(skillsDir, { recursive: true });
 	for (const skill of NECESSARY_PROJECT_SKILLS) {
 		const source = join(sourceSkillsDir, skill);
 		const sourceSkill = join(source, "SKILL.md");

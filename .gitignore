@@ -56,6 +56,11 @@ config/project-blueprint.json
 config/project-flows.json
 config/project-*.backup-*.json
 
+# NOTE: <repo>/.idu/ is INTENTIONALLY tracked (not gitignored). The .idu/
+# directory is governance that travels with the repo, per the Item 3a
+# territory model (auditor-approved). See openspec/changes/2026-06-16-
+# idu-pi-self-hygiene/proposal.md (the Territory model section).
+
 # Pi/OpenSpec local runtime state, with source templates explicitly allowed
 .pi/*
 !.pi/extensions/

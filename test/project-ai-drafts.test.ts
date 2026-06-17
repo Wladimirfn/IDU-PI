@@ -405,12 +405,18 @@ test("reviewAiProjectFlowsDraft detects ID conflicts and does not write config",
 	assert.ok(review.idConflicts.includes("module:core"));
 	assert.ok(review.idConflicts.includes("screen:home"));
 	assert.ok(review.possibleDuplicates.length > 0);
+	// Territory model: reviewAiProjectFlowsDraft only reads project-flows
+	// (via loadProjectFlows), so blueprint stays in legacy until a reader
+	// for it triggers the migration. The flows file moves to .idu/.
 	assert.equal(
 		readFileSync(join(projectPath, "config", "project-blueprint.json"), "utf8"),
 		beforeBlueprint,
 	);
 	assert.equal(
-		readFileSync(join(projectPath, "config", "project-flows.json"), "utf8"),
+		readFileSync(
+			join(projectPath, ".idu", "config", "project-flows.json"),
+			"utf8",
+		),
 		beforeFlows,
 	);
 });

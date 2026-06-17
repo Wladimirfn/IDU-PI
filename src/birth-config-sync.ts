@@ -27,7 +27,8 @@ export function syncProjectConfigToStateRoot(
 	input: SyncProjectConfigInput,
 ): SyncProjectConfigResult {
 	assertSafeStateRoot(input.stateRoot);
-	const srcDir = join(input.repoRoot, "config");
+	// Territory model: project-local governance lives under <repo>/.idu/config/.
+	const srcDir = join(input.repoRoot, ".idu", "config");
 	const dstDir = join(input.stateRoot, "config");
 
 	if (!existsSync(srcDir)) {

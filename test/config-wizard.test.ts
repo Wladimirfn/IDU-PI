@@ -37,6 +37,12 @@ function tempDir(): string {
 	return dir;
 }
 
+function tempStateRoot(): string {
+	const dir = mkdtempSync(join(tmpdir(), "pi-telegram-config-state-"));
+	tempRoots.push(dir);
+	return dir;
+}
+
 after(async () => {
 	await Promise.all(
 		tempRoots.map((dir) => rm(dir, { recursive: true, force: true })),
@@ -70,8 +76,9 @@ test("inspectProjectConfig reports missing project-local assets", () => {
 
 test("inspectProjectConfig reports existing project-local assets and workspace state", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const workspaceRoot = join(projectPath, ".workspaces");
-	initProjectAssets(projectPath);
+	initProjectAssets(projectPath, stateRoot);
 	initWorkspaceRoot(workspaceRoot);
 
 	const report = inspectProjectConfig({
@@ -101,20 +108,21 @@ test("inspectProjectConfig reports existing project-local assets and workspace s
 
 test("initProjectAssets creates missing assets without overwriting existing files", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const existingRegistry = join(projectPath, ".atl", "skill-registry.md");
 	const existingMcp = join(projectPath, ".mcp", "config.json");
-	initProjectAssets(projectPath);
+	initProjectAssets(projectPath, stateRoot);
 	writeFileSync(existingRegistry, "# custom registry\n", "utf8");
 	writeFileSync(existingMcp, '{"enabled":true}\n', "utf8");
 
-	const result = initProjectAssets(projectPath);
+	const result = initProjectAssets(projectPath, stateRoot);
 
 	assert.equal(readFileSync(existingRegistry, "utf8"), "# custom registry\n");
 	assert.equal(readFileSync(existingMcp, "utf8"), '{"enabled":true}\n');
 	assert.ok(result.existing.includes(".atl/skill-registry.md"));
 	assert.ok(result.existing.includes(".mcp/config.json"));
 	assert.equal(
-		existsSync(join(projectPath, ".agents", "skills", ".gitkeep")),
+		existsSync(join(projectPath, ".idu", "skills", ".gitkeep")),
 		true,
 	);
 	assert.equal(existsSync(join(projectPath, ".mcp", "config.json")), true);
@@ -123,72 +131,77 @@ test("initProjectAssets creates missing assets without overwriting existing file
 test("initProjectBlueprint creates config and blueprint when missing", () => {
 	const projectPath = join(tempDir(), "demo-project");
 	mkdirSync(projectPath, { recursive: true });
+	const stateRoot = tempStateRoot();
 
-	const result = initProjectBlueprint(projectPath, "active-demo");
-	const blueprintPath = join(projectPath, "config", "project-blueprint.json");
+	const result = initProjectBlueprint(projectPath, stateRoot, "active-demo");
+	const blueprintPath = join(projectPath, ".idu", "config", "project-blueprint.json");
 	const blueprint = JSON.parse(readFileSync(blueprintPath, "utf8")) as {
 		projectName: string;
 	};
 
-	assert.equal(existsSync(join(projectPath, "config")), true);
-	assert.ok(result.created.includes("config/project-blueprint.json"));
+	assert.equal(existsSync(join(projectPath, ".idu", "config")), true);
+	assert.ok(result.created.includes(".idu/config/project-blueprint.json"));
 	assert.equal(blueprint.projectName, "active-demo");
 });
 
 test("initProjectBlueprint does not overwrite existing blueprint", () => {
 	const projectPath = tempDir();
-	const blueprintPath = join(projectPath, "config", "project-blueprint.json");
-	mkdirSync(join(projectPath, "config"), { recursive: true });
+	const stateRoot = tempStateRoot();
+	const blueprintPath = join(projectPath, ".idu", "config", "project-blueprint.json");
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(blueprintPath, '{"projectName":"custom"}\n', "utf8");
 
-	const result = initProjectBlueprint(projectPath, "ignored");
+	const result = initProjectBlueprint(projectPath, stateRoot, "ignored");
 
 	assert.equal(
 		readFileSync(blueprintPath, "utf8"),
 		'{"projectName":"custom"}\n',
 	);
-	assert.ok(result.existing.includes("config/project-blueprint.json"));
+	assert.ok(result.existing.includes(".idu/config/project-blueprint.json"));
 });
 
 test("initProjectFlows creates flows when missing", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 
-	const result = initProjectFlows(projectPath);
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const result = initProjectFlows(projectPath, stateRoot);
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		projectType: string;
 	};
 
-	assert.ok(result.created.includes("config/project-flows.json"));
+	assert.ok(result.created.includes(".idu/config/project-flows.json"));
 	assert.equal(flows.projectType, "real-project-functional-map");
 });
 
 test("initProjectFlows does not overwrite existing flows", () => {
 	const projectPath = tempDir();
-	const flowsPath = join(projectPath, "config", "project-flows.json");
-	mkdirSync(join(projectPath, "config"), { recursive: true });
+	const stateRoot = tempStateRoot();
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(flowsPath, '{"projectType":"custom"}\n', "utf8");
 
-	const result = initProjectFlows(projectPath);
+	const result = initProjectFlows(projectPath, stateRoot);
 
 	assert.equal(readFileSync(flowsPath, "utf8"), '{"projectType":"custom"}\n');
-	assert.ok(result.existing.includes("config/project-flows.json"));
+	assert.ok(result.existing.includes(".idu/config/project-flows.json"));
 });
 
 test("initProjectConfig creates both project config files", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 
-	const result = initProjectConfig(projectPath, "demo-id");
+	const result = initProjectConfig(projectPath, stateRoot, "demo-id");
 
-	assert.ok(result.created.includes("config/project-blueprint.json"));
-	assert.ok(result.created.includes("config/project-flows.json"));
+	assert.ok(result.created.includes(".idu/config/project-blueprint.json"));
+	assert.ok(result.created.includes(".idu/config/project-flows.json"));
 	assert.match(formatInitProjectConfigResult(result), /init_project_config/);
 	assert.equal(
-		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 		true,
 	);
 	assert.equal(
-		existsSync(join(projectPath, "config", "project-flows.json")),
+		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
 		true,
 	);
 });
@@ -196,10 +209,11 @@ test("initProjectConfig creates both project config files", () => {
 test("initProjectConfig infers safe projectName from folder", () => {
 	const projectPath = join(tempDir(), "folder-project");
 	mkdirSync(projectPath, { recursive: true });
+	const stateRoot = tempStateRoot();
 
-	initProjectConfig(projectPath);
+	initProjectConfig(projectPath, stateRoot);
 	const blueprint = JSON.parse(
-		readFileSync(join(projectPath, "config", "project-blueprint.json"), "utf8"),
+		readFileSync(join(projectPath, ".idu", "config", "project-blueprint.json"), "utf8"),
 	) as { projectName: string };
 
 	assert.equal(blueprint.projectName, "folder-project");
@@ -208,12 +222,13 @@ test("initProjectConfig infers safe projectName from folder", () => {
 test("initProjectConfig writes only under projectPath", () => {
 	const root = tempDir();
 	const projectPath = join(root, "project");
+	const stateRoot = tempStateRoot();
 	mkdirSync(projectPath, { recursive: true });
 
-	initProjectConfig(projectPath, "demo");
+	initProjectConfig(projectPath, stateRoot, "demo");
 
 	assert.equal(
-		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 		true,
 	);
 	assert.equal(
@@ -224,8 +239,9 @@ test("initProjectConfig writes only under projectPath", () => {
 
 test("inspectProjectConfig reports missing project config and recommends init", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const workspaceRoot = join(projectPath, ".workspaces");
-	initProjectAssets(projectPath);
+	initProjectAssets(projectPath, stateRoot);
 	initWorkspaceRoot(workspaceRoot);
 
 	const report = inspectProjectConfig({
@@ -254,9 +270,10 @@ test("inspectProjectConfig reports missing project config and recommends init", 
 
 test("inspectProjectConfig reports valid local project config", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const workspaceRoot = join(projectPath, ".workspaces");
-	initProjectAssets(projectPath);
-	initProjectConfig(projectPath, "demo");
+	initProjectAssets(projectPath, stateRoot);
+	initProjectConfig(projectPath, stateRoot, "demo");
 	initWorkspaceRoot(workspaceRoot);
 
 	const report = inspectProjectConfig({
@@ -292,17 +309,18 @@ test("inspectProjectConfig reports valid local project config", () => {
 
 test("inspectProjectConfig reports invalid project config without throwing", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const workspaceRoot = join(projectPath, ".workspaces");
-	initProjectAssets(projectPath);
+	initProjectAssets(projectPath, stateRoot);
 	initWorkspaceRoot(workspaceRoot);
-	mkdirSync(join(projectPath, "config"), { recursive: true });
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, "config", "project-blueprint.json"),
+		join(projectPath, ".idu", "config", "project-blueprint.json"),
 		"{ invalid",
 		"utf8",
 	);
 	writeFileSync(
-		join(projectPath, "config", "project-flows.json"),
+		join(projectPath, ".idu", "config", "project-flows.json"),
 		"{}",
 		"utf8",
 	);
@@ -363,7 +381,8 @@ test("inspectProjectMap detects default map in use", () => {
 
 test("inspectProjectMap detects valid project-local map", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
 
 	const result = inspectProjectMap(projectPath);
 
@@ -374,8 +393,9 @@ test("inspectProjectMap detects valid project-local map", () => {
 
 test("inspectProjectMap detects module without screens", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		modules: Array<{ screens: string[] }>;
 	};
@@ -389,8 +409,9 @@ test("inspectProjectMap detects module without screens", () => {
 
 test("inspectProjectMap detects screen with missing module", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		screens: Array<{ module: string }>;
 	};
@@ -404,8 +425,9 @@ test("inspectProjectMap detects screen with missing module", () => {
 
 test("inspectProjectMap detects flow with missing module", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		flows: Array<{ module: string }>;
 	};
@@ -419,8 +441,9 @@ test("inspectProjectMap detects flow with missing module", () => {
 
 test("inspectProjectMap detects step without from or to", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		flows: Array<{ steps: Array<{ from?: string }> }>;
 	};
@@ -434,8 +457,9 @@ test("inspectProjectMap detects step without from or to", () => {
 
 test("inspectProjectMap detects dataStore without ownerModule", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		dataStores: Array<{ ownerModule?: string }>;
 	};
@@ -449,8 +473,9 @@ test("inspectProjectMap detects dataStore without ownerModule", () => {
 
 test("inspectProjectMap detects invalid moduleConnection", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		moduleConnections: Array<{ toModule: string }>;
 	};
@@ -464,8 +489,9 @@ test("inspectProjectMap detects invalid moduleConnection", () => {
 
 test("inspectProjectMap detects uiElement without selector or label", () => {
 	const projectPath = tempDir();
-	initProjectConfig(projectPath, "demo");
-	const flowsPath = join(projectPath, "config", "project-flows.json");
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "demo");
+	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		uiElements: Array<{ selector?: string; label?: string }>;
 	};
@@ -484,11 +510,11 @@ test("inspectProjectMap does not write files", () => {
 	inspectProjectMap(projectPath);
 
 	assert.equal(
-		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 		false,
 	);
 	assert.equal(
-		existsSync(join(projectPath, "config", "project-flows.json")),
+		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
 		false,
 	);
 });
@@ -506,6 +532,7 @@ test("initWorkspaceRoot creates reports and workspaces directories", () => {
 
 test("syncNecessarySkills copies only necessary skills and writes a simple index", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const sourceSkillsDir = join(tempDir(), "source-skills");
 	for (const skill of NECESSARY_PROJECT_SKILLS) {
 		const skillDir = join(sourceSkillsDir, skill);
@@ -521,22 +548,22 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 		"utf8",
 	);
 
-	const result = syncNecessarySkills(sourceSkillsDir, projectPath);
+	const result = syncNecessarySkills(sourceSkillsDir, projectPath, stateRoot);
 
 	assert.deepEqual(result.missing, []);
 	assert.equal(result.copied.length, NECESSARY_PROJECT_SKILLS.length);
 	assert.equal(
 		existsSync(
-			join(projectPath, ".agents", "skills", "bug-hunter", "SKILL.md"),
+			join(projectPath, ".idu", "skills", "bug-hunter", "SKILL.md"),
 		),
 		true,
 	);
 	assert.equal(
-		existsSync(join(projectPath, ".agents", "skills", "rcm-flujos-operativos")),
+		existsSync(join(projectPath, ".idu", "skills", "rcm-flujos-operativos")),
 		false,
 	);
 	assert.match(
-		readFileSync(join(projectPath, ".agents", "skills", "INDEX.md"), "utf8"),
+		readFileSync(join(projectPath, ".idu", "skills", "INDEX.md"), "utf8"),
 		/bug-hunter/,
 	);
 	assert.match(formatSkillsSyncResult(result), /Skills sincronizadas/);
@@ -544,6 +571,7 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 
 test("formatConfigOverview and formatConfigDoctor hide secrets and show next steps", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
@@ -568,7 +596,7 @@ test("formatConfigOverview and formatConfigDoctor hide secrets and show next ste
 		/TELEGRAM_BOT_TOKEN|replace_me|token/,
 	);
 	assert.match(
-		formatInitAssetsResult(initProjectAssets(projectPath)),
+		formatInitAssetsResult(initProjectAssets(projectPath, stateRoot)),
 		/Assets/,
 	);
 });

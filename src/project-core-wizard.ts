@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { assertAllowedWrite } from "./idu-scratch.js";
 import {
 	createDefaultProjectCore,
 	loadProjectCore,
@@ -38,6 +39,7 @@ export type ProjectCoreWizardState = {
 export type ProjectCoreWizardOptions = {
 	projectId: string;
 	projectPath: string;
+	stateRoot: string;
 	workspaceRoot: string;
 	projectName?: string;
 	now?: () => Date;
@@ -224,7 +226,7 @@ function completeWizard(
 	state: ProjectCoreWizardState,
 ): ProjectCoreWizardResult {
 	const core = buildDraftCore(options, state);
-	writeProjectCoreDraft(options.projectPath, core);
+	writeProjectCoreDraft(options.projectPath, options.stateRoot, core);
 	const completedState: ProjectCoreWizardState = {
 		...state,
 		status: "completed",
@@ -287,7 +289,11 @@ function buildDraftCore(
 	};
 }
 
-function writeProjectCoreDraft(projectPath: string, core: ProjectCore): void {
+function writeProjectCoreDraft(
+	projectPath: string,
+	stateRoot: string,
+	core: ProjectCore,
+): void {
 	const validation = validateProjectCore(core);
 	if (!validation.ok) {
 		throw new Error(
@@ -295,6 +301,7 @@ function writeProjectCoreDraft(projectPath: string, core: ProjectCore): void {
 		);
 	}
 	const path = projectCorePath(projectPath);
+	assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(core, null, 2)}\n`);
 }
@@ -330,7 +337,7 @@ function wizardStatePath(workspaceRoot: string): string {
 }
 
 function projectCorePath(projectPath: string): string {
-	return join(projectPath, "config", "project-core.json");
+	return join(projectPath, ".idu", "config", "project-core.json");
 }
 
 function currentIso(options: ProjectCoreWizardOptions): string {

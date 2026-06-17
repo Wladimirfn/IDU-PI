@@ -18,7 +18,17 @@
  * user is told to reconcile manually.
  */
 
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync } from "node:fs";
+import {
+	appendFileSync,
+	cpSync,
+	readdirSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	rmdirSync,
+	rmSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 /** Exact 4 governance files (auditor-approved, no more, no less). */
@@ -47,7 +57,12 @@ export function migrateHygieneLayout(input: {
 	const iduConfigDir = join(input.repoRoot, ".idu", "config");
 	const iduSkillsDir = join(input.repoRoot, ".idu", "skills");
 	const legacyConfigDir = join(input.repoRoot, "config");
-	const legacySkillsDir = join(input.repoRoot, "skills");
+	// FORMERLY: config-wizard used <repo>/.agents/skills/ (SKILLS_DIR =
+	// ".agents/skills" in src/config-wizard.ts) for project skills. The
+	// idu-pi-owned signal was the presence of SKILL.md inside each
+	// subdir. This migration moves that legacy layout to
+	// <repo>/.idu/skills/ (the new territory).
+	const legacySkillsDir = join(input.repoRoot, ".agents", "skills");
 
 	const result: MigrationResult = { moved: [], skipped: [], errors: [] };
 
@@ -74,63 +89,72 @@ export function migrateHygieneLayout(input: {
 		tryRmdirIfEmpty(legacyConfigDir);
 	}
 
-	// 2. Skills: by manifest. Read skills.json, enumerate only the skills
-	// it lists, move each one recursively. Leave non-listed dirs intact.
+	// 2. Skills: by directory enumeration + SKILL.md presence.
+	// Any subdir of <repo>/.agents/skills/ that contains SKILL.md is an
+	// idu-pi skill (idu-pi's format). Subdirs without SKILL.md are the
+	// user's; we leave them alone. The auditor-required principle: idu-pi
+	// only migrates what its own files say it owns.
 	if (existsSync(iduSkillsDir)) {
 		result.skipped.push({
 			from: legacySkillsDir,
 			reason: ".idu/skills/ already exists; manual reconciliation required",
 		});
 	} else {
-		const manifestPath = join(legacySkillsDir, "skills.json");
-		if (existsSync(manifestPath)) {
+		if (existsSync(legacySkillsDir)) {
+			let entries: string[] = [];
 			try {
-				const manifestRaw = readFileSync(manifestPath, "utf8");
-				const manifest = JSON.parse(manifestRaw) as { skills?: unknown };
-				const skillNames = extractSkillNames(manifest);
-				// Move each skill dir recursively
-				for (const name of skillNames) {
-					if (!name) continue;
-					const from = join(legacySkillsDir, name);
-					const to = join(iduSkillsDir, name);
-					if (!existsSync(from)) continue;
-					try {
-						const stat = statSync(from);
-						if (!stat.isDirectory()) continue;
-						safeMove(from, to);
-						result.moved.push({ from, to });
-					} catch (err) {
-						result.errors.push({ from, message: (err as Error).message });
-					}
-				}
-				// Then move the manifest itself
-				const manifestTo = join(iduSkillsDir, "skills.json");
-				try {
-					safeMove(manifestPath, manifestTo);
-					result.moved.push({ from: manifestPath, to: manifestTo });
-				} catch (err) {
-					result.errors.push({ from: manifestPath, message: (err as Error).message });
-				}
-				// .gitkeep is created by initProjectAssets, so it is idu-pi-owned.
-				const gitkeep = join(legacySkillsDir, ".gitkeep");
-				if (existsSync(gitkeep)) {
-					try {
-						const gitkeepTo = join(iduSkillsDir, ".gitkeep");
-						safeMove(gitkeep, gitkeepTo);
-						result.moved.push({ from: gitkeep, to: gitkeepTo });
-					} catch (err) {
-						result.errors.push({ from: gitkeep, message: (err as Error).message });
-					}
-				}
+				entries = readdirSync(legacySkillsDir, { withFileTypes: true })
+					.filter((e) => e.isDirectory())
+					.map((e) => e.name);
 			} catch (err) {
 				result.errors.push({
-					from: manifestPath,
-					message: `manifest parse failed: ${(err as Error).message}`,
+					from: legacySkillsDir,
+					message: `failed to enumerate legacy skills dir: ${(err as Error).message}`,
 				});
+			}
+			// Move each subdir that has SKILL.md (idu-pi-owned)
+			for (const name of entries) {
+				const from = join(legacySkillsDir, name);
+				const to = join(iduSkillsDir, name);
+				if (!existsSync(join(from, "SKILL.md"))) continue; // not idu-pi-owned
+				try {
+					safeMove(from, to);
+					result.moved.push({ from, to });
+				} catch (err) {
+					result.errors.push({ from, message: (err as Error).message });
+				}
+			}
+			// Move INDEX.md (idu-pi's auto-generated index)
+			const indexMd = join(legacySkillsDir, "INDEX.md");
+			if (existsSync(indexMd)) {
+				try {
+					const indexMdTo = join(iduSkillsDir, "INDEX.md");
+					safeMove(indexMd, indexMdTo);
+					result.moved.push({ from: indexMd, to: indexMdTo });
+				} catch (err) {
+					result.errors.push({
+						from: indexMd,
+						message: (err as Error).message,
+					});
+				}
+			}
+			// Move .gitkeep (idu-pi-owned, created by initProjectAssets)
+			const gitkeep = join(legacySkillsDir, ".gitkeep");
+			if (existsSync(gitkeep)) {
+				try {
+					const gitkeepTo = join(iduSkillsDir, ".gitkeep");
+					safeMove(gitkeep, gitkeepTo);
+					result.moved.push({ from: gitkeep, to: gitkeepTo });
+				} catch (err) {
+					result.errors.push({
+						from: gitkeep,
+						message: (err as Error).message,
+					});
+				}
 			}
 		}
 		// If the legacy skills dir is now empty, remove it. If the user has
-		// other files/dirs in there (non-listed, non-manifest), we leave them.
+		// other files/dirs in there (non-SKILL.md), we leave them.
 		tryRmdirIfEmpty(legacySkillsDir);
 	}
 
@@ -144,29 +168,6 @@ export function migrateHygieneLayout(input: {
 	});
 
 	return result;
-}
-
-/**
- * Extract skill names from a skills.json manifest. Supports both shapes:
- * - { skills: [{ name: "foo" }, ...] } (array of objects)
- * - { skills: { foo: {...}, bar: {...} } } (object map)
- */
-function extractSkillNames(manifest: { skills?: unknown }): string[] {
-	if (!manifest.skills) return [];
-	if (Array.isArray(manifest.skills)) {
-		return manifest.skills
-			.map((s) => {
-				if (typeof s === "object" && s !== null && "name" in s) {
-					return String((s as { name: unknown }).name);
-				}
-				return "";
-			})
-			.filter((n) => n.length > 0);
-	}
-	if (typeof manifest.skills === "object" && manifest.skills !== null) {
-		return Object.keys(manifest.skills as Record<string, unknown>);
-	}
-	return [];
 }
 
 /**
@@ -189,7 +190,10 @@ function safeMove(from: string, to: string): void {
 	}
 }
 
-function appendToEventsLog(stateRoot: string, event: Record<string, unknown>): void {
+function appendToEventsLog(
+	stateRoot: string,
+	event: Record<string, unknown>,
+): void {
 	const eventsPath = join(stateRoot, "events.jsonl");
 	mkdirSync(stateRoot, { recursive: true });
 	appendFileSync(eventsPath, `${JSON.stringify(event)}\n`, "utf8");
@@ -203,4 +207,37 @@ function tryRmdirIfEmpty(dir: string): void {
 	} catch {
 		// Not empty, or not a dir, or no permission. Leave it.
 	}
+}
+
+/**
+ * Read a governance file from <repo>/.idu/config/<name> with an automatic
+ * one-time migration from the legacy location <repo>/config/<name>.
+ *
+ * Territory model: idu-pi only writes under stateRoot/** or <repo>/.idu/**.
+ * Readers should prefer the .idu/ path. If the file is found at the legacy
+ * location instead, this helper moves it atomically to .idu/ before reading.
+ *
+ * Returns:
+ *   - `{ content, migrated: false }` if the file was already in .idu/
+ *   - `{ content, migrated: true  }` if the file was migrated from legacy
+ *   - `{ content: null, migrated: false }` if neither path has the file
+ *
+ * Safe to call multiple times: after the first migration, subsequent calls
+ * hit the .idu/ path directly and return `migrated: false`.
+ */
+export function readIdPathWithMigration(
+	repoRoot: string,
+	name: string,
+): { content: string | null; migrated: boolean } {
+	const newPath = join(repoRoot, ".idu", "config", name);
+	if (existsSync(newPath)) {
+		return { content: readFileSync(newPath, "utf8"), migrated: false };
+	}
+	const legacyPath = join(repoRoot, "config", name);
+	if (existsSync(legacyPath)) {
+		mkdirSync(dirname(newPath), { recursive: true });
+		renameSync(legacyPath, newPath);
+		return { content: readFileSync(newPath, "utf8"), migrated: true };
+	}
+	return { content: null, migrated: false };
 }

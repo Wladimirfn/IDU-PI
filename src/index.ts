@@ -2403,6 +2403,7 @@ bot.command("idu_define_project", async (ctx) => {
 	const result = startProjectCoreWizard({
 		projectId: activeProject?.id ?? currentProjectId(),
 		projectPath: activeProject?.path ?? currentCwd,
+		stateRoot: activeProjectStateRoot(),
 		workspaceRoot: config.agentWorkspaceRoot,
 		projectName: activeProject?.name ?? activeProject?.id,
 	});
@@ -2416,6 +2417,7 @@ bot.command("idu_core_status", async (ctx) => {
 	const status = getProjectCoreWizardStatus({
 		projectId: activeProject?.id ?? currentProjectId(),
 		projectPath: activeProject?.path ?? currentCwd,
+		stateRoot: activeProjectStateRoot(),
 		workspaceRoot: config.agentWorkspaceRoot,
 		projectName: activeProject?.name ?? activeProject?.id,
 	});
@@ -2463,6 +2465,7 @@ bot.command("idu_confirm_core", async (ctx) => {
 		formatProjectCoreConfirmationResult(
 			confirmProjectCore({
 				projectPath: activeProject?.path ?? currentCwd,
+				stateRoot: activeProjectStateRoot(),
 				reportsDir: join(config.agentWorkspaceRoot, "reports"),
 				research: commandArg(ctx.message?.text ?? "") || undefined,
 			}),
@@ -2478,6 +2481,7 @@ bot.command("idu_reject_core", async (ctx) => {
 		formatProjectCoreConfirmationResult(
 			rejectProjectCore({
 				projectPath: activeProject?.path ?? currentCwd,
+				stateRoot: activeProjectStateRoot(),
 				reportsDir: join(config.agentWorkspaceRoot, "reports"),
 				reason: commandArg(ctx.message?.text ?? "") || undefined,
 			}),
@@ -2493,6 +2497,7 @@ bot.command("idu_core_diff", async (ctx) => {
 		formatProjectCoreDiff(
 			diffProjectCore({
 				projectPath: activeProject?.path ?? currentCwd,
+				stateRoot: activeProjectStateRoot(),
 				reportsDir: join(config.agentWorkspaceRoot, "reports"),
 			}),
 		),
@@ -2744,7 +2749,12 @@ bot.command("config", async (ctx) => {
 			);
 			return;
 		}
-		await replyLong(ctx, formatInitAssetsResult(initProjectAssets(currentCwd)));
+		await replyLong(
+			ctx,
+			formatInitAssetsResult(
+				initProjectAssets(currentCwd, activeProjectStateRoot()),
+			),
+		);
 		return;
 	}
 	if (arg === "init_project_config") {
@@ -2859,7 +2869,11 @@ bot.command("config", async (ctx) => {
 		await replyLong(
 			ctx,
 			formatProjectFlowsDraftApplyResult(
-				applyProjectFlowsDraft(currentCwd, restArgs.join(" ")),
+				applyProjectFlowsDraft(
+					currentCwd,
+					activeProjectStateRoot(),
+					restArgs.join(" "),
+				),
 			),
 		);
 		return;
@@ -2962,7 +2976,9 @@ bot.command("config", async (ctx) => {
 		}
 		await replyLong(
 			ctx,
-			formatSkillsSyncResult(syncNecessarySkills(source, currentCwd)),
+			formatSkillsSyncResult(
+				syncNecessarySkills(source, currentCwd, activeProjectStateRoot()),
+			),
 		);
 		return;
 	}
@@ -3558,6 +3574,7 @@ bot.on("message:text", async (ctx) => {
 				{
 					projectId: activeProject?.id ?? currentProjectId(),
 					projectPath: activeProject?.path ?? currentCwd,
+					stateRoot: activeProjectStateRoot(),
 					workspaceRoot: config.agentWorkspaceRoot,
 					projectName: activeProject?.name ?? activeProject?.id,
 				},

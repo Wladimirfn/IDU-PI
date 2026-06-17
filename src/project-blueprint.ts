@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 
 export type ProjectBlueprint = {
 	projectName: string;
@@ -37,15 +38,26 @@ const REQUIRED_STRING_ARRAY_FIELDS = [
 ] as const;
 
 export function loadProjectBlueprint(projectPath: string): ProjectBlueprint {
-	const projectBlueprintPath = join(
+	// Territory: prefer <repo>/.idu/config/project-blueprint.json, with one-time
+	// migration from <repo>/config/project-blueprint.json.
+	const migrated = readIdPathWithMigration(
 		projectPath,
-		"config",
 		"project-blueprint.json",
 	);
-	const blueprintPath = existsSync(projectBlueprintPath)
-		? projectBlueprintPath
-		: defaultBlueprintPath();
-	const raw = readFileSync(blueprintPath, "utf8");
+	let blueprintPath: string;
+	let raw: string;
+	if (migrated.content !== null) {
+		raw = migrated.content;
+		blueprintPath = join(
+			projectPath,
+			".idu",
+			"config",
+			"project-blueprint.json",
+		);
+	} else {
+		blueprintPath = defaultBlueprintPath();
+		raw = readFileSync(blueprintPath, "utf8");
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw) as unknown;

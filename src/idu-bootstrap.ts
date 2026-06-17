@@ -8,6 +8,7 @@ import {
 } from "./config.js";
 import { initProjectConfig } from "./config-wizard.js";
 import { activateIduSession, configureIduSessionStore } from "./idu-session.js";
+import { assertAllowedWrite } from "./idu-scratch.js";
 import {
 	createDefaultProjectCore,
 	validateProjectCore,
@@ -56,8 +57,8 @@ type BootstrapState = {
 	projectCoreStatus: string;
 };
 
-const PROJECT_CORE = "config/project-core.json";
-const PROJECT_CONSTITUTION = "config/project-constitution.json";
+const PROJECT_CORE = ".idu/config/project-core.json";
+const PROJECT_CONSTITUTION = ".idu/config/project-constitution.json";
 
 export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	const projectPath = canonicalDirectory(input.projectPath);
@@ -130,6 +131,10 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	let projectCoreStatus = "draft";
 	if (!coreExisted) {
 		mkdirSync(dirname(corePath), { recursive: true });
+		assertAllowedWrite(corePath, {
+			stateRoot: statePaths.stateRoot,
+			repoRoot: projectPath,
+		});
 		const core = createDefaultProjectCore(project.name || project.id);
 		writeFileSync(corePath, `${JSON.stringify(core, null, 2)}\n`, "utf8");
 		created.push(PROJECT_CORE);
@@ -158,6 +163,10 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 			const validation = validateProjectCore(core);
 			if (validation.ok) {
 				const constitution = deriveConstitutionFromProjectCore(validation.core);
+				assertAllowedWrite(constitutionPath, {
+					stateRoot: statePaths.stateRoot,
+					repoRoot: projectPath,
+				});
 				writeFileSync(
 					constitutionPath,
 					`${JSON.stringify(constitution, null, 2)}\n`,

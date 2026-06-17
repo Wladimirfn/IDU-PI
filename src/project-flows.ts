@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 
 export type UiElementType =
 	| "button"
@@ -149,11 +150,18 @@ const STEP_TYPES = new Set<FlowStepType>([
 ]);
 
 export function loadProjectFlows(projectPath: string): ProjectFlows {
-	const projectFlowsPath = join(projectPath, "config", "project-flows.json");
-	const flowsPath = existsSync(projectFlowsPath)
-		? projectFlowsPath
-		: defaultFlowsPath();
-	const raw = readFileSync(flowsPath, "utf8");
+	// Territory: prefer <repo>/.idu/config/project-flows.json, with one-time
+	// migration from <repo>/config/project-flows.json.
+	const migrated = readIdPathWithMigration(projectPath, "project-flows.json");
+	let flowsPath: string;
+	let raw: string;
+	if (migrated.content !== null) {
+		raw = migrated.content;
+		flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	} else {
+		flowsPath = defaultFlowsPath();
+		raw = readFileSync(flowsPath, "utf8");
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw) as unknown;
