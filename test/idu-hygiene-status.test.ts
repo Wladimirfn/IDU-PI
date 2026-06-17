@@ -17,7 +17,10 @@ import {
 
 function makeRoot(): { root: string; cleanup: () => void } {
 	const root = mkdtempSync(join(tmpdir(), "idu-hygiene-status-"));
-	return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+	return {
+		root,
+		cleanup: () => rmSync(root, { recursive: true, force: true }),
+	};
 }
 
 test("readHygieneStatus: returns null lastRun when sensor has never run", () => {
@@ -45,11 +48,25 @@ test("readHygieneStatus: reads sensor snapshot from hygiene-sensor-last.json", (
 			matchedPaths: 2,
 			truncated: false,
 			findings: [
-				{ path: "/repo/.DS_Store", pattern: ".DS_Store", severity: "info", fingerprint: "abc123" },
-				{ path: "/repo/tmp-debug.mjs", pattern: "tmp-*.mjs", severity: "info", fingerprint: "def456" },
+				{
+					path: "/repo/.DS_Store",
+					pattern: ".DS_Store",
+					severity: "info",
+					fingerprint: "abc123",
+				},
+				{
+					path: "/repo/tmp-debug.mjs",
+					pattern: "tmp-*.mjs",
+					severity: "info",
+					fingerprint: "def456",
+				},
 			],
 		};
-		writeFileSync(join(root, "hygiene-sensor-last.json"), JSON.stringify(snapshot), "utf8");
+		writeFileSync(
+			join(root, "hygiene-sensor-last.json"),
+			JSON.stringify(snapshot),
+			"utf8",
+		);
 
 		const result = readHygieneStatus(root);
 		assert.ok(result.lastRun);
@@ -88,31 +105,59 @@ test("readHygieneStatus: counts un-acked hygiene_junk_file injections", () => {
 				kind: "hygiene_junk_file",
 				acked: false,
 				ts: "2026-06-17T10:00:00Z",
-				decisionEnvelope: { severity: "info", summary: "Junk: .DS_Store", options: ["ack"], evidenceRefs: [], orchestratorDecisionRequired: false },
+				decisionEnvelope: {
+					severity: "info",
+					summary: "Junk: .DS_Store",
+					options: ["ack"],
+					evidenceRefs: [],
+					orchestratorDecisionRequired: false,
+				},
 			},
 			{
 				injectionId: "hyg-2",
 				kind: "hygiene_junk_file",
 				acked: false,
 				ts: "2026-06-17T10:01:00Z",
-				decisionEnvelope: { severity: "warning", summary: "Junk: tmp-debug.mjs", options: ["ack"], evidenceRefs: [], orchestratorDecisionRequired: true },
+				decisionEnvelope: {
+					severity: "warning",
+					summary: "Junk: tmp-debug.mjs",
+					options: ["ack"],
+					evidenceRefs: [],
+					orchestratorDecisionRequired: true,
+				},
 			},
 			{
 				injectionId: "obj-1",
 				kind: "objective_reminder",
 				acked: false,
 				ts: "2026-06-17T10:02:00Z",
-				decisionEnvelope: { severity: "info", summary: "obj", options: ["ack"], evidenceRefs: [], orchestratorDecisionRequired: false },
+				decisionEnvelope: {
+					severity: "info",
+					summary: "obj",
+					options: ["ack"],
+					evidenceRefs: [],
+					orchestratorDecisionRequired: false,
+				},
 			},
 			{
 				injectionId: "hyg-3",
 				kind: "hygiene_junk_file",
 				acked: true, // acked, shouldn't count
 				ts: "2026-06-17T09:00:00Z",
-				decisionEnvelope: { severity: "info", summary: "old", options: ["ack"], evidenceRefs: [], orchestratorDecisionRequired: false },
+				decisionEnvelope: {
+					severity: "info",
+					summary: "old",
+					options: ["ack"],
+					evidenceRefs: [],
+					orchestratorDecisionRequired: false,
+				},
 			},
 		];
-		writeFileSync(join(root, "injections.jsonl"), injections.map((i) => JSON.stringify(i)).join("\n"), "utf8");
+		writeFileSync(
+			join(root, "injections.jsonl"),
+			injections.map((i) => JSON.stringify(i)).join("\n"),
+			"utf8",
+		);
 
 		const result = readHygieneStatus(root);
 		assert.equal(result.pendingInjections, 2); // only un-acked hygiene
@@ -124,7 +169,11 @@ test("readHygieneStatus: counts un-acked hygiene_junk_file injections", () => {
 test("readHygieneStatus: malformed hygiene-sensor-last.json falls back to null lastRun", () => {
 	const { root, cleanup } = makeRoot();
 	try {
-		writeFileSync(join(root, "hygiene-sensor-last.json"), "not json {{{", "utf8");
+		writeFileSync(
+			join(root, "hygiene-sensor-last.json"),
+			"not json {{{",
+			"utf8",
+		);
 		const result = readHygieneStatus(root);
 		assert.equal(result.lastRun, null);
 	} finally {
@@ -140,9 +189,20 @@ test("formatHygieneStatus: includes Last run, Patterns, Pending lines", () => {
 			scannedPaths: 50,
 			matchedPaths: 1,
 			truncated: false,
-			findings: [{ path: "/x/.DS_Store", pattern: ".DS_Store", severity: "info", fingerprint: "a" }],
+			findings: [
+				{
+					path: "/x/.DS_Store",
+					pattern: ".DS_Store",
+					severity: "info",
+					fingerprint: "a",
+				},
+			],
 		};
-		writeFileSync(join(root, "hygiene-sensor-last.json"), JSON.stringify(snapshot), "utf8");
+		writeFileSync(
+			join(root, "hygiene-sensor-last.json"),
+			JSON.stringify(snapshot),
+			"utf8",
+		);
 		const status = readHygieneStatus(root);
 		const formatted = formatHygieneStatus(status);
 		assert.ok(formatted.includes("idu-pi hygiene status"));
@@ -178,9 +238,20 @@ test("CLI idu-hygiene-status: prints status and exits 0", () => {
 			scannedPaths: 10,
 			matchedPaths: 1,
 			truncated: false,
-			findings: [{ path: join(repoRoot, ".DS_Store"), pattern: ".DS_Store", severity: "info", fingerprint: "x" }],
+			findings: [
+				{
+					path: join(repoRoot, ".DS_Store"),
+					pattern: ".DS_Store",
+					severity: "info",
+					fingerprint: "x",
+				},
+			],
 		};
-		writeFileSync(join(stateRoot, "hygiene-sensor-last.json"), JSON.stringify(snapshot), "utf8");
+		writeFileSync(
+			join(stateRoot, "hygiene-sensor-last.json"),
+			JSON.stringify(snapshot),
+			"utf8",
+		);
 
 		const out = runHygieneStatusCli(stateRoot, repoRoot);
 		assert.equal(out.exitCode, 0);

@@ -99,7 +99,9 @@ export function formatHygieneStatus(status: HygieneStatus): string {
 	lines.push("");
 
 	if (status.lastRun) {
-		lines.push(`Last run: ${status.lastRun.ts} (scanned ${status.lastRun.scannedPaths}, matched ${status.lastRun.matchedPaths}${status.lastRun.truncated ? ", truncated" : ""})`);
+		lines.push(
+			`Last run: ${status.lastRun.ts} (scanned ${status.lastRun.scannedPaths}, matched ${status.lastRun.matchedPaths}${status.lastRun.truncated ? ", truncated" : ""})`,
+		);
 	} else {
 		lines.push("Last run: never run");
 	}
@@ -125,7 +127,10 @@ export function formatHygieneStatus(status: HygieneStatus): string {
  * return the output. Used by tests to verify the CLI surface.
  * In production this is wired into src/cli.ts's main switch.
  */
-export function runHygieneStatusCli(stateRoot: string, _repoRoot: string): { exitCode: number; stdout: string } {
+export function runHygieneStatusCli(
+	stateRoot: string,
+	_repoRoot: string,
+): { exitCode: number; stdout: string } {
 	const status = readHygieneStatus(stateRoot);
 	const stdout = formatHygieneStatus(status);
 	return { exitCode: 0, stdout };

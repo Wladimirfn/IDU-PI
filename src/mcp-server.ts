@@ -3624,10 +3624,7 @@ async function dispatchTool(
 				data: {
 					hygiene: hygieneStatus,
 				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Read-only: no side effects.",
-				],
+				safeNotes: [...resolution.safeNotes, "Read-only: no side effects."],
 			});
 		}
 		case "idu_supervisor_consult": {
@@ -4563,8 +4560,7 @@ async function dispatchTool(
 		case "idu_hygiene_migrate": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const params = args as { projectPath?: string };
-			const repoRoot =
-				(params.projectPath ?? runtime.projectPath ?? "").trim();
+			const repoRoot = (params.projectPath ?? runtime.projectPath ?? "").trim();
 			if (!repoRoot) {
 				return envelope({
 					stateRoot,
@@ -4615,9 +4611,7 @@ async function dispatchTool(
 				],
 				...(migration.errors.length > 0
 					? {
-							errors: migration.errors.map(
-									(e) => `${e.from}: ${e.message}`,
-								),
+							errors: migration.errors.map((e) => `${e.from}: ${e.message}`),
 						}
 					: {}),
 			});

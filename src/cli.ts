@@ -1872,14 +1872,12 @@ export async function runCliCommand(
 		// createCliRuntime so a user with no registered project can
 		// still migrate their legacy layout.
 		if (
-			(command === "idu-hygiene-migrate" ||
-				command === "hygiene-migrate") &&
+			(command === "idu-hygiene-migrate" || command === "hygiene-migrate") &&
 			!runtime
 		) {
 			const parsed = parseHygieneMigrateArgs(rest);
 			const repoRoot = parsed.repoRoot ?? process.cwd();
-			const stateRoot =
-				process.env.AGENT_WORKSPACE_ROOT ?? repoRoot;
+			const stateRoot = process.env.AGENT_WORKSPACE_ROOT ?? repoRoot;
 			try {
 				const result: MigrationResult = migrateHygieneLayout({
 					repoRoot,
@@ -1891,11 +1889,7 @@ export async function runCliCommand(
 					stderr: "",
 				};
 			} catch (err) {
-				return fail(
-					err instanceof Error
-						? err.message
-						: String(err),
-				);
+				return fail(err instanceof Error ? err.message : String(err));
 			}
 		}
 		const activeRuntime =
@@ -2089,8 +2083,7 @@ export async function runCliCommand(
 			case "idu-hygiene-migrate":
 			case "hygiene-migrate": {
 				const parsed = parseHygieneMigrateArgs(rest);
-				const repoRoot =
-					parsed.repoRoot ?? activeRuntime.projectPath;
+				const repoRoot = parsed.repoRoot ?? activeRuntime.projectPath;
 				if (!repoRoot) {
 					return fail(
 						"idu-hygiene-migrate requiere --repo-root <path> o un proyecto activo.",
@@ -2276,8 +2269,13 @@ export async function runCliCommand(
 				// PR-A of objective-injection (PISO gate read path).
 				// Read-only: no side effects, no enqueue. Use this to verify
 				// the current PISO gate state from the CLI.
-				const blocking = readPendingBlockingInjection(activeRuntime.workspaceRoot);
-				const statePath = join(activeRuntime.workspaceRoot, "objective-reminder.json");
+				const blocking = readPendingBlockingInjection(
+					activeRuntime.workspaceRoot,
+				);
+				const statePath = join(
+					activeRuntime.workspaceRoot,
+					"objective-reminder.json",
+				);
 				const reminderExists = existsSync(statePath);
 				return ok(
 					`objective_reminder state:\n` +
