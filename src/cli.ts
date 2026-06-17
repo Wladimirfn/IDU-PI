@@ -13,6 +13,7 @@ import {
 } from "./config.js";
 import { AgentRouter, profileModelLabel } from "./agent-router.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 import {
 	applyPackageEnvDefaults,
 	buildCliHomeStatus,
@@ -2929,9 +2930,34 @@ export async function runCliCommand(
 				const params = rest.join(" ").trim();
 				const ack = !/ack\s*:\s*false/.test(params);
 				const pending = readPendingInjections(activeRuntime.workspaceRoot, {});
-				if (ack && pending.length > 0) {
+				if (pending.length > 0) {
 					for (const inj of pending) {
-						markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
+						// Wire telemetry: write `delivered` for each surfaced
+						// advisory (#2467). Do NOT call markInjectionAcked here —
+						// that's reserved for the explicit idu_ack_advisory
+						// escape hatch. The cron evaluator calls
+						// markInjectionAcked when it writes `resolved` or
+						// `expired` (per-kind policy).
+						recordLifecycleEvent({
+							stateRoot: activeRuntime.workspaceRoot,
+							injectionId: inj.injectionId,
+							phase: "delivered",
+							kind: inj.kind,
+							now: new Date(),
+						});
+						if (ack) {
+							// ack:true on the pull = deliberate dismissal (escape
+							// hatch). Mark acked AND write `dismissed` event.
+							markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
+							recordLifecycleEvent({
+								stateRoot: activeRuntime.workspaceRoot,
+								injectionId: inj.injectionId,
+								phase: "dismissed",
+								kind: inj.kind,
+								reason: "idu-pending-injections ack:true",
+								now: new Date(),
+							});
+						}
 					}
 				}
 				const banner = pisoBannerLine(activeRuntime.workspaceRoot);

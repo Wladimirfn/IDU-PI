@@ -8,6 +8,7 @@ import { createCliRuntime, type CliRuntime } from "./cli.js";
 import { runSensorImpulses } from "./sensor-impulses.js";
 import { categorizeFindings } from "./supervisor-categorize.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 import {
 	formatBibliotecarioInit,
 	runBibliotecarioInit,
@@ -4489,9 +4490,32 @@ async function dispatchTool(
 			const params = args as { ack?: boolean };
 			const ack = params.ack !== false;
 			const pending = readPendingInjections(stateRoot, {});
-			if (ack && pending.length > 0) {
+			if (pending.length > 0) {
 				for (const inj of pending) {
-					markInjectionAcked(stateRoot, inj.injectionId);
+					// Wire telemetry: write `delivered` for each surfaced advisory (#2467).
+					// Do NOT call markInjectionAcked here — that's reserved for the
+					// explicit idu_ack_advisory escape hatch. The cron evaluator will
+					// call markInjectionAcked when it writes `resolved` or `expired`.
+					recordLifecycleEvent({
+						stateRoot,
+						injectionId: inj.injectionId,
+						phase: "delivered",
+						kind: inj.kind,
+						now: new Date(),
+					});
+					if (ack) {
+						// ack:true on the pull = deliberate dismissal (escape hatch).
+						// Mark acked AND write `dismissed` lifecycle event.
+						markInjectionAcked(stateRoot, inj.injectionId);
+						recordLifecycleEvent({
+							stateRoot,
+							injectionId: inj.injectionId,
+							phase: "dismissed",
+							kind: inj.kind,
+							reason: "idu_pending_injections ack:true",
+							now: new Date(),
+						});
+					}
 				}
 			}
 			return envelope({
