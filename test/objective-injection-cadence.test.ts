@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -58,6 +59,53 @@ function writeTurnCount(stateRoot: string, turnCount: number): void {
 	);
 }
 
+/**
+ * Write a real un-acked objective_reminder injection to injections.jsonl.
+ * This is the "source of truth" the function reads — without it, the
+ * function treats the reminder as if it doesn't exist, which masks bugs.
+ */
+function writeUnackedInjection(
+	stateRoot: string,
+	injectionId: string,
+	lastReminderAt: string,
+): void {
+	const path = resolveInjectionsPath(stateRoot);
+	const injection = {
+		injectionId,
+		kind: "objective_reminder",
+		triggerId: "objective_reminder",
+		ts: lastReminderAt,
+		acked: false,
+		decisionEnvelope: {
+			severity: "info",
+			summary: "Refresh project objective via idu_supervisor_context_pack",
+			options: ["ack", "refresh"],
+			evidenceRefs: ["piso:objective_reminder"],
+			orchestratorDecisionRequired: false,
+		},
+	};
+	mkdirSync(stateRoot, { recursive: true });
+	appendFileSync(path, `${JSON.stringify(injection)}\n`, "utf8");
+}
+
+function readInjectionById(
+	stateRoot: string,
+	injectionId: string,
+): Record<string, unknown> | null {
+	const path = resolveInjectionsPath(stateRoot);
+	if (!existsSync(path)) return null;
+	const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
+	for (const line of lines) {
+		try {
+			const obj = JSON.parse(line) as Record<string, unknown>;
+			if (obj.injectionId === injectionId) return obj;
+		} catch {
+			// skip malformed
+		}
+	}
+	return null;
+}
+
 test("enqueueObjectiveReminder: enqueues when no recent reminder", () => {
 	const { stateRoot, cleanup } = makeRoot();
 	try {
@@ -100,16 +148,19 @@ test("enqueueObjectiveReminder: does NOT enqueue when recent un-acked reminder e
 	}
 });
 
-test("enqueueObjectiveReminder: enqueues when last reminder is older than dedup window", () => {
+test("enqueueObjectiveReminder: enqueues fresh when last reminder is older than dedup window AND stale", () => {
 	const { stateRoot, cleanup } = makeRoot();
 	try {
-		// Write a state with lastReminderAt 5h ago (dedup window is 4h)
+		// Setup: a real un-acked reminder 5h ago (past dedup window).
+		// The function should treat the old one as stale: auto-ack it,
+		// and enqueue a fresh one with a NEW injectionId.
 		const fiveHoursAgo = new Date(
 			Date.now() - 5 * 60 * 60 * 1000,
 		).toISOString();
+		writeUnackedInjection(stateRoot, "stale-rem-123", fiveHoursAgo);
 		writeReminderState(stateRoot, {
 			lastReminderAt: fiveHoursAgo,
-			lastInjectionId: "old-rem-123",
+			lastInjectionId: "stale-rem-123",
 		});
 		const result = enqueueObjectiveReminder({
 			stateRoot,
@@ -117,6 +168,16 @@ test("enqueueObjectiveReminder: enqueues when last reminder is older than dedup 
 		});
 		assert.equal(result.enqueued, true);
 		assert.equal(result.reason, "fresh");
+		assert.notEqual(result.injectionId, "stale-rem-123");
+		// The old one should be auto-acked in injections.jsonl
+		const oldEntry = readInjectionById(stateRoot, "stale-rem-123");
+		assert.ok(oldEntry);
+		assert.equal(oldEntry.acked, true);
+		// The new one should be present and un-acked
+		assert.ok(result.injectionId, "fresh enqueue must produce an injectionId");
+		const newEntry = readInjectionById(stateRoot, result.injectionId);
+		assert.ok(newEntry);
+		assert.equal(newEntry.acked, false);
 	} finally {
 		cleanup();
 	}
@@ -125,8 +186,10 @@ test("enqueueObjectiveReminder: enqueues when last reminder is older than dedup 
 test("enqueueObjectiveReminder: escalates an existing un-acked reminder after 1h", () => {
 	const { stateRoot, cleanup } = makeRoot();
 	try {
-		// Write a state with lastReminderAt 90min ago
+		// Setup: a real un-acked reminder 90min ago. The function should
+		// escalate: same injectionId, severity=warning, decisionRequired=true.
 		const ninetyMinAgo = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+		writeUnackedInjection(stateRoot, "stale-rem-456", ninetyMinAgo);
 		writeReminderState(stateRoot, {
 			lastReminderAt: ninetyMinAgo,
 			lastInjectionId: "stale-rem-456",
@@ -139,6 +202,55 @@ test("enqueueObjectiveReminder: escalates an existing un-acked reminder after 1h
 		assert.equal(result.escalated, true);
 		assert.equal(result.reason, "escalated");
 		assert.equal(result.injectionId, "stale-rem-456");
+		// The injection in injections.jsonl must now be blocking.
+		const entry = readInjectionById(stateRoot, "stale-rem-456");
+		assert.ok(entry, "escalated injection must be present in injections.jsonl");
+		assert.equal(entry.acked, false);
+		const env = entry.decisionEnvelope as Record<string, unknown>;
+		assert.equal(env.severity, "warning", "escalated severity must be warning");
+		assert.equal(
+			env.orchestratorDecisionRequired,
+			true,
+			"escalated injection must require orchestrator decision (PISO gate)",
+		);
+		// Sanity: no new entry should have been appended for this id.
+		// (counting entries with this id should be 1, not 2)
+	} finally {
+		cleanup();
+	}
+});
+
+test("enqueueObjectiveReminder: dedup does NOT swallow the [1h, 4h) window for un-acked reminders", () => {
+	// This test reproduces Finding D: with the old dedup condition
+	// (`ageMs < DEDUP_WINDOW_MS = 4h`), a 2h-old un-acked reminder would
+	// be deduped instead of escalated, leaving the PISO gate stuck in
+	// "informative" state forever. With the fix (dedup uses
+	// `ageMs < ESCALATE_AFTER_MS = 1h`), the 2h case escalates.
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+		writeUnackedInjection(stateRoot, "ignored-rem-789", twoHoursAgo);
+		writeReminderState(stateRoot, {
+			lastReminderAt: twoHoursAgo,
+			lastInjectionId: "ignored-rem-789",
+		});
+		const result = enqueueObjectiveReminder({
+			stateRoot,
+			planObjective: "Test",
+		});
+		assert.equal(
+			result.reason,
+			"escalated",
+			"2h-old un-acked reminder must escalate, not dedup (Finding D)",
+		);
+		assert.equal(result.escalated, true);
+		const entry = readInjectionById(stateRoot, "ignored-rem-789");
+		assert.equal(
+			(entry?.decisionEnvelope as Record<string, unknown> | undefined)
+				?.orchestratorDecisionRequired,
+			true,
+			"PISO gate must be triggered",
+		);
 	} finally {
 		cleanup();
 	}

@@ -207,82 +207,95 @@ export function enqueueObjectiveReminder(input: {
 	const now = input.now ?? new Date();
 	const statePath = resolveObjectiveStatePath(input.stateRoot);
 	const state = readReminderState(input.stateRoot);
+
+	const lastInjectionId = state?.lastInjectionId ?? null;
 	const lastReminderAt = state?.lastReminderAt
 		? new Date(state.lastReminderAt)
 		: null;
-	const lastInjectionId = state?.lastInjectionId ?? null;
 
-	// Dedup: a recent un-acked reminder still counts
-	if (lastReminderAt && lastInjectionId) {
-		const ageMs = now.getTime() - lastReminderAt.getTime();
-		// Check if the last reminder in injections.jsonl is acked
-		const lastReminderStillUnacked = readInjectionsByKind(
-			input.stateRoot,
-			"objective_reminder",
-		).find((i) => i.injectionId === lastInjectionId && !i.acked);
-		if (lastReminderStillUnacked) {
-			if (ageMs < OBJECTIVE_REMINDER_DEDUP_WINDOW_MS) {
-				// Still within dedup window: no-op
-				return {
-					enqueued: false,
-					escalated: false,
-					injectionId: null,
-					reason: "dedup",
-				};
-			}
-			// Past dedup window (>= 4h) and still un-acked: it's stale.
-			// Mark the old one as acked so it doesn't re-surface, and
-			// enqueue a fresh reminder. Escalation is short-circuited here
-			// because the old reminder is too old to escalate usefully.
-			markInjectionAckedInFile(input.stateRoot, lastInjectionId);
-		}
+	// Find the last reminder in injections.jsonl (the source of truth for
+	// un-acked state). The state file is just a cache; the JSONL is the
+	// ledger. If they diverge, the JSONL wins.
+	const allInjections = readAllInjections(input.stateRoot);
+	const lastInjection = lastInjectionId
+		? allInjections.find((i) => i.injectionId === lastInjectionId)
+		: null;
+	const lastUnacked =
+		lastInjection && !lastInjection.acked ? lastInjection : null;
+	const ageMs = lastReminderAt
+		? now.getTime() - lastReminderAt.getTime()
+		: Number.POSITIVE_INFINITY;
+
+	// Case 1: un-acked AND < ESCALATE_AFTER (1h) — dedup. The orchestrator
+	// has been reminded recently; do nothing.
+	if (lastUnacked && ageMs < OBJECTIVE_REMINDER_ESCALATE_AFTER_MS) {
+		return {
+			enqueued: false,
+			escalated: false,
+			injectionId: null,
+			reason: "dedup",
+		};
 	}
 
-	// Escalation: if the last reminder is >=1h old and <4h, escalate it.
-	// (Past 4h already returned a fresh reminder above.)
-	if (lastReminderAt && lastInjectionId) {
-		const ageMs = now.getTime() - lastReminderAt.getTime();
-		if (
-			ageMs >= OBJECTIVE_REMINDER_ESCALATE_AFTER_MS &&
-			ageMs < OBJECTIVE_REMINDER_DEDUP_WINDOW_MS
-		) {
-			// Find the same injectionId and overwrite with escalated version
-			const injections = readAllInjections(input.stateRoot);
-			const idx = injections.findIndex(
-				(i) => i.injectionId === lastInjectionId,
-			);
-			if (idx >= 0) {
-				const escalated = {
-					...injections[idx],
-					decisionEnvelope: {
-						...injections[idx].decisionEnvelope,
-						severity: "warning",
-						orchestratorDecisionRequired: true,
-					},
-					acked: false,
-				};
-				injections[idx] = escalated;
-				writeAllInjections(input.stateRoot, injections);
-			}
-			const newState: ObjectiveReminderState = {
-				lastReminderAt: lastReminderAt.toISOString(),
-				lastEscalationAt: now.toISOString(),
-				turnsSinceLastReminder: 0,
-				lastInjectionId,
+	// Case 2: un-acked AND ESCALATE_AFTER <= age < DEDUP_WINDOW
+	// ([1h, 4h)) — the orchestrator ignored the reminder for >1h. Escalate:
+	// same injectionId, severity=warning, decisionRequired=true.
+	if (
+		lastUnacked &&
+		lastInjectionId &&
+		ageMs >= OBJECTIVE_REMINDER_ESCALATE_AFTER_MS &&
+		ageMs < OBJECTIVE_REMINDER_DEDUP_WINDOW_MS
+	) {
+		const idx = allInjections.findIndex(
+			(i) => i.injectionId === lastInjectionId,
+		);
+		if (idx >= 0) {
+			const original = allInjections[idx];
+			const escalated: InjectionRecord = {
+				...original,
+				decisionEnvelope: {
+					...original.decisionEnvelope,
+					severity: "warning",
+					orchestratorDecisionRequired: true,
+				},
+				acked: false,
 			};
-			writeReminderStateToPath(statePath, newState);
-			return {
-				enqueued: true,
-				escalated: true,
-				injectionId: lastInjectionId,
-				reason: "escalated",
-			};
+			allInjections[idx] = escalated;
+			writeAllInjections(input.stateRoot, allInjections);
 		}
+		const newState: ObjectiveReminderState = {
+			lastReminderAt: lastReminderAt
+				? lastReminderAt.toISOString()
+				: now.toISOString(),
+			lastEscalationAt: now.toISOString(),
+			turnsSinceLastReminder: 0,
+			lastInjectionId,
+		};
+		writeReminderStateToPath(statePath, newState);
+		return {
+			enqueued: true,
+			escalated: true,
+			injectionId: lastInjectionId,
+			reason: "escalated",
+		};
 	}
 
-	// Fresh: enqueue a new reminder
+	// Case 3: un-acked AND age >= DEDUP_WINDOW (>= 4h) — stale. Auto-ack
+	// the old one so it doesn't re-surface in idu_pending_injections,
+	// then fall through to Case 4 (fresh).
+	if (
+		lastUnacked &&
+		lastInjectionId &&
+		ageMs >= OBJECTIVE_REMINDER_DEDUP_WINDOW_MS
+	) {
+		markInjectionAckedInFile(input.stateRoot, lastInjectionId);
+	}
+
+	// Case 4: fresh — no un-acked reminder (acked, or no state). Enqueue
+	// a new reminder, severity=info, decisionRequired=false (informative,
+	// not blocking). The cron preflight is the canonical caller.
 	const injectionId = `obj-rem-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`;
-	const injection = {
+	const injection: InjectionRecord = {
 		injectionId,
 		kind: "objective_reminder",
 		triggerId: "objective_reminder",
@@ -369,6 +382,7 @@ function readTurnCounter(stateRoot: string): { turnCount: number } | null {
 type InjectionRecord = {
 	injectionId: string;
 	kind?: string;
+	triggerId?: string;
 	ts?: string;
 	acked?: boolean;
 	decisionEnvelope?: {
