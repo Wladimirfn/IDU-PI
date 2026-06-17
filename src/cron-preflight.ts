@@ -30,6 +30,12 @@ import {
 } from "./supervisor-categorize.js";
 import { enqueueObjectiveReminder } from "./objective-injection.js";
 import { readPlanObjective } from "./plan-objective-reader.js";
+import { defaultPredicateForKind, evaluatePredicate } from "./satisfaction-predicate.js";
+import {
+	readMcpUsageLog,
+	readPendingAdvisories,
+	recordLifecycleEvent,
+} from "./telemetry-lifecycle.js";
 import type { IduModelRoleId } from "./model-assignments.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
@@ -107,10 +113,90 @@ export async function runCronPreflight(
 		now: input.now,
 	});
 
-	return {
+	// STEP 3b: satisfaction-predicate evaluator (#2467). For each pending
+	// advisory (one whose latest phase is "delivered"), evaluate its
+	// predicate and either write "resolved" (if satisfied) or "expired"
+	// (if past the window without satisfaction). Runs in the cron tick
+	// so silent-ignore is visible even if the orchestrator never pulls
+	// again.
+	try {
+		evaluateSatisfactionPredicates({
+			stateRoot: input.stateRoot,
+			now: input.now ?? new Date(),
+		});
+	} catch (err) {
+		// Telemetry is non-fatal; log + continue.
+	}
+
+return {
 		report: null, // postflight report is owned by the MCP/CLI caller; cron doesn't need it
 		sensorImpulses,
 		supervisorAdvisory,
 		changedFiles: input.changedFiles,
 	};
+}
+
+/**
+ * Iterate over pending advisories (last phase = delivered) and evaluate
+ * each one's satisfaction predicate. Write "resolved" or "expired"
+ * lifecycle events accordingly.
+ */
+export function evaluateSatisfactionPredicates(input: {
+	stateRoot: string;
+	now: Date;
+	projectPath?: string;
+}): void {
+const pending = readPendingAdvisories(input.stateRoot);
+	const usageLog = readMcpUsageLog(input.stateRoot);
+	for (const advisory of pending) {
+		// Get the predicate (default by kind, or read from the advisory's
+		// own envelope — for now we only support the default per-kind).
+		const predicate = defaultPredicateForKind(advisory.kind ?? "");
+		if (!predicate) continue;
+		const evaluation = evaluatePredicate({
+			predicate,
+			deliveredAt: advisory.ts,
+			now: input.now,
+			usageLog,
+		});
+		if (evaluation.outcome === "satisfied") {
+			recordLifecycleEvent({
+				stateRoot: input.stateRoot,
+				injectionId: advisory.injectionId,
+				phase: "resolved",
+				kind: advisory.kind,
+				reason: evaluation.reason,
+				now: input.now,
+			});
+		} else if (evaluation.outcome === "delivered-not-resolved") {
+			// Only mark expired if we're PAST the window. Within window
+			// + no call yet = keep waiting (silent wait, no event).
+			const deliveredMs = Date.parse(advisory.ts);
+			const pastWindow = (() => {
+				if (predicate.kind === "tool-called") {
+			return input.now.getTime() > deliveredMs + predicate.windowMs;
+				}
+				if (predicate.kind === "path-absent") {
+			// path-absent: no time window — satisfied if the file is gone
+			return false;
+				}
+				// state-key: reserved for future
+				return false;
+			})();
+			if (pastWindow) {
+				recordLifecycleEvent({
+			stateRoot: input.stateRoot,
+			injectionId: advisory.injectionId,
+			phase: "expired",
+			kind: advisory.kind,
+			reason: "window passed without satisfaction",
+			now: input.now,
+				});
+			}
+			// Within window but no call yet → silent wait. The cron tick will
+			// re-evaluate on the next run. If the orchestrator never pulls
+			// again, the advisory stays "delivered" until window expires.
+		}
+		// "dismissed" is NOT here — only the idu_ack_advisory escape hatch writes dismissed.
+	}
 }
