@@ -103,7 +103,9 @@ export function loadJunkPatterns(stateRoot: string): JunkPatterns {
  * This gives projects both knobs: drop a known pattern entirely, or
  * whitelist a specific path under a broader pattern.
  */
-export function compileJunkPatterns(patterns: JunkPatterns): CompiledJunkPatterns {
+export function compileJunkPatterns(
+	patterns: JunkPatterns,
+): CompiledJunkPatterns {
 	const allow = new Set(patterns.allowlist);
 	const seen = new Set<string>();
 	const effective: string[] = [];
@@ -143,9 +145,7 @@ export function compileJunkPatterns(patterns: JunkPatterns): CompiledJunkPattern
 export function globToRegex(pattern: string): RegExp {
 	const isBasename = !pattern.includes("/");
 	const compiled = compileGlobBody(pattern);
-	const regex = isBasename
-		? `^(?:.*/)?${compiled}$`
-		: `^${compiled}$`;
+	const regex = isBasename ? `^(?:.*/)?${compiled}$` : `^${compiled}$`;
 	return new RegExp(regex);
 }
 
@@ -178,8 +178,18 @@ function compileGlobBody(pattern: string): string {
 			i += 1;
 			continue;
 		}
-		if (ch === "." || ch === "(" || ch === ")" || ch === "+" || ch === "|" ||
-			ch === "^" || ch === "$" || ch === "{" || ch === "}" || ch === "\\") {
+		if (
+			ch === "." ||
+			ch === "(" ||
+			ch === ")" ||
+			ch === "+" ||
+			ch === "|" ||
+			ch === "^" ||
+			ch === "$" ||
+			ch === "{" ||
+			ch === "}" ||
+			ch === "\\"
+		) {
 			regex += "\\" + ch;
 			i += 1;
 			continue;

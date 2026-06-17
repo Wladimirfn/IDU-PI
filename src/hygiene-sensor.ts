@@ -17,12 +17,7 @@
  */
 
 import { createHash } from "node:crypto";
-import {
-	existsSync,
-	readdirSync,
-	realpathSync,
-	statSync,
-} from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import {
 	compileJunkPatterns,
@@ -60,11 +55,7 @@ export type RunHygieneSensorInput = {
 const DEFAULT_MAX_DEPTH = 10;
 const DEFAULT_MAX_FILES = 50_000;
 
-const DEFAULT_EXCLUDED_DIR_NAMES = new Set([
-	".git",
-	"node_modules",
-	".idu",
-]);
+const DEFAULT_EXCLUDED_DIR_NAMES = new Set([".git", "node_modules", ".idu"]);
 
 /**
  * Run the hygiene sensor against a repo.
