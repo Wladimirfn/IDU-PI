@@ -77,3 +77,29 @@ test("orchestrator.md: documents user-escalation reads by timestamp, not ack sta
 		"orchestrator.md must mention that user-escalation reads by timestamp, not by acked state",
 	);
 });
+
+test("orchestrator.md: contains Hygiene sensor section", () => {
+	const content = readFileSync(ORCHESTRATOR_PROFILE, "utf8");
+	assert.ok(
+		content.includes("## Hygiene sensor"),
+		"orchestrator.md must contain a '## Hygiene sensor' section",
+	);
+});
+
+test("orchestrator.md: mentions hygiene-patterns.json override", () => {
+	const content = readFileSync(ORCHESTRATOR_PROFILE, "utf8");
+	assert.ok(
+		content.includes("hygiene-patterns.json"),
+		"orchestrator.md must mention the per-project override file hygiene-patterns.json",
+	);
+});
+
+test("orchestrator.md: explicitly says idu-pi does NOT delete (orchestrator acts)", () => {
+	const content = readFileSync(ORCHESTRATOR_PROFILE, "utf8");
+	assert.ok(
+		content.toLowerCase().includes("does not delete") ||
+			content.toLowerCase().includes("no borra") ||
+			content.toLowerCase().includes("no delete"),
+		"orchestrator.md must explicitly say idu-pi does NOT delete files",
+	);
+});

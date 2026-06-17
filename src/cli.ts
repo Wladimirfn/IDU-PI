@@ -141,6 +141,8 @@ import {
 	migrateHygieneLayout,
 	type MigrationResult,
 } from "./hygiene-migrate.js";
+import { formatHygieneStatus, readHygieneStatus } from "./hygiene-status.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 import {
 	runBibliotecarioInit,
 	formatBibliotecarioInit,
@@ -2283,6 +2285,13 @@ export async function runCliCommand(
 						`  state_file: ${reminderExists ? statePath : "not created yet"}\n`,
 				);
 			}
+			case "idu-hygiene-status": {
+				// Item 3b sub-PR C: text mirror of the MCP tool.
+				// Read-only: no side effects.
+				return ok(
+					formatHygieneStatus(readHygieneStatus(activeRuntime.workspaceRoot)),
+				);
+			}
 			case "idu-check-user-escalation": {
 				// PR-105c. Reads last-user-interaction.json (if present) and
 				// runs the user escalation check. Writes user-escalations.jsonl
@@ -2932,6 +2941,20 @@ export async function runCliCommand(
 				if (ack && pending.length > 0) {
 					for (const inj of pending) {
 						markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
+						// Telemetry: recording delivered + resolved for each
+						// injection that the orchestrator pulled + acked.
+						recordLifecycleEvent({
+							stateRoot: activeRuntime.workspaceRoot,
+							injectionId: inj.injectionId,
+							phase: "delivered",
+							kind: inj.kind,
+						});
+						recordLifecycleEvent({
+							stateRoot: activeRuntime.workspaceRoot,
+							injectionId: inj.injectionId,
+							phase: "resolved",
+							kind: inj.kind,
+						});
 					}
 				}
 				const banner = pisoBannerLine(activeRuntime.workspaceRoot);
