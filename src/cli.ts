@@ -138,6 +138,10 @@ import {
 } from "./idu-prepare.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
 import {
+	migrateHygieneLayout,
+	type MigrationResult,
+} from "./hygiene-migrate.js";
+import {
 	runBibliotecarioInit,
 	formatBibliotecarioInit,
 } from "./cli-bibliotecario-init.js";
@@ -1861,6 +1865,37 @@ export async function runCliCommand(
 		if (command === "idu" && !runtime) {
 			return ok(await runBootstrapIduCommand());
 		}
+		// idu-hygiene-migrate is one-shot: it operates on a repo path
+		// (default: cwd), not on a registered project. Run it BEFORE
+		// createCliRuntime so a user with no registered project can
+		// still migrate their legacy layout.
+		if (
+			(command === "idu-hygiene-migrate" ||
+				command === "hygiene-migrate") &&
+			!runtime
+		) {
+			const parsed = parseHygieneMigrateArgs(rest);
+			const repoRoot = parsed.repoRoot ?? process.cwd();
+			const stateRoot =
+				process.env.AGENT_WORKSPACE_ROOT ?? repoRoot;
+			try {
+				const result: MigrationResult = migrateHygieneLayout({
+					repoRoot,
+					stateRoot,
+				});
+				return {
+					exitCode: result.errors.length > 0 ? 1 : 0,
+					stdout: formatHygieneMigrateResult(repoRoot, result),
+					stderr: "",
+				};
+			} catch (err) {
+				return fail(
+					err instanceof Error
+						? err.message
+						: String(err),
+				);
+			}
+		}
 		const activeRuntime =
 			runtime ??
 			createCliRuntime({
@@ -2048,6 +2083,26 @@ export async function runCliCommand(
 						),
 					),
 				);
+			}
+			case "idu-hygiene-migrate":
+			case "hygiene-migrate": {
+				const parsed = parseHygieneMigrateArgs(rest);
+				const repoRoot =
+					parsed.repoRoot ?? activeRuntime.projectPath;
+				if (!repoRoot) {
+					return fail(
+						"idu-hygiene-migrate requiere --repo-root <path> o un proyecto activo.",
+					);
+				}
+				const result: MigrationResult = migrateHygieneLayout({
+					repoRoot,
+					stateRoot: activeRuntime.workspaceRoot,
+				});
+				return {
+					exitCode: result.errors.length > 0 ? 1 : 0,
+					stdout: formatHygieneMigrateResult(repoRoot, result),
+					stderr: "",
+				};
 			}
 			case "idu-source-status":
 			case "source-status":
@@ -3934,6 +3989,7 @@ async function runBootstrapIduCommand(): Promise<string> {
 		projectPath: process.cwd(),
 		config,
 		registryPath: resolveIduRegistryPath(),
+		consentGiven: true,
 	});
 	const activeRuntime = createCliRuntime({
 		projectPath: bootstrap.project.path,
@@ -4580,6 +4636,76 @@ function ok(stdout: string): CliResult {
 	return { exitCode: 0, stdout, stderr: "" };
 }
 
+/**
+ * Parse `idu-hygiene-migrate` args. Supports `--repo-root <path>` (with
+ * optional `=` form). Unknown flags throw so the CLI surfaces a clear
+ * error rather than silently ignoring them.
+ */
+export function parseHygieneMigrateArgs(rawArgs: readonly string[]): {
+	repoRoot?: string;
+} {
+	const args = [...rawArgs];
+	let repoRoot: string | undefined;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--repo-root") {
+			const value = args[i + 1];
+			if (typeof value !== "string" || value.length === 0) {
+				throw new Error("--repo-root requiere un valor");
+			}
+			repoRoot = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--repo-root=")) {
+			const value = arg.slice("--repo-root=".length);
+			if (value.length === 0) {
+				throw new Error("--repo-root requiere un valor");
+			}
+			repoRoot = value;
+			continue;
+		}
+		throw new Error(`Flag desconocido para idu-hygiene-migrate: ${arg}`);
+	}
+	return { ...(repoRoot !== undefined ? { repoRoot } : {}) };
+}
+
+/** Format a hygiene migration result for CLI output. */
+export function formatHygieneMigrateResult(
+	repoRoot: string,
+	result: MigrationResult,
+): string {
+	const lines: string[] = [];
+	lines.push("idu-pi hygiene migrate");
+	lines.push("");
+	lines.push(`repoRoot: ${repoRoot}`);
+	lines.push(`moved: ${result.moved.length}`);
+	lines.push(`skipped: ${result.skipped.length}`);
+	lines.push(`errors: ${result.errors.length}`);
+	if (result.moved.length > 0) {
+		lines.push("");
+		lines.push("Files:");
+		for (const entry of result.moved) {
+			lines.push(`- ${entry.from} -> ${entry.to}`);
+		}
+	}
+	if (result.skipped.length > 0) {
+		lines.push("");
+		lines.push("Skipped:");
+		for (const entry of result.skipped) {
+			lines.push(`- ${entry.from}: ${entry.reason}`);
+		}
+	}
+	if (result.errors.length > 0) {
+		lines.push("");
+		lines.push("Errors:");
+		for (const entry of result.errors) {
+			lines.push(`- ${entry.from}: ${entry.message}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 function fail(stderr: string): CliResult {
 	return { exitCode: 1, stdout: helpText(), stderr };
 }
@@ -4654,6 +4780,7 @@ export function helpText(): string {
 		"  idu-pi idu-master-plan-approve latest",
 		"  idu-pi idu-master-plan-reject latest [motivo]",
 		"  idu-pi idu-master-plan-redraft latest",
+		"  idu-pi idu-hygiene-migrate [--repo-root <path>]  # one-time migrate legacy config/ and .agents/skills/ to .idu/",
 		"  idu-pi idu-source-status",
 		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
 		"  idu-pi idu-source-read <source-id>",
