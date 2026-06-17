@@ -57,11 +57,11 @@ export function migrateHygieneLayout(input: {
 	const iduConfigDir = join(input.repoRoot, ".idu", "config");
 	const iduSkillsDir = join(input.repoRoot, ".idu", "skills");
 	const legacyConfigDir = join(input.repoRoot, "config");
-	// The actual legacy skills path used by config-wizard is .agents/skills/,
-	// NOT skills/. (The original scout audit had the path wrong; the real
-	// layout uses SKILLS_DIR = ".agents/skills" in src/config-wizard.ts.)
-	// The signal of "idu-pi-owned" is the presence of SKILL.md inside the
-	// subdir — every idu-pi skill follows this format.
+	// FORMERLY: config-wizard used <repo>/.agents/skills/ (SKILLS_DIR =
+	// ".agents/skills" in src/config-wizard.ts) for project skills. The
+	// idu-pi-owned signal was the presence of SKILL.md inside each
+	// subdir. This migration moves that legacy layout to
+	// <repo>/.idu/skills/ (the new territory).
 	const legacySkillsDir = join(input.repoRoot, ".agents", "skills");
 
 	const result: MigrationResult = { moved: [], skipped: [], errors: [] };
