@@ -8,6 +8,7 @@ import { createCliRuntime, type CliRuntime } from "./cli.js";
 import { runSensorImpulses } from "./sensor-impulses.js";
 import { categorizeFindings } from "./supervisor-categorize.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 import {
 	formatBibliotecarioInit,
 	runBibliotecarioInit,
@@ -4487,11 +4488,39 @@ async function dispatchTool(
 		case "idu_pending_injections": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const params = args as { ack?: boolean };
-			const ack = params.ack !== false;
+			// AUDITOR-FIX-A: default ack = FALSE. A routine pull (no flag)
+			// only writes `delivered`. ack:true must be EXPLICIT — that's
+			// the deliberate dismissal escape hatch. If we default to true,
+			// every pull dismisses + acks the advisory, defeating Item 5's
+			// forced-pull escalation. (Use idu_ack_advisory for the
+			// dedicated escape hatch tool.)
+			const ack = params.ack === true;
 			const pending = readPendingInjections(stateRoot, {});
-			if (ack && pending.length > 0) {
+			if (pending.length > 0) {
 				for (const inj of pending) {
-					markInjectionAcked(stateRoot, inj.injectionId);
+					// Wire telemetry: write `delivered` for each surfaced advisory (#2467).
+					// The cron evaluator will call markInjectionAcked when it writes
+					// `resolved` (clear PISO gate) or `expired` (per-kind policy).
+					recordLifecycleEvent({
+						stateRoot,
+						injectionId: inj.injectionId,
+						phase: "delivered",
+						kind: inj.kind,
+						now: new Date(),
+					});
+					if (ack) {
+						// ack:true on the pull = deliberate dismissal (escape hatch).
+						// Mark acked AND write `dismissed` lifecycle event.
+						markInjectionAcked(stateRoot, inj.injectionId);
+						recordLifecycleEvent({
+							stateRoot,
+							injectionId: inj.injectionId,
+							phase: "dismissed",
+							kind: inj.kind,
+							reason: "idu_pending_injections ack:true",
+							now: new Date(),
+						});
+					}
 				}
 			}
 			return envelope({
@@ -4520,8 +4549,7 @@ async function dispatchTool(
 		case "idu_hygiene_migrate": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const params = args as { projectPath?: string };
-			const repoRoot =
-				(params.projectPath ?? runtime.projectPath ?? "").trim();
+			const repoRoot = (params.projectPath ?? runtime.projectPath ?? "").trim();
 			if (!repoRoot) {
 				return envelope({
 					stateRoot,
@@ -4572,9 +4600,7 @@ async function dispatchTool(
 				],
 				...(migration.errors.length > 0
 					? {
-							errors: migration.errors.map(
-									(e) => `${e.from}: ${e.message}`,
-								),
+							errors: migration.errors.map((e) => `${e.from}: ${e.message}`),
 						}
 					: {}),
 			});

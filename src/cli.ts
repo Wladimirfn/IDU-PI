@@ -13,6 +13,7 @@ import {
 } from "./config.js";
 import { AgentRouter, profileModelLabel } from "./agent-router.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 import {
 	applyPackageEnvDefaults,
 	buildCliHomeStatus,
@@ -1870,14 +1871,12 @@ export async function runCliCommand(
 		// createCliRuntime so a user with no registered project can
 		// still migrate their legacy layout.
 		if (
-			(command === "idu-hygiene-migrate" ||
-				command === "hygiene-migrate") &&
+			(command === "idu-hygiene-migrate" || command === "hygiene-migrate") &&
 			!runtime
 		) {
 			const parsed = parseHygieneMigrateArgs(rest);
 			const repoRoot = parsed.repoRoot ?? process.cwd();
-			const stateRoot =
-				process.env.AGENT_WORKSPACE_ROOT ?? repoRoot;
+			const stateRoot = process.env.AGENT_WORKSPACE_ROOT ?? repoRoot;
 			try {
 				const result: MigrationResult = migrateHygieneLayout({
 					repoRoot,
@@ -1889,11 +1888,7 @@ export async function runCliCommand(
 					stderr: "",
 				};
 			} catch (err) {
-				return fail(
-					err instanceof Error
-						? err.message
-						: String(err),
-				);
+				return fail(err instanceof Error ? err.message : String(err));
 			}
 		}
 		const activeRuntime =
@@ -2087,8 +2082,7 @@ export async function runCliCommand(
 			case "idu-hygiene-migrate":
 			case "hygiene-migrate": {
 				const parsed = parseHygieneMigrateArgs(rest);
-				const repoRoot =
-					parsed.repoRoot ?? activeRuntime.projectPath;
+				const repoRoot = parsed.repoRoot ?? activeRuntime.projectPath;
 				if (!repoRoot) {
 					return fail(
 						"idu-hygiene-migrate requiere --repo-root <path> o un proyecto activo.",
@@ -2274,8 +2268,13 @@ export async function runCliCommand(
 				// PR-A of objective-injection (PISO gate read path).
 				// Read-only: no side effects, no enqueue. Use this to verify
 				// the current PISO gate state from the CLI.
-				const blocking = readPendingBlockingInjection(activeRuntime.workspaceRoot);
-				const statePath = join(activeRuntime.workspaceRoot, "objective-reminder.json");
+				const blocking = readPendingBlockingInjection(
+					activeRuntime.workspaceRoot,
+				);
+				const statePath = join(
+					activeRuntime.workspaceRoot,
+					"objective-reminder.json",
+				);
 				const reminderExists = existsSync(statePath);
 				return ok(
 					`objective_reminder state:\n` +
@@ -2927,11 +2926,39 @@ export async function runCliCommand(
 			case "idu-pending-injections":
 			case "pending-injections": {
 				const params = rest.join(" ").trim();
-				const ack = !/ack\s*:\s*false/.test(params);
+				// AUDITOR-FIX-A: default ack = FALSE. A routine pull (no flag)
+				// only writes `delivered`. `ack:true` must be EXPLICIT — that's
+				// the deliberate dismissal escape hatch. If we default to true,
+				// every pull dismisses + acks the advisory, defeating Item 5's
+				// forced-pull escalation.
+				const ack = /\back\s*:\s*true\b/.test(params);
 				const pending = readPendingInjections(activeRuntime.workspaceRoot, {});
-				if (ack && pending.length > 0) {
+				if (pending.length > 0) {
 					for (const inj of pending) {
-						markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
+						// Wire telemetry: write `delivered` for each surfaced
+						// advisory (#2467). The cron evaluator calls
+						// markInjectionAcked when it writes `resolved` or
+						// `expired` (per-kind policy).
+						recordLifecycleEvent({
+							stateRoot: activeRuntime.workspaceRoot,
+							injectionId: inj.injectionId,
+							phase: "delivered",
+							kind: inj.kind,
+							now: new Date(),
+						});
+						if (ack) {
+							// ack:true on the pull = deliberate dismissal (escape
+							// hatch). Mark acked AND write `dismissed` event.
+							markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
+							recordLifecycleEvent({
+								stateRoot: activeRuntime.workspaceRoot,
+								injectionId: inj.injectionId,
+								phase: "dismissed",
+								kind: inj.kind,
+								reason: "idu-pending-injections ack:true",
+								now: new Date(),
+							});
+						}
 					}
 				}
 				const banner = pisoBannerLine(activeRuntime.workspaceRoot);
