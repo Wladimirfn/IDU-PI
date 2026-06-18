@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,9 +14,17 @@ import {
 	readInjectionLifecycle,
 	recordLifecycleEvent,
 } from "../src/telemetry-lifecycle.js";
-import { evaluateSatisfactionPredicates, expiredAckPolicy } from "../src/cron-preflight.js";
+import {
+	evaluateSatisfactionPredicates,
+	expiredAckPolicy,
+	recordInjectionEmitted,
+} from "../src/cron-preflight.js";
 import { enqueueObjectiveReminder } from "../src/objective-injection.js";
-import { resolveInjectionsPath, readPendingInjections } from "../src/injection-store.js";
+import {
+	resolveInjectionsPath,
+	readPendingInjections,
+	markInjectionAcked,
+} from "../src/injection-store.js";
 
 void enqueueObjectiveReminder;
 void readPendingInjections;
@@ -319,14 +334,22 @@ test("AUDITOR-CRITICAL: pull marks delivered ONLY (no resolved event on pull)", 
 
 // AUDITOR-CRITICAL TESTS: reconcile Item 5 escalation with telemetry ack policy
 
-function readAllInjections(stateRoot: string): { injectionId: string; acked: boolean; kind?: string }[] {
+function readAllInjections(
+	stateRoot: string,
+): { injectionId: string; acked: boolean; kind?: string }[] {
 	const path = resolveInjectionsPath(stateRoot);
 	if (!existsSync(path)) return [];
-	const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim());
+	const lines = readFileSync(path, "utf8")
+		.split("\n")
+		.filter((l) => l.trim());
 	const out: { injectionId: string; acked: boolean; kind?: string }[] = [];
 	for (const line of lines) {
 		try {
-			const obj = JSON.parse(line) as { injectionId?: unknown; acked?: unknown; kind?: unknown };
+			const obj = JSON.parse(line) as {
+				injectionId?: unknown;
+				acked?: unknown;
+				kind?: unknown;
+			};
 			if (typeof obj.injectionId === "string") {
 				out.push({
 					injectionId: obj.injectionId,
@@ -345,31 +368,55 @@ test("AUDITOR-CRITICAL: resolved → markInjectionAcked (clears PISO gate)", () 
 	const { root, cleanup } = makeRoot();
 	try {
 		// First: enqueue an actual injection (so it exists in injections.jsonl)
-		
-		const reminderResult = enqueueObjectiveReminder({ stateRoot: root, planObjective: "TEST" });
+
+		const reminderResult = enqueueObjectiveReminder({
+			stateRoot: root,
+			planObjective: "TEST",
+		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
 
 		// Then: write telemetry events (emitted + delivered)
 		const deliveredAt = new Date("2026-06-17T10:00:00Z");
-		recordLifecycleEvent({ stateRoot: root, injectionId: reminderResult.injectionId, phase: "emitted", kind: "objective_reminder", now: deliveredAt });
-		recordLifecycleEvent({ stateRoot: root, injectionId: reminderResult.injectionId, phase: "delivered", kind: "objective_reminder", now: deliveredAt });
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: reminderResult.injectionId,
+			phase: "emitted",
+			kind: "objective_reminder",
+			now: deliveredAt,
+		});
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: reminderResult.injectionId,
+			phase: "delivered",
+			kind: "objective_reminder",
+			now: deliveredAt,
+		});
 
 		// Then: orchestrator calls idu_supervisor_context_pack within window
 		const logsDir = join(root, "logs");
 		mkdirSync(logsDir, { recursive: true });
 		writeFileSync(
 			join(logsDir, "mcp-usage.jsonl"),
-			JSON.stringify({ tool: "idu_supervisor_context_pack", ts: "2026-06-17T10:15:00Z" }) + "\n",
+			JSON.stringify({
+				tool: "idu_supervisor_context_pack",
+				ts: "2026-06-17T10:15:00Z",
+			}) + "\n",
 			"utf8",
 		);
 
 		const now = new Date("2026-06-17T10:30:00Z");
 		evaluateSatisfactionPredicates({ stateRoot: root, now });
 
-		const inj = readAllInjections(root).find((i) => i.injectionId === reminderResult.injectionId);
+		const inj = readAllInjections(root).find(
+			(i) => i.injectionId === reminderResult.injectionId,
+		);
 		assert.ok(inj);
-		assert.equal(inj.acked, true, "resolved must mark acked=true (orchestrator complied)");
+		assert.equal(
+			inj.acked,
+			true,
+			"resolved must mark acked=true (orchestrator complied)",
+		);
 	} finally {
 		cleanup();
 	}
@@ -379,24 +426,45 @@ test("AUDITOR-CRITICAL: expired on objective_reminder does NOT mark acked (let I
 	const { root, cleanup } = makeRoot();
 	try {
 		// First: enqueue an actual injection
-		
-		const reminderResult = enqueueObjectiveReminder({ stateRoot: root, planObjective: "TEST" });
+
+		const reminderResult = enqueueObjectiveReminder({
+			stateRoot: root,
+			planObjective: "TEST",
+		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
 
 		const deliveredAt = new Date("2026-06-17T10:00:00Z");
 		const now = new Date("2026-06-17T12:00:00Z");
 
-		recordLifecycleEvent({ stateRoot: root, injectionId: reminderResult.injectionId!, phase: "emitted", kind: "objective_reminder", now: deliveredAt });
-		recordLifecycleEvent({ stateRoot: root, injectionId: reminderResult.injectionId!, phase: "delivered", kind: "objective_reminder", now: deliveredAt });
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: reminderResult.injectionId!,
+			phase: "emitted",
+			kind: "objective_reminder",
+			now: deliveredAt,
+		});
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: reminderResult.injectionId!,
+			phase: "delivered",
+			kind: "objective_reminder",
+			now: deliveredAt,
+		});
 
 		mkdirSync(join(root, "logs"), { recursive: true });
 
 		evaluateSatisfactionPredicates({ stateRoot: root, now });
 
-		const inj = readAllInjections(root).find((i) => i.injectionId === reminderResult.injectionId);
+		const inj = readAllInjections(root).find(
+			(i) => i.injectionId === reminderResult.injectionId,
+		);
 		assert.ok(inj);
-		assert.equal(inj.acked, false, "expired on objective_reminder must NOT mark acked (Item 5 escalation must continue)");
+		assert.equal(
+			inj.acked,
+			false,
+			"expired on objective_reminder must NOT mark acked (Item 5 escalation must continue)",
+		);
 	} finally {
 		cleanup();
 	}
@@ -421,8 +489,11 @@ test("AUDITOR-CRITICAL: full happy-path lifecycle [emitted, delivered, resolved]
 		const emittedAt = new Date("2026-06-17T10:00:00Z");
 
 		// Step 1: cron emits (via runCronPreflight → enqueueObjectiveReminder → recordLifecycleEvent('emitted'))
-		
-		const reminderResult = enqueueObjectiveReminder({ stateRoot: root, planObjective: "TEST" });
+
+		const reminderResult = enqueueObjectiveReminder({
+			stateRoot: root,
+			planObjective: "TEST",
+		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
 		// Simulate the cron-preflight emission step (the real code calls this):
@@ -436,7 +507,7 @@ test("AUDITOR-CRITICAL: full happy-path lifecycle [emitted, delivered, resolved]
 
 		// Step 2: pull (MCP/CLI writes delivered)
 		const pulledAt = new Date("2026-06-17T10:05:00Z");
-		const pendingFromPull = readPendingInjections(root, {});
+		
 		// Simulate the MCP/CLI pull path (the real code calls this):
 		recordLifecycleEvent({
 			stateRoot: root,
@@ -451,22 +522,170 @@ test("AUDITOR-CRITICAL: full happy-path lifecycle [emitted, delivered, resolved]
 		mkdirSync(logsDir, { recursive: true });
 		writeFileSync(
 			join(logsDir, "mcp-usage.jsonl"),
-			JSON.stringify({ tool: "idu_supervisor_context_pack", ts: "2026-06-17T10:10:00Z" }) + "\n",
+			JSON.stringify({
+				tool: "idu_supervisor_context_pack",
+				ts: "2026-06-17T10:10:00Z",
+			}) + "\n",
 			"utf8",
 		);
 
 		// Step 4: cron tick evaluates → writes resolved + markInjectionAcked
-		evaluateSatisfactionPredicates({ stateRoot: root, now: new Date("2026-06-17T10:15:00Z") });
+		evaluateSatisfactionPredicates({
+			stateRoot: root,
+			now: new Date("2026-06-17T10:15:00Z"),
+		});
 
 		// Verify lifecycle
 		const events = readInjectionLifecycle(root, reminderResult.injectionId);
 		const phases = events.map((e) => e.phase);
-		assert.deepEqual(phases, ["emitted", "delivered", "resolved"], "full happy-path lifecycle");
+		assert.deepEqual(
+			phases,
+			["emitted", "delivered", "resolved"],
+			"full happy-path lifecycle",
+		);
 
 		// Verify acked
-		const inj = readAllInjections(root).find((i) => i.injectionId === reminderResult.injectionId);
+		const inj = readAllInjections(root).find(
+			(i) => i.injectionId === reminderResult.injectionId,
+		);
 		assert.ok(inj);
 		assert.equal(inj.acked, true);
+	} finally {
+		cleanup();
+	}
+});
+
+test("AUDITOR-FIX-A: routine pull (no ack flag) writes delivered ONLY, does NOT auto-ack", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		// enqueueObjectiveReminder is imported at top
+		const reminderResult = enqueueObjectiveReminder({
+			stateRoot: root,
+			planObjective: "TEST",
+		});
+		assert.ok(reminderResult.enqueued);
+		assert.ok(reminderResult.injectionId);
+
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: reminderResult.injectionId,
+			phase: "emitted",
+			kind: "objective_reminder",
+			now: new Date(),
+		});
+
+		const pending = readPendingInjections(root, {});
+		const ack = false; // default after AUDITOR-FIX-A
+		assert.equal(pending.length, 1);
+		for (const inj of pending) {
+			recordLifecycleEvent({
+				stateRoot: root,
+				injectionId: inj.injectionId,
+				phase: "delivered",
+				kind: inj.kind,
+				now: new Date(),
+			});
+			if (ack) {
+				markInjectionAcked(root, inj.injectionId);
+				recordLifecycleEvent({
+					stateRoot: root,
+					injectionId: inj.injectionId,
+					phase: "dismissed",
+					kind: inj.kind,
+					now: new Date(),
+				});
+			}
+		}
+
+		const events = readInjectionLifecycle(root, reminderResult.injectionId);
+		const phases = events.map((e) => e.phase);
+		assert.deepEqual(
+			phases,
+			["emitted", "delivered"],
+			"routine pull should NOT dismiss",
+		);
+		const inj = readAllInjections(root).find(
+			(i) => i.injectionId === reminderResult.injectionId,
+		);
+		assert.ok(inj);
+		assert.equal(inj.acked, false, "routine pull must NOT mark acked");
+	} finally {
+		cleanup();
+	}
+});
+
+test("AUDITOR-FIX-A: pull with ack:true writes dismissed AND marks acked", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		// enqueueObjectiveReminder is imported at top
+		const reminderResult = enqueueObjectiveReminder({
+			stateRoot: root,
+			planObjective: "TEST",
+		});
+		assert.ok(reminderResult.enqueued);
+		assert.ok(reminderResult.injectionId);
+
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: reminderResult.injectionId,
+			phase: "emitted",
+			kind: "objective_reminder",
+			now: new Date(),
+		});
+
+		const pending = readPendingInjections(root, {});
+		const ack = true;
+		for (const inj of pending) {
+			recordLifecycleEvent({
+				stateRoot: root,
+				injectionId: inj.injectionId,
+				phase: "delivered",
+				kind: inj.kind,
+				now: new Date(),
+			});
+			if (ack) {
+				markInjectionAcked(root, inj.injectionId);
+				recordLifecycleEvent({
+					stateRoot: root,
+					injectionId: inj.injectionId,
+					phase: "dismissed",
+					kind: inj.kind,
+					reason: "idu_pending_injections ack:true",
+					now: new Date(),
+				});
+			}
+		}
+
+		const events = readInjectionLifecycle(root, reminderResult.injectionId);
+		const phases = events.map((e) => e.phase);
+		assert.deepEqual(
+			phases,
+			["emitted", "delivered", "dismissed"],
+			"ack:true must write dismissed",
+		);
+		const inj = readAllInjections(root).find(
+			(i) => i.injectionId === reminderResult.injectionId,
+		);
+		assert.ok(inj);
+		assert.equal(inj.acked, true, "ack:true must mark acked");
+	} finally {
+		cleanup();
+	}
+});
+
+test("AUDITOR-FIX-B: recordInjectionEmitted writes the `emitted` lifecycle event (helper for reminder AND future hygiene)", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		// recordInjectionEmitted needs to be imported
+		recordInjectionEmitted({
+			stateRoot: root,
+			injectionId: "hy-test-1",
+			kind: "hygiene_junk_file",
+		});
+		const events = readInjectionLifecycle(root, "hy-test-1");
+		assert.equal(events.length, 1);
+		assert.equal(events[0].phase, "emitted");
+		assert.equal(events[0].kind, "hygiene_junk_file");
 	} finally {
 		cleanup();
 	}

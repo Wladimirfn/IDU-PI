@@ -117,13 +117,13 @@ export async function runCronPreflight(
 		now: input.now,
 	});
 	// Wire telemetry: write `emitted` for the just-created/escalated
-	// injection (#2467). The hygiene sensor's emission path will also
-	// call this when sub-PR B merges.
+	// injection (#2467). AUDITOR-FIX-B: the hygiene sensor's emission
+	// path MUST use the same helper when sub-PR B merges — see
+	// `recordInjectionEmitted` below.
 	if (reminderResult.enqueued && reminderResult.injectionId) {
-		recordLifecycleEvent({
+		recordInjectionEmitted({
 			stateRoot: input.stateRoot,
 			injectionId: reminderResult.injectionId,
-			phase: "emitted",
 			kind: "objective_reminder",
 			now: input.now ?? new Date(),
 		});
@@ -153,13 +153,39 @@ export async function runCronPreflight(
 }
 
 /**
+ * Write the `emitted` lifecycle event for a freshly-created injection.
+ * Both the reminder path (this cron tick) and the future hygiene
+ * sensor emission path MUST call this helper to keep the lifecycle
+ * consistent. Without it, the cron evaluator has nothing to evaluate
+ * (the evaluator only looks at advisories whose latest phase is
+ * `delivered`, but if `emitted` was never written, `delivered` was
+ * never written either, and the evaluator iterates empty).
+ */
+export function recordInjectionEmitted(input: {
+	stateRoot: string;
+	injectionId: string;
+	kind: string;
+	now?: Date;
+}): void {
+	recordLifecycleEvent({
+		stateRoot: input.stateRoot,
+		injectionId: input.injectionId,
+		phase: "emitted",
+		kind: input.kind,
+		now: input.now ?? new Date(),
+	});
+}
+
+/**
  * Escalation policy per advisory kind. Determines whether `expired`
  * also calls `markInjectionAcked`. The default is no-ack (forced-pull
  * semantics: Item 5's universal escalation handles surfacing the
  * ignored advisory). Hygiene advisories are advisory-only and ack on
  * expired.
  */
-export function expiredAckPolicy(kind: string): "ack-on-expired" | "no-ack-on-expired" {
+export function expiredAckPolicy(
+	kind: string,
+): "ack-on-expired" | "no-ack-on-expired" {
 	switch (kind) {
 		case "hygiene_junk_file":
 			// Hygiene advisories are advisory-only — they don't have
