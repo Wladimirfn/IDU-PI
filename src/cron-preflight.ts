@@ -30,6 +30,11 @@ import {
 } from "./supervisor-categorize.js";
 import { enqueueObjectiveReminder } from "./objective-injection.js";
 import { markInjectionAcked } from "./injection-store.js";
+import { runHygieneSensor } from "./hygiene-sensor.js";
+import {
+	DEFAULT_HYGIENE_CAP,
+	emitHygieneInjections,
+} from "./hygiene-injection.js";
 import { readPlanObjective } from "./plan-objective-reader.js";
 import {
 	defaultPredicateForKind,
@@ -54,6 +59,11 @@ export type CronPreflightInput = {
 		options: { projectId: string; stateRoot: string },
 	) => Promise<PromptForRoleResult>;
 	now?: Date;
+	/**
+	 * Cap on the number of `hygiene_junk_file` injections alive at any
+	 * time. Default 20. See hygiene-injection.ts for the algorithm.
+	 */
+	hygieneCap?: number;
 };
 
 export type CronPreflightResult = {
@@ -129,6 +139,29 @@ export async function runCronPreflight(
 		});
 	}
 
+	// STEP 3a: hygiene emission (forward obligation #1 from PR #153 audit).
+	// Run the hygiene sensor against the project's repo and emit
+	// `hygiene_junk_file` injections with dedup + cap. The invariant
+	// (every hygiene injection has its emitted event) is guaranteed by
+	// the hygiene-injection module.
+	try {
+		const sensorOutput = runHygieneSensor({
+			stateRoot: input.stateRoot,
+			repoPath: input.projectPath,
+		});
+		emitHygieneInjections({
+			stateRoot: input.stateRoot,
+			findings: sensorOutput.findings.map((f) => ({
+				path: f.path,
+				pattern: f.pattern,
+			})),
+			cap: input.hygieneCap ?? DEFAULT_HYGIENE_CAP,
+			now: input.now,
+		});
+	} catch (err) {
+		// Non-fatal: telemetry / injection write is best-effort.
+	}
+
 	// STEP 3b: satisfaction-predicate evaluator (#2467). For each pending
 	// advisory (one whose latest phase is "delivered"), evaluate its
 	// predicate and either write "resolved" (if satisfied) or "expired"
@@ -165,6 +198,8 @@ export function recordInjectionEmitted(input: {
 	stateRoot: string;
 	injectionId: string;
 	kind: string;
+	reason?: string;
+	path?: string;
 	now?: Date;
 }): void {
 	recordLifecycleEvent({
@@ -172,6 +207,8 @@ export function recordInjectionEmitted(input: {
 		injectionId: input.injectionId,
 		phase: "emitted",
 		kind: input.kind,
+		reason: input.reason,
+		path: input.path,
 		now: input.now ?? new Date(),
 	});
 }
@@ -217,9 +254,14 @@ export function evaluateSatisfactionPredicates(input: {
 	const pending = readPendingAdvisories(input.stateRoot);
 	const usageLog = readMcpUsageLog(input.stateRoot);
 	for (const advisory of pending) {
-		// Get the predicate (default by kind, or read from the advisory's
-		// own envelope — for now we only support the default per-kind).
-		const predicate = defaultPredicateForKind(advisory.kind ?? "");
+		// Get the predicate (default by kind). The hygiene emission
+		// path writes the path into the lifecycle event so the
+		// `path-absent` predicate can be constructed without
+		// re-discovering the file.
+		const predicate = defaultPredicateForKind(
+			advisory.kind ?? "",
+			advisory.path ? { path: advisory.path } : undefined,
+		);
 		if (!predicate) continue;
 		const evaluation = evaluatePredicate({
 			predicate,

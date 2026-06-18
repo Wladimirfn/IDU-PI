@@ -820,7 +820,9 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Descarta explícitamente un advisory pendiente (escape hatch). Marca el injection como acked y emite el evento de lifecycle `dismissed`. Usar solo para dismissal deliberado; la decisión queda en el audit log.",
 		{
 			injectionId: optionalString("ID del injection a descartar."),
-			reason: optionalString("Razón opcional del dismissal (aparece en el audit log)."),
+			reason: optionalString(
+				"Razón opcional del dismissal (aparece en el audit log).",
+			),
 		},
 	),
 	tool(
@@ -4521,11 +4523,15 @@ async function dispatchTool(
 					// Wire telemetry: write `delivered` for each surfaced advisory (#2467).
 					// The cron evaluator will call markInjectionAcked when it writes
 					// `resolved` (clear PISO gate) or `expired` (per-kind policy).
+					// The path is included for hygiene advisories so the
+					// path-absent predicate can be constructed.
+					const meta = inj.meta as { path?: string } | undefined;
 					recordLifecycleEvent({
 						stateRoot,
 						injectionId: inj.injectionId,
 						phase: "delivered",
 						kind: inj.kind,
+						path: meta?.path,
 						now: new Date(),
 					});
 					if (ack) {
@@ -4665,7 +4671,8 @@ async function dispatchTool(
 					tool: name,
 					projectId: runtime.projectId,
 					projectPath: runtime.projectPath,
-					summary: "idu_hygiene_sweep requires --projectPath or an active project.",
+					summary:
+						"idu_hygiene_sweep requires --projectPath or an active project.",
 					data: {},
 					safeNotes: [
 						...resolution.safeNotes,

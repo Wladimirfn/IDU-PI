@@ -2124,7 +2124,10 @@ export async function runCliCommand(
 					);
 				}
 				const stateRoot = activeRuntime.workspaceRoot;
-				const sensorOutput = runHygieneSensor({ stateRoot, repoPath: repoRoot });
+				const sensorOutput = runHygieneSensor({
+					stateRoot,
+					repoPath: repoRoot,
+				});
 				const sweep: PlanSweepResult = planSweep({
 					sensorOutput,
 					stateRoot,
@@ -2132,7 +2135,7 @@ export async function runCliCommand(
 					mode: "advisory",
 				});
 				return {
-					exitCode: 0,  // advisory only — never fail
+					exitCode: 0, // advisory only — never fail
 					stdout: formatHygieneSweepResult(repoRoot, sweep),
 					stderr: "",
 				};
@@ -2977,12 +2980,16 @@ export async function runCliCommand(
 						// Wire telemetry: write `delivered` for each surfaced
 						// advisory (#2467). The cron evaluator calls
 						// markInjectionAcked when it writes `resolved` or
-						// `expired` (per-kind policy).
+						// `expired` (per-kind policy). The path is included
+						// for hygiene advisories so the path-absent
+						// predicate can be constructed.
+						const meta = inj.meta as { path?: string } | undefined;
 						recordLifecycleEvent({
 							stateRoot: activeRuntime.workspaceRoot,
 							injectionId: inj.injectionId,
 							phase: "delivered",
 							kind: inj.kind,
+							path: meta?.path,
 							now: new Date(),
 						});
 						if (ack) {
@@ -4755,7 +4762,9 @@ export function formatHygieneSweepResult(
 	lines.push("idu-pi hygiene sweep");
 	lines.push("");
 	lines.push(`repoRoot: ${repoRoot}`);
-	lines.push(`Sensor snapshot: ${result.sensorSnapshot.ts} (${result.sensorSnapshot.findings.length} findings)`);
+	lines.push(
+		`Sensor snapshot: ${result.sensorSnapshot.ts} (${result.sensorSnapshot.findings.length} findings)`,
+	);
 	lines.push(`Revalidated at: ${result.revalidatedAt}`);
 	lines.push("");
 	if (result.paths.length > 0) {
