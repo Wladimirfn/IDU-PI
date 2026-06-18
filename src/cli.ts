@@ -579,7 +579,35 @@ export {
 	helpText,
 } from "./cli/dispatch-glue/index.js";
 export type { CliResult } from "./cli/dispatch-glue/index.js";
-// PR 2 (Item 4): clusters C (master-plan) + D (birth) imports.
+// PR 3 (Item 4): RuntimeContext moved to dispatch-glue/context.ts (precondition
+// of moving cluster O, which uses it). Same pattern as CliResult (PR 1)
+// and ExecutionDirectorCliResult (PR 2).
+import type { RuntimeContext } from "./cli/dispatch-glue/index.js";
+// PR 3 (Item 4): clusters N (wizard) + P (tail-formatters) + O (setup) imports.
+import {
+	runWizardActivateSupervisor,
+	registeredProjectForPath,
+	requiredEnvForWizard,
+	parseAllowedRootsForWizard,
+	wizardActivationDiagnostic,
+} from "./cli/wizard/index.js";
+import {
+	formatPendingInjections,
+	formatTriggerSubscription,
+} from "./cli/tail-formatters/index.js";
+import {
+	handleSetupCommand,
+	parseMcpTarget,
+	handleProjectCommand,
+	inspectConnection,
+	formatCliSupervisorStartupSection,
+	formatDashboard,
+	buildPreflightReport,
+	buildPostflightReport,
+	runPrepare,
+	loadConfirmedProjectConstitution,
+} from "./cli/setup/index.js";
+// (PR 2 imports already exist above; this is just an anchor for the editor)
 import {
 	loadAutomaticov1Plan,
 	loadCliExecutionReadiness,
@@ -934,16 +962,6 @@ export type CliRuntime = {
 	rebindRoleEngine?: () => RoleEngineSubscriptionStatus;
 	unbindRoleEngine?: () => RoleEngineSubscriptionStatus;
 	activeProfileId?: () => string;
-};
-
-type RuntimeContext = {
-	config: BridgeConfig;
-	registry: ProjectRegistry;
-	activeProject: ProjectEntry;
-	structuredTaskQueue: StructuredTaskQueue;
-	runtimeWorkspaceRoot: string;
-	reportsPath: string;
-	labDbPath: string;
 };
 
 function resolveRuntimeProject(
@@ -3901,291 +3919,6 @@ async function runBootstrapIduCommand(): Promise<string> {
 		.join("\n");
 }
 
-function handleSetupCommand(rest: string[]): string {
-	const subcommand = rest[0] ?? "status";
-	const target = parseMcpTarget(rest);
-	const agentDir =
-		target === "opencode"
-			? join(homedir(), ".config", "opencode")
-			: resolvePiAgentDir();
-	const packageRoot = resolveCliPackageRoot();
-	const mcpServerPath = join(
-		dirname(fileURLToPath(import.meta.url)),
-		"mcp-server.js",
-	);
-	const extensionSourcePath = join(
-		packageRoot,
-		".pi",
-		"extensions",
-		"idu-pi-commands.ts",
-	);
-	if (subcommand === "status") {
-		const mcpInstalled = existsSync(join(agentDir, "mcp.json"));
-		return formatIduSetupStatus({
-			system: detectSystem(),
-			tools: detectTools(),
-			agentConfigs: detectAgentConfigs(),
-			mcpInstalled,
-		});
-	}
-	if (subcommand === "wizard") {
-		return formatSetupWizardNonInteractive(
-			buildCliHomeStatus({
-				argvPath: process.argv[1],
-				stdinInteractive: false,
-			}),
-		);
-	}
-	if (subcommand === "path-help") {
-		return formatSetupPathHelp();
-	}
-	if (subcommand === "mcp-print") {
-		return printIduMcpConfig({ mcpServerPath, target });
-	}
-	if (subcommand === "mcp-init") {
-		const force = rest.includes("--force");
-		const dryRun = rest.includes("--dry-run");
-		const result = installIduMcpConfig({
-			agentDir,
-			mcpServerPath,
-			target,
-			extensionSourcePath,
-			force,
-			dryRun,
-		});
-		return formatInstallIduMcpConfigResult(result);
-	}
-	throw new Error(
-		"Uso: idu-pi setup [status|wizard|path-help|mcp-init|mcp-print] [--target pi|opencode] [--force] [--dry-run]",
-	);
-}
-
-function parseMcpTarget(args: string[]): IduMcpTarget {
-	const targetFlag = args.find((arg) => arg.startsWith("--target="));
-	const targetIndex = args.indexOf("--target");
-	const target =
-		targetFlag?.split("=")[1] ??
-		(targetIndex >= 0 ? args[targetIndex + 1] : undefined);
-	if (!target) return "pi";
-	if (target === "pi" || target === "opencode") return target;
-	throw new Error("Uso: --target pi|opencode");
-}
-
-function handleProjectCommand(rest: string[]): string {
-	const subcommand = rest[0];
-	const config = loadConfig({ requireTelegram: false });
-	const registryPath = resolveIduRegistryPath();
-	if (subcommand === "enroll") {
-		const projectPath = rest[1];
-		if (!projectPath)
-			throw new Error("Uso: idu-pi project enroll <projectPath> [projectId]");
-		return formatProjectEnrollResult(
-			projectEnroll({
-				projectPath,
-				projectId: rest[2],
-				workspaceRoot: config.agentWorkspaceRoot,
-				allowedRoots: config.allowedRoots,
-				registryPath,
-			}),
-		);
-	}
-	if (subcommand === "status") {
-		const projectPath = rest[1];
-		if (!projectPath)
-			throw new Error("Uso: idu-pi project status <projectPath>");
-		return formatProjectInstallStatus(
-			projectInstallStatus({
-				projectPath,
-				workspaceRoot: config.agentWorkspaceRoot,
-				allowedRoots: config.allowedRoots,
-				mcpAvailable: existsSync(join(resolvePiAgentDir(), "mcp.json")),
-				registryPath,
-			}),
-		);
-	}
-	if (subcommand === "state-path") {
-		const projectPath = rest[1];
-		if (!projectPath)
-			throw new Error("Uso: idu-pi project state-path <projectPath>");
-		const status = projectInstallStatus({
-			projectPath,
-			workspaceRoot: config.agentWorkspaceRoot,
-			allowedRoots: config.allowedRoots,
-			registryPath,
-		});
-		return formatProjectStatePaths(
-			resolveProjectStatePaths({
-				workspaceRoot: config.agentWorkspaceRoot,
-				projectId: status.projectId,
-				projectPath: status.projectPath,
-			}),
-		);
-	}
-	throw new Error(
-		"Uso: idu-pi project [enroll|status|state-path] <projectPath> [projectId]",
-	);
-}
-
-function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
-	return inspectProjectConnection({
-		registry: context.registry,
-		defaultCwd: context.config.defaultCwd,
-		allowedRoots: context.config.allowedRoots,
-		workspaceRoot: context.runtimeWorkspaceRoot,
-		...(context.activeProject.stateRoot
-			? { stateRoot: context.activeProject.stateRoot }
-			: {}),
-		projectId: context.activeProject.id,
-		alignmentState: readProjectAlignmentState(context.runtimeWorkspaceRoot, {
-			projectId: context.activeProject.id,
-			projectPath: context.activeProject.path,
-		}),
-	});
-}
-
-function formatCliSupervisorStartupSection(
-	startup: IduSupervisorHookResult | undefined,
-): string[] {
-	if (!startup) return [""];
-	const reason = startup.reason ? ` (${startup.reason})` : "";
-	return [
-		"",
-		"Arranque supervisor:",
-		`${startup.status}${reason} — ${startup.summary}`,
-	];
-}
-
-function formatDashboard(report: ProjectConnectionReport): string {
-	return formatIduProjectDashboard({
-		projectId: report.projectId,
-		configStatus: report.configStatus,
-		alignmentStatus: report.alignmentStatus,
-		readiness: report.readiness,
-		reason: report.alignmentReason,
-		recommendedNext: cliCommandFor(report.recommendedNext),
-	} satisfies IduProjectDashboardReport);
-}
-
-function buildPreflightReport(
-	request: string,
-	context: RuntimeContext,
-): ProjectPreflightReport {
-	const connection = inspectConnection(context);
-	const blueprint =
-		connection.projectPath &&
-		connection.blueprint?.source === "project-local" &&
-		connection.blueprint.valid
-			? loadProjectBlueprint(connection.projectPath)
-			: undefined;
-	const flows =
-		connection.projectPath &&
-		connection.flows?.source === "project-local" &&
-		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
-			: undefined;
-	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
-	return analyzeProjectPreflight(request, {
-		connection,
-		blueprint,
-		flows,
-		constitution,
-		projectId: connection.projectId,
-		projectPath: connection.projectPath,
-	});
-}
-
-function buildPostflightReport(
-	context: RuntimeContext,
-): ProjectPostflightReport {
-	const connection = inspectConnection(context);
-	const projectPath = connection.projectPath ?? context.activeProject.path;
-	const flows =
-		connection.projectPath &&
-		connection.flows?.source === "project-local" &&
-		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
-			: undefined;
-	const gitState = readProjectPostflightGitState(projectPath);
-	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
-	const report = analyzeProjectPostflight({
-		projectPath,
-		connectionReport: connection,
-		projectFlows: flows,
-		constitution,
-		changedFiles: gitState.changedFiles,
-		diffSummary: gitState.diffSummary,
-	});
-	const reportWithWarnings = {
-		...report,
-		warnings: [...gitState.warnings, ...report.warnings],
-	};
-	return {
-		...reportWithWarnings,
-		physicalGates: buildPostflightPhysicalGates({
-			projectPath,
-			gitState,
-			report: reportWithWarnings,
-		}),
-	};
-}
-
-function runPrepare(context: RuntimeContext): IduPrepareResult {
-	const reportsPath = context.reportsPath;
-	const projectId = context.activeProject.id;
-	const projectPath = context.activeProject.path;
-	const result = runIduPrepare({
-		projectId,
-		projectPath,
-		reportsPath,
-		inspectConnection: () => inspectConnection(context),
-		initProjectConfig: () => initProjectConfig(projectPath, projectId),
-		inspectProjectMap: () =>
-			inspectProjectMap(projectPath, {
-				activeProjectId: projectId,
-				activeProjectName: context.activeProject.name,
-			}),
-		loadProjectFlows: () => loadProjectFlows(projectPath),
-		scanProjectMap: (flows) => scanProjectMap(projectPath, flows),
-		suggestProjectFlows: (flows) =>
-			suggestProjectFlowsFromScan(projectPath, flows),
-		draftProjectFlows: (flows) =>
-			saveProjectFlowsDraft(projectPath, flows, reportsPath),
-		reviewProjectFlowsDraft: (draftPathOrLatest, flows) =>
-			reviewProjectFlowsDraft(draftPathOrLatest, flows, reportsPath),
-		postflight: () => buildPostflightReport(context),
-		createStructuredTask: (input) =>
-			context.structuredTaskQueue.enqueueTask(input),
-	});
-	recordProjectAlignmentState(context.runtimeWorkspaceRoot, {
-		projectId,
-		projectPath,
-		alignmentStatus: result.alignmentStatus,
-		readiness: result.readiness,
-		alignmentReason: [`último prepare: ${result.recommendedNext}`],
-		differencesDetected: result.differencesDetected,
-	});
-	return result;
-}
-
-function loadConfirmedProjectConstitution(projectPath: string | undefined) {
-	if (!projectPath) return undefined;
-	const corePath = join(projectPath, "config", "project-core.json");
-	if (!existsSync(corePath)) return undefined;
-	try {
-		const core = loadProjectCore(projectPath);
-		if (core.status !== "confirmed") return undefined;
-		const constitutionPath = join(
-			projectPath,
-			"config",
-			"project-constitution.json",
-		);
-		return existsSync(constitutionPath)
-			? loadProjectConstitution(projectPath)
-			: deriveConstitutionFromProjectCore(core);
-	} catch {
-		return undefined;
-	}
-}
 
 export function createCliTask(
 	kind: TaskTemplateKind,
@@ -6198,89 +5931,6 @@ async function handleInstallationChoice(
 	return "Opción de instalación no reconocida. No ejecuté acciones.";
 }
 
-function runWizardActivateSupervisor(): string {
-	try {
-		applyPackageEnvDefaults();
-		const defaultCwd = canonicalDirectory(requiredEnvForWizard("DEFAULT_CWD"));
-		const allowedRoots = parseAllowedRootsForWizard(
-			process.env.ALLOWED_ROOTS,
-			defaultCwd,
-		);
-		const registry = loadRegistry(defaultCwd, allowedRoots, {
-			registryPath: resolveIduRegistryPath(),
-			createIfMissing: false,
-		});
-		const projectPath = canonicalDirectory(process.cwd());
-		if (!isAllowedCwd(projectPath, allowedRoots)) {
-			return wizardActivationDiagnostic(
-				`cwd fuera de ALLOWED_ROOTS: ${projectPath}`,
-			);
-		}
-		const project = registeredProjectForPath(registry, projectPath);
-		if (!project) {
-			return wizardActivationDiagnostic(
-				"Proyecto no registrado; el wizard no enrola automáticamente.",
-			);
-		}
-		if (!project.stateRoot || !existsSync(project.stateRoot)) {
-			return wizardActivationDiagnostic(
-				"Proyecto registrado sin stateRoot aislado existente; re-enrolalo antes de activar.",
-			);
-		}
-		configureIduSessionStore({
-			workspaceRoot: project.stateRoot,
-			filePath: join(project.stateRoot, "idu-session-state.json"),
-		});
-		activateIduSession(project.id);
-		return [
-			"Guardrails automáticos activados para el proyecto activo.",
-			"No ejecuté bootstrap, scans, prepare ni AgentLabs desde el wizard.",
-			`projectId: ${project.id}`,
-			`projectPath: ${project.path}`,
-			`stateRoot: ${project.stateRoot}`,
-		].join("\n");
-	} catch (error) {
-		return wizardActivationDiagnostic(
-			error instanceof Error ? error.message : String(error),
-		);
-	}
-}
-
-function registeredProjectForPath(
-	registry: ProjectRegistry,
-	projectPath: string,
-): ProjectEntry | undefined {
-	const normalize = (value: string) =>
-		process.platform === "win32" ? value.toLowerCase() : value;
-	return registry.projects.find(
-		(project) => normalize(project.path) === normalize(projectPath),
-	);
-}
-
-function requiredEnvForWizard(name: string): string {
-	const value = process.env[name]?.trim();
-	if (!value) throw new Error(`Missing required env var: ${name}`);
-	return value;
-}
-
-function parseAllowedRootsForWizard(
-	raw: string | undefined,
-	defaultCwd: string,
-): string[] {
-	return (raw?.trim() ? raw.split(";") : [defaultCwd])
-		.map((entry) => canonicalDirectory(entry.trim()))
-		.filter(Boolean);
-}
-
-function wizardActivationDiagnostic(reason: string): string {
-	return [
-		"No pude activar guardrails desde el wizard.",
-		`Qué pasó: ${reason}`,
-		"Acción recomendada: primero enrolá o bootstrappeá el proyecto de forma explícita.",
-		"Comando sugerido: idu-pi project enroll .",
-	].join("\n");
-}
-
 async function confirmAction(
 	question: CliQuestion,
 	message: string,
@@ -6295,31 +5945,6 @@ async function confirmAction(
 	);
 }
 
-function formatPendingInjections(pending: Injection[], ack: boolean): string {
-	const lines: string[] = [];
-	lines.push(`Pending Injections — count=${pending.length} ack=${ack}`);
-	if (pending.length > 0) {
-		for (const inj of pending) {
-			lines.push(
-				`  - ${inj.triggerId} severity=${inj.decisionEnvelope.severity} summary="${inj.decisionEnvelope.summary}"`,
-			);
-		}
-	}
-	return lines.join("\n");
-}
-
-function formatTriggerSubscription(): string {
-	const lines: string[] = [];
-	lines.push(
-		`Trigger Subscription — ${TRIGGER_DEFINITIONS.length} disparadores`,
-	);
-	for (const def of TRIGGER_DEFINITIONS) {
-		lines.push(
-			`  - ${def.id} severity=${def.contract.severity} decisionRequired=${def.contract.decisionRequired} kinds=[${def.kinds.join(",")}]`,
-		);
-	}
-	return lines.join("\n");
-}
 
 if (
 	process.argv[1] &&

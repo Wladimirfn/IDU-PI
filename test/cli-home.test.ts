@@ -1519,9 +1519,14 @@ test("interactive project panel auto-refresh re-renders changed content and clea
 });
 
 test("wizard source avoids AgentLabs scans prepare and bootstrap", () => {
-	const source = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
+	// PR 3 of Item 4: the wizard function (runWizardActivateSupervisor) is
+	// now in src/cli/wizard/helpers.ts. Read from there to find the wizard.
+	const source = readFileSync(
+		join(process.cwd(), "src", "cli", "wizard", "helpers.ts"),
+		"utf8",
+	);
 	const interactiveBlock = source.slice(
-		source.indexOf("async function runInstallationMenu"),
+		source.indexOf("export function runWizardActivateSupervisor"),
 	);
 	assert.doesNotMatch(
 		interactiveBlock,
