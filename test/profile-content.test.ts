@@ -77,3 +77,43 @@ test("orchestrator.md: documents user-escalation reads by timestamp, not ack sta
 		"orchestrator.md must mention that user-escalation reads by timestamp, not by acked state",
 	);
 });
+
+// ---------------------------------------------------------------------------
+// Item 3c: sweep + ack-advisory contract documented in orchestrator profile
+// ---------------------------------------------------------------------------
+
+test("orchestrator.md: documents the sweep contract (sub-PR B of Item 3c)", () => {
+	const content = readFileSync(ORCHESTRATOR_PROFILE, "utf8");
+	assert.ok(
+		content.includes("Sweep") || content.includes("sweep"),
+		"orchestrator.md must include the Sweep section",
+	);
+	assert.ok(
+		content.includes("idu_hygiene_sweep"),
+		"orchestrator.md must mention the idu_hygiene_sweep MCP tool",
+	);
+	assert.ok(
+		content.includes("idu-hygiene-sweep"),
+		"orchestrator.md must mention the idu-hygiene-sweep CLI command",
+	);
+});
+
+test("orchestrator.md: documents that idu-pi does NOT delete in sweep mode", () => {
+	const content = readFileSync(ORCHESTRATOR_PROFILE, "utf8");
+	assert.ok(
+		content.includes("NO borra") || content.includes("does NOT delete") || content.includes("not delete"),
+		"orchestrator.md must say idu-pi does NOT delete (advisory-only contract)",
+	);
+});
+
+test("orchestrator.md: documents the explicit dismissal escape hatch (idu_ack_advisory)", () => {
+	const content = readFileSync(ORCHESTRATOR_PROFILE, "utf8");
+	assert.ok(
+		content.includes("idu_ack_advisory"),
+		"orchestrator.md must mention the idu_ack_advisory escape hatch",
+	);
+	assert.ok(
+		content.includes("dismissal") || content.includes("Dismissal"),
+		"orchestrator.md must document the dismissal escape hatch",
+	);
+});

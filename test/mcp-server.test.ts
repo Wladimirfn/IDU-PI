@@ -1160,7 +1160,8 @@ test("mcp server lists Idu-pi tools", async () => {
 	);
 	// 84 baseline + 1 for idu_hygiene_migrate (sub-PR 3 of self-hygiene)
 	// + 1 for idu_hygiene_sweep (Item 3c sub-PR B of 3)
-	assert.equal(tools.length, 86);
+	// + 1 for idu_ack_advisory (Item 3c sub-PR C of 3, forward obligation #2 from PR #153)
+	assert.equal(tools.length, 87);
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {

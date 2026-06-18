@@ -144,6 +144,7 @@ import {
 } from "./hygiene-migrate.js";
 import { planSweep, type PlanSweepResult } from "./sweep-command.js";
 import { runHygieneSensor } from "./hygiene-sensor.js";
+import { ackAdvisory, type AckAdvisoryResult } from "./idu-ack-advisory.js";
 import {
 	runBibliotecarioInit,
 	formatBibliotecarioInit,
@@ -2099,6 +2100,20 @@ export async function runCliCommand(
 					stdout: formatHygieneMigrateResult(repoRoot, result),
 					stderr: "",
 				};
+			}
+			case "idu-ack-advisory":
+			case "ack-advisory": {
+				const injectionId = rest[0];
+				if (!injectionId) {
+					return fail("Usage: idu-ack-advisory <injectionId> [reason...]");
+				}
+				const reason = rest.slice(1).join(" ").trim() || undefined;
+				const result: AckAdvisoryResult = ackAdvisory({
+					stateRoot: activeRuntime.workspaceRoot,
+					injectionId,
+					reason,
+				});
+				return ok(`acked ${result.injectionId} (${result.reason})`);
 			}
 			case "idu-hygiene-sweep":
 			case "hygiene-sweep": {
@@ -4875,6 +4890,7 @@ export function helpText(): string {
 		"  idu-pi idu-master-plan-redraft latest",
 		"  idu-pi idu-hygiene-migrate [--repo-root <path>]  # one-time migrate legacy config/ and .agents/skills/ to .idu/",
 		"  idu-pi idu-hygiene-sweep                            # propose `rm <path>` per vetted file (advisory only)",
+		"  idu-pi idu-ack-advisory <injectionId> [reason]       # explicit dismissal escape hatch",
 		"  idu-pi idu-source-status",
 		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
 		"  idu-pi idu-source-read <source-id>",
