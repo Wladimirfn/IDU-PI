@@ -508,7 +508,7 @@ test("AUDITOR-CRITICAL: full happy-path lifecycle [emitted, delivered, resolved]
 
 		// Step 2: pull (MCP/CLI writes delivered)
 		const pulledAt = new Date("2026-06-17T10:05:00Z");
-		
+
 		// Simulate the MCP/CLI pull path (the real code calls this):
 		recordLifecycleEvent({
 			stateRoot: root,
@@ -715,13 +715,10 @@ test("AUDITOR-FIX-gemelo: ack:true on already-acked injection does NOT write a n
 				orchestratorDecisionRequired: true,
 			},
 			injectionId: "obj-gemelo-1",
-			acked: true,  // already acked
+			acked: true, // already acked
 			kind: "objective_reminder",
 		};
-		writeFileSync(
-			join(root, "injections.jsonl"),
-			JSON.stringify(inj) + "\n",
-		);
+		writeFileSync(join(root, "injections.jsonl"), JSON.stringify(inj) + "\n");
 
 		// Now simulate the inline ack:true path with the NEW guard.
 		// The outcome is checked via a function reference to defeat
@@ -772,7 +769,11 @@ test("AUDITOR-FIX-gemelo: ack:true on ghost id does NOT write a new dismissed ev
 			});
 		}
 		const allEvents = readInjectionLifecycle(root, "ghost-id-gemelo");
-		assert.equal(allEvents.length, 0, "gemelo must NOT write any event on not-found");
+		assert.equal(
+			allEvents.length,
+			0,
+			"gemelo must NOT write any event on not-found",
+		);
 	} finally {
 		cleanup();
 	}

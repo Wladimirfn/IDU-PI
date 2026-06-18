@@ -29,6 +29,11 @@ export type Injection = {
 	// are written with kind="supervisor_advisory". Other callers
 	// (e.g. proposal outbox) may omit it.
 	kind?: string;
+	// Optional structured context for predicate resolution. The hygiene
+	// emission path sets `meta.path` so the cron evaluator can
+	// construct the `path-absent` predicate without re-discovering the
+	// file. Other callers may omit it.
+	meta?: { path?: string; pattern?: string; [k: string]: unknown };
 };
 
 export type ReadPendingInjectionsOptions = {

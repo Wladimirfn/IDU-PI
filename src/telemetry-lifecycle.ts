@@ -36,6 +36,10 @@ export type LifecycleEvent = {
 	ts: string;
 	kind?: string;
 	reason?: string;
+	// Optional path context. Set by the hygiene emission path so the
+	// cron evaluator can construct the `path-absent` predicate from
+	// the lifecycle log without re-discovering the file.
+	path?: string;
 };
 
 /** Max events before rollover. */
@@ -51,6 +55,7 @@ export function recordLifecycleEvent(input: {
 	phase: LifecyclePhase;
 	kind?: string;
 	reason?: string;
+	path?: string;
 	now?: Date;
 }): LifecycleEvent {
 	if (!isValidPhase(input.phase)) {
@@ -62,6 +67,7 @@ export function recordLifecycleEvent(input: {
 		ts: (input.now ?? new Date()).toISOString(),
 		kind: input.kind,
 		reason: input.reason,
+		path: input.path,
 	};
 	appendLifecycleLog(input.stateRoot, event);
 	rolloverIfNeeded(input.stateRoot);
