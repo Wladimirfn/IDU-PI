@@ -74,7 +74,9 @@ export function requiredStringArray(
 	return field;
 }
 
-export function isObjectRecord(value: unknown): value is Record<string, unknown> {
+export function isObjectRecord(
+	value: unknown,
+): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -143,7 +145,9 @@ export function formatBirthStatus(env: BirthStatusEnvelope): string {
 	return lines.join("\n");
 }
 
-export function formatBirthExistingScan(env: BirthExistingScanEnvelope): string {
+export function formatBirthExistingScan(
+	env: BirthExistingScanEnvelope,
+): string {
 	const lines: string[] = [];
 	lines.push(`Birth Existing Scan — ${env.projectId}`);
 	const o = env.scan.observed;
@@ -164,7 +168,9 @@ export function formatBirthExistingScan(env: BirthExistingScanEnvelope): string 
 	return lines.join("\n");
 }
 
-export function formatBirthBibliotecario(env: BirthBibliotecarioEnvelope): string {
+export function formatBirthBibliotecario(
+	env: BirthBibliotecarioEnvelope,
+): string {
 	const d = env.discovery;
 	const lines: string[] = [];
 	lines.push(`Birth Bibliotecario Discovery — ${env.projectId}`);
@@ -223,7 +229,9 @@ export function formatBirthRepoPlan(env: BirthRepoPlanEnvelope): string {
 	return lines.join("\n");
 }
 
-export function formatBirthPrototype(env: BirthPrototypeMasterEnvelope): string {
+export function formatBirthPrototype(
+	env: BirthPrototypeMasterEnvelope,
+): string {
 	const p = env.prototype;
 	const lines: string[] = [];
 	lines.push(`Birth Master Prototype — ${env.projectId}`);

@@ -37,7 +37,10 @@ import {
 	formatProjectStatePaths,
 	resolveProjectStatePaths,
 } from "../../project-state.js";
-import { inspectProjectConnection, type ProjectConnectionReport } from "../../project-connection.js";
+import {
+	inspectProjectConnection,
+	type ProjectConnectionReport,
+} from "../../project-connection.js";
 import {
 	formatIduProjectDashboard,
 	type IduProjectDashboardReport,
@@ -45,11 +48,17 @@ import {
 import type { IduSupervisorHookResult } from "../../idu-supervisor-hooks.js";
 import { cliCommandFor } from "../dispatch-glue/index.js";
 import type { RuntimeContext } from "../dispatch-glue/index.js";
-import { readProjectAlignmentState, recordProjectAlignmentState } from "../../project-alignment-state.js";
+import {
+	readProjectAlignmentState,
+	recordProjectAlignmentState,
+} from "../../project-alignment-state.js";
 import { loadProjectBlueprint } from "../../project-blueprint.js";
 import { loadProjectFlows } from "../../project-flows.js";
 import { loadProjectCore } from "../../project-core.js";
-import { loadProjectConstitution, deriveConstitutionFromProjectCore } from "../../project-constitution.js";
+import {
+	loadProjectConstitution,
+	deriveConstitutionFromProjectCore,
+} from "../../project-constitution.js";
 import {
 	analyzeProjectPreflight,
 	type ProjectPreflightReport,
@@ -60,10 +69,7 @@ import {
 	type ProjectPostflightReport,
 } from "../../project-postflight.js";
 import { buildPostflightPhysicalGates } from "../../physical-gates.js";
-import {
-	runIduPrepare,
-	type IduPrepareResult,
-} from "../../idu-prepare.js";
+import { runIduPrepare, type IduPrepareResult } from "../../idu-prepare.js";
 import { initProjectConfig, inspectProjectMap } from "../../config-wizard.js";
 import {
 	scanProjectMap,
@@ -197,7 +203,9 @@ export function handleProjectCommand(rest: string[]): string {
 	);
 }
 
-export function inspectConnection(context: RuntimeContext): ProjectConnectionReport {
+export function inspectConnection(
+	context: RuntimeContext,
+): ProjectConnectionReport {
 	return inspectProjectConnection({
 		registry: context.registry,
 		defaultCwd: context.config.defaultCwd,
@@ -338,7 +346,9 @@ export function runPrepare(context: RuntimeContext): IduPrepareResult {
 	return result;
 }
 
-export function loadConfirmedProjectConstitution(projectPath: string | undefined) {
+export function loadConfirmedProjectConstitution(
+	projectPath: string | undefined,
+) {
 	if (!projectPath) return undefined;
 	const corePath = join(projectPath, "config", "project-core.json");
 	if (!existsSync(corePath)) return undefined;

@@ -4726,7 +4726,6 @@ async function runOrReuseMasterPlanDeepReview(
 	return runMasterPlanDeepReview(runtime, "simple");
 }
 
-
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	const normalizedArgs = normalizeCliArgs(args);

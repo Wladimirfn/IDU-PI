@@ -15,7 +15,10 @@
 
 import type { Automaticov1CycleResult } from "../../automaticov1-cycle.js";
 import { runAutomaticov1AdvisoryCycle } from "../../automaticov1-cycle.js";
-import { buildExecutionDirectorTick, type ExecutionDirectorTickInput } from "../../execution-director-tick.js";
+import {
+	buildExecutionDirectorTick,
+	type ExecutionDirectorTickInput,
+} from "../../execution-director-tick.js";
 import { inferTaskTemplateKind } from "../../task-templates.js";
 import { getIduSessionStatus } from "../../idu-session.js";
 import { buildIduExecutionReadiness } from "../../idu-execution-readiness.js";
@@ -23,10 +26,19 @@ import { readIduUsageEvents, buildIduUsageReport } from "../../usage-events.js";
 import { loadProjectConstitution } from "../../project-constitution.js";
 import { loadProjectCore } from "../../project-core.js";
 import { buildMasterPlanTaskTree } from "../../master-plan-task-tree.js";
-import { recommendExternalSources, type ExternalSourceDomain } from "../../external-source-registry.js";
+import {
+	recommendExternalSources,
+	type ExternalSourceDomain,
+} from "../../external-source-registry.js";
 import { buildExternalIntelligenceReport } from "../../external-intelligence.js";
-import { inspectEvents, formatInspectEventsReport } from "../../events-inspector.js";
-import { ProposalOutboxStore, type FlowBoundProposal } from "../../proposal-outbox.js";
+import {
+	inspectEvents,
+	formatInspectEventsReport,
+} from "../../events-inspector.js";
+import {
+	ProposalOutboxStore,
+	type FlowBoundProposal,
+} from "../../proposal-outbox.js";
 import { buildCliSelfMaintenanceReport } from "../_shared/index.js";
 import type { CliRuntime } from "../../cli.js";
 import type { CliResult } from "../dispatch-glue/index.js";
@@ -212,7 +224,9 @@ export async function runCliAutomaticov1Cycle(
 	});
 }
 
-export function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
+export function formatCliAutomaticov1Cycle(
+	result: Automaticov1CycleResult,
+): string {
 	const lines: string[] = [
 		"🤖 automaticov1 cycle",
 		`status: ${result.status}`,

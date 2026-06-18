@@ -7,10 +7,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import {
-	canonicalDirectory,
-	isAllowedCwd,
-} from "../../config.js";
+import { canonicalDirectory, isAllowedCwd } from "../../config.js";
 import {
 	applyPackageEnvDefaults,
 	resolveIduRegistryPath,

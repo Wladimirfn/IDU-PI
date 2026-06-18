@@ -9,7 +9,10 @@
 import type { Injection } from "../../injection-store.js";
 import { TRIGGER_DEFINITIONS } from "../../trigger-engine.js";
 
-export function formatPendingInjections(pending: Injection[], ack: boolean): string {
+export function formatPendingInjections(
+	pending: Injection[],
+	ack: boolean,
+): string {
 	const lines: string[] = [];
 	lines.push(`Pending Injections — count=${pending.length} ack=${ack}`);
 	if (pending.length > 0) {
