@@ -553,11 +553,32 @@ import {
 	type SupervisorSelfMaintenanceAdvisory,
 } from "./supervisor-self-maintenance-advisory.js";
 
-export type CliResult = {
-	exitCode: number;
-	stdout: string;
-	stderr: string;
-};
+// CliResult moved to src/cli/dispatch-glue/types.ts (PR 1 of Item 4, cluster Q).
+// The typecheck guard (npx tsc --noEmit) verifies all consumers still resolve.
+import type { CliResult } from "./cli/dispatch-glue/index.js";
+// Internal imports (Q cluster helpers, used throughout cli.ts).
+import {
+	ok,
+	fail,
+	helpText,
+	requiredText,
+	requiredArg,
+	requiredDecisionParts,
+	requiredRuleDecisionParts,
+	primaryIntentConcept,
+	cliCommandFor,
+	parseHygieneMigrateArgs,
+	formatHygieneMigrateResult,
+	formatHygieneSweepResult,
+} from "./cli/dispatch-glue/index.js";
+// Re-export the 4 Q functions for the public surface (snapshot test pins them).
+export {
+	parseHygieneMigrateArgs,
+	formatHygieneSweepResult,
+	formatHygieneMigrateResult,
+	helpText,
+} from "./cli/dispatch-glue/index.js";
+export type { CliResult } from "./cli/dispatch-glue/index.js";
 
 export type CliAutonomousAlertTickResult = {
 	report: AutonomousAlertEngineReport;
@@ -4652,191 +4673,6 @@ export function formatCliTaskResult(task: StructuredTask): string {
 	].join("\n");
 }
 
-function primaryIntentConcept(concepts: string[] | undefined): string {
-	return (
-		concepts?.find((concept) => concept !== "task" && concept !== "queue") ??
-		concepts?.[0] ??
-		"unknown"
-	);
-}
-
-function cliCommandFor(telegramCommand: string): string {
-	return telegramCommand
-		.replace(/^\/idu_prepare\b/u, "idu-pi idu-prepare")
-		.replace(
-			/^\/config init_project_config\b/u,
-			"Telegram: /config init_project_config",
-		)
-		.replace(/^\/addproject\b/u, "Telegram: /addproject")
-		.replace(/^\/useproject\b/u, "Telegram: /useproject");
-}
-
-function requiredText(parts: string[]): string {
-	const text = parts.join(" ").trim();
-	if (!text)
-		throw new Error("Falta solicitud. Usá comillas si tiene espacios.");
-	return text;
-}
-
-function requiredArg(parts: string[], index: number, name: string): string {
-	const value = parts[index]?.trim();
-	if (!value) throw new Error(`Falta ${name}.`);
-	return value;
-}
-
-function requiredDecisionParts(parts: string[]): {
-	pathOrLatest: string;
-	proposalIdOrAll: string;
-	reason?: string;
-} {
-	const [pathOrLatest = "", proposalIdOrAll = "", ...reasonParts] = parts;
-	if (!pathOrLatest.trim() || !proposalIdOrAll.trim()) {
-		throw new Error(
-			"Uso: supervisor-improvements-approve latest <proposalId|all> [motivo]",
-		);
-	}
-	const reason = reasonParts.join(" ").trim();
-	return {
-		pathOrLatest,
-		proposalIdOrAll,
-		...(reason ? { reason } : {}),
-	};
-}
-
-function requiredRuleDecisionParts(parts: string[]): {
-	ruleId: string;
-	reason?: string;
-} {
-	const [ruleId = "", ...reasonParts] = parts;
-	if (!ruleId.trim()) {
-		throw new Error("Uso: supervisor-learning-rules-disable <ruleId> [motivo]");
-	}
-	const reason = reasonParts.join(" ").trim();
-	return { ruleId, ...(reason ? { reason } : {}) };
-}
-
-function ok(stdout: string): CliResult {
-	return { exitCode: 0, stdout, stderr: "" };
-}
-
-/**
- * Parse `idu-hygiene-migrate` args. Supports `--repo-root <path>` (with
- * optional `=` form). Unknown flags throw so the CLI surfaces a clear
- * error rather than silently ignoring them.
- */
-export function parseHygieneMigrateArgs(rawArgs: readonly string[]): {
-	repoRoot?: string;
-} {
-	const args = [...rawArgs];
-	let repoRoot: string | undefined;
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (arg === "--repo-root") {
-			const value = args[i + 1];
-			if (typeof value !== "string" || value.length === 0) {
-				throw new Error("--repo-root requiere un valor");
-			}
-			repoRoot = value;
-			i++;
-			continue;
-		}
-		if (arg.startsWith("--repo-root=")) {
-			const value = arg.slice("--repo-root=".length);
-			if (value.length === 0) {
-				throw new Error("--repo-root requiere un valor");
-			}
-			repoRoot = value;
-			continue;
-		}
-		throw new Error(`Flag desconocido para idu-hygiene-migrate: ${arg}`);
-	}
-	return { ...(repoRoot !== undefined ? { repoRoot } : {}) };
-}
-
-/** Format a hygiene migration result for CLI output. */
-export function formatHygieneSweepResult(
-	repoRoot: string,
-	result: PlanSweepResult,
-): string {
-	const lines: string[] = [];
-	lines.push("idu-pi hygiene sweep");
-	lines.push("");
-	lines.push(`repoRoot: ${repoRoot}`);
-	lines.push(
-		`Sensor snapshot: ${result.sensorSnapshot.ts} (${result.sensorSnapshot.findings.length} findings)`,
-	);
-	lines.push(`Revalidated at: ${result.revalidatedAt}`);
-	lines.push("");
-	if (result.paths.length > 0) {
-		lines.push(`Paths to delete (${result.paths.length}):`);
-		for (let i = 0; i < result.paths.length; i++) {
-			const p = result.paths[i];
-			const finding = result.sensorSnapshot.findings.find((f) => f.path === p);
-			lines.push(`- ${p}${finding ? ` (matched: ${finding.pattern})` : ""}`);
-		}
-	} else {
-		lines.push("Paths to delete: (none)");
-	}
-	lines.push("");
-	if (result.commands.length > 0) {
-		lines.push(`Suggested commands (${result.commands.length}):`);
-		for (const cmd of result.commands) {
-			lines.push(cmd);
-		}
-	}
-	lines.push("");
-	if (result.skipped.length > 0) {
-		lines.push(`Skipped (${result.skipped.length}):`);
-		for (const entry of result.skipped) {
-			lines.push(`- ${entry.path} (${entry.reason})`);
-		}
-	} else {
-		lines.push("Skipped: (none)");
-	}
-	lines.push("");
-	lines.push("idu-pi does NOT delete. Run the suggested commands to clean up.");
-	return lines.join("\n");
-}
-
-export function formatHygieneMigrateResult(
-	repoRoot: string,
-	result: MigrationResult,
-): string {
-	const lines: string[] = [];
-	lines.push("idu-pi hygiene migrate");
-	lines.push("");
-	lines.push(`repoRoot: ${repoRoot}`);
-	lines.push(`moved: ${result.moved.length}`);
-	lines.push(`skipped: ${result.skipped.length}`);
-	lines.push(`errors: ${result.errors.length}`);
-	if (result.moved.length > 0) {
-		lines.push("");
-		lines.push("Files:");
-		for (const entry of result.moved) {
-			lines.push(`- ${entry.from} -> ${entry.to}`);
-		}
-	}
-	if (result.skipped.length > 0) {
-		lines.push("");
-		lines.push("Skipped:");
-		for (const entry of result.skipped) {
-			lines.push(`- ${entry.from}: ${entry.reason}`);
-		}
-	}
-	if (result.errors.length > 0) {
-		lines.push("");
-		lines.push("Errors:");
-		for (const entry of result.errors) {
-			lines.push(`- ${entry.from}: ${entry.message}`);
-		}
-	}
-	return lines.join("\n");
-}
-
-function fail(stderr: string): CliResult {
-	return { exitCode: 1, stdout: helpText(), stderr };
-}
-
 async function runMasterPlanDeepReview(
 	runtime: CliRuntime,
 	mode: "simple" | "advanced",
@@ -4890,98 +4726,6 @@ async function runOrReuseMasterPlanDeepReview(
 	return runMasterPlanDeepReview(runtime, "simple");
 }
 
-export function helpText(): string {
-	return [
-		"Uso: idu-pi <comando> [args]",
-		"",
-		"Comandos:",
-		"  idu-pi status",
-		"  idu-pi idu                 (Telegram: /idu)",
-		"  idu-pi idu start           (alias explícito de arranque autónomo)",
-		"  idu-pi idu-off             (Telegram: /idu_off)",
-		"  idu-pi idu-status          (Telegram: /idu_status)",
-		"  idu-pi idu-prepare         (Telegram: /idu_prepare)",
-		"  idu-pi idu-project-reset-state --yes  # borra estado aislado; no toca repo real",
-		"  idu-pi idu-master-plan-status",
-		"  idu-pi idu-master-plan-review latest",
-		"  idu-pi idu-master-plan-approve latest",
-		"  idu-pi idu-master-plan-reject latest [motivo]",
-		"  idu-pi idu-master-plan-redraft latest",
-		"  idu-pi idu-hygiene-migrate [--repo-root <path>]  # one-time migrate legacy config/ and .agents/skills/ to .idu/",
-		"  idu-pi idu-hygiene-sweep                            # propose `rm <path>` per vetted file (advisory only)",
-		"  idu-pi idu-ack-advisory <injectionId> [reason]       # explicit dismissal escape hatch",
-		"  idu-pi idu-source-status",
-		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
-		"  idu-pi idu-source-read <source-id>",
-		"  idu-pi idu-source-extract <source-id>",
-		"  idu-pi idu-source-report <source-id>",
-		'  idu-pi idu-source-research "consulta"',
-		"  idu-pi idu-source-digest <source-id>",
-		"  idu-pi idu-source-digest-status",
-		"  idu-pi idu-source-chunk-read <source-id> <chunk-id>",
-		'  idu-pi idu-source-recommend "tarea"',
-		"  idu-pi idu-source-required-actions",
-		"  idu-pi idu-source-skill-candidates-create all",
-		"  idu-pi idu-source-skill-candidates-review latest",
-		"  idu-pi idu-source-refresh",
-		"  idu-pi idu-onboard-project",
-		"  idu-pi idu-birth-general-spec --spec-file <general-spec.json>",
-		"  idu-pi idu-birth-general-spec-derive --ui-file src/App.tsx",
-		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
-		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
-		"  idu-pi idu-trigger-engine enable|disable|status      # opt-in persistente del trigger engine",
-		"  idu-pi idu-supervisor-improvements-review latest",
-		"  idu-pi idu-supervisor-improvements-create latest",
-		"  idu-pi idu-supervisor-improvements-status latest",
-		"  idu-pi idu-supervisor-improvements-approve latest <proposalId|all>",
-		"  idu-pi idu-supervisor-improvements-reject latest <proposalId|all> [motivo]",
-		"  idu-pi idu-supervisor-improvements-defer latest <proposalId|all> [motivo]",
-		"  idu-pi idu-supervisor-learning-rules-status",
-		"  idu-pi idu-supervisor-learning-rules-test",
-		"  idu-pi idu-supervisor-learning-rules-disable <ruleId> [motivo]",
-		"  idu-pi idu-supervisor-learning-rules-enable <ruleId> [motivo]",
-		"  idu-pi idu-supervisor-learning-rules-rollback latest",
-		"  idu-pi idu-skill-improvements-review latest",
-		"  idu-pi idu-skill-improvements-create latest",
-		"  idu-pi idu-skill-improvements-status latest",
-		"  idu-pi idu-skill-improvements-approve latest <proposalId|all>",
-		"  idu-pi idu-skill-improvements-reject latest <proposalId|all> [motivo]",
-		"  idu-pi idu-skill-improvements-defer latest <proposalId|all> [motivo]",
-		"  idu-pi idu-skill-drafts-create latest",
-		"  idu-pi idu-skill-drafts-review latest",
-		'  idu-pi idu-preflight "solicitud"',
-		'  idu-pi idu-advisory "solicitud"',
-		"  idu-pi idu-postflight",
-		"  idu-pi idu-usage-status",
-		"  idu-pi idu-lab-review-plan postflight",
-		"  idu-pi revisar",
-		"  idu-pi idu-agentlab-request-create postflight",
-		"  idu-pi idu-agentlab-request-create master-plan latest  # crea solicitud; no ejecuta labs",
-		"  idu-pi idu-agentlab-request-create skill-draft latest",
-		"  idu-pi idu-agentlab-request-review latest",
-		"  idu-pi idu-agentlab-review-run latest  # ejecuta AgentLab review-only en clone/sandbox",
-		"  idu-pi idu-agentlab-review-status latest",
-		"  idu-pi idu-agentlab-report-consolidate latest",
-		"  idu-pi idu-agentlab-report-consolidation-status latest",
-		"  idu-pi idu-semantic-audit-status (Telegram: /semantic_audit_status)",
-		"  idu-pi idu-semantic-audit-run    (Telegram: /semantic_audit_run)",
-		"  idu-pi idu-semantic-compact-draft (Telegram: /semantic_compact_draft)",
-		"  idu-pi idu-semantic-compact-review latest",
-		"  idu-pi idu-semantic-agent-tasks-review latest",
-		"  idu-pi idu-semantic-agent-tasks-create latest",
-		'  idu-pi idu-task [tipo] "detalle" (Telegram: /task bug <detalle>)',
-		"  idu-pi idu-queue-detail          (Telegram: /queue_detail)",
-		"  idu-pi idu-queue-clear-structured (Telegram: /queue_clear_structured)",
-		"  idu-pi idu-queue-approve <id>    (Telegram: /queue_approve <id>)",
-		"  idu-pi idu-queue-reject <id>     (Telegram: /queue_reject <id>)",
-		"  idu-pi idu-queue-complete <id> <evidencia>",
-		"",
-		"Notas:",
-		"- Usa AGENT_WORKSPACE_ROOT y el registro de proyectos del bridge.",
-		"- No ejecuta AgentLabs salvo el comando explícito idu-agentlab-review-run, que corre review-only en clone/sandbox.",
-		"- Las mejoras del supervisor son propuestas de revisión; no aplican reglas ni skills.",
-	].join("\n");
-}
 
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);

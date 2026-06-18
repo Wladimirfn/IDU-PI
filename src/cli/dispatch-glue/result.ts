@@ -1,0 +1,108 @@
+/**
+ * result.ts — CLI result construction helpers.
+ * - `ok` and `fail` are internal (re-exported by `index.ts`).
+ * - `helpText` is exported (part of the 20-function public surface).
+ */
+
+import type { CliResult } from "./types.js";
+
+export function ok(stdout: string): CliResult {
+	return { exitCode: 0, stdout, stderr: "" };
+}
+
+export function fail(stderr: string): CliResult {
+	return { exitCode: 1, stdout: helpText(), stderr };
+}
+
+export function helpText(): string {
+	return [
+		"Uso: idu-pi <comando> [args]",
+		"",
+		"Comandos:",
+		"  idu-pi status",
+		"  idu-pi idu                 (Telegram: /idu)",
+		"  idu-pi idu start           (alias explícito de arranque autónomo)",
+		"  idu-pi idu-off             (Telegram: /idu_off)",
+		"  idu-pi idu-status          (Telegram: /idu_status)",
+		"  idu-pi idu-prepare         (Telegram: /idu_prepare)",
+		"  idu-pi idu-project-reset-state --yes  # borra estado aislado; no toca repo real",
+		"  idu-pi idu-master-plan-status",
+		"  idu-pi idu-master-plan-review latest",
+		"  idu-pi idu-master-plan-approve latest",
+		"  idu-pi idu-master-plan-reject latest [motivo]",
+		"  idu-pi idu-master-plan-redraft latest",
+		"  idu-pi idu-hygiene-migrate [--repo-root <path>]  # one-time migrate legacy config/ and .agents/skills/ to .idu/",
+		"  idu-pi idu-hygiene-sweep                            # propose `rm <path>` per vetted file (advisory only)",
+		"  idu-pi idu-ack-advisory <injectionId> [reason]       # explicit dismissal escape hatch",
+		"  idu-pi idu-source-status",
+		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
+		"  idu-pi idu-source-read <source-id>",
+		"  idu-pi idu-source-extract <source-id>",
+		"  idu-pi idu-source-report <source-id>",
+		'  idu-pi idu-source-research "consulta"',
+		"  idu-pi idu-source-digest <source-id>",
+		"  idu-pi idu-source-digest-status",
+		"  idu-pi idu-source-chunk-read <source-id> <chunk-id>",
+		'  idu-pi idu-source-recommend "tarea"',
+		"  idu-pi idu-source-required-actions",
+		"  idu-pi idu-source-skill-candidates-create all",
+		"  idu-pi idu-source-skill-candidates-review latest",
+		"  idu-pi idu-source-refresh",
+		"  idu-pi idu-onboard-project",
+		"  idu-pi idu-birth-general-spec --spec-file <general-spec.json>",
+		"  idu-pi idu-birth-general-spec-derive --ui-file src/App.tsx",
+		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
+		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
+		"  idu-pi idu-trigger-engine enable|disable|status      # opt-in persistente del trigger engine",
+		"  idu-pi idu-supervisor-improvements-review latest",
+		"  idu-pi idu-supervisor-improvements-create latest",
+		"  idu-pi idu-supervisor-improvements-status latest",
+		"  idu-pi idu-supervisor-improvements-approve latest <proposalId|all>",
+		"  idu-pi idu-supervisor-improvements-reject latest <proposalId|all> [motivo]",
+		"  idu-pi idu-supervisor-improvements-defer latest <proposalId|all> [motivo]",
+		"  idu-pi idu-supervisor-learning-rules-status",
+		"  idu-pi idu-supervisor-learning-rules-test",
+		"  idu-pi idu-supervisor-learning-rules-disable <ruleId> [motivo]",
+		"  idu-pi idu-supervisor-learning-rules-enable <ruleId> [motivo]",
+		"  idu-pi idu-supervisor-learning-rules-rollback latest",
+		"  idu-pi idu-skill-improvements-review latest",
+		"  idu-pi idu-skill-improvements-create latest",
+		"  idu-pi idu-skill-improvements-status latest",
+		"  idu-pi idu-skill-improvements-approve latest <proposalId|all>",
+		"  idu-pi idu-skill-improvements-reject latest <proposalId|all> [motivo]",
+		"  idu-pi idu-skill-improvements-defer latest <proposalId|all> [motivo]",
+		"  idu-pi idu-skill-drafts-create latest",
+		"  idu-pi idu-skill-drafts-review latest",
+		'  idu-pi idu-preflight "solicitud"',
+		'  idu-pi idu-advisory "solicitud"',
+		"  idu-pi idu-postflight",
+		"  idu-pi idu-usage-status",
+		"  idu-pi idu-lab-review-plan postflight",
+		"  idu-pi revisar",
+		"  idu-pi idu-agentlab-request-create postflight",
+		"  idu-pi idu-agentlab-request-create master-plan latest  # crea solicitud; no ejecuta labs",
+		"  idu-pi idu-agentlab-request-create skill-draft latest",
+		"  idu-pi idu-agentlab-request-review latest",
+		"  idu-pi idu-agentlab-review-run latest  # ejecuta AgentLab review-only en clone/sandbox",
+		"  idu-pi idu-agentlab-review-status latest",
+		"  idu-pi idu-agentlab-report-consolidate latest",
+		"  idu-pi idu-agentlab-report-consolidation-status latest",
+		"  idu-pi idu-semantic-audit-status (Telegram: /semantic_audit_status)",
+		"  idu-pi idu-semantic-audit-run    (Telegram: /semantic_audit_run)",
+		"  idu-pi idu-semantic-compact-draft (Telegram: /semantic_compact_draft)",
+		"  idu-pi idu-semantic-compact-review latest",
+		"  idu-pi idu-semantic-agent-tasks-review latest",
+		"  idu-pi idu-semantic-agent-tasks-create latest",
+		'  idu-pi idu-task [tipo] "detalle" (Telegram: /task bug <detalle>)',
+		"  idu-pi idu-queue-detail          (Telegram: /queue_detail)",
+		"  idu-pi idu-queue-clear-structured (Telegram: /queue_clear_structured)",
+		"  idu-pi idu-queue-approve <id>    (Telegram: /queue_approve <id>)",
+		"  idu-pi idu-queue-reject <id>     (Telegram: /queue_reject <id>)",
+		"  idu-pi idu-queue-complete <id> <evidencia>",
+		"",
+		"Notas:",
+		"- Usa AGENT_WORKSPACE_ROOT y el registro de proyectos del bridge.",
+		"- No ejecuta AgentLabs salvo el comando explícito idu-agentlab-review-run, que corre review-only en clone/sandbox.",
+		"- Las mejoras del supervisor son propuestas de revisión; no aplican reglas ni skills.",
+	].join("\n");
+}
