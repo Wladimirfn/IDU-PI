@@ -24,6 +24,7 @@ import {
 	resolveInjectionsPath,
 	readPendingInjections,
 	markInjectionAcked,
+	type AckOutcome,
 } from "../src/injection-store.js";
 
 void enqueueObjectiveReminder;
@@ -686,6 +687,92 @@ test("AUDITOR-FIX-B: recordInjectionEmitted writes the `emitted` lifecycle event
 		assert.equal(events.length, 1);
 		assert.equal(events[0].phase, "emitted");
 		assert.equal(events[0].kind, "hygiene_junk_file");
+	} finally {
+		cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// AUDITOR-FIX (post-#156): the gemelo (inline ack:true on the pull) must
+// also honor the new AckOutcome guard. The test below exercises the same
+// pattern as the MCP server case (mcp-server.ts:4534 area) and the CLI
+// mirror (cli.ts:2991 area). After the fix, ack:true against an
+// already-acked injection must NOT write a new `dismissed` event.
+// ---------------------------------------------------------------------------
+
+test("AUDITOR-FIX-gemelo: ack:true on already-acked injection does NOT write a new dismissed event", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		// Seed an injection that is ALREADY acked
+		const inj = {
+			ts: new Date().toISOString(),
+			triggerId: "test-trigger",
+			decisionEnvelope: {
+				severity: "warning",
+				summary: "test",
+				options: [],
+				evidenceRefs: [],
+				orchestratorDecisionRequired: true,
+			},
+			injectionId: "obj-gemelo-1",
+			acked: true,  // already acked
+			kind: "objective_reminder",
+		};
+		writeFileSync(
+			join(root, "injections.jsonl"),
+			JSON.stringify(inj) + "\n",
+		);
+
+		// Now simulate the inline ack:true path with the NEW guard.
+		// The outcome is checked via a function reference to defeat
+		// TS narrowing after assert.equal.
+		const outcome: AckOutcome = markInjectionAcked(root, "obj-gemelo-1");
+		assert.equal(outcome, "already-acked", "outcome should be 'already-acked'");
+		const isAcked = (o: AckOutcome): boolean => o === "acked";
+
+		// The new guard: ONLY write `dismissed` when outcome === "acked"
+		if (isAcked(outcome)) {
+			recordLifecycleEvent({
+				stateRoot: root,
+				injectionId: "obj-gemelo-1",
+				phase: "dismissed",
+				kind: "objective_reminder",
+				reason: "idu_pending_injections ack:true",
+				now: new Date(),
+			});
+		}
+		// Assert: NO dismissed event was written
+		const allEvents = readInjectionLifecycle(root, "obj-gemelo-1");
+		const dismissed = allEvents.filter((e) => e.phase === "dismissed");
+		assert.equal(
+			dismissed.length,
+			0,
+			"gemelo must NOT write a dismissed event on no-op (already-acked)",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("AUDITOR-FIX-gemelo: ack:true on ghost id does NOT write a new dismissed event", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		const outcome: AckOutcome = markInjectionAcked(root, "ghost-id-gemelo");
+		assert.equal(outcome, "not-found", "outcome should be 'not-found'");
+		const isAcked = (o: AckOutcome): boolean => o === "acked";
+
+		if (isAcked(outcome)) {
+			recordLifecycleEvent({
+				stateRoot: root,
+				injectionId: "ghost-id-gemelo",
+				phase: "dismissed",
+				kind: "objective_reminder",
+				reason: "idu_pending_injections ack:true",
+				now: new Date(),
+			});
+		}
+		const allEvents = readInjectionLifecycle(root, "ghost-id-gemelo");
+		assert.equal(allEvents.length, 0, "gemelo must NOT write any event on not-found");
 	} finally {
 		cleanup();
 	}

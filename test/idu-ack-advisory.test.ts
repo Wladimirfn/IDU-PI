@@ -1,13 +1,20 @@
 /**
  * idu-ack-advisory.test.ts — tests for the explicit dismissal escape hatch.
  *
- * Forward obligation #2 from PR #153 audit: "hoy el dismissal explícito va
- * por ack:true en el pull; el tool dedicado de dismissal sigue pendiente."
+ * Forward obligation #2 from PR #153 audit. Post-#156-audit-fix:
+ * the contract is now that ackAdvisory only writes a `dismissed` lifecycle
+ * event when markInjectionAcked reports a real transition ("acked"). The
+ * other two outcomes ("already-acked", "not-found") are no-ops and must
+ * NOT generate lifecycle noise. This is the auditor-required guard that
+ * fixes the phantom-dismissal bug.
  *
  * Contract:
- *   - ackAdvisory({ stateRoot, injectionId, reason? }) calls markInjectionAcked
- *     AND writes a `dismissed` lifecycle event.
- *   - The result echoes the injectionId, acked:true, phase:"dismissed", reason.
+ *   - markInjectionAcked → "acked": real transition, write `dismissed`, return
+ *     { acked: true, status: "acked" }.
+ *   - markInjectionAcked → "already-acked": no-op, NO event, return
+ *     { acked: false, status: "already-acked" }.
+ *   - markInjectionAcked → "not-found": no-op, NO event, return
+ *     { acked: false, status: "not-found" }.
  */
 
 import assert from "node:assert/strict";
@@ -29,7 +36,7 @@ function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
 	};
 }
 
-function seedInjection(stateRoot: string, injectionId: string): void {
+function seedInjection(stateRoot: string, injectionId: string, acked = false): void {
 	// The injection-store writes to <stateRoot>/injections.jsonl with shape:
 	//   { ts, triggerId, decisionEnvelope, injectionId, acked: false }
 	// We write a minimal valid line so markInjectionAcked can find it.
@@ -44,7 +51,7 @@ function seedInjection(stateRoot: string, injectionId: string): void {
 			orchestratorDecisionRequired: true,
 		},
 		injectionId,
-		acked: false,
+		acked,
 		kind: "hygiene_junk_file",
 	});
 	writeFileSync(join(stateRoot, "injections.jsonl"), line + "\n");
@@ -64,8 +71,13 @@ function readTelemetry(stateRoot: string): Array<{ phase: string; injectionId: s
 	return lines.map((line) => JSON.parse(line));
 }
 
+function countDismissed(stateRoot: string, injectionId: string): number {
+	const events = readTelemetry(stateRoot);
+	return events.filter((e) => e.phase === "dismissed" && e.injectionId === injectionId).length;
+}
+
 // ---------------------------------------------------------------------------
-// Tests
+// Tests — the "acked" path (real transition)
 // ---------------------------------------------------------------------------
 
 test("ackAdvisory: marks the injection as acked in injections.jsonl", () => {
@@ -83,14 +95,13 @@ test("ackAdvisory: marks the injection as acked in injections.jsonl", () => {
 	}
 });
 
-test("ackAdvisory: writes a `dismissed` lifecycle event", () => {
+test("ackAdvisory: writes a `dismissed` lifecycle event on real transition", () => {
 	const { stateRoot, cleanup } = makeStateRoot();
 	try {
 		const id = "obj-test-2";
 		seedInjection(stateRoot, id);
 		ackAdvisory({ stateRoot, injectionId: id, reason: "manual review done" });
 		const events = readTelemetry(stateRoot);
-		assert.ok(events.length >= 1, "telemetry should have at least 1 event");
 		const dismissed = events.find((e) => e.phase === "dismissed" && e.injectionId === id);
 		assert.ok(dismissed, "should have a dismissed event for the injection");
 		assert.equal(dismissed.reason, "manual review done");
@@ -99,7 +110,7 @@ test("ackAdvisory: writes a `dismissed` lifecycle event", () => {
 	}
 });
 
-test("ackAdvisory: returns the result with injectionId, acked:true, phase:'dismissed'", () => {
+test("ackAdvisory: returns acked:true, status:'acked' on real transition", () => {
 	const { stateRoot, cleanup } = makeStateRoot();
 	try {
 		const id = "obj-test-3";
@@ -108,6 +119,7 @@ test("ackAdvisory: returns the result with injectionId, acked:true, phase:'dismi
 		assert.equal(result.injectionId, id);
 		assert.equal(result.acked, true);
 		assert.equal(result.phase, "dismissed");
+		assert.equal((result as { status: string }).status, "acked");
 		assert.ok(result.reason);
 		assert.ok(result.ts);
 	} finally {
@@ -127,27 +139,59 @@ test("ackAdvisory: default reason is 'idu_ack_advisory' (the tool name)", () => 
 	}
 });
 
-test("ackAdvisory: idempotent — calling twice is safe (second call is a no-op for the file write)", () => {
+// ---------------------------------------------------------------------------
+// Tests — the "already-acked" path (idempotent, no new event)
+// ---------------------------------------------------------------------------
+
+test("ackAdvisory: idempotent — second call on already-acked returns acked:false, status:'already-acked'", () => {
 	const { stateRoot, cleanup } = makeStateRoot();
 	try {
 		const id = "obj-test-5";
 		seedInjection(stateRoot, id);
+		// First call: real transition
 		ackAdvisory({ stateRoot, injectionId: id });
-		// The second call still writes a `dismissed` event (the audit log
-		// captures the intent). The injection-store keeps the line as
-		// acked:true (it skips already-acked lines).
-		ackAdvisory({ stateRoot, injectionId: id, reason: "second call" });
-		const injections = readInjections(stateRoot);
-		assert.equal(injections[0].acked, true);
-		const events = readTelemetry(stateRoot);
-		const dismissed = events.filter((e) => e.phase === "dismissed" && e.injectionId === id);
-		assert.equal(dismissed.length, 2, "two dismissed events recorded");
+		const firstDismissedCount = countDismissed(stateRoot, id);
+		assert.equal(firstDismissedCount, 1, "first call wrote exactly 1 dismissed event");
+		// Second call: should be a no-op
+		const result = ackAdvisory({ stateRoot, injectionId: id, reason: "second call" });
+		assert.equal(result.acked, false, "second call should report acked:false");
+		assert.equal(
+			(result as { status: string }).status,
+			"already-acked",
+			"second call should report status:'already-acked'",
+		);
+		// CRITICAL: NO new event written on no-op
+		const secondDismissedCount = countDismissed(stateRoot, id);
+		assert.equal(
+			secondDismissedCount,
+			1,
+			"no-op must NOT write a new dismissed event (phantom dismissal guard)",
+		);
 	} finally {
 		cleanup();
 	}
 });
 
-test("ackAdvisory: does NOT crash when the injectionId doesn't exist", () => {
+test("ackAdvisory: line seeded as already-acked returns acked:false, status:'already-acked'", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		const id = "obj-already-acked";
+		seedInjection(stateRoot, id, true);  // already-acked=true
+		const result = ackAdvisory({ stateRoot, injectionId: id });
+		assert.equal(result.acked, false);
+		assert.equal((result as { status: string }).status, "already-acked");
+		// No event written
+		assert.equal(countDismissed(stateRoot, id), 0);
+	} finally {
+		cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Tests — the "not-found" path (ghost id, no event)
+// ---------------------------------------------------------------------------
+
+test("ackAdvisory: not-found (ghost id) returns acked:false, status:'not-found', 0 events in telemetry", () => {
 	const { stateRoot, cleanup } = makeStateRoot();
 	try {
 		// No injection seeded
@@ -156,10 +200,22 @@ test("ackAdvisory: does NOT crash when the injectionId doesn't exist", () => {
 			injectionId: "ghost-id",
 			reason: "test",
 		});
-		// markInjectionAcked is a no-op when not found, but we still write
-		// the lifecycle event. The result reflects the operation.
 		assert.equal(result.injectionId, "ghost-id");
-		assert.equal(result.acked, true);
+		assert.equal(result.acked, false, "ghost id must report acked:false");
+		assert.equal(
+			(result as { status: string }).status,
+			"not-found",
+			"ghost id must report status:'not-found'",
+		);
+		// CRITICAL: NO event written on ghost id
+		assert.equal(
+			countDismissed(stateRoot, "ghost-id"),
+			0,
+			"ghost id must NOT write a dismissed event (phantom dismissal guard)",
+		);
+		// The telemetry file should be empty (no events at all)
+		const allEvents = readTelemetry(stateRoot);
+		assert.equal(allEvents.length, 0, "ghost id must NOT write any telemetry event");
 	} finally {
 		cleanup();
 	}

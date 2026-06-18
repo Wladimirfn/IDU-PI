@@ -4530,16 +4530,24 @@ async function dispatchTool(
 					});
 					if (ack) {
 						// ack:true on the pull = deliberate dismissal (escape hatch).
-						// Mark acked AND write `dismissed` lifecycle event.
-						markInjectionAcked(stateRoot, inj.injectionId);
-						recordLifecycleEvent({
-							stateRoot,
-							injectionId: inj.injectionId,
-							phase: "dismissed",
-							kind: inj.kind,
-							reason: "idu_pending_injections ack:true",
-							now: new Date(),
-						});
+						// Same guard as idu_ack_advisory: only write the
+						// `dismissed` event on a real transition. The
+						// prior implementation always wrote the event
+						// regardless of markInjectionAcked's outcome,
+						// which produced phantom dismissals on no-op
+						// calls (already-acked, not-found). The #156
+						// audit caught this. Same fix here.
+						const outcome = markInjectionAcked(stateRoot, inj.injectionId);
+						if (outcome === "acked") {
+							recordLifecycleEvent({
+								stateRoot,
+								injectionId: inj.injectionId,
+								phase: "dismissed",
+								kind: inj.kind,
+								reason: "idu_pending_injections ack:true",
+								now: new Date(),
+							});
+						}
 					}
 				}
 			}

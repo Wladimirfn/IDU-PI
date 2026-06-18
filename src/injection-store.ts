@@ -87,28 +87,47 @@ export function readPendingInjections(
 	return out;
 }
 
+/**
+ * Outcome of a markInjectionAcked call. Distinguishes the three states:
+ *   - "acked"         : a real transition just happened (acked: false → true)
+ *   - "already-acked" : the line existed but was already acked:true (no-op)
+ *   - "not-found"     : no line with this injectionId exists
+ *
+ * Callers (idu_ack_advisory, the inline ack:true on idu_pending_injections)
+ * use this to decide whether to write the `dismissed` lifecycle event:
+ * only `acked` is a real transition; the other two are no-ops and should
+ * NOT generate lifecycle noise.
+ */
+export type AckOutcome = "acked" | "not-found" | "already-acked";
+
 export function markInjectionAcked(
 	stateRoot: string,
 	injectionId: string,
-): void {
+): AckOutcome {
 	const filePath = resolveInjectionsPath(stateRoot);
-	if (!existsSync(filePath)) return;
+	if (!existsSync(filePath)) return "not-found";
 	const raw = readFileSync(filePath, "utf8");
-	if (!raw.trim()) return;
+	if (!raw.trim()) return "not-found";
 	const lines = raw.split("\n").filter((line) => line.length > 0);
 	let target: Injection | null = null;
+	let alreadyAcked: boolean = false;
 	for (const line of lines) {
 		try {
 			const parsed = JSON.parse(line) as Injection;
-			if (parsed.injectionId === injectionId && !parsed.acked) {
-				target = parsed;
+			if (parsed.injectionId === injectionId) {
+				if (parsed.acked) {
+					alreadyAcked = true;
+				} else {
+					target = parsed;
+				}
 				break;
 			}
 		} catch {
 			// skip malformed line
 		}
 	}
-	if (!target) return;
+	if (alreadyAcked) return "already-acked";
+	if (!target) return "not-found";
 	const injection = target;
 	// Record the decision FIRST so a ledger/DB failure is not
 	// swallowed silently. If recordDecision throws, the injection
@@ -136,4 +155,5 @@ export function markInjectionAcked(
 		}
 	});
 	writeFileSync(filePath, `${updated.join("\n")}\n`, "utf8");
+	return "acked";
 }

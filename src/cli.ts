@@ -2987,16 +2987,26 @@ export async function runCliCommand(
 						});
 						if (ack) {
 							// ack:true on the pull = deliberate dismissal (escape
-							// hatch). Mark acked AND write `dismissed` event.
-							markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
-							recordLifecycleEvent({
-								stateRoot: activeRuntime.workspaceRoot,
-								injectionId: inj.injectionId,
-								phase: "dismissed",
-								kind: inj.kind,
-								reason: "idu-pending-injections ack:true",
-								now: new Date(),
-							});
+							// hatch). Same guard as idu_ack_advisory: only
+							// write the `dismissed` event on a real
+							// transition. The #156 audit caught the
+							// phantom-dismissal bug; the MCP server
+							// twin and this CLI mirror were both fixed
+							// in the same commit.
+							const outcome = markInjectionAcked(
+								activeRuntime.workspaceRoot,
+								inj.injectionId,
+							);
+							if (outcome === "acked") {
+								recordLifecycleEvent({
+									stateRoot: activeRuntime.workspaceRoot,
+									injectionId: inj.injectionId,
+									phase: "dismissed",
+									kind: inj.kind,
+									reason: "idu-pending-injections ack:true",
+									now: new Date(),
+								});
+							}
 						}
 					}
 				}
