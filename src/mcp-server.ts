@@ -49,6 +49,7 @@ import {
 } from "./hygiene-migrate.js";
 import { planSweep, type PlanSweepResult } from "./sweep-command.js";
 import { runHygieneSensor } from "./hygiene-sensor.js";
+import { ackAdvisory, type AckAdvisoryResult } from "./idu-ack-advisory.js";
 import {
 	projectEnroll,
 	projectInstallStatus,
@@ -247,6 +248,7 @@ export type IduMcpToolName =
 	| "idu_outbox_prune"
 	| "idu_hygiene_migrate"
 	| "idu_hygiene_sweep"
+	| "idu_ack_advisory"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
@@ -811,6 +813,14 @@ const TOOLS: IduMcpToolDefinition[] = [
 		"Re-ejecuta el sensor de higiene y propone `rm <path>` por archivo exacto. ADVISORY ONLY — idu-pi NO borra; el orquestador corre los comandos. Paths dentro de <stateRoot>/**, <repo>/.git/**, <repo>/.idu/**, <repo>/node_modules/** son SKIP. Modo `auto` es interno y rechazado.",
 		{
 			projectPath: optionalString("Ruta opcional del proyecto a escanear."),
+		},
+	),
+	tool(
+		"idu_ack_advisory",
+		"Descarta explícitamente un advisory pendiente (escape hatch). Marca el injection como acked y emite el evento de lifecycle `dismissed`. Usar solo para dismissal deliberado; la decisión queda en el audit log.",
+		{
+			injectionId: optionalString("ID del injection a descartar."),
+			reason: optionalString("Razón opcional del dismissal (aparece en el audit log)."),
 		},
 	),
 	tool(
@@ -4520,16 +4530,24 @@ async function dispatchTool(
 					});
 					if (ack) {
 						// ack:true on the pull = deliberate dismissal (escape hatch).
-						// Mark acked AND write `dismissed` lifecycle event.
-						markInjectionAcked(stateRoot, inj.injectionId);
-						recordLifecycleEvent({
-							stateRoot,
-							injectionId: inj.injectionId,
-							phase: "dismissed",
-							kind: inj.kind,
-							reason: "idu_pending_injections ack:true",
-							now: new Date(),
-						});
+						// Same guard as idu_ack_advisory: only write the
+						// `dismissed` event on a real transition. The
+						// prior implementation always wrote the event
+						// regardless of markInjectionAcked's outcome,
+						// which produced phantom dismissals on no-op
+						// calls (already-acked, not-found). The #156
+						// audit caught this. Same fix here.
+						const outcome = markInjectionAcked(stateRoot, inj.injectionId);
+						if (outcome === "acked") {
+							recordLifecycleEvent({
+								stateRoot,
+								injectionId: inj.injectionId,
+								phase: "dismissed",
+								kind: inj.kind,
+								reason: "idu_pending_injections ack:true",
+								now: new Date(),
+							});
+						}
 					}
 				}
 			}
@@ -4681,6 +4699,45 @@ async function dispatchTool(
 					"ADVISORY ONLY. idu-pi does NOT delete. The orchestrator runs the suggested commands.",
 					"NEVER `find -delete`. Each command is `rm <exact-path>` from the sensor's findings[].path.",
 					"Re-validated at sweep time: territoriality, pattern, existence, symlink target.",
+				],
+			});
+		}
+		case "idu_ack_advisory": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as { injectionId?: string; reason?: string };
+			if (!params.injectionId) {
+				return envelope({
+					stateRoot,
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "idu_ack_advisory requires --injectionId",
+					data: {},
+					safeNotes: [
+						...resolution.safeNotes,
+						"No ack executed: missing injectionId.",
+					],
+					errors: ["injectionId is required"],
+				});
+			}
+			const result: AckAdvisoryResult = ackAdvisory({
+				stateRoot,
+				injectionId: params.injectionId,
+				reason: params.reason,
+			});
+			return envelope({
+				stateRoot,
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: runtime.projectPath,
+				summary: `acked ${result.injectionId} (${result.reason})`,
+				data: { ack: result },
+				safeNotes: [
+					...resolution.safeNotes,
+					"Explicit dismissal escape hatch. Audit log written.",
+					"This is the dedicated tool for deliberate dismissal; the inline `ack:true` flag on idu_pending_injections still works for ad-hoc use.",
 				],
 			});
 		}

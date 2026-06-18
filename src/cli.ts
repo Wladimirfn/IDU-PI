@@ -144,6 +144,7 @@ import {
 } from "./hygiene-migrate.js";
 import { planSweep, type PlanSweepResult } from "./sweep-command.js";
 import { runHygieneSensor } from "./hygiene-sensor.js";
+import { ackAdvisory, type AckAdvisoryResult } from "./idu-ack-advisory.js";
 import {
 	runBibliotecarioInit,
 	formatBibliotecarioInit,
@@ -2100,6 +2101,20 @@ export async function runCliCommand(
 					stderr: "",
 				};
 			}
+			case "idu-ack-advisory":
+			case "ack-advisory": {
+				const injectionId = rest[0];
+				if (!injectionId) {
+					return fail("Usage: idu-ack-advisory <injectionId> [reason...]");
+				}
+				const reason = rest.slice(1).join(" ").trim() || undefined;
+				const result: AckAdvisoryResult = ackAdvisory({
+					stateRoot: activeRuntime.workspaceRoot,
+					injectionId,
+					reason,
+				});
+				return ok(`acked ${result.injectionId} (${result.reason})`);
+			}
 			case "idu-hygiene-sweep":
 			case "hygiene-sweep": {
 				const repoRoot = activeRuntime.projectPath;
@@ -2972,16 +2987,26 @@ export async function runCliCommand(
 						});
 						if (ack) {
 							// ack:true on the pull = deliberate dismissal (escape
-							// hatch). Mark acked AND write `dismissed` event.
-							markInjectionAcked(activeRuntime.workspaceRoot, inj.injectionId);
-							recordLifecycleEvent({
-								stateRoot: activeRuntime.workspaceRoot,
-								injectionId: inj.injectionId,
-								phase: "dismissed",
-								kind: inj.kind,
-								reason: "idu-pending-injections ack:true",
-								now: new Date(),
-							});
+							// hatch). Same guard as idu_ack_advisory: only
+							// write the `dismissed` event on a real
+							// transition. The #156 audit caught the
+							// phantom-dismissal bug; the MCP server
+							// twin and this CLI mirror were both fixed
+							// in the same commit.
+							const outcome = markInjectionAcked(
+								activeRuntime.workspaceRoot,
+								inj.injectionId,
+							);
+							if (outcome === "acked") {
+								recordLifecycleEvent({
+									stateRoot: activeRuntime.workspaceRoot,
+									injectionId: inj.injectionId,
+									phase: "dismissed",
+									kind: inj.kind,
+									reason: "idu-pending-injections ack:true",
+									now: new Date(),
+								});
+							}
 						}
 					}
 				}
@@ -4875,6 +4900,7 @@ export function helpText(): string {
 		"  idu-pi idu-master-plan-redraft latest",
 		"  idu-pi idu-hygiene-migrate [--repo-root <path>]  # one-time migrate legacy config/ and .agents/skills/ to .idu/",
 		"  idu-pi idu-hygiene-sweep                            # propose `rm <path>` per vetted file (advisory only)",
+		"  idu-pi idu-ack-advisory <injectionId> [reason]       # explicit dismissal escape hatch",
 		"  idu-pi idu-source-status",
 		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
 		"  idu-pi idu-source-read <source-id>",
