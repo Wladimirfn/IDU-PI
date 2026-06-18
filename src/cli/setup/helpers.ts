@@ -51,11 +51,11 @@ import {
 } from "../../idu-project-dashboard.js";
 import type { IduSupervisorHookResult } from "../../idu-supervisor-hooks.js";
 import { cliCommandFor } from "../dispatch-glue/index.js";
+import { initProjectConfig, inspectProjectMap } from "../../config-wizard.js";
 import {
-	initProjectConfig,
-	inspectProjectMap,
-} from "../../config-wizard.js";
-import { readProjectAlignmentState, recordProjectAlignmentState } from "../../project-alignment-state.js";
+	readProjectAlignmentState,
+	recordProjectAlignmentState,
+} from "../../project-alignment-state.js";
 import { loadProjectBlueprint } from "../../project-blueprint.js";
 import { loadProjectFlows } from "../../project-flows.js";
 import { loadProjectCore } from "../../project-core.js";
@@ -73,10 +73,7 @@ import {
 	type ProjectPostflightReport,
 } from "../../project-postflight.js";
 import { buildPostflightPhysicalGates } from "../../physical-gates.js";
-import {
-	runIduPrepare,
-	type IduPrepareResult,
-} from "../../idu-prepare.js";
+import { runIduPrepare, type IduPrepareResult } from "../../idu-prepare.js";
 import {
 	scanProjectMap,
 	suggestProjectFlowsFromScan,

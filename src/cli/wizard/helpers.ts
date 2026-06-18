@@ -7,10 +7,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import {
-	canonicalDirectory,
-	isAllowedCwd,
-} from "../../config.js";
+import { canonicalDirectory, isAllowedCwd } from "../../config.js";
 import {
 	applyPackageEnvDefaults,
 	resolveIduRegistryPath,
@@ -60,7 +57,7 @@ export function runWizardActivateSupervisor(): string {
 		});
 		activateIduSession(project.id);
 		return [
-			"Guardrails automáticas activados para el proyecto activo.",
+			"Guardrails automáticos activados para el proyecto activo.",
 			"No ejecuté bootstrap, scans, prepare ni AgentLabs desde el wizard.",
 			`projectId: ${project.id}`,
 			`projectPath: ${project.path}`,
