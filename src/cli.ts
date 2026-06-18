@@ -579,6 +579,43 @@ export {
 	helpText,
 } from "./cli/dispatch-glue/index.js";
 export type { CliResult } from "./cli/dispatch-glue/index.js";
+// PR 2 (Item 4): clusters C (master-plan) + D (birth) imports.
+import {
+	loadAutomaticov1Plan,
+	loadCliExecutionReadiness,
+	safeProjectCoreStatus,
+	safeProjectConstitutionStatus,
+	runCliExecutionDirectorTick,
+	formatExecutionDirectorTick,
+	formatProposalOutbox,
+	formatProposalDetail,
+	runCliAutomaticov1Cycle,
+	formatCliAutomaticov1Cycle,
+	handleCliEventsInspectCommand,
+} from "./cli/master-plan/index.js";
+import type { ExecutionDirectorCliResult } from "./cli/master-plan/index.js";
+import {
+	parseBirthGeneralSpecCliInput,
+	parseGeneralSpecSections,
+	requiredStringArray,
+	isObjectRecord,
+	formatBirthGeneralSpec,
+	parseUiFiles,
+	formatBirthGeneralSpecDerivation,
+	formatBirthStatus,
+	formatBirthExistingScan,
+	formatBirthBibliotecario,
+	formatBirthValidate,
+	formatBirthRepoPlan,
+	formatBirthPrototype,
+} from "./cli/birth/index.js";
+// buildCliSelfMaintenanceReport moved to _shared/ (cross-cluster dep,
+// used by both C and B). Re-exported below to preserve the 20-function surface.
+import { buildCliSelfMaintenanceReport } from "./cli/_shared/index.js";
+// Re-export ExecutionDirectorCliResult (PR 2: type moved to master-plan/types.ts).
+export type { ExecutionDirectorCliResult } from "./cli/master-plan/index.js";
+// Re-export buildCliSelfMaintenanceReport (PR 2: moved to _shared/).
+export { buildCliSelfMaintenanceReport } from "./cli/_shared/index.js";
 
 export type CliAutonomousAlertTickResult = {
 	report: AutonomousAlertEngineReport;
@@ -589,10 +626,6 @@ export type CliAutonomousAlertTickResult = {
 export type CliAutonomousAlertControlResult = {
 	action: string;
 	state: AutonomousAlertEngineState;
-};
-
-export type ExecutionDirectorCliResult = ExecutionDirectorTickResult & {
-	savedProposals: FlowBoundProposal[];
 };
 
 export type CliRuntime = {
@@ -3263,265 +3296,6 @@ export async function runCliCommand(
 	}
 }
 
-function loadAutomaticov1Plan(runtime: CliRuntime) {
-	if (!runtime.masterPlanReview) return undefined;
-	try {
-		return runtime.masterPlanReview("latest").plan;
-	} catch {
-		return undefined;
-	}
-}
-
-function loadCliExecutionReadiness(runtime: CliRuntime) {
-	const taskTree = buildMasterPlanTaskTree(loadAutomaticov1Plan(runtime));
-	const usageReport = buildIduUsageReport(
-		readIduUsageEvents(runtime.workspaceRoot, 500),
-	);
-	return buildIduExecutionReadiness({
-		coreStatus: safeProjectCoreStatus(runtime.projectPath),
-		constitutionStatus: safeProjectConstitutionStatus(runtime.projectPath),
-		taskTreeStatus: taskTree.status,
-		mcpContextPackStaleness: usageReport.mcpContextPackStaleness,
-	});
-}
-
-function safeProjectCoreStatus(projectPath: string) {
-	try {
-		return loadProjectCore(projectPath).status;
-	} catch {
-		return "unknown" as const;
-	}
-}
-
-function safeProjectConstitutionStatus(projectPath: string) {
-	try {
-		return loadProjectConstitution(projectPath).status;
-	} catch {
-		return "unknown" as const;
-	}
-}
-
-function runCliExecutionDirectorTick(
-	input: ExecutionDirectorTickInput & { stateRoot: string },
-): ExecutionDirectorCliResult {
-	const tick = buildExecutionDirectorTick(input);
-	const store = new ProposalOutboxStore({ stateRoot: input.stateRoot });
-	const savedProposals = tick.proposals.map((proposal) =>
-		store.createProposal(proposal),
-	);
-	return { ...tick, savedProposals };
-}
-
-function formatExecutionDirectorTick(
-	result: ExecutionDirectorCliResult,
-): string {
-	return [
-		"Execution Director Tick",
-		`status: ${result.status}`,
-		`authority: ${result.authority}`,
-		`proposals: ${result.proposals.length}`,
-		`savedProposals: ${result.savedProposals.length}`,
-		"",
-		"Safe notes:",
-		...result.safeNotes.map((note) => `- ${note}`),
-	].join("\n");
-}
-
-function formatProposalOutbox(proposals: FlowBoundProposal[]): string {
-	if (!proposals.length) return "Proposal outbox is empty.";
-	return [
-		`Proposal outbox (${proposals.length})`,
-		...proposals.map(
-			(proposal) =>
-				`- ${proposal.id}: ${proposal.title} [${proposal.status}] hito=${proposal.hitoId} flow=${proposal.flowId}`,
-		),
-	].join("\n");
-}
-
-function formatProposalDetail(
-	proposal: FlowBoundProposal | undefined,
-	id: string,
-): string {
-	if (!proposal) return `Proposal not found: ${id}`;
-	return JSON.stringify(proposal, null, 2);
-}
-
-async function runCliAutomaticov1Cycle(
-	runtime: CliRuntime,
-	parts: string[],
-): Promise<Automaticov1CycleResult> {
-	const command = parts[0] === "cycle" ? parts.slice(1) : parts;
-	const allowTaskCreation = command.includes("--allow-task-creation");
-	const allowExternalFetch = command.includes("--allow-external-fetch");
-	const allowSkillDraftProposal = command.includes("--allow-skill-proposals");
-	let selfMaintenance:
-		| ReturnType<typeof buildCliSelfMaintenanceReport>
-		| undefined;
-	const loadSelfMaintenance = () => {
-		selfMaintenance ??= buildCliSelfMaintenanceReport(
-			runtime,
-			runtime.workspaceRoot,
-		);
-		return selfMaintenance;
-	};
-	const request =
-		"automaticov1 cyclic autonomous loop: Bibliotecario evidence/news/docs intelligence, supervisor participation, skill proposals, project structure optimization, failure detection and repair boundaries.";
-	return runAutomaticov1AdvisoryCycle({
-		projectId: runtime.projectId,
-		projectPath: runtime.projectPath,
-		stateRoot: runtime.workspaceRoot,
-		iduActive: getIduSessionStatus(runtime.projectId).active,
-		allowTaskCreation,
-		allowExternalFetch,
-		allowSkillDraftProposal,
-		usageEvents: readIduUsageEvents(runtime.workspaceRoot, 500),
-		loadPlan: () => {
-			if (!runtime.masterPlanReview) {
-				return {
-					status: "draft",
-					inferredObjective:
-						"Master Plan no disponible; automaticov1 bloqueado para evitar autonomía sin objetivo.",
-					executiveSummary:
-						"Master Plan no disponible; no se ejecuta ciclo autónomo real.",
-					criticalRisks: ["Master Plan no disponible"],
-				};
-			}
-			try {
-				return runtime.masterPlanReview("latest").plan as unknown as Record<
-					string,
-					unknown
-				>;
-			} catch (error) {
-				return {
-					status: "draft",
-					inferredObjective:
-						"Master Plan no disponible o ilegible; automaticov1 bloqueado para evitar drift.",
-					executiveSummary: String(
-						error instanceof Error ? error.message : error,
-					),
-					criticalRisks: ["Master Plan no disponible"],
-				};
-			}
-		},
-		loadTasks: () => loadSelfMaintenance().tasks,
-		loadTaskTree: () => buildMasterPlanTaskTree(loadAutomaticov1Plan(runtime)),
-		loadExecutionReadiness: () => loadCliExecutionReadiness(runtime),
-		loadSelfMaintenanceSignals: () => loadSelfMaintenance().report.signals,
-		createTask: (draft) => {
-			const task = runtime.createTask(
-				inferTaskTemplateKind(draft.text),
-				draft.text,
-			);
-			return { id: task.id };
-		},
-		buildSupervisorCronPlan: () => runtime.supervisorCronPlan(),
-		buildBibliotecarioSnapshot: () => ({
-			local: runtime.sourceRecommend(request),
-			requiredActions: runtime.sourceRequiredActions(),
-			externalRegistry: recommendExternalSources({
-				projectId: runtime.projectId,
-				request,
-				domains: [
-					"programming_structure",
-					"security",
-					"academic",
-					"standards",
-				] as ExternalSourceDomain[],
-				language: "typescript",
-				framework: "node",
-				maxMatches: 8,
-			}),
-			rawContentIncluded: false,
-			webFetchAllowed: false,
-			contractPromotionAllowed: false,
-		}),
-		buildExternalIntelligenceReport: () =>
-			buildExternalIntelligenceReport({ projectId: runtime.projectId }),
-		createSkillDraftFromLessons: () =>
-			runtime.skillDraftFromLessons({ mode: "proposal-only" }),
-	});
-}
-
-function formatCliAutomaticov1Cycle(result: Automaticov1CycleResult): string {
-	const lines: string[] = [
-		"🤖 automaticov1 cycle",
-		`status: ${result.status}`,
-		`authority: ${result.authority}`,
-		`allowedToProceed: ${result.allowedToProceed}`,
-		`taskCreation: ${result.allowTaskCreation ? "enabled" : "disabled"}`,
-		`externalFetch: ${result.externalFetchExecuted ? "executed" : "disabled"}`,
-		`skillProposals: ${result.skillProposalExecuted ? "executed" : "disabled"}`,
-		`alertTick: ${result.alertScheduledTick.status}`,
-		`alertDecisions: ${result.alertScheduledTick.report?.decisions.length ?? 0}`,
-		`tasksCreated: ${result.alertScheduledTick.tasksCreated.length}`,
-	];
-	if (result.birth) {
-		const b = result.birth;
-		lines.push("");
-		lines.push("Birth:");
-		lines.push(`- state: ${b.state}`);
-		lines.push(`- allowedToImplement: ${b.allowedToImplement}`);
-		lines.push(`- repoWritesAllowed: ${b.repoWritesAllowed}`);
-		lines.push(`- nextRequiredAction: ${b.nextRequiredAction}`);
-		if (b.scopeLimit) lines.push(`- scopeLimit: ${b.scopeLimit}`);
-		if (b.blockingReasons.length > 0) {
-			lines.push("- blockingReasons:");
-			for (const r of b.blockingReasons) lines.push(`  - ${r}`);
-		}
-	}
-	lines.push("");
-	lines.push("Evidence:");
-	lines.push(...result.evidenceRefs.map((ref) => `- ${ref}`));
-	lines.push("");
-	lines.push("Next:");
-	lines.push(...result.nextActions.map((action) => `- ${action}`));
-	lines.push("");
-	lines.push("Safe notes:");
-	lines.push(...result.safeNotes.map((note) => `- ${note}`));
-	return lines.join("\n");
-}
-
-function handleCliEventsInspectCommand(
-	runtime: CliRuntime,
-	parts: string[],
-): CliResult {
-	const projectId =
-		parts.find((p) => p.startsWith("--project="))?.slice("--project=".length) ??
-		runtime.projectId;
-	const kindsArg = parts
-		.find((p) => p.startsWith("--kinds="))
-		?.slice("--kinds=".length);
-	const kinds = kindsArg
-		? kindsArg
-				.split(",")
-				.map((k) => k.trim())
-				.filter(Boolean)
-		: undefined;
-	const since = parts
-		.find((p) => p.startsWith("--since="))
-		?.slice("--since=".length);
-	const until = parts
-		.find((p) => p.startsWith("--until="))
-		?.slice("--until=".length);
-	const limitArg = parts
-		.find((p) => p.startsWith("--limit="))
-		?.slice("--limit=".length);
-	const limit = limitArg ? Number.parseInt(limitArg, 10) : undefined;
-	if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
-		return ok(`Events: limit inválido "${limitArg}"`);
-	}
-	const result = inspectEvents({
-		stateRoot: runtime.workspaceRoot,
-		projectId,
-		kinds,
-		since: since ? new Date(since) : undefined,
-		until: until ? new Date(until) : undefined,
-		limit,
-		now: new Date(),
-	});
-	return ok(formatInspectEventsReport(result));
-}
-
 function handleCliAlertCommand(
 	runtime: CliRuntime,
 	parts: string[],
@@ -3910,63 +3684,6 @@ function runCliAutonomousAlertControl(
 	return { action, state };
 }
 
-export function buildCliSelfMaintenanceReport(
-	runtime: CliRuntime,
-	stateRoot: string,
-): { tasks: StructuredTask[]; report: SupervisorSelfMaintenanceAdvisory } {
-	const tasks = runtime.listTasks?.() ?? [];
-	const now = new Date();
-	const supervisorActivity = summarizeSupervisorActivityEvents(
-		filterRecentSupervisorActivityEvents(
-			readSupervisorActivityEvents(stateRoot),
-			now,
-			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
-		),
-	);
-	const usageReport = buildIduUsageReport(
-		filterRecentIduUsageEvents(
-			readIduUsageEvents(stateRoot),
-			now,
-			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
-		),
-		{ now },
-	);
-	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
-		readAgentLabEffectivenessEvents(stateRoot),
-	);
-	let semanticNewEvents = 0;
-	try {
-		const semanticDelta = runtime.semanticAuditStatus().newEvents;
-		semanticNewEvents =
-			semanticDelta.labRuns +
-			semanticDelta.findings +
-			semanticDelta.proposals +
-			semanticDelta.tasks +
-			semanticDelta.userSignals +
-			semanticDelta.memoryItems;
-	} catch {
-		semanticNewEvents = 0;
-	}
-	return {
-		tasks,
-		report: buildSupervisorSelfMaintenanceAdvisory({
-			projectId: runtime.projectId,
-			now,
-			tasks,
-			supervisorEvents: supervisorActivity.totalEvents,
-			supervisorActivitySkipped:
-				(supervisorActivity.byReason.idu_inactive ?? 0) +
-				(supervisorActivity.byReason.no_new_events ?? 0) +
-				(supervisorActivity.byReason.not_enough_data ?? 0),
-			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
-			usageFailures: usageReport.unresolvedFailures,
-			usageNotAllowed: usageReport.notAllowed,
-			usageRequiresHuman: usageReport.requiresHuman,
-			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
-			semanticNewEvents,
-		}),
-	};
-}
 
 function formatCliAutonomousAlertReport(
 	result: AutonomousAlertEngineReport | CliAutonomousAlertTickResult,
@@ -6576,227 +6293,6 @@ async function confirmAction(
 		answer === "si" ||
 		answer === "sí"
 	);
-}
-
-function parseBirthGeneralSpecCliInput(parts: string[]): {
-	sections: Parameters<typeof approveBirthGeneralSpec>[0]["sections"];
-	approvedBy: string;
-} {
-	const specFileIndex = parts.indexOf("--spec-file");
-	let raw: unknown;
-	if (specFileIndex >= 0) {
-		const specPath = parts[specFileIndex + 1];
-		if (!specPath)
-			throw new Error("Uso: idu-birth-general-spec --spec-file <path>");
-		raw = JSON.parse(readFileSync(specPath, "utf8"));
-	} else {
-		const json = parts.join(" ").trim();
-		if (!json)
-			throw new Error("Uso: idu-birth-general-spec --spec-file <path>");
-		raw = JSON.parse(json);
-	}
-	const parsed = isObjectRecord(raw) ? raw : {};
-	const sections = isObjectRecord(parsed.sections) ? parsed.sections : parsed;
-	return {
-		sections: parseGeneralSpecSections(sections),
-		approvedBy:
-			typeof parsed.approvedBy === "string" && parsed.approvedBy.trim()
-				? parsed.approvedBy.trim()
-				: "owner",
-	};
-}
-
-function parseGeneralSpecSections(
-	value: Record<string, unknown>,
-): Parameters<typeof approveBirthGeneralSpec>[0]["sections"] {
-	return {
-		navigation: requiredStringArray(value, "navigation"),
-		baseComponents: requiredStringArray(value, "baseComponents"),
-		pageStructureRules: requiredStringArray(value, "pageStructureRules"),
-		dataRules: requiredStringArray(value, "dataRules"),
-		interactionRules: requiredStringArray(value, "interactionRules"),
-		motionRules: requiredStringArray(value, "motionRules"),
-		accessibilityCriteria: requiredStringArray(value, "accessibilityCriteria"),
-		performanceCriteria: requiredStringArray(value, "performanceCriteria"),
-	};
-}
-
-function requiredStringArray(
-	value: Record<string, unknown>,
-	key: string,
-): string[] {
-	const field = value[key];
-	if (!Array.isArray(field) || field.some((item) => typeof item !== "string")) {
-		throw new Error(`General Spec field '${key}' must be an array of strings.`);
-	}
-	return field;
-}
-
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function formatBirthGeneralSpec(
-	result: ApproveBirthGeneralSpecResult,
-	status: BirthStatusEnvelope,
-): string {
-	const lines: string[] = [];
-	lines.push(`Birth General Spec — ${result.projectId}`);
-	lines.push(`status: ${result.generalSpec.status}`);
-	lines.push(`specVersion: ${result.generalSpec.specVersion ?? 1}`);
-	lines.push(`approvedBy: ${result.generalSpec.approvedBy ?? "—"}`);
-	lines.push("");
-	lines.push(formatBirthStatus(status));
-	return lines.join("\n");
-}
-
-function parseUiFiles(parts: string[]): string[] {
-	const files: string[] = [];
-	for (let index = 0; index < parts.length; index++) {
-		const part = parts[index];
-		if (part === "--ui-file") {
-			const file = parts[index + 1];
-			if (file) files.push(file);
-			index++;
-		} else if (part === "--ui-files") {
-			const value = parts[index + 1];
-			if (value)
-				files.push(
-					...value
-						.split(",")
-						.map((item) => item.trim())
-						.filter(Boolean),
-				);
-			index++;
-		}
-	}
-	return files;
-}
-
-function formatBirthGeneralSpecDerivation(
-	result: VisualDerivationResult,
-): string {
-	const lines: string[] = [];
-	lines.push("Birth General Spec Derivation");
-	lines.push(`applied: ${result.appliedCount}`);
-	lines.push(`dropped: ${result.droppedCount}`);
-	if (result.routerFallbackWarning) {
-		lines.push(`warning: ${result.routerFallbackWarning}`);
-	}
-	return lines.join("\n");
-}
-
-function formatBirthStatus(env: BirthStatusEnvelope): string {
-	const lines: string[] = [];
-	lines.push(`Birth Pipeline Status — ${env.projectId} (${env.mode})`);
-	lines.push(`state: ${env.state}`);
-	lines.push(`allowedToImplement: ${env.allowedToImplement}`);
-	lines.push(`repoWritesAllowed: ${env.repoWritesAllowed}`);
-	lines.push(`nextRequiredAction: ${env.nextRequiredAction}`);
-	if (env.scopeLimit) lines.push(`scopeLimit: ${env.scopeLimit}`);
-	if (env.blockingReasons.length > 0) {
-		lines.push("blockingReasons:");
-		for (const r of env.blockingReasons) lines.push(`  - ${r}`);
-	}
-	return lines.join("\n");
-}
-
-function formatBirthExistingScan(env: BirthExistingScanEnvelope): string {
-	const lines: string[] = [];
-	lines.push(`Birth Existing Scan — ${env.projectId}`);
-	const o = env.scan.observed;
-	lines.push(`packageManager: ${o.packageManager}`);
-	lines.push(`languages: ${o.languages.join(", ") || "(none)"}`);
-	lines.push(`frameworks: ${o.frameworks.join(", ") || "(none)"}`);
-	lines.push(`tests: ${o.tests.length} file(s)`);
-	lines.push(`docs: ${o.docs.length} file(s)`);
-	lines.push(`assets: ${o.assets.length} file(s)`);
-	if (env.scan.risks.length > 0) {
-		lines.push("risks:");
-		for (const r of env.scan.risks) lines.push(`  - ${r}`);
-	}
-	lines.push(`detectedSpecs.status: ${env.detectedSpecs.status}`);
-	lines.push(
-		`detectedSpecs.approval.status: ${env.detectedSpecs.approval.status}`,
-	);
-	return lines.join("\n");
-}
-
-function formatBirthBibliotecario(env: BirthBibliotecarioEnvelope): string {
-	const d = env.discovery;
-	const lines: string[] = [];
-	lines.push(`Birth Bibliotecario Discovery — ${env.projectId}`);
-	lines.push(`status: ${d.status}`);
-	lines.push(`localSources: ${d.localSources.length}`);
-	lines.push(`externalPermission: ${d.externalPermission}`);
-	lines.push(
-		`externalCategoriesNeeded: ${d.externalCategoriesNeeded.join(", ") || "(none)"}`,
-	);
-	lines.push(`ideas: ${d.ideas.length}`);
-	if (d.ideas.length > 0) {
-		for (const idea of d.ideas) {
-			lines.push(
-				`  - ${idea.sourcePath}: ${idea.compatibility} (${idea.decisionStatus})`,
-			);
-		}
-	}
-	if (d.limitations.length > 0) {
-		lines.push("limitations:");
-		for (const l of d.limitations) lines.push(`  - ${l}`);
-	}
-	lines.push(`nextRequiredAction: ${d.nextRequiredAction}`);
-	return lines.join("\n");
-}
-
-function formatBirthValidate(env: BirthValidateEnvelope): string {
-	const lines: string[] = [];
-	lines.push(
-		formatBirthExistingScan({
-			version: 1,
-			kind: "birth_existing_scan",
-			projectId: env.projectId,
-			scan: env.scan,
-			detectedSpecs: env.detectedSpecs,
-		}),
-	);
-	lines.push("");
-	lines.push(formatBirthBibliotecario(env.bibliotecario));
-	lines.push("");
-	lines.push(
-		formatBirthStatus({ ...env.readiness, version: 1, kind: "birth_status" }),
-	);
-	return lines.join("\n");
-}
-
-function formatBirthRepoPlan(env: BirthRepoPlanEnvelope): string {
-	const d = env.decision;
-	const lines: string[] = [];
-	lines.push(`Birth Repo Plan — ${env.projectId}`);
-	lines.push(`repoWritesAllowed: ${d.repoWritesAllowed}`);
-	if (d.blockingReasons.length > 0) {
-		lines.push("blockingReasons:");
-		for (const r of d.blockingReasons) lines.push(`  - ${r}`);
-	}
-	lines.push(`nextRequiredAction: ${d.nextRequiredAction}`);
-	return lines.join("\n");
-}
-
-function formatBirthPrototype(env: BirthPrototypeMasterEnvelope): string {
-	const p = env.prototype;
-	const lines: string[] = [];
-	lines.push(`Birth Master Prototype — ${env.projectId}`);
-	lines.push(`status: ${p.status}`);
-	if (p.approvedBy) lines.push(`approvedBy: ${p.approvedBy}`);
-	if (p.approvedAt) lines.push(`approvedAt: ${p.approvedAt}`);
-	lines.push(`productIntent: ${p.productIntent}`);
-	lines.push(`visualStyle: ${p.visualStyle}`);
-	lines.push(`layoutBase: ${p.layoutBase}`);
-	lines.push(
-		`stackRecommendation: ${p.stackRecommendation.packageManager} / ${p.stackRecommendation.runtime}`,
-	);
-	lines.push(`forbiddenPatterns: ${p.forbiddenPatterns.join(", ")}`);
-	lines.push(`scalingRules: ${p.scalingRules.join(", ")}`);
-	return lines.join("\n");
 }
 
 function formatPendingInjections(pending: Injection[], ack: boolean): string {
