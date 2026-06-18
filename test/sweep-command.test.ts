@@ -48,7 +48,9 @@ function makeFixture(): {
 	};
 }
 
-function makeSensor(findings: { path: string; pattern: string }[]): SensorResult {
+function makeSensor(
+	findings: { path: string; pattern: string }[],
+): SensorResult {
 	return {
 		findings: findings.map((f) => ({
 			path: f.path,
@@ -126,20 +128,31 @@ test("AUDITOR-CRITICAL: planSweep never proposes `find -delete`, only per-path `
 		// CRITICAL ASSERTION 2: no glob expansion in the suggested commands
 		for (const cmd of result.commands) {
 			assert.ok(
-				!cmd.includes("*.mjs") && !cmd.includes("'*.bak'") && !cmd.includes("*"),
+				!cmd.includes("*.mjs") &&
+					!cmd.includes("'*.bak'") &&
+					!cmd.includes("*"),
 				`forbidden glob expansion in command: ${cmd}`,
 			);
 		}
 		// CRITICAL ASSERTION 3: each command is `rm <exact-path>`
 		assert.equal(result.commands.length, 2);
-		assert.ok(result.commands[0].startsWith("rm "), `command 0 starts with rm: ${result.commands[0]}`);
-		assert.ok(result.commands[1].startsWith("rm "), `command 1 starts with rm: ${result.commands[1]}`);
+		assert.ok(
+			result.commands[0].startsWith("rm "),
+			`command 0 starts with rm: ${result.commands[0]}`,
+		);
+		assert.ok(
+			result.commands[1].startsWith("rm "),
+			`command 1 starts with rm: ${result.commands[1]}`,
+		);
 		// CRITICAL ASSERTION 4: each command targets the EXACT path, not a glob
 		assert.ok(result.commands[0].includes(join(repoPath, "tmp-debug.mjs")));
 		assert.ok(result.commands[1].includes(join(repoPath, ".DS_Store")));
 		// tmp-keep.mjs was NOT a finding, so it must not appear
 		for (const cmd of result.commands) {
-			assert.ok(!cmd.includes("tmp-keep.mjs"), `must not include unvetted path: ${cmd}`);
+			assert.ok(
+				!cmd.includes("tmp-keep.mjs"),
+				`must not include unvetted path: ${cmd}`,
+			);
 		}
 	} finally {
 		cleanup();
@@ -160,9 +173,7 @@ test("planSweep (advisory): SKIPS paths inside <stateRoot>/", () => {
 			makeInput({
 				stateRoot,
 				repoPath,
-				sensorOutput: makeSensor([
-					{ path: stateFile, pattern: "tmp-*.mjs" },
-				]),
+				sensorOutput: makeSensor([{ path: stateFile, pattern: "tmp-*.mjs" }]),
 			}),
 		);
 		assert.deepEqual(result.paths, []);
@@ -185,9 +196,7 @@ test("planSweep (advisory): SKIPS paths inside <repo>/.git/", () => {
 			makeInput({
 				stateRoot,
 				repoPath,
-				sensorOutput: makeSensor([
-					{ path: gitFile, pattern: "*.tmp" },
-				]),
+				sensorOutput: makeSensor([{ path: gitFile, pattern: "*.tmp" }]),
 			}),
 		);
 		assert.equal(result.skipped.length, 1);
@@ -207,9 +216,7 @@ test("planSweep (advisory): SKIPS paths inside <repo>/.idu/", () => {
 			makeInput({
 				stateRoot,
 				repoPath,
-				sensorOutput: makeSensor([
-					{ path: iduFile, pattern: "*.tmp" },
-				]),
+				sensorOutput: makeSensor([{ path: iduFile, pattern: "*.tmp" }]),
 			}),
 		);
 		assert.equal(result.skipped.length, 1);
@@ -229,9 +236,7 @@ test("planSweep (advisory): SKIPS paths inside <repo>/node_modules/", () => {
 			makeInput({
 				stateRoot,
 				repoPath,
-				sensorOutput: makeSensor([
-					{ path: depsFile, pattern: "*.tmp" },
-				]),
+				sensorOutput: makeSensor([{ path: depsFile, pattern: "*.tmp" }]),
 			}),
 		);
 		assert.equal(result.skipped.length, 1);
@@ -254,9 +259,7 @@ test("planSweep: re-validates — file no longer exists is SKIPPED", () => {
 			makeInput({
 				stateRoot,
 				repoPath,
-				sensorOutput: makeSensor([
-					{ path: ghostPath, pattern: "*.tmp" },
-				]),
+				sensorOutput: makeSensor([{ path: ghostPath, pattern: "*.tmp" }]),
 			}),
 		);
 		assert.equal(result.paths.length, 0);
@@ -279,7 +282,7 @@ test("planSweep: re-validates — pattern no longer matches is SKIPPED", () => {
 				stateRoot,
 				repoPath,
 				sensorOutput: makeSensor([
-					{ path: legitFile, pattern: "tmp-*.mjs" },  // claims it matched `tmp-*.mjs`
+					{ path: legitFile, pattern: "tmp-*.mjs" }, // claims it matched `tmp-*.mjs`
 				]),
 			}),
 		);
@@ -295,7 +298,9 @@ test("planSweep: re-validates — pattern no longer matches is SKIPPED", () => {
 // Re-validation: symlink target outside repo
 // ---------------------------------------------------------------------------
 
-test("planSweep: re-validates — symlink target outside repo is SKIPPED", { skip: process.platform === "win32" }, () => {
+test("planSweep: re-validates — symlink target outside repo is SKIPPED", {
+	skip: process.platform === "win32",
+}, () => {
 	const { stateRoot, repoPath, cleanup } = makeFixture();
 	try {
 		// Create a target OUTSIDE the repo
@@ -310,9 +315,7 @@ test("planSweep: re-validates — symlink target outside repo is SKIPPED", { ski
 				makeInput({
 					stateRoot,
 					repoPath,
-					sensorOutput: makeSensor([
-						{ path: link, pattern: "tmp-*.mjs" },
-					]),
+					sensorOutput: makeSensor([{ path: link, pattern: "tmp-*.mjs" }]),
 				}),
 			);
 			assert.equal(result.paths.length, 0);
@@ -347,9 +350,7 @@ test("planSweep (auto): ALLOWS paths in stateRoot/tmp", () => {
 				stateRoot,
 				repoPath,
 				mode: "auto",
-				sensorOutput: makeSensor([
-					{ path: tmpFile, pattern: "tmp-*.mjs" },
-				]),
+				sensorOutput: makeSensor([{ path: tmpFile, pattern: "tmp-*.mjs" }]),
 			}),
 		);
 		assert.equal(result.paths.length, 1);
@@ -369,9 +370,7 @@ test("planSweep (auto): SKIPS user's repo paths (auto is stateRoot-only)", () =>
 				stateRoot,
 				repoPath,
 				mode: "auto",
-				sensorOutput: makeSensor([
-					{ path: repoFile, pattern: "tmp-*.mjs" },
-				]),
+				sensorOutput: makeSensor([{ path: repoFile, pattern: "tmp-*.mjs" }]),
 			}),
 		);
 		assert.equal(result.paths.length, 0);
@@ -383,7 +382,13 @@ test("planSweep (auto): SKIPS user's repo paths (auto is stateRoot-only)", () =>
 });
 
 // ---------------------------------------------------------------------------
-// autoCleanStateRoot (internal — for cron preflight to clean its own scratch)
+// autoCleanStateRoot (INTERNAL — DEFERRED, not yet wired from production)
+//
+// AUDITOR-FIX: the prior comment said "for cron preflight to clean its
+// own scratch", but no production code calls autoCleanStateRoot today.
+// The tests below document the CONTRACT for when the wiring lands. The
+// auditor-required hard guarantee (a test that fails if the function
+// is removed or its behavior regresses) is satisfied by these tests.
 // ---------------------------------------------------------------------------
 
 test("autoCleanStateRoot: returns empty when stateRoot/tmp does not exist", () => {
@@ -440,9 +445,7 @@ test("autoCleanStateRoot: does NOT touch files outside stateRoot", () => {
 test("planSweep: result.sensorSnapshot echoes the sensor's findings (idempotent)", () => {
 	const { stateRoot, repoPath, cleanup } = makeFixture();
 	try {
-		const findings = [
-			{ path: join(repoPath, "a.tmp"), pattern: "*.tmp" },
-		];
+		const findings = [{ path: join(repoPath, "a.tmp"), pattern: "*.tmp" }];
 		const result = planSweep(
 			makeInput({
 				stateRoot,
@@ -453,7 +456,10 @@ test("planSweep: result.sensorSnapshot echoes the sensor's findings (idempotent)
 		assert.equal(result.sensorSnapshot.ts, "2026-06-17T10:00:00.000Z");
 		assert.equal(result.sensorSnapshot.findings.length, 1);
 		assert.equal(result.sensorSnapshot.findings[0].path, findings[0].path);
-		assert.equal(result.sensorSnapshot.findings[0].pattern, findings[0].pattern);
+		assert.equal(
+			result.sensorSnapshot.findings[0].pattern,
+			findings[0].pattern,
+		);
 	} finally {
 		cleanup();
 	}

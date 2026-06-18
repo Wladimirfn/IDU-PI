@@ -6,9 +6,14 @@
  * Two modes (territoriality split):
  *   - `advisory` (default, exposed via CLI/MCP): proposes `rm <exact-path>`
  *     per vetted path in the user's repo. The orchestrator runs them.
- *   - `auto` (internal, NOT exposed via CLI/MCP): allows paths in
- *     `<stateRoot>/tmp/**` only. Used by the cron preflight to clean
- *     idu-pi's own scratch.
+ *   - `auto` (INTERNAL, NOT exposed via CLI/MCP): allows paths in
+ *     `<stateRoot>/tmp/**` only. **DEFERRED — not yet wired** to the
+ *     cron preflight; the function `autoCleanStateRoot` exists with
+ *     tests but is not called from any production path today. When
+ *     the cron preflight gains a `<stateRoot>/tmp` cleanup step (a
+ *     future change), it MUST call `autoCleanStateRoot` directly (or
+ *     pass `mode: "auto"` to planSweep). Until then, the only
+ *     `autoCleanStateRoot` caller is its own test suite.
  *
  * SECURITY REFINEMENT (auditor-flagged, non-negotiable):
  *   - We NEVER propose `find -name 'pattern' -delete`. That re-evaluates
@@ -18,7 +23,8 @@
  *   - Re-validates at sweep time: territoriality, pattern still matches,
  *     file still exists, symlink target inside repo.
  *   - The user's repo is the orchestrator's territory. idu-pi does NOT
- *     touch it. idu-pi only cleans its own `<stateRoot>/tmp/**`.
+ *     touch it. idu-pi cleans its own `<stateRoot>/tmp/**` ONLY via
+ *     the internal `autoCleanStateRoot` (when wired).
  */
 
 import {
@@ -245,7 +251,15 @@ export function shellEscape(path: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// autoCleanStateRoot (INTERNAL — only called by cron preflight)
+// autoCleanStateRoot (INTERNAL — DEFERRED, not yet wired)
+//
+// AUDITOR-FIX: the prior comment said "INTERNAL — only called by cron
+// preflight", but no production code calls this function today. It is
+// exported and tested (the tests document the contract), but the
+// wiring is a separate change. When the cron preflight gains a
+// `<stateRoot>/tmp` cleanup step, the preflight MUST import and call
+// this function (or call `planSweep({ mode: "auto" })`). Until then,
+// the only caller is the test suite.
 // ---------------------------------------------------------------------------
 
 export type AutoCleanResult = {
@@ -255,8 +269,10 @@ export type AutoCleanResult = {
 
 /**
  * idu-pi IS the owner of <stateRoot>/tmp. It can clean directly.
- * This is INTERNAL — not exposed via CLI or MCP. The cron preflight
- * calls this if a hygiene advisory points to stateRoot/tmp.
+ * This is INTERNAL — not exposed via CLI or MCP. **DEFERRED, not yet
+ * wired**: the cron preflight does not call this today. When the
+ * preflight gains a cleanup step, it MUST call this function (or
+ * `planSweep({ mode: "auto" })`) for `<stateRoot>/tmp`.
  *
  * Safety: this function NEVER touches the user's repo. It only operates
  * inside <stateRoot>/tmp. If the tmp dir doesn't exist, it's a no-op.
