@@ -142,6 +142,8 @@ import {
 	migrateHygieneLayout,
 	type MigrationResult,
 } from "./hygiene-migrate.js";
+import { planSweep, type PlanSweepResult } from "./sweep-command.js";
+import { runHygieneSensor } from "./hygiene-sensor.js";
 import {
 	runBibliotecarioInit,
 	formatBibliotecarioInit,
@@ -2095,6 +2097,28 @@ export async function runCliCommand(
 				return {
 					exitCode: result.errors.length > 0 ? 1 : 0,
 					stdout: formatHygieneMigrateResult(repoRoot, result),
+					stderr: "",
+				};
+			}
+			case "idu-hygiene-sweep":
+			case "hygiene-sweep": {
+				const repoRoot = activeRuntime.projectPath;
+				if (!repoRoot) {
+					return fail(
+						"idu-hygiene-sweep requiere un proyecto activo (activeRuntime.projectPath).",
+					);
+				}
+				const stateRoot = activeRuntime.workspaceRoot;
+				const sensorOutput = runHygieneSensor({ stateRoot, repoPath: repoRoot });
+				const sweep: PlanSweepResult = planSweep({
+					sensorOutput,
+					stateRoot,
+					repoPath: repoRoot,
+					mode: "advisory",
+				});
+				return {
+					exitCode: 0,  // advisory only — never fail
+					stdout: formatHygieneSweepResult(repoRoot, sweep),
 					stderr: "",
 				};
 			}
@@ -4698,6 +4722,48 @@ export function parseHygieneMigrateArgs(rawArgs: readonly string[]): {
 }
 
 /** Format a hygiene migration result for CLI output. */
+export function formatHygieneSweepResult(
+	repoRoot: string,
+	result: PlanSweepResult,
+): string {
+	const lines: string[] = [];
+	lines.push("idu-pi hygiene sweep");
+	lines.push("");
+	lines.push(`repoRoot: ${repoRoot}`);
+	lines.push(`Sensor snapshot: ${result.sensorSnapshot.ts} (${result.sensorSnapshot.findings.length} findings)`);
+	lines.push(`Revalidated at: ${result.revalidatedAt}`);
+	lines.push("");
+	if (result.paths.length > 0) {
+		lines.push(`Paths to delete (${result.paths.length}):`);
+		for (let i = 0; i < result.paths.length; i++) {
+			const p = result.paths[i];
+			const finding = result.sensorSnapshot.findings.find((f) => f.path === p);
+			lines.push(`- ${p}${finding ? ` (matched: ${finding.pattern})` : ""}`);
+		}
+	} else {
+		lines.push("Paths to delete: (none)");
+	}
+	lines.push("");
+	if (result.commands.length > 0) {
+		lines.push(`Suggested commands (${result.commands.length}):`);
+		for (const cmd of result.commands) {
+			lines.push(cmd);
+		}
+	}
+	lines.push("");
+	if (result.skipped.length > 0) {
+		lines.push(`Skipped (${result.skipped.length}):`);
+		for (const entry of result.skipped) {
+			lines.push(`- ${entry.path} (${entry.reason})`);
+		}
+	} else {
+		lines.push("Skipped: (none)");
+	}
+	lines.push("");
+	lines.push("idu-pi does NOT delete. Run the suggested commands to clean up.");
+	return lines.join("\n");
+}
+
 export function formatHygieneMigrateResult(
 	repoRoot: string,
 	result: MigrationResult,
@@ -4808,6 +4874,7 @@ export function helpText(): string {
 		"  idu-pi idu-master-plan-reject latest [motivo]",
 		"  idu-pi idu-master-plan-redraft latest",
 		"  idu-pi idu-hygiene-migrate [--repo-root <path>]  # one-time migrate legacy config/ and .agents/skills/ to .idu/",
+		"  idu-pi idu-hygiene-sweep                            # propose `rm <path>` per vetted file (advisory only)",
 		"  idu-pi idu-source-status",
 		"  idu-pi idu-source-add <path.md|path.txt|path.pdf>",
 		"  idu-pi idu-source-read <source-id>",

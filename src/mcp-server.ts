@@ -47,6 +47,8 @@ import {
 	migrateHygieneLayout,
 	type MigrationResult,
 } from "./hygiene-migrate.js";
+import { planSweep, type PlanSweepResult } from "./sweep-command.js";
+import { runHygieneSensor } from "./hygiene-sensor.js";
 import {
 	projectEnroll,
 	projectInstallStatus,
@@ -244,6 +246,7 @@ export type IduMcpToolName =
 	| "idu_pending_injections"
 	| "idu_outbox_prune"
 	| "idu_hygiene_migrate"
+	| "idu_hygiene_sweep"
 	| "idu_subscribe_triggers"
 	| "idu_architectural_pruning_plan"
 	| "idu_context_pruning_advisory"
@@ -801,6 +804,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 			projectPath: optionalString(
 				"Ruta opcional del repo a migrar; por defecto el proyecto activo.",
 			),
+		},
+	),
+	tool(
+		"idu_hygiene_sweep",
+		"Re-ejecuta el sensor de higiene y propone `rm <path>` por archivo exacto. ADVISORY ONLY — idu-pi NO borra; el orquestador corre los comandos. Paths dentro de <stateRoot>/**, <repo>/.git/**, <repo>/.idu/**, <repo>/node_modules/** son SKIP. Modo `auto` es interno y rechazado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto a escanear."),
 		},
 	),
 	tool(
@@ -4603,6 +4613,75 @@ async function dispatchTool(
 							errors: migration.errors.map((e) => `${e.from}: ${e.message}`),
 						}
 					: {}),
+			});
+		}
+		case "idu_hygiene_sweep": {
+			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+			const params = args as { projectPath?: string; mode?: string };
+			// The CLI/MCP surface only supports `advisory`. `auto` is
+			// internal-only (used by the cron preflight to clean
+			// <stateRoot>/tmp/**). Reject any other mode explicitly.
+			if (params.mode && params.mode !== "advisory") {
+				return envelope({
+					stateRoot,
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: `idu_hygiene_sweep rejects mode='${params.mode}'`,
+					data: {},
+					safeNotes: [
+						...resolution.safeNotes,
+						"Mode `auto` is internal-only (idu-pi internal auto-clean of <stateRoot>/tmp/**).",
+					],
+					errors: [
+						"auto mode is internal-only. Use mode='advisory' (default).",
+					],
+				});
+			}
+			const repoRoot = (params.projectPath ?? runtime.projectPath ?? "").trim();
+			if (!repoRoot) {
+				return envelope({
+					stateRoot,
+					ok: false,
+					tool: name,
+					projectId: runtime.projectId,
+					projectPath: runtime.projectPath,
+					summary: "idu_hygiene_sweep requires --projectPath or an active project.",
+					data: {},
+					safeNotes: [
+						...resolution.safeNotes,
+						"No sweep executed: missing target repo root.",
+					],
+					errors: [
+						"projectPath is required when no active project is registered",
+					],
+				});
+			}
+			// Re-run the sensor at sweep time for a fresh snapshot. The
+			// sensor's findings[].path becomes the source of truth; the
+			// sweep never re-discovers. (See design.md / spec.md.)
+			const sensorOutput = runHygieneSensor({ stateRoot, repoPath: repoRoot });
+			const sweep: PlanSweepResult = planSweep({
+				sensorOutput,
+				stateRoot,
+				repoPath: repoRoot,
+				mode: "advisory",
+			});
+			return envelope({
+				stateRoot,
+				ok: true,
+				tool: name,
+				projectId: runtime.projectId,
+				projectPath: repoRoot,
+				summary: `sweep: ${sweep.paths.length} paths to delete, ${sweep.skipped.length} skipped`,
+				data: { sweep },
+				safeNotes: [
+					...resolution.safeNotes,
+					"ADVISORY ONLY. idu-pi does NOT delete. The orchestrator runs the suggested commands.",
+					"NEVER `find -delete`. Each command is `rm <exact-path>` from the sensor's findings[].path.",
+					"Re-validated at sweep time: territoriality, pattern, existence, symlink target.",
+				],
 			});
 		}
 		case "idu_outbox_prune": {
