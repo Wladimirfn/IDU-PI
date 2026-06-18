@@ -35,3 +35,4 @@ export {
 } from "./hygiene.js";
 
 export type { CliResult } from "./types.js";
+export type { RuntimeContext } from "./context.js";
