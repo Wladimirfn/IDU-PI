@@ -2056,6 +2056,7 @@ export async function runCliCommand(
 			runtime ??
 			createCliRuntime({
 				createRegistryIfMissing: command !== "status",
+				requireTelegramConfig: false,
 			});
 		configureIduSessionStore(
 			activeRuntime.sessionStatePath
