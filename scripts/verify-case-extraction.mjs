@@ -1,0 +1,411 @@
+#!/usr/bin/env node
+/**
+ * verify-case-extraction.mjs
+ *
+ * PR 7 verification gate. For each cluster being extracted, this script:
+ *
+ * 1. Reads the source switch body (the case label + body) from main @ <sha>.
+ * 2. Reads the wrapper function body from the cluster's handlers.ts.
+ * 3. Compares body-vs-body, modulo:
+ *    - The function signature wrapper (`export function handleX(...)`)
+ *    - The `activeRuntime` → `runtime` rename (the wrapper takes `runtime`
+ *      as a parameter; the case uses `activeRuntime` as a closure var).
+ *
+ * Exits 0 if all wrappers are byte-identical (modulo the rename +
+ * signature). Exits 1 with a list of failing wrappers otherwise.
+ *
+ * Usage:
+ *   node scripts/verify-case-extraction.mjs <main-sha> \
+ *     <label1>:<handlers-path1> \
+ *     <label2>:<handlers-path2> \
+ *     ...
+ *
+ * Example:
+ *   node scripts/verify-case-extraction.mjs 311ec1a \
+ *     role:src/cli/role/handlers.ts \
+ *     alerts:src/cli/alerts/handlers.ts
+ *
+ * Exit codes:
+ *   0  all wrappers byte-identical (modulo signature + rename)
+ *   1  one or more wrappers differ
+ *   2  invalid arguments
+ */
+
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+if (args.length < 2) {
+	console.error(
+		"Usage: verify-case-extraction.mjs <main-sha> <label:path> [<label:path> ...]",
+	);
+	process.exit(2);
+}
+
+const mainSha = args[0];
+const targets = args.slice(1).map((spec) => {
+	const colonIdx = spec.indexOf(":");
+	if (colonIdx < 0) {
+		console.error(`Invalid spec (missing ':'): ${spec}`);
+		process.exit(2);
+	}
+	return {
+		label: spec.slice(0, colonIdx),
+		file: spec.slice(colonIdx + 1),
+	};
+});
+
+/**
+ * Find the dispatch switch in cli.ts. Returns the line index of the
+ * opening `switch (command)` and a function that, given an inner line,
+ * returns the depth of `{` from the switch's perspective.
+ */
+function findSwitch(lines) {
+	let switchStart = -1;
+	let switchEnd = -1;
+	let depth = 0;
+	let inSwitch = false;
+	for (let i = 0; i < lines.length; i++) {
+		const l = lines[i];
+		if (!inSwitch && /\bswitch\s*\(\s*command\s*\)/.test(l)) {
+			switchStart = i;
+			inSwitch = true;
+			depth = 0;
+		}
+		if (inSwitch) {
+			for (const ch of l) {
+				if (ch === "{") depth++;
+				else if (ch === "}") depth--;
+			}
+			if (depth === 0 && /[{}]/.test(l)) {
+				switchEnd = i;
+				inSwitch = false;
+			}
+		}
+	}
+	return { switchStart, switchEnd };
+}
+
+/**
+ * Extract case groups from the switch. A group is one or more consecutive
+ * `case "X":` labels that share a body. The body is the lines between
+ * the last case label and the next `case "X":` or `default:`.
+ */
+function extractCaseGroups(lines, switchStart, switchEnd) {
+	const groups = [];
+	let currentLabels = [];
+	let bodyStart = -1;
+	let bodyEnd = -1;
+	let seenBody = false;
+	for (let i = switchStart + 1; i < switchEnd; i++) {
+		const l = lines[i];
+		const m = l.match(/^\s*case\s+"([^"]+)"\s*:/);
+		if (m) {
+			if (seenBody && currentLabels.length > 0) {
+				groups.push({
+					labels: [...currentLabels],
+					bodyStart,
+					bodyEnd,
+				});
+				currentLabels = [];
+				bodyStart = -1;
+				bodyEnd = -1;
+				seenBody = false;
+			}
+			currentLabels.push(m[1]);
+		} else if (/^\s+default:\s*$/.test(l)) {
+			if (seenBody && currentLabels.length > 0) {
+				groups.push({ labels: [...currentLabels], bodyStart, bodyEnd });
+			}
+			break;
+		} else if (currentLabels.length > 0) {
+			if (bodyStart < 0) bodyStart = i;
+			bodyEnd = i;
+			seenBody = true;
+		}
+	}
+	if (seenBody && currentLabels.length > 0) {
+		groups.push({ labels: [...currentLabels], bodyStart, bodyEnd });
+	}
+	return groups;
+}
+
+/**
+ * Extract the body of an `export function handleX(...)` from a handlers.ts
+ * file. Returns the function body (including the `export function`
+ * signature) or null if not found.
+ */
+function extractHandlerBody(helpersSrc, handlerName) {
+	const lines = helpersSrc.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const l = lines[i];
+		const m = l.match(
+			new RegExp(`^export\\s+(?:async\\s+)?function\\s+${handlerName}\\s*\\(`),
+		);
+		if (!m) continue;
+		// Walk forward to find matching `}` at column 0.
+		let depth = 0;
+		let started = false;
+		let endIdx = i;
+		for (let k = i; k < lines.length; k++) {
+			for (const ch of lines[k]) {
+				if (ch === "{") {
+					depth++;
+					started = true;
+				} else if (ch === "}") {
+					depth--;
+					if (started && depth === 0) {
+						endIdx = k;
+						break;
+					}
+				}
+			}
+			if (started && depth === 0) break;
+		}
+		return {
+			signature: lines[i],
+			body: lines.slice(i, endIdx + 1).join("\n"),
+			startLine: i + 1,
+			endLine: endIdx + 1,
+		};
+	}
+	return null;
+}
+
+/**
+ * Strip the function signature from a wrapper body, leaving just the
+ * inner content for byte-comparison. Also strips the trailing closing
+ * `}` (the function's closing brace) since the case body doesn't
+ * include its closing brace.
+ */
+function stripSignature(body) {
+	const lines = body.split("\n");
+	const result = [];
+	let depth = 0;
+	let pastSignature = false;
+	let pastLastBrace = false;
+	for (const line of lines) {
+		if (pastLastBrace) continue;
+		if (!pastSignature) {
+			// Track depth; once we've seen an open brace at depth >= 1,
+			// the signature is "complete".
+			for (const ch of line) {
+				if (ch === "{") {
+					depth++;
+					pastSignature = true;
+				} else if (ch === "}") {
+					depth--;
+				}
+			}
+			continue;
+		}
+		// If this is the closing `}` line at column 0, skip it.
+		if (/^}\s*$/.test(line)) {
+			pastLastBrace = true;
+			continue;
+		}
+		result.push(line);
+	}
+	return result.join("\n");
+}
+
+/**
+ * Normalize indentation: strip ALL leading whitespace from each line.
+ * This is the strongest normalization — it ignores indentation entirely,
+ * which is an artifact of where the code lives (case body is inside
+ * the switch; wrapper body is at module top level). The CONTENT must
+ * be identical; whitespace at the start of lines is irrelevant.
+ */
+function normalizeIndent(body) {
+	return body
+		.split("\n")
+		.map((l) => l.replace(/^\s*/, ""))
+		.join("\n");
+}
+
+/**
+ * Renames `activeRuntime` to `runtime` in the case body so it matches the
+ * wrapper parameter name. (The wrapper takes `runtime: CliRuntime`;
+ * the case body used `activeRuntime` as a closure var.)
+ */
+function renameActiveRuntime(body) {
+	return body.replace(/\bactiveRuntime\b/g, "runtime");
+}
+
+/**
+ * Strip the trailing closing `}` if it's the LAST non-empty line of
+ * the body. Multi-line cases (e.g., `case "X": { ... }`) include the
+ * closing brace in the extracted body; single-line cases don't.
+ * Wrapper bodies don't include the closing `}` (already stripped by
+ * stripSignature). This normalizes that asymmetry.
+ */
+function stripTrailingBrace(body) {
+	const lines = body.split("\n");
+	// Find the last non-empty line.
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const l = lines[i];
+		if (l.trim() === "") continue;
+		if (/^}\s*$/.test(l.trim())) {
+			// Remove this line.
+			lines.splice(i, 1);
+		}
+		break;
+	}
+	return lines.join("\n");
+}
+
+const mainSrc = execSync(`git show ${mainSha}:src/cli.ts`, {
+	encoding: "utf8",
+});
+const mainLines = mainSrc.split("\n");
+const { switchStart, switchEnd } = findSwitch(mainLines);
+const groups = extractCaseGroups(mainLines, switchStart, switchEnd);
+
+const handlersByLabel = new Map();
+for (const target of targets) {
+	const src = readFileSync(target.file, "utf8");
+	// Collect all `export function handleXxx` and `export async function handleXxx` declarations.
+	const exportRe = /^export\s+(?:async\s+)?function\s+(\w+)/gm;
+	let m;
+	while ((m = exportRe.exec(src))) {
+		handlersByLabel.set(m[1], target.file);
+	}
+	if (handlersByLabel.size === 0) {
+		console.error(`Cannot find any exported handlers in ${target.file}`);
+		process.exit(2);
+	}
+}
+
+let totalDiff = 0;
+const totalGroups = groups.length;
+let checked = 0;
+let okCount = 0;
+
+for (const target of targets) {
+	const src = readFileSync(target.file, "utf8");
+	console.log(`\n=== ${target.label} (${target.file}) ===`);
+	// Find all case groups whose primary label is in this cluster.
+	// For now, walk all groups; the wrapper file doesn't carry the
+	// label-to-wrapper mapping directly (that's the PR 7 hard problem).
+	// We'll use a heuristic: the wrapper's signature and the case's
+	// free-vars match.
+	for (const group of groups) {
+		// Heuristic: skip groups that don't include this cluster's
+		// label prefix. E.g., role: skips "role-engine" but not
+		// "queue-approve".
+		const primary = group.labels[0];
+		if (
+			!primary.includes(target.label) &&
+			!matchesCluster(primary, target.label)
+		)
+			continue;
+
+		// Find the wrapper that exports the same primary label.
+		const handlerName = findHandlerForLabel(src, primary);
+		if (!handlerName) continue;
+
+		const handler = extractHandlerBody(src, handlerName);
+		if (!handler) continue;
+
+		const caseBody = mainLines
+			.slice(group.bodyStart, group.bodyEnd + 1)
+			.join("\n");
+		const wrapperInner = normalizeIndent(stripSignature(handler.body));
+		const expectedInner = normalizeIndent(
+			stripTrailingBrace(renameActiveRuntime(caseBody)),
+		);
+
+		if (wrapperInner.trim() === expectedInner.trim()) {
+			okCount++;
+			console.log(`  OK    ${group.labels.join(" | ")} -> ${handlerName}`);
+		} else {
+			totalDiff++;
+			console.log(`  DIFF  ${group.labels.join(" | ")} -> ${handlerName}`);
+			showBodyDiff(expectedInner, wrapperInner);
+		}
+		checked++;
+	}
+}
+
+console.log("");
+console.log("---");
+console.log(`Total case groups: ${totalGroups}`);
+console.log(`Checked: ${checked}`);
+console.log(`OK: ${okCount}`);
+console.log(`DIFF: ${totalDiff}`);
+
+if (totalDiff > 0) {
+	console.log("");
+	console.log("STOP: byte-identity violated. Per the auditor's contract:");
+	console.log("wrapper body must be byte-identical to case body");
+	console.log("(modulo `activeRuntime` → `runtime` rename + signature).");
+	process.exit(1);
+}
+
+function matchesCluster(label, cluster) {
+	const map = {
+		role: [
+			"role-engine",
+			"orchestrator-advisory",
+			"model-invocation-status",
+			"idu-role",
+			"idu-orchestrator",
+			"idu-model",
+		],
+		alerts: ["alerts", "idu-alerts", "supervisor-self-maintenance"],
+	};
+	const prefixes = map[cluster] || [cluster];
+	return prefixes.some((p) => label.includes(p));
+}
+
+function findHandlerForLabel(helpersSrc, label) {
+	// Convention: `handle<LabelPascal>` for each case group. The "idu-"
+	// prefix is dropped (the alias without prefix is the canonical name).
+	// Examples:
+	//   "role-engine"             -> "handleRoleEngine"
+	//   "model-invocation-status" -> "handleModelInvocationStatus"
+	//   "alerts-tick"             -> "handleAlertsTick"
+	const parts = label.split(/[-_]/);
+	const stripped = parts[0] === "idu" ? parts.slice(1) : parts;
+	const pascal = stripped
+		.map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+		.join("");
+	const candidates = [
+		`handle${pascal}`,
+		`handle${pascal}Tick`,
+		`handle${pascal}Control`,
+		`handle${pascal}Status`,
+	];
+	for (const c of candidates) {
+		const re = new RegExp(`^export\\s+(?:async\\s+)?function\\s+${c}\\b`);
+		if (re.test(helpersSrc)) return c;
+	}
+	// Fallback: scan all exports.
+	const exportRe = /^export\s+(?:async\s+)?function\s+(\w+)/gm;
+	let m;
+	while ((m = exportRe.exec(helpersSrc))) {
+		const name = m[1];
+		if (
+			name.toLowerCase().includes(pascal.toLowerCase()) ||
+			name.toLowerCase().includes(label.replace(/-/g, ""))
+		) {
+			return name;
+		}
+	}
+	return null;
+}
+
+function showBodyDiff(main, next) {
+	const a = main.split("\n");
+	const b = next.split("\n");
+	const max = Math.max(a.length, b.length);
+	let shown = 0;
+	for (let i = 0; i < max && shown < 8; i++) {
+		if (a[i] !== b[i]) {
+			console.log(`    L${i + 1} main: ${JSON.stringify(a[i] ?? "")}`);
+			console.log(`    L${i + 1} new : ${JSON.stringify(b[i] ?? "")}`);
+			shown++;
+		}
+	}
+	if (shown === 8) console.log("    ... (truncated)");
+}
