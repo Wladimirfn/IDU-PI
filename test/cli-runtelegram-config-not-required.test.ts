@@ -27,7 +27,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -37,19 +37,50 @@ import { runCliCommand } from "../src/cli.js";
 test(
 	"runCliCommand does not require TELEGRAM_BOT_TOKEN (regression: pre-existing bug)",
 	async () => {
+		// Create a tempdir with a registered project so that
+		// createCliRuntime() doesn't throw "No hay proyecto activo"
+		// before reaching the switch. The registry must contain an
+		// active project pointing to the tempdir itself.
 		const tmpDir = mkdtempSync(join(tmpdir(), "cli-fix-runtelegram-"));
 		try {
-			// Set up a minimal env: DEFAULT_CWD points to a valid
-			// directory inside ALLOWED_ROOTS. NO telegram env vars.
+			const registryDir = join(tmpDir, ".idu");
+			mkdirSync(registryDir, { recursive: true });
+			const registryPath = join(registryDir, "registry.json");
+			// Create minimal registry with one active project pointing
+			// at the tempdir.
+			writeFileSync(
+				registryPath,
+				JSON.stringify(
+					{
+						activeProjectId: "default",
+						projects: [
+							{
+								id: "default",
+								name: "default",
+								path: tmpDir,
+								lastSessionFile: null,
+							},
+						],
+					},
+					null,
+					2,
+				),
+			);
+
+			// Set up env: DEFAULT_CWD points to tempdir; ALLOWED_ROOTS
+			// allows the tempdir; IDU_PI_REGISTRY_PATH points to our
+			// pre-built registry. NO telegram env vars.
 			const previousEnv = {
 				DEFAULT_CWD: process.env.DEFAULT_CWD,
 				ALLOWED_ROOTS: process.env.ALLOWED_ROOTS,
+				IDU_PI_REGISTRY_PATH: process.env.IDU_PI_REGISTRY_PATH,
 				TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
 				ALLOWED_USER_ID: process.env.ALLOWED_USER_ID,
 				REQUIRE_TELEGRAM_CONFIG: process.env.REQUIRE_TELEGRAM_CONFIG,
 			};
 			process.env.DEFAULT_CWD = tmpDir;
 			process.env.ALLOWED_ROOTS = tmpDir;
+			process.env.IDU_PI_REGISTRY_PATH = registryPath;
 			delete process.env.TELEGRAM_BOT_TOKEN;
 			delete process.env.ALLOWED_USER_ID;
 			delete process.env.REQUIRE_TELEGRAM_CONFIG;
@@ -96,17 +127,22 @@ test(
 				// unrelated message about a missing project. The key is
 				// that we DID reach the switch (i.e., the dispatcher
 				// didn't bail out early with the telegram-env error).
-				// We assert that stdout does NOT contain the bug's
-				// signature help-text prefix that appeared when the
-				// dispatcher returned the default-case after the
-				// catch swallowed the telegram error.
 				//
-				// Actually the help text DOES appear in valid runs
-				// (e.g., when the user runs `idu-pi help`), so we can't
-				// use that as a negative signal. Instead, we verify that
-				// stderr does NOT mention "Missing required env var" —
-				// which is the unique signature of the bug.
-				//
+				// Strong positive: assert that stdout starts with
+				// "Role Engine Status:" — this is the canonical header
+				// emitted by `formatRoleEngineStatus`. If we reach
+				// the case (after the fix), this header MUST be present.
+				// If the dispatcher still throws (regression), it
+				// won't be. This makes the test catch future
+				// regressions where some other code path bails out
+				// before reaching the case.
+				assert.match(
+					result.stdout,
+					/Role Engine Status:/u,
+					`Dispatcher did not reach the role-engine case ` +
+						`(regression): stdout=${JSON.stringify(result.stdout.slice(0, 300))}`,
+				);
+
 				// Additionally, verify that the dispatcher did NOT
 				// hit the default case ("Comando desconocido") for our
 				// command. The role-engine case should match (or some
