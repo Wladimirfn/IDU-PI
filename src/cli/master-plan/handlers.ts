@@ -30,7 +30,7 @@ import {
 	getIduSessionStatus,
 } from "../../idu-session.js";
 import { recordSupervisorActivityEventDeferred } from "../../supervisor-activity-events.js";
-import { recordIduUsageEventDeferred } from "../../usage-events.js";
+import { recordCliUsage } from "../usage.js";
 import { requiredText } from "../dispatch-glue/parsers.js";
 import { ok, fail } from "../dispatch-glue/index.js";
 import type { CliResult } from "../dispatch-glue/index.js";
@@ -40,32 +40,6 @@ import {
 	formatCliAutomaticov1Cycle,
 	handleCliEventsInspectCommand,
 } from "./helpers.js";
-
-function recordCliUsage(
-	runtime: CliRuntime,
-	action: string,
-	fields: {
-		risk?: string;
-		recommendation?: string;
-		allowedToProceed?: boolean;
-		requiresHuman?: boolean;
-		durationMs?: number;
-		ok?: boolean;
-	} = {},
-): void {
-	// Inlined from src/cli.ts:1983 (recordCliUsage) to keep this file
-	// self-contained. The byte-identity contract requires that the
-	// wrapper call resolves to the same recordIduUsageEventDeferred
-	// call as the case body. By inlining the body of the helper
-	// here (verbatim), we preserve that equivalence.
-	recordIduUsageEventDeferred(runtime.workspaceRoot, {
-		projectId: runtime.projectId,
-		surface: "cli",
-		action,
-		active: getIduSessionStatus(runtime.projectId).active,
-		...fields,
-	});
-}
 
 export async function handleAutomaticov1(
 	runtime: CliRuntime,

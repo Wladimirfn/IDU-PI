@@ -248,7 +248,9 @@ function stripTrailingBrace(body) {
 	return lines.join("\n");
 }
 
-const mainSrc = execSync(`git show ${mainSha}:src/cli.ts`, { encoding: "utf8" });
+const mainSrc = execSync(`git show ${mainSha}:src/cli.ts`, {
+	encoding: "utf8",
+});
 const mainLines = mainSrc.split("\n");
 const { switchStart, switchEnd } = findSwitch(mainLines);
 const groups = extractCaseGroups(mainLines, switchStart, switchEnd);
@@ -360,9 +362,7 @@ function findHandlerForLabel(helpersSrc, label) {
 		`handle${pascal}Status`,
 	];
 	for (const c of candidates) {
-		const re = new RegExp(
-			`^export\\s+(?:async\\s+)?function\\s+${c}\\b`,
-		);
+		const re = new RegExp(`^export\\s+(?:async\\s+)?function\\s+${c}\\b`);
 		if (re.test(helpersSrc)) return c;
 	}
 	const exportRe = /^export\s+(?:async\s+)?function\s+(\w+)/gm;
@@ -392,4 +392,165 @@ function showBodyDiff(main, next) {
 		}
 	}
 	if (shown === 8) console.log("    ... (truncated)");
+}
+
+// =====================================================================
+// Duplication guard (added in PR 7b follow-up).
+//
+// Contract: any helper internal to cli.ts that a case body calls MUST
+// be extracted to a shared module (e.g. src/cli/usage.ts) and imported
+// by every handler file that needs it. NEVER duplicate the helper
+// inline in a handler file.
+//
+// A refactor whose goal is de-duplication cannot add duplication.
+// The byte-identity gate above catches drift on the case body vs the
+// wrapper body, but it does NOT see whether a wrapper resolves a
+// helper call to an imported function (correct) or to a local
+// re-definition (duplication). This guard closes that blind spot.
+//
+// Two checks:
+//
+//   (A) Cross-handler-file: the same exported function name MUST NOT
+//       be defined in more than one handler file. Two handlers that
+//       both define `foo` is duplication.
+//
+//   (B) Handler vs cli.ts internals: the same function name MUST NOT
+//       appear as an internal `function foo(...)` in cli.ts AND as an
+//       exported `function foo(...)` (or `function foo(...)` wrapped
+//       by an `export` declaration) in a handler file. The handler
+//       should import, not redeclare.
+//
+// Both checks are run AFTER the byte-identity gate and are blocking.
+// =====================================================================
+
+const ALL_HANDLER_FILES = [
+	// Add each new cluster's handlers.ts as it's introduced.
+	"src/cli/role/handlers.ts",
+	"src/cli/master-plan/handlers.ts",
+];
+
+function parseAllFunctionNames(src) {
+	// Match BOTH exported and non-exported top-level function declarations.
+	// The duplication guard must catch local copies (e.g. PR 7b's local
+	// `function recordCliUsage(...)` inside handlers.ts).
+	const re = /^(?:export\s+)?(?:async\s+)?function\s+(\w+)/gm;
+	const names = [];
+	let m;
+	while ((m = re.exec(src))) names.push(m[1]);
+	return names;
+}
+
+function checkCrossHandlerDuplication() {
+	const fileToFns = new Map();
+	for (const file of ALL_HANDLER_FILES) {
+		try {
+			const src = readFileSync(file, "utf8");
+			const fns = parseAllFunctionNames(src);
+			if (fns.length > 0) fileToFns.set(file, fns);
+		} catch {
+			// File may not exist yet for clusters not extracted.
+		}
+	}
+
+	const nameToFiles = new Map();
+	for (const [file, fns] of fileToFns) {
+		for (const fn of fns) {
+			if (!nameToFiles.has(fn)) nameToFiles.set(fn, []);
+			nameToFiles.get(fn).push(file);
+		}
+	}
+
+	const dupes = [];
+	for (const [fn, files] of nameToFiles) {
+		if (files.length > 1) dupes.push({ fn, files });
+	}
+	return dupes;
+}
+
+function checkHandlerVsCliInternals() {
+	let cliSrc;
+	try {
+		// Read from the CURRENT working tree, not from `main`. The
+		// guard must compare against the cli.ts that will exist
+		// AFTER the PR merges — which is the working tree's cli.ts,
+		// not main's pre-PR cli.ts.
+		cliSrc = readFileSync("src/cli.ts", "utf8");
+	} catch {
+		return [];
+	}
+	const cliInternals = new Set(parseAllFunctionNames(cliSrc));
+
+	const violations = [];
+	for (const file of ALL_HANDLER_FILES) {
+		let src;
+		try {
+			src = readFileSync(file, "utf8");
+		} catch {
+			continue;
+		}
+		const fns = parseAllFunctionNames(src);
+		for (const fn of fns) {
+			if (cliInternals.has(fn)) {
+				violations.push({ fn, handlerFile: file });
+			}
+		}
+	}
+	return violations;
+}
+
+// Run duplication checks (only when at least one handler file is present).
+const hasAnyHandler = ALL_HANDLER_FILES.some((f) => {
+	try {
+		readFileSync(f, "utf8");
+		return true;
+	} catch {
+		return false;
+	}
+});
+
+if (hasAnyHandler) {
+	console.log("");
+	console.log("=== Duplication guard ===");
+	let dupFailures = 0;
+
+	const crossHandler = checkCrossHandlerDuplication();
+	if (crossHandler.length > 0) {
+		dupFailures++;
+		console.log(
+			`  FAIL: ${crossHandler.length} function(s) defined in multiple handler files:`,
+		);
+		for (const { fn, files } of crossHandler) {
+			console.log(`    - ${fn}: ${files.join(", ")}`);
+		}
+	} else {
+		console.log("  OK: no function is defined in multiple handler files");
+	}
+
+	const handlerVsCli = checkHandlerVsCliInternals();
+	if (handlerVsCli.length > 0) {
+		dupFailures++;
+		console.log(
+			`  FAIL: ${handlerVsCli.length} handler file(s) shadow cli.ts internals — extract to a shared module instead:`,
+		);
+		for (const { fn, handlerFile } of handlerVsCli) {
+			console.log(
+				`    - ${fn} (defined in cli.ts AND exported by ${handlerFile})`,
+			);
+		}
+	} else {
+		console.log("  OK: no handler file shadows a cli.ts internal");
+	}
+
+	if (dupFailures > 0) {
+		console.log("");
+		console.log("STOP: duplication guard failed.");
+		console.log(
+			"Per the auditor's contract, a refactor cannot add duplication.",
+		);
+		console.log(
+			"Extract the offending helper to a shared module (e.g. src/cli/usage.ts)",
+		);
+		console.log("and import it from both cli.ts and the handler file(s).");
+		process.exit(1);
+	}
 }

@@ -505,6 +505,7 @@ import {
 	recordIduUsageEventDeferred,
 	summarizeIduUsageEvents,
 } from "./usage-events.js";
+import { recordCliUsage } from "./cli/usage.js";
 import {
 	filterRecentSupervisorActivityEvents,
 	readSupervisorActivityEvents,
@@ -1992,27 +1993,6 @@ function pisoBannerLine(workspaceRoot: string): string {
 	if (!blocking) return "";
 	const mins = Math.floor(blocking.ageMs / 60_000);
 	return `\u26a0 BLOCKING: ${blocking.severity} ${blocking.kind} — ${blocking.summary} (acked=${blocking.acked}, ageMs=${blocking.ageMs} ~${mins}m) — pull \`idu_pending_injections\` and act\n`;
-}
-
-function recordCliUsage(
-	runtime: CliRuntime,
-	action: string,
-	fields: {
-		risk?: string;
-		recommendation?: string;
-		allowedToProceed?: boolean;
-		requiresHuman?: boolean;
-		durationMs?: number;
-		ok?: boolean;
-	} = {},
-): void {
-	recordIduUsageEventDeferred(runtime.workspaceRoot, {
-		projectId: runtime.projectId,
-		surface: "cli",
-		action,
-		active: getIduSessionStatus(runtime.projectId).active,
-		...fields,
-	});
 }
 
 export async function runCliCommand(
