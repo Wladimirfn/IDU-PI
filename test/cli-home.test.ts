@@ -1374,7 +1374,12 @@ test("wizard activation does not create missing stateRoot", async () => {
 });
 
 test("project panel auto-refresh is scoped and cleaned up", () => {
-	const source = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
+	// PR 6 of Item 4: the L cluster (TUI) was moved to src/cli/tui/helpers.ts.
+	// Read from there to find the project panel code.
+	const source = readFileSync(
+		join(process.cwd(), "src", "cli", "tui", "helpers.ts"),
+		"utf8",
+	);
 	assert.match(source, /↻ Actualizar métricas/u);
 	assert.match(source, /runProjectStatusPanelTui/u);
 	const projectPanelBlock = source.slice(
