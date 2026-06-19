@@ -724,6 +724,14 @@ import {
 	validateAgentProfiles,
 } from "./cli/role/index.js";
 
+// PR 7a (Item 4): cluster M (role) case wrappers for the dispatch switch.
+import {
+	handleModelInvocationStatus,
+	handleOrchestratorAdvisory,
+	handleRoleEngine,
+	handleRoleEngineStatus,
+} from "./cli/role/index.js";
+
 // PR 6 (Item 4): cluster L (TUI) internal imports (NOT public surface).
 import {
 	buildHomeTaskQueueRuntime,
@@ -2527,43 +2535,17 @@ export async function runCliCommand(
 			case "revisar":
 				return ok(await runMasterPlanDeepReview(activeRuntime, "simple"));
 			case "idu-model-invocation-status":
-			case "model-invocation-status": {
-				const { role, limit } = parseModelInvocationStatusArgs(rest);
-				// REQ-SF-2: use the runtime's labDbPath directly. Reconstructing
-				// the path from workspaceRoot + projects + projectId + lab.db
-				// produced a nested duplicate (projects/idu-pi/projects/idu-pi/lab.db).
-				// The runtime already exposes the correct canonical path.
-				const labDbPath =
-					activeRuntime.labDbPath ??
-					join(
-						activeRuntime.workspaceRoot,
-						"projects",
-						activeRuntime.projectId,
-						"lab.db",
-					);
-				const result = buildModelInvocationStatusOrError({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					labDbPath,
-					options: { role, limit },
-				});
-				if (!result.ok) {
-					return fail(result.error);
-				}
-				return ok(
-					`lab.db path: ${labDbPath}\n` +
-						activeRuntime.formatModelInvocationStatus(result.report),
-				);
-			}
+			case "model-invocation-status":
+				return handleModelInvocationStatus(activeRuntime, rest);
 			case "idu-orchestrator-advisory":
 			case "orchestrator-advisory":
-				return ok(runIdOrchestratorAdvisoryCommand(rest, activeRuntime));
+				return handleOrchestratorAdvisory(activeRuntime, rest);
 			case "idu-role-engine":
 			case "role-engine":
-				return ok(runIdRoleEngineCommand(rest, activeRuntime));
+				return handleRoleEngine(activeRuntime, rest);
 			case "idu-role-engine-status":
 			case "role-engine-status":
-				return ok(runIdRoleEngineStatusCommand(rest, activeRuntime));
+				return handleRoleEngineStatus(activeRuntime, rest);
 			case "idu-agentlab-request-create":
 			case "agentlab-request-create": {
 				const { source, selector, model, stateRoot } =
