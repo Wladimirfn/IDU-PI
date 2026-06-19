@@ -622,6 +622,20 @@ import {
 	handleCliEventsInspectCommand,
 } from "./cli/master-plan/index.js";
 import type { ExecutionDirectorCliResult } from "./cli/master-plan/index.js";
+
+// PR 7b (Item 4): cluster C (master-plan) case wrappers for the dispatch switch.
+import {
+	handleAutomaticov1,
+	handleEvents,
+	handleMasterPlanStatus,
+	handleMasterPlanReview,
+	handleMasterPlanApprove,
+	handleMasterPlanReject,
+	handleMasterPlanRedraft,
+	handleExecutionDirectorTick,
+	handleProposalOutbox,
+	handleProposalDetail,
+} from "./cli/master-plan/index.js";
 import {
 	parseBirthGeneralSpecCliInput,
 	parseGeneralSpecSections,
@@ -2090,26 +2104,8 @@ export async function runCliCommand(
 		}
 		switch (command) {
 			case "automaticov1":
-			case "idu-automaticov1": {
-				const result = await runCliAutomaticov1Cycle(activeRuntime, rest);
-				recordCliUsage(activeRuntime, command, {
-					recommendation: "warn",
-					allowedToProceed: result.allowedToProceed,
-					requiresHuman: true,
-					ok: true,
-				});
-				recordSupervisorActivityEventDeferred(activeRuntime.workspaceRoot, {
-					projectId: activeRuntime.projectId,
-					eventType: "supervisor_tick",
-					origin: "orchestrator_requested",
-					trigger: "cron_planning",
-					status: result.status === "ran" ? "completed" : "skipped",
-					active: getIduSessionStatus(activeRuntime.projectId).active,
-					createdTasks: result.alertScheduledTick.tasksCreated.length,
-					ok: result.status === "ran",
-				});
-				return ok(formatCliAutomaticov1Cycle(result));
-			}
+			case "idu-automaticov1":
+			return await handleAutomaticov1(activeRuntime, command, rest);
 			case "status":
 				return ok(
 					activeRuntime.formatConnection(activeRuntime.inspectConnection()),
@@ -2143,7 +2139,7 @@ export async function runCliCommand(
 				return handleCliAlertCommand(activeRuntime, rest);
 			case "events":
 			case "idu-events":
-				return handleCliEventsInspectCommand(activeRuntime, rest);
+			return handleEvents(activeRuntime, rest);
 			case "idu-alerts-status":
 			case "alerts-status":
 				return ok(
@@ -2184,71 +2180,19 @@ export async function runCliCommand(
 				);
 			case "idu-master-plan-status":
 			case "master-plan-status":
-				if (
-					!activeRuntime.masterPlanStatus ||
-					!activeRuntime.formatMasterPlanStatus
-				)
-					return fail("Master Plan no disponible en este runtime.");
-				return ok(
-					activeRuntime.formatMasterPlanStatus(
-						activeRuntime.masterPlanStatus(),
-					),
-				);
+			return handleMasterPlanStatus(activeRuntime);
 			case "idu-master-plan-review":
 			case "master-plan-review":
-				if (
-					!activeRuntime.masterPlanReview ||
-					!activeRuntime.formatMasterPlanReview
-				)
-					return fail("Master Plan no disponible en este runtime.");
-				return ok(
-					activeRuntime.formatMasterPlanReview(
-						activeRuntime.masterPlanReview(rest.join(" ").trim() || "latest"),
-					),
-				);
+			return handleMasterPlanReview(activeRuntime, rest);
 			case "idu-master-plan-approve":
 			case "master-plan-approve":
-				if (
-					!activeRuntime.masterPlanApprove ||
-					!activeRuntime.formatMasterPlanOperation
-				)
-					return fail("Master Plan no disponible en este runtime.");
-				return ok(
-					activeRuntime.formatMasterPlanOperation(
-						activeRuntime.masterPlanApprove(rest.join(" ").trim() || "latest"),
-					),
-				);
+			return handleMasterPlanApprove(activeRuntime, rest);
 			case "idu-master-plan-reject":
-			case "master-plan-reject": {
-				if (
-					!activeRuntime.masterPlanReject ||
-					!activeRuntime.formatMasterPlanOperation
-				)
-					return fail("Master Plan no disponible en este runtime.");
-				const pathOrLatest = rest[0] ?? "latest";
-				const reason = rest.slice(1).join(" ").trim() || undefined;
-				return ok(
-					activeRuntime.formatMasterPlanOperation(
-						activeRuntime.masterPlanReject(pathOrLatest, reason),
-					),
-				);
-			}
+			case "master-plan-reject":
+			return handleMasterPlanReject(activeRuntime, rest);
 			case "idu-master-plan-redraft":
-			case "master-plan-redraft": {
-				if (
-					!activeRuntime.masterPlanRedraft ||
-					!activeRuntime.formatMasterPlanOperation
-				)
-					return fail("Master Plan no disponible en este runtime.");
-				const reasonParts = rest[0] === "latest" ? rest.slice(1) : rest;
-				return ok(
-					activeRuntime.formatMasterPlanOperation(
-						activeRuntime.masterPlanRedraft(
-							reasonParts.join(" ").trim() || undefined,
-						),
-					),
-				);
-			}
+			case "master-plan-redraft":
+			return handleMasterPlanRedraft(activeRuntime, rest);
 			case "idu-hygiene-migrate":
 			case "hygiene-migrate": {
 				const parsed = parseHygieneMigrateArgs(rest);
@@ -2653,44 +2597,13 @@ export async function runCliCommand(
 				);
 			case "idu-execution-director-tick":
 			case "execution-director-tick":
-				if (
-					!activeRuntime.executionDirectorTick ||
-					!activeRuntime.formatExecutionDirectorTick
-				) {
-					return fail("Execution director no disponible en este runtime.");
-				}
-				return ok(
-					activeRuntime.formatExecutionDirectorTick(
-						activeRuntime.executionDirectorTick(),
-					),
-				);
+			return handleExecutionDirectorTick(activeRuntime);
 			case "idu-proposal-outbox":
 			case "proposal-outbox":
-				if (
-					!activeRuntime.proposalOutbox ||
-					!activeRuntime.formatProposalOutbox
-				) {
-					return fail("Proposal outbox no disponible en este runtime.");
-				}
-				return ok(
-					activeRuntime.formatProposalOutbox(activeRuntime.proposalOutbox()),
-				);
+			return handleProposalOutbox(activeRuntime);
 			case "idu-proposal-detail":
-			case "proposal-detail": {
-				if (
-					!activeRuntime.proposalDetail ||
-					!activeRuntime.formatProposalDetail
-				) {
-					return fail("Proposal outbox no disponible en este runtime.");
-				}
-				const id = requiredText(rest);
-				return ok(
-					activeRuntime.formatProposalDetail(
-						activeRuntime.proposalDetail(id),
-						id,
-					),
-				);
-			}
+			case "proposal-detail":
+			return handleProposalDetail(activeRuntime, rest);
 			case "idu-supervisor-improvements-review":
 			case "supervisor-improvements-review":
 				return ok(

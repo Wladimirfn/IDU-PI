@@ -22,3 +22,16 @@ export {
 	formatCliAutomaticov1Cycle,
 	handleCliEventsInspectCommand,
 } from "./helpers.js";
+
+export {
+	handleAutomaticov1,
+	handleEvents,
+	handleMasterPlanStatus,
+	handleMasterPlanReview,
+	handleMasterPlanApprove,
+	handleMasterPlanReject,
+	handleMasterPlanRedraft,
+	handleExecutionDirectorTick,
+	handleProposalOutbox,
+	handleProposalDetail,
+} from "./handlers.js";

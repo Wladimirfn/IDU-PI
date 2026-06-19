@@ -335,6 +335,13 @@ function matchesCluster(label, cluster) {
 			"idu-model",
 		],
 		alerts: ["alerts", "idu-alerts", "supervisor-self-maintenance"],
+		"master-plan": [
+			"master-plan",
+			"automaticov1",
+			"events",
+			"execution-director",
+			"proposal",
+		],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
