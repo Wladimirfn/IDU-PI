@@ -344,6 +344,13 @@ function matchesCluster(label, cluster) {
 			"execution-director",
 			"proposal",
 		],
+		agentlab: [
+			"agentlab",
+			"usage-status",
+			"lab-review-plan",
+			"review",
+			"revisar",
+		],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -362,7 +369,10 @@ function findHandlerForLabel(helpersSrc, label) {
 		`handle${pascal}Status`,
 	];
 	for (const c of candidates) {
-		const re = new RegExp(`^export\\s+(?:async\\s+)?function\\s+${c}\\b`);
+		const re = new RegExp(
+			`^export\\s+(?:async\\s+)?function\\s+${c}\\b`,
+			"m",
+		);
 		if (re.test(helpersSrc)) return c;
 	}
 	const exportRe = /^export\s+(?:async\s+)?function\s+(\w+)/gm;
@@ -427,6 +437,7 @@ const ALL_HANDLER_FILES = [
 	// Add each new cluster's handlers.ts as it's introduced.
 	"src/cli/role/handlers.ts",
 	"src/cli/master-plan/handlers.ts",
+	"src/cli/agentlab/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

@@ -730,6 +730,19 @@ import {
 	runMasterPlanDeepReview,
 	runOrReuseMasterPlanDeepReview,
 } from "./cli/agentlab/index.js";
+
+// PR 7c (Item 4): cluster E (agentlab) case wrappers for the dispatch switch.
+import {
+	handleUsageStatus,
+	handleLabReviewPlan,
+	handleReview,
+	handleAgentLabRequestCreate,
+	handleAgentLabRequestReview,
+	handleAgentLabReviewRun,
+	handleAgentLabReviewStatus,
+	handleAgentLabReportConsolidate,
+	handleAgentLabReportConsolidationStatus,
+} from "./cli/agentlab/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2434,30 +2447,14 @@ export async function runCliCommand(
 			}
 			case "idu-usage-status":
 			case "usage-status":
-				await flushIduUsageEvents();
-				return ok(
-					formatIduUsageSummary(
-						summarizeIduUsageEvents(
-							readIduUsageEvents(activeRuntime.workspaceRoot),
-						),
-					),
-				);
+			return await handleUsageStatus(activeRuntime);
 			case "idu-lab-review-plan":
-			case "lab-review-plan": {
-				const mode = rest[0] ?? "postflight";
-				if (mode !== "postflight") {
-					return fail(`Modo no soportado para lab-review-plan: ${mode}`);
-				}
-				return ok(
-					activeRuntime.formatLabReviewPlan(
-						activeRuntime.labReviewPlan("postflight"),
-					),
-				);
-			}
+			case "lab-review-plan":
+			return handleLabReviewPlan(activeRuntime, rest);
 			case "idu-review":
 			case "review":
 			case "revisar":
-				return ok(await runMasterPlanDeepReview(activeRuntime, "simple"));
+			return await handleReview(activeRuntime);
 			case "idu-model-invocation-status":
 			case "model-invocation-status":
 				return handleModelInvocationStatus(activeRuntime, rest);
@@ -2471,63 +2468,23 @@ export async function runCliCommand(
 			case "role-engine-status":
 				return handleRoleEngineStatus(activeRuntime, rest);
 			case "idu-agentlab-request-create":
-			case "agentlab-request-create": {
-				const { source, selector, model, stateRoot } =
-					parseAgentLabRequestCreateArgs(rest);
-				return ok(
-					activeRuntime.formatAgentLabReviewRequestPlan(
-						activeRuntime.agentLabRequestCreate(source, selector, {
-							...(model !== undefined ? { model } : {}),
-							...(stateRoot !== undefined ? { stateRoot } : {}),
-						}),
-					),
-				);
-			}
+			case "agentlab-request-create":
+			return handleAgentLabRequestCreate(activeRuntime, rest);
 			case "idu-agentlab-request-review":
 			case "agentlab-request-review":
-				return ok(
-					activeRuntime.formatAgentLabReviewRequestReview(
-						activeRuntime.agentLabRequestReview(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleAgentLabRequestReview(activeRuntime, rest);
 			case "idu-agentlab-review-run":
 			case "agentlab-review-run":
-				return ok(
-					activeRuntime.formatAgentLabReviewRunResult(
-						await activeRuntime.agentLabReviewRun(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return await handleAgentLabReviewRun(activeRuntime, rest);
 			case "idu-agentlab-review-status":
 			case "agentlab-review-status":
-				return ok(
-					activeRuntime.formatAgentLabReviewStatus(
-						activeRuntime.agentLabReviewStatus(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleAgentLabReviewStatus(activeRuntime, rest);
 			case "idu-agentlab-report-consolidate":
 			case "agentlab-report-consolidate":
-				return ok(
-					activeRuntime.formatAgentLabConsolidationResult(
-						activeRuntime.agentLabReportConsolidate(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleAgentLabReportConsolidate(activeRuntime, rest);
 			case "idu-agentlab-report-consolidation-status":
 			case "agentlab-report-consolidation-status":
-				return ok(
-					activeRuntime.formatAgentLabConsolidationStatus(
-						activeRuntime.agentLabReportConsolidationStatus(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleAgentLabReportConsolidationStatus(activeRuntime, rest);
 			case "idu-semantic-audit-status":
 			case "semantic-audit-status":
 				return ok(

@@ -11,3 +11,15 @@ export {
 	runMasterPlanDeepReview,
 	runOrReuseMasterPlanDeepReview,
 } from "./helpers.js";
+
+export {
+	handleUsageStatus,
+	handleLabReviewPlan,
+	handleReview,
+	handleAgentLabRequestCreate,
+	handleAgentLabRequestReview,
+	handleAgentLabReviewRun,
+	handleAgentLabReviewStatus,
+	handleAgentLabReportConsolidate,
+	handleAgentLabReportConsolidationStatus,
+} from "./handlers.js";
