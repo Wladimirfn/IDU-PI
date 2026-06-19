@@ -743,6 +743,24 @@ import {
 	handleAgentLabReportConsolidate,
 	handleAgentLabReportConsolidationStatus,
 } from "./cli/agentlab/index.js";
+// PR 7d (Item 4): cluster F (source) case wrappers for the dispatch switch.
+import {
+	handleSourceStatus,
+	handleSourceAdd,
+	handleSourceRemove,
+	handleSourceRead,
+	handleSourceExtract,
+	handleSourceReport,
+	handleSourceResearch,
+	handleSourceDigest,
+	handleSourceDigestStatus,
+	handleSourceChunkRead,
+	handleSourceRecommend,
+	handleSourceRequiredActions,
+	handleSourceSkillCandidatesCreate,
+	handleSourceSkillCandidatesReview,
+	handleSourceRefresh,
+} from "./cli/source/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2246,116 +2264,49 @@ export async function runCliCommand(
 			}
 			case "idu-source-status":
 			case "source-status":
-				return ok(
-					activeRuntime.formatSourceLibraryStatus(
-						activeRuntime.sourceLibraryStatus(),
-					),
-				);
+			return handleSourceStatus(activeRuntime);
 			case "idu-source-add":
 			case "source-add":
-				return ok(
-					activeRuntime.formatSourceLibraryAddResult(
-						activeRuntime.sourceLibraryAdd(requiredText(rest)),
-					),
-				);
+			return handleSourceAdd(activeRuntime, rest);
 			case "idu-source-remove":
 			case "source-remove":
-				return ok(
-					activeRuntime.formatSourceLibraryRemoveResult(
-						activeRuntime.sourceLibraryRemove(requiredText(rest)),
-					),
-				);
+			return handleSourceRemove(activeRuntime, rest);
 			case "idu-source-read":
 			case "source-read":
-				return ok(
-					activeRuntime.formatSourceLibraryReadResult(
-						activeRuntime.sourceLibraryRead(requiredText(rest)),
-					),
-				);
+			return handleSourceRead(activeRuntime, rest);
 			case "idu-source-extract":
 			case "source-extract":
-				return ok(
-					activeRuntime.formatSourceLibraryExtractResult(
-						activeRuntime.sourceLibraryExtract(requiredText(rest)),
-					),
-				);
+			return handleSourceExtract(activeRuntime, rest);
 			case "idu-source-report":
 			case "source-report":
-				return ok(
-					activeRuntime.formatSourceLibraryItemReport(
-						activeRuntime.sourceLibraryReport(requiredText(rest)),
-					),
-				);
+			return handleSourceReport(activeRuntime, rest);
 			case "idu-source-research":
 			case "source-research":
-				return ok(
-					activeRuntime.formatSourceResearchReport(
-						activeRuntime.sourceLibraryResearch(requiredText(rest)),
-					),
-				);
+			return handleSourceResearch(activeRuntime, rest);
 			case "idu-source-digest":
 			case "source-digest":
-				return ok(
-					activeRuntime.formatSourceDigest(
-						activeRuntime.sourceDigest(requiredText(rest)),
-					),
-				);
+			return handleSourceDigest(activeRuntime, rest);
 			case "idu-source-digest-status":
 			case "source-digest-status":
-				return ok(
-					activeRuntime.formatSourceDigestStatus(
-						activeRuntime.sourceDigestStatus(),
-					),
-				);
+			return handleSourceDigestStatus(activeRuntime);
 			case "idu-source-chunk-read":
 			case "source-chunk-read":
-				return ok(
-					activeRuntime.formatSourceChunkRead(
-						activeRuntime.sourceChunkRead(
-							requiredArg(rest, 0, "sourceId"),
-							requiredArg(rest, 1, "chunkId"),
-						),
-					),
-				);
+			return handleSourceChunkRead(activeRuntime, rest);
 			case "idu-source-recommend":
 			case "source-recommend":
-				return ok(
-					activeRuntime.formatSourceRecommendationReport(
-						activeRuntime.sourceRecommend(requiredText(rest)),
-					),
-				);
+			return handleSourceRecommend(activeRuntime, rest);
 			case "idu-source-required-actions":
 			case "source-required-actions":
-				return ok(
-					activeRuntime.formatSourceRequiredActionsReport(
-						activeRuntime.sourceRequiredActions(),
-					),
-				);
+			return handleSourceRequiredActions(activeRuntime);
 			case "idu-source-skill-candidates-create":
 			case "source-skill-candidates-create":
-				return ok(
-					activeRuntime.formatSourceSkillCandidateCreationResult(
-						activeRuntime.sourceSkillCandidatesCreate(
-							rest.join(" ").trim() || "all",
-						),
-					),
-				);
+			return handleSourceSkillCandidatesCreate(activeRuntime, rest);
 			case "idu-source-skill-candidates-review":
 			case "source-skill-candidates-review":
-				return ok(
-					activeRuntime.formatSourceSkillCandidateReview(
-						activeRuntime.sourceSkillCandidatesReview(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleSourceSkillCandidatesReview(activeRuntime, rest);
 			case "idu-source-refresh":
 			case "source-refresh":
-				return ok(
-					activeRuntime.formatSourceLibraryRefreshResult(
-						activeRuntime.sourceLibraryRefresh(),
-					),
-				);
+			return handleSourceRefresh(activeRuntime);
 			case "idu-preflight":
 			case "preflight": {
 				const report = activeRuntime.preflight(requiredText(rest));

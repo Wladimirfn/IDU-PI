@@ -351,6 +351,7 @@ function matchesCluster(label, cluster) {
 			"review",
 			"revisar",
 		],
+		source: ["source"],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -438,6 +439,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/role/handlers.ts",
 	"src/cli/master-plan/handlers.ts",
 	"src/cli/agentlab/handlers.ts",
+	"src/cli/source/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
