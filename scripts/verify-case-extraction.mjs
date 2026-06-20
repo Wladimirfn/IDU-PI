@@ -263,8 +263,7 @@ function stripTrailingBrace(body) {
  */
 function resolveImportAliases(helpersSrc) {
 	const aliases = new Map();
-	const importRe =
-		/import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+["'][^"']+["']/g;
+	const importRe = /import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+["'][^"']+["']/g;
 	let m;
 	while ((m = importRe.exec(helpersSrc))) {
 		const names = m[1];
@@ -370,8 +369,12 @@ if (totalDiff > 0) {
 	console.log("STOP: byte-identity violated. Per the auditor's contract:");
 	console.log("wrapper body must be byte-identical to case body");
 	console.log("(modulo `activeRuntime` → `runtime` rename + signature).");
-	console.log("Wrapper may use `import { X as Y }` aliases — those are resolved");
-	console.log("automatically (Y → X) before comparison. Other diffs are real drift.");
+	console.log(
+		"Wrapper may use `import { X as Y }` aliases — those are resolved",
+	);
+	console.log(
+		"automatically (Y → X) before comparison. Other diffs are real drift.",
+	);
 	process.exit(1);
 }
 
@@ -414,6 +417,29 @@ function matchesCluster(label, cluster) {
 		queue: ["queue", "task"],
 		alerts: ["alerts"],
 		birth: ["birth"],
+		single: [
+			"status",
+			"idu",
+			"idu-off",
+			"idu-status",
+			"idu-prepare",
+			"idu-project-reset-state",
+			"idu-hygiene-migrate",
+			"idu-ack-advisory",
+			"idu-hygiene-sweep",
+			"idu-preflight",
+			"idu-advisory",
+			"idu-postflight",
+			"idu-objective-status",
+			"idu-onboard-project",
+			"idu-bibliotecario-init",
+			"idu-pending-injections",
+			"idu-decision-ledger",
+			"idu-outbox-prune",
+			"idu-subscribe-triggers",
+			"idu-trigger-engine",
+			"idu-trigger-show",
+		],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -421,11 +447,21 @@ function matchesCluster(label, cluster) {
 
 function findHandlerForLabel(helpersSrc, label) {
 	const parts = label.split(/[-_]/);
-	const stripped = parts[0] === "idu" ? parts.slice(1) : parts;
+	// Pascal candidates: try both the LOCKED (idu- stripped) and the
+	// NON-STRIPPED version. The single cluster has cases like `status` AND
+	// `idu-status` whose pascal under the locked template both collapse to
+	// "Status" (collision). The single-cluster wrappers keep "Idu" in the
+	// name (`handleIduStatus`) — this is a deliberate deviation, not a bug.
+	const stripped =
+		parts[0] === "idu" && parts.length > 1 ? parts.slice(1) : parts;
 	const pascal = stripped
 		.map((s) => s.charAt(0).toUpperCase() + s.slice(1))
 		.join("");
+	const fullPascal = parts
+		.map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+		.join("");
 	const candidates = [
+		`handle${fullPascal}`,
 		`handle${pascal}`,
 		`handle${pascal}Tick`,
 		`handle${pascal}Control`,
@@ -441,6 +477,7 @@ function findHandlerForLabel(helpersSrc, label) {
 		const name = m[1];
 		if (
 			name.toLowerCase().includes(pascal.toLowerCase()) ||
+			name.toLowerCase().includes(fullPascal.toLowerCase()) ||
 			name.toLowerCase().includes(label.replace(/-/g, ""))
 		) {
 			return name;
@@ -505,6 +542,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/queue/handlers.ts",
 	"src/cli/alerts/handlers.ts",
 	"src/cli/birth/handlers.ts",
+	"src/cli/single/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
@@ -648,7 +686,7 @@ if (hasAnyHandler) {
 		);
 		for (const { fn, handlerFile } of handlerVsCli) {
 			console.log(
-				`    - ${fn} (defined in cli.ts AND exported by ${handlerFile})`,
+				`    - ${fn} (defined in cli.ts AND ${handlerFile})`,
 			);
 		}
 	} else {

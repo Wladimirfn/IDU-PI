@@ -1,0 +1,25 @@
+// src/cli/single/index.ts
+// PR 7k (Item 4): barrel for the single-shot cluster (K).
+export {
+	handleStatus,
+	handleIdu,
+	handleIduOff,
+	handleIduStatus,
+	handleIduPrepare,
+	handleIduProjectResetState,
+	handleIduHygieneMigrate,
+	handleIduAckAdvisory,
+	handleIduHygieneSweep,
+	handleIduPreflight,
+	handleIduAdvisory,
+	handleIduPostflight,
+	handleIduObjectiveStatus,
+	handleIduOnboardProject,
+	handleIduBibliotecarioInit,
+	handleIduPendingInjections,
+	handleIduDecisionLedger,
+	handleIduOutboxPrune,
+	handleIduSubscribeTriggers,
+	handleIduTriggerEngine,
+	handleIduTriggerShow,
+} from "./handlers.js";

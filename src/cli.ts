@@ -1,41 +1,20 @@
 #!/usr/bin/env node
-import { createHash, randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { emitKeypressEvents } from "node:readline";
-import { createInterface } from "node:readline/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import {
 	canonicalDirectory,
 	isAllowedCwd,
 	loadConfig,
-	parseAgentProfiles,
 	type BridgeConfig,
 } from "./config.js";
-import { AgentRouter, profileModelLabel } from "./agent-router.js";
+import { AgentRouter } from "./agent-router.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
-import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 import {
 	applyPackageEnvDefaults,
 	buildCliHomeStatus,
 	formatCliHome,
-	formatCliProjectStatus,
-	formatDiagnosticsStatus,
-	formatIduLogo,
-	formatInstallationMenu,
-	formatMainMenu,
-	formatModelProfilesMenu,
-	formatModelProfilesStatus,
-	formatSetupPathHelp,
-	formatSupervisorStatus,
-	formatTaskQueueStatus,
-	formatTelegramRemoteMenu,
-	formatTelegramRemoteStatus,
-	formatSetupWizardNonInteractive,
-	resolveCliPackageRoot,
 	resolveIduRegistryPath,
 } from "./cli-home.js";
 import {
-	formatProjectStatePaths,
 	formatProjectStateResetResult,
 	resetProjectState,
 	resolveProjectStatePaths,
@@ -104,9 +83,6 @@ import {
 import {
 	formatOrchestratorAdvisory,
 	formatRoleEngineStatus,
-	runIdOrchestratorAdvisoryCommand,
-	runIdRoleEngineCommand,
-	runIdRoleEngineStatusCommand,
 	type RoleEngineStatusReport,
 } from "./cli-role-engine.js";
 import { getOrchestratorAdvisoryStream } from "./orchestrator-advisory-stream.js";
@@ -123,18 +99,12 @@ import {
 	type RoleEngineSubscriptionStatus,
 } from "./role-engine-subscription.js";
 import type { RoleAdvisory } from "./roles/index.js";
-import { initProjectConfig, inspectProjectMap } from "./config-wizard.js";
 import {
-	activateIduSession,
 	configureIduSessionStore,
-	deactivateIduSession,
-	formatIduSessionStatus,
 	getIduSessionStatus,
-	shouldUseAutomaticGuardrails,
 } from "./idu-session.js";
 import {
 	formatIduPrepareResult,
-	runIduPrepare,
 	type IduPrepareResult,
 } from "./idu-prepare.js";
 import { runIduBootstrap } from "./idu-bootstrap.js";
@@ -142,15 +112,6 @@ import {
 	migrateHygieneLayout,
 	type MigrationResult,
 } from "./hygiene-migrate.js";
-import { planSweep, type PlanSweepResult } from "./sweep-command.js";
-import { runHygieneSensor } from "./hygiene-sensor.js";
-import { ackAdvisory, type AckAdvisoryResult } from "./idu-ack-advisory.js";
-import {
-	runBibliotecarioInit,
-	formatBibliotecarioInit,
-} from "./cli-bibliotecario-init.js";
-import { runOnboardProject } from "./cli-onboard-project.js";
-import { runSkillRating, formatSkillRating } from "./cli-skill-rating.js";
 import {
 	approveMasterPlan,
 	ensureMasterPlanForIdu,
@@ -161,7 +122,6 @@ import {
 	getMasterPlanStatus,
 	handleMasterPlanNaturalDecision,
 	readGitHead,
-	recordMasterPlanLabReviewDone,
 	redraftMasterPlan,
 	rejectMasterPlan,
 	reviewMasterPlan,
@@ -170,57 +130,11 @@ import {
 	type MasterPlanReview,
 	type MasterPlanStatusResult,
 } from "./master-plan.js";
-import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
-import type {
-	BirthStatusEnvelope,
-	BirthExistingScanEnvelope,
-	BirthBibliotecarioEnvelope,
-	BirthValidateEnvelope,
-	BirthRepoPlanEnvelope,
-	BirthRepoPlan,
-} from "./birth-runtime.js";
-import {
-	approveBirthGeneralSpec,
-	type ApproveBirthGeneralSpecResult,
-} from "./birth-general-spec-runtime.js";
-import {
-	runVisualDerivation,
-	type VisualDerivationPrompt,
-	type VisualDerivationResult,
-} from "./birth-general-spec-derive.js";
-import type { BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
-import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
-import { runMcpContextPackAutoRefreshTick } from "./mcp-context-pack-auto-refresh-invocation.js";
-import { formatScheduledTickSkippedDetail } from "./alerts-scheduled-tick-skipped-detail.js";
-import {
-	formatInspectEventsReport,
-	inspectEvents,
-} from "./events-inspector.js";
-import {
-	appendInjection,
-	readPendingInjections,
-	markInjectionAcked,
-	type Injection,
-} from "./injection-store.js";
-import { applyPrune, planPrune } from "./idu-outbox-prune.js";
-import { listDecisions } from "./decision-ledger.js";
-import { emitAlertsScheduledTick } from "./role-events.js";
-import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
-import { readBirthArtifact } from "./birth-artifacts.js";
-import {
-	buildExecutionDirectorTick,
-	type ExecutionDirectorTickInput,
-	type ExecutionDirectorTickResult,
-} from "./execution-director-tick.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
 import {
 	ProposalOutboxStore,
 	type FlowBoundProposal,
 } from "./proposal-outbox.js";
-import {
-	formatIduProjectDashboard,
-	type IduProjectDashboardReport,
-} from "./idu-project-dashboard.js";
 import {
 	buildLabReviewPlan,
 	formatLabReviewPlan,
@@ -232,37 +146,15 @@ import {
 	formatProjectAdvisory,
 	type ProjectAdvisory,
 } from "./project-advisory.js";
-import { loadProjectBlueprint } from "./project-blueprint.js";
 import {
 	formatProjectConnectionReport,
-	inspectProjectConnection,
 	type ProjectConnectionReport,
 } from "./project-connection.js";
 import {
-	readProjectAlignmentState,
-	recordProjectAlignmentState,
-} from "./project-alignment-state.js";
-import { formatProjectCoreForPrompt, loadProjectCore } from "./project-core.js";
-import {
-	deriveConstitutionFromProjectCore,
-	loadProjectConstitution,
-} from "./project-constitution.js";
-import { loadProjectFlows } from "./project-flows.js";
-import {
-	reviewProjectFlowsDraft,
-	saveProjectFlowsDraft,
-	scanProjectMap,
-	suggestProjectFlowsFromScan,
-} from "./project-map-scanner.js";
-import { buildPostflightPhysicalGates } from "./physical-gates.js";
-import {
-	analyzeProjectPostflight,
 	formatProjectPostflightReport,
-	readProjectPostflightGitState,
 	type ProjectPostflightReport,
 } from "./project-postflight.js";
 import {
-	analyzeProjectPreflight,
 	formatProjectPreflightReport,
 	type ProjectPreflightReport,
 } from "./project-preflight.js";
@@ -272,21 +164,6 @@ import {
 	type ProjectEntry,
 	type ProjectRegistry,
 } from "./projects.js";
-import {
-	detectAgentConfigs,
-	detectSystem,
-	detectTools,
-	formatIduSetupStatus,
-	formatInstallIduMcpConfigResult,
-	formatProjectEnrollResult,
-	formatProjectInstallStatus,
-	installIduMcpConfig,
-	printIduMcpConfig,
-	projectEnroll,
-	projectInstallStatus,
-	resolvePiAgentDir,
-	type IduMcpTarget,
-} from "./idu-installer.js";
 import {
 	buildSemanticAuditStatus,
 	formatSemanticAuditRunResult,
@@ -323,7 +200,6 @@ import {
 import {
 	maybeRunSupervisorAfterPostflight,
 	maybeRunSupervisorAfterSemanticTrigger,
-	maybeRunSupervisorAfterTask,
 	maybeRunSupervisorOnIduActivation,
 	type IduSupervisorHookResult,
 } from "./idu-supervisor-hooks.js";
@@ -420,84 +296,24 @@ import {
 	type SupervisorLearningRulesTestResult,
 } from "./supervisor-learning-rules.js";
 import {
-	disableSupervisorTrigger,
-	enableSupervisorTrigger,
-	formatSupervisorTriggerResult,
-	formatSupervisorTriggerStatus,
-	getSupervisorTriggerStatus,
-} from "./supervisor-trigger.js";
-import {
-	disableTriggerEngineConfig,
-	enableTriggerEngineConfig,
-	formatTriggerEngineConfigResult,
-	formatTriggerEngineConfigStatus,
-	getTriggerEngineConfigStatus,
-} from "./trigger-engine-config.js";
-import {
-	analyzeStructuredTaskSignal,
 	formatStructuredTaskQueueDetail,
-	formatTareasView,
-	formatTareasYCola,
-	renderTaskQueuePanel,
 	StructuredTaskQueue,
-	structuredTaskInputForText,
 	type StructuredTask,
 } from "./structured-task-queue.js";
-import {
-	formatColaDeAccionesFeed,
-	readColaDeAccionesFeed,
-} from "./cola-acciones-feed.js";
-import {
-	buildTaskPrompt,
-	formatTaskTemplateHelp,
-	inferTaskTemplateKind,
-	type TaskTemplateKind,
-} from "./task-templates.js";
+import type { TaskTemplateKind } from "./task-templates.js";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import {
-	bridgeLifecycleReply,
-	launchBridgeLifecycle,
-	type BridgeLifecycleAction,
-} from "./bridge-lifecycle.js";
-import {
-	formatBridgeEnvStatus,
-	packageEnvPath,
-	readEnvDraft,
-	tailTextFile,
-	validateBridgeEnvDraft,
-	writeEnvDraftWithBackup,
-} from "./env-config.js";
-import {
-	IDU_MODEL_ROLES,
 	applySupervisorModelAssignment,
-	assignmentOptionsFromModelCatalog,
-	formatAgentLabModelAssignmentProposal,
-	formatModelAssignments,
 	loadModelAssignments,
-	readGentleModelRouting,
-	recommendAgentLabModelAssignments,
-	saveModelAssignment,
-	saveModelAssignments,
 	type IduModelRoleId,
 } from "./model-assignments.js";
 import {
-	buildUnifiedModelCatalog,
-	modelProviderDisplayKey,
-	modelProviderDisplayLabel,
-	readPiModelCatalogSnapshot,
-	resolvePiModelCatalogSnapshotPath,
-} from "./model-catalog.js";
-import {
 	buildIduUsageReport,
 	filterRecentIduUsageEvents,
-	flushIduUsageEvents,
-	formatIduUsageSummary,
 	readIduUsageEvents,
 	recordIduUsageEventDeferred,
-	summarizeIduUsageEvents,
 } from "./usage-events.js";
-import { recordCliUsage } from "./cli/usage.js";
 import {
 	filterRecentSupervisorActivityEvents,
 	readSupervisorActivityEvents,
@@ -510,40 +326,8 @@ import {
 	readAgentLabEffectivenessEvents,
 } from "./agentlab-effectiveness-events.js";
 import {
-	buildAutonomousAlertEngineReport,
-	type AutonomousAlertDecision,
-	type AutonomousAlertEngineReport,
-} from "./autonomous-alert-engine.js";
-import {
-	runAutomaticov1AdvisoryCycle,
-	type Automaticov1CycleResult,
-} from "./automaticov1-cycle.js";
-import {
-	runAutonomousAlertScheduledTick,
-	type AutonomousAlertScheduledTickResult,
-} from "./autonomous-alert-scheduler.js";
-import { emitStuckTaskEventsFromAlertReport } from "./autonomous-alert-engine-event-bridge.js";
-import {
-	appendDigestQueueEntry,
-	classifyInterrupt,
-	maybeFlushDigest,
-	type DigestSignal,
-} from "./digest.js";
-import {
-	appendAutonomousAlertDecision,
-	readAutonomousAlertEngineState,
-	updateAutonomousAlertControlState,
-	type AutonomousAlertEngineState,
-} from "./autonomous-alert-engine-state.js";
-import { buildExternalIntelligenceReport } from "./external-intelligence.js";
-import {
-	recommendExternalSources,
-	type ExternalSourceDomain,
-} from "./external-source-registry.js";
-import {
 	buildSupervisorSelfMaintenanceAdvisory,
 	SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
-	type SupervisorSelfMaintenanceAdvisory,
 } from "./supervisor-self-maintenance-advisory.js";
 
 // CliResult moved to src/cli/dispatch-glue/types.ts (PR 1 of Item 4, cluster Q).
@@ -554,12 +338,6 @@ import {
 	ok,
 	fail,
 	helpText,
-	requiredText,
-	requiredArg,
-	requiredDecisionParts,
-	requiredRuleDecisionParts,
-	primaryIntentConcept,
-	cliCommandFor,
 	parseHygieneMigrateArgs,
 	formatHygieneMigrateResult,
 	formatHygieneSweepResult,
@@ -578,19 +356,7 @@ export type { CliResult } from "./cli/dispatch-glue/index.js";
 import type { RuntimeContext } from "./cli/dispatch-glue/index.js";
 // PR 3 (Item 4): clusters N (wizard) + P (tail-formatters) + O (setup) imports.
 import {
-	runWizardActivateSupervisor,
-	registeredProjectForPath,
-	requiredEnvForWizard,
-	parseAllowedRootsForWizard,
-	wizardActivationDiagnostic,
-} from "./cli/wizard/index.js";
-import {
-	formatPendingInjections,
-	formatTriggerSubscription,
-} from "./cli/tail-formatters/index.js";
-import {
 	handleSetupCommand,
-	parseMcpTarget,
 	handleProjectCommand,
 	inspectConnection,
 	formatCliSupervisorStartupSection,
@@ -598,21 +364,13 @@ import {
 	buildPreflightReport,
 	buildPostflightReport,
 	runPrepare,
-	loadConfirmedProjectConstitution,
 } from "./cli/setup/index.js";
 // (PR 2 imports already exist above; this is just an anchor for the editor)
 import {
-	loadAutomaticov1Plan,
-	loadCliExecutionReadiness,
-	safeProjectCoreStatus,
-	safeProjectConstitutionStatus,
 	runCliExecutionDirectorTick,
 	formatExecutionDirectorTick,
 	formatProposalOutbox,
 	formatProposalDetail,
-	runCliAutomaticov1Cycle,
-	formatCliAutomaticov1Cycle,
-	handleCliEventsInspectCommand,
 } from "./cli/master-plan/index.js";
 import type { ExecutionDirectorCliResult } from "./cli/master-plan/index.js";
 
@@ -629,21 +387,6 @@ import {
 	handleProposalOutbox,
 	handleProposalDetail,
 } from "./cli/master-plan/index.js";
-import {
-	parseBirthGeneralSpecCliInput,
-	parseGeneralSpecSections,
-	requiredStringArray,
-	isObjectRecord,
-	formatBirthGeneralSpec,
-	parseUiFiles,
-	formatBirthGeneralSpecDerivation,
-	formatBirthStatus,
-	formatBirthExistingScan,
-	formatBirthBibliotecario,
-	formatBirthValidate,
-	formatBirthRepoPlan,
-	formatBirthPrototype,
-} from "./cli/birth/index.js";
 // buildCliSelfMaintenanceReport moved to _shared/ (cross-cluster dep,
 // used by both C and B). Re-exported below to preserve the 20-function surface.
 import { buildCliSelfMaintenanceReport } from "./cli/_shared/index.js";
@@ -697,31 +440,10 @@ export {
 } from "./cli/queue/index.js";
 
 // PR 4 (Item 4): clusters B (alerts) + E (agentlab) + M (role) imports.
-import {
-	handleCliAlertCommand,
-	buildCliAutonomousAlertStatus,
-	runCliAutonomousAlertTick,
-	digestSignalFromAlertDecision,
-	buildAlertRouteInjection,
-	runCliAutonomousAlertScheduledTick,
-	runCliAutonomousAlertControl,
-	formatCliAutonomousAlertReport,
-	formatCliAutonomousAlertScheduledTick,
-	formatCliAutonomousAlertControl,
-	positiveIntegerText,
-	emitIduProgress,
-} from "./cli/alerts/index.js";
-import type {
-	CliAutonomousAlertTickResult,
-	CliAutonomousAlertControlResult,
-	DigestAlertRoutingResult,
-} from "./cli/alerts/index.js";
+import { emitIduProgress } from "./cli/alerts/index.js";
 // routeAlertDecisionsForDigest is exported (public surface, snapshot test pins it).
 import { routeAlertDecisionsForDigest } from "./cli/alerts/index.js";
-import {
-	runMasterPlanDeepReview,
-	runOrReuseMasterPlanDeepReview,
-} from "./cli/agentlab/index.js";
+import { runOrReuseMasterPlanDeepReview } from "./cli/agentlab/index.js";
 
 // PR 7c (Item 4): cluster E (agentlab) case wrappers for the dispatch switch.
 import {
@@ -820,14 +542,30 @@ import {
 	handleBirthPrototypeMaster,
 	handleBirthRepoPlan,
 } from "./cli/birth/index.js";
+// PR 7k (Item 4): cluster K (single-shot) case wrappers for the dispatch switch.
 import {
-	modelAssignmentOptions,
-	modelAssignmentOptionGroups,
-	formatModelAssignmentOptionLabel,
-	resolveRoleSelection,
-	resolveAssignmentSelection,
-	validateAgentProfiles,
-} from "./cli/role/index.js";
+	handleStatus,
+	handleIdu,
+	handleIduOff,
+	handleIduStatus,
+	handleIduPrepare,
+	handleIduProjectResetState,
+	handleIduHygieneMigrate,
+	handleIduAckAdvisory,
+	handleIduHygieneSweep,
+	handleIduPreflight,
+	handleIduAdvisory,
+	handleIduPostflight,
+	handleIduObjectiveStatus,
+	handleIduOnboardProject,
+	handleIduBibliotecarioInit,
+	handleIduPendingInjections,
+	handleIduDecisionLedger,
+	handleIduOutboxPrune,
+	handleIduSubscribeTriggers,
+	handleIduTriggerEngine,
+	handleIduTriggerShow,
+} from "./cli/single/index.js";
 
 // PR 7a (Item 4): cluster M (role) case wrappers for the dispatch switch.
 import {
@@ -844,10 +582,7 @@ import {
 } from "./cli/tui/index.js";
 
 // PR 5 (Item 4): cluster I (queue) internal imports + types.
-import {
-	semanticCompactionProjectContext,
-	strongestGuardRisk,
-} from "./cli/queue/index.js";
+import { semanticCompactionProjectContext } from "./cli/queue/index.js";
 import type {
 	TaskQueuePanelDispatchRuntime,
 	TaskQueuePanelDispatchResult,
@@ -2076,13 +1811,6 @@ export function parseAgentLabRequestCreateArgs(rawArgs: readonly string[]): {
 	};
 }
 
-function pisoBannerLine(workspaceRoot: string): string {
-	const blocking = readPendingBlockingInjection(workspaceRoot);
-	if (!blocking) return "";
-	const mins = Math.floor(blocking.ageMs / 60_000);
-	return `\u26a0 BLOCKING: ${blocking.severity} ${blocking.kind} — ${blocking.summary} (acked=${blocking.acked}, ageMs=${blocking.ageMs} ~${mins}m) — pull \`idu_pending_injections\` and act\n`;
-}
-
 export async function runCliCommand(
 	args: string[],
 	runtime?: CliRuntime,
@@ -2175,33 +1903,13 @@ export async function runCliCommand(
 			case "idu-automaticov1":
 				return await handleAutomaticov1(activeRuntime, command, rest);
 			case "status":
-				return ok(
-					activeRuntime.formatConnection(activeRuntime.inspectConnection()),
-				);
-			case "idu": {
-				activateIduSession(activeRuntime.projectId);
-				const supervisorStartup = activeRuntime.supervisorOnIduActivation();
-				recordCliUsage(activeRuntime, command, { ok: true });
-				return ok(
-					[
-						"Guardrails automáticos activados para el proyecto activo.",
-						...formatCliSupervisorStartupSection(supervisorStartup),
-						"",
-						activeRuntime.formatDashboard(activeRuntime.inspectConnection()),
-					].join("\n"),
-				);
-			}
-			case "idu-off": {
-				const status = deactivateIduSession(activeRuntime.projectId);
-				recordCliUsage(activeRuntime, command, { ok: true });
-				return ok(formatIduSessionStatus(status));
-			}
-			case "idu-status": {
-				const status = getIduSessionStatus(activeRuntime.projectId);
-				recordCliUsage(activeRuntime, command, { ok: true });
-				const banner = pisoBannerLine(activeRuntime.workspaceRoot);
-				return ok(banner + formatIduSessionStatus(status));
-			}
+				return handleStatus(activeRuntime);
+			case "idu":
+				return handleIdu(activeRuntime, command);
+			case "idu-off":
+				return handleIduOff(activeRuntime, command);
+			case "idu-status":
+				return handleIduStatus(activeRuntime, command);
 			case "alerts":
 			case "idu-alerts":
 				return handleAlerts(activeRuntime, rest);
@@ -2218,18 +1926,11 @@ export async function runCliCommand(
 			case "alerts-scheduled-tick":
 				return handleAlertsScheduledTick(activeRuntime, rest);
 			case "idu-prepare":
-			case "prepare": {
-				const result = activeRuntime.prepare();
-				recordCliUsage(activeRuntime, command, { ok: true });
-				return ok(activeRuntime.formatPrepare(result));
-			}
+			case "prepare":
+				return handleIduPrepare(activeRuntime, command);
 			case "idu-project-reset-state":
 			case "project-reset-state":
-				return ok(
-					activeRuntime.formatProjectStateResetResult(
-						activeRuntime.projectStateReset(rest.includes("--yes")),
-					),
-				);
+				return handleIduProjectResetState(activeRuntime, rest);
 			case "idu-master-plan-status":
 			case "master-plan-status":
 				return handleMasterPlanStatus(activeRuntime);
@@ -2246,63 +1947,14 @@ export async function runCliCommand(
 			case "master-plan-redraft":
 				return handleMasterPlanRedraft(activeRuntime, rest);
 			case "idu-hygiene-migrate":
-			case "hygiene-migrate": {
-				const parsed = parseHygieneMigrateArgs(rest);
-				const repoRoot = parsed.repoRoot ?? activeRuntime.projectPath;
-				if (!repoRoot) {
-					return fail(
-						"idu-hygiene-migrate requiere --repo-root <path> o un proyecto activo.",
-					);
-				}
-				const result: MigrationResult = migrateHygieneLayout({
-					repoRoot,
-					stateRoot: activeRuntime.workspaceRoot,
-				});
-				return {
-					exitCode: result.errors.length > 0 ? 1 : 0,
-					stdout: formatHygieneMigrateResult(repoRoot, result),
-					stderr: "",
-				};
-			}
+			case "hygiene-migrate":
+				return handleIduHygieneMigrate(activeRuntime, rest);
 			case "idu-ack-advisory":
-			case "ack-advisory": {
-				const injectionId = rest[0];
-				if (!injectionId) {
-					return fail("Usage: idu-ack-advisory <injectionId> [reason...]");
-				}
-				const reason = rest.slice(1).join(" ").trim() || undefined;
-				const result: AckAdvisoryResult = ackAdvisory({
-					stateRoot: activeRuntime.workspaceRoot,
-					injectionId,
-					reason,
-				});
-				return ok(`acked ${result.injectionId} (${result.reason})`);
-			}
+			case "ack-advisory":
+				return handleIduAckAdvisory(activeRuntime, rest);
 			case "idu-hygiene-sweep":
-			case "hygiene-sweep": {
-				const repoRoot = activeRuntime.projectPath;
-				if (!repoRoot) {
-					return fail(
-						"idu-hygiene-sweep requiere un proyecto activo (activeRuntime.projectPath).",
-					);
-				}
-				const stateRoot = activeRuntime.workspaceRoot;
-				const sensorOutput = runHygieneSensor({
-					stateRoot,
-					repoPath: repoRoot,
-				});
-				const sweep: PlanSweepResult = planSweep({
-					sensorOutput,
-					stateRoot,
-					repoPath: repoRoot,
-					mode: "advisory",
-				});
-				return {
-					exitCode: 0, // advisory only — never fail
-					stdout: formatHygieneSweepResult(repoRoot, sweep),
-					stderr: "",
-				};
-			}
+			case "hygiene-sweep":
+				return handleIduHygieneSweep(activeRuntime);
 			case "idu-source-status":
 			case "source-status":
 				return handleSourceStatus(activeRuntime);
@@ -2349,59 +2001,18 @@ export async function runCliCommand(
 			case "source-refresh":
 				return handleSourceRefresh(activeRuntime);
 			case "idu-preflight":
-			case "preflight": {
-				const report = activeRuntime.preflight(requiredText(rest));
-				recordCliUsage(activeRuntime, command, {
-					risk: report.risk,
-					recommendation: report.recommendedNext,
-					allowedToProceed: report.okToProceed,
-					requiresHuman: report.requiresHumanConfirmation,
-					ok: report.okToProceed,
-				});
-				return ok(activeRuntime.formatPreflight(report));
-			}
+			case "preflight":
+				return handleIduPreflight(activeRuntime, command, rest);
 			case "idu-advisory":
-			case "advisory": {
-				const advisory = activeRuntime.advisory(requiredText(rest));
-				recordCliUsage(activeRuntime, command, {
-					recommendation: advisory.recommendation,
-					requiresHuman: advisory.requiresHumanConfirmation,
-					allowedToProceed: advisory.okToProceed,
-					ok: advisory.okToProceed,
-				});
-				return ok(activeRuntime.formatAdvisory(advisory));
-			}
+			case "advisory":
+				return handleIduAdvisory(activeRuntime, command, rest);
 			case "idu-postflight":
-			case "postflight": {
-				const report = activeRuntime.postflight();
-				recordCliUsage(activeRuntime, command, {
-					risk: report.risk,
-					recommendation: report.recommendedNext,
-					requiresHuman: report.requiresHumanConfirmation,
-					ok: !report.requiresHumanConfirmation,
-				});
-				return ok(activeRuntime.formatPostflight(report));
-			}
+			case "postflight":
+				return handleIduPostflight(activeRuntime, command);
 			case "idu-run-cron-preflight":
 				return await handleRunCronPreflight(activeRuntime, rest);
-			case "idu-objective-status": {
-				// PR-A of objective-injection (PISO gate read path).
-				// Read-only: no side effects, no enqueue. Use this to verify
-				// the current PISO gate state from the CLI.
-				const blocking = readPendingBlockingInjection(
-					activeRuntime.workspaceRoot,
-				);
-				const statePath = join(
-					activeRuntime.workspaceRoot,
-					"objective-reminder.json",
-				);
-				const reminderExists = existsSync(statePath);
-				return ok(
-					`objective_reminder state:\n` +
-						`  blocking: ${blocking ? `${blocking.severity} ${blocking.kind} (acked=${blocking.acked}, ageMs=${blocking.ageMs})` : "none"}\n` +
-						`  state_file: ${reminderExists ? statePath : "not created yet"}\n`,
-				);
-			}
+			case "idu-objective-status":
+				return handleIduObjectiveStatus(activeRuntime);
 			case "idu-check-user-escalation":
 				return await handleCheckUserEscalation(activeRuntime);
 			case "idu-usage-status":
@@ -2567,36 +2178,11 @@ export async function runCliCommand(
 			case "birth-bibliotecario-discovery":
 				return handleBirthBibliotecarioDiscovery(activeRuntime);
 			case "idu-onboard-project":
-			case "onboard-project": {
-				const result = runOnboardProject(
-					activeRuntime.workspaceRoot,
-					activeRuntime.projectId,
-					{
-						projectPath: activeRuntime.projectPath,
-						allowedRoots: [
-							activeRuntime.projectPath,
-							activeRuntime.workspaceRoot,
-						],
-						registryPath: process.env.IDU_PI_REGISTRY_PATH,
-					},
-				);
-				return {
-					exitCode: result.exitCode,
-					stdout: result.ok ? `${JSON.stringify(result, null, 2)}\n` : "",
-					stderr: result.ok ? "" : `${JSON.stringify(result, null, 2)}\n`,
-				};
-			}
+			case "onboard-project":
+				return handleIduOnboardProject(activeRuntime);
 			case "idu-bibliotecario-init":
-			case "bibliotecario-init": {
-				const result = runBibliotecarioInit({
-					stateRoot: activeRuntime.workspaceRoot,
-					projectId: activeRuntime.projectId,
-				});
-				if (!result.ok) {
-					return fail(result.error);
-				}
-				return ok(formatBibliotecarioInit(result));
-			}
+			case "bibliotecario-init":
+				return handleIduBibliotecarioInit(activeRuntime);
 			case "idu-skill-rating":
 			case "skill-rating":
 				return handleSkillRating(activeRuntime, rest);
@@ -2613,217 +2199,28 @@ export async function runCliCommand(
 			case "birth-prototype-master":
 				return handleBirthPrototypeMaster(activeRuntime, rest);
 			case "idu-pending-injections":
-			case "pending-injections": {
-				const params = rest.join(" ").trim();
-				// AUDITOR-FIX-A: default ack = FALSE. A routine pull (no flag)
-				// only writes `delivered`. `ack:true` must be EXPLICIT — that's
-				// the deliberate dismissal escape hatch. If we default to true,
-				// every pull dismisses + acks the advisory, defeating Item 5's
-				// forced-pull escalation.
-				const ack = /\back\s*:\s*true\b/.test(params);
-				const pending = readPendingInjections(activeRuntime.workspaceRoot, {});
-				if (pending.length > 0) {
-					for (const inj of pending) {
-						// Wire telemetry: write `delivered` for each surfaced
-						// advisory (#2467). The cron evaluator calls
-						// markInjectionAcked when it writes `resolved` or
-						// `expired` (per-kind policy). The path is included
-						// for hygiene advisories so the path-absent
-						// predicate can be constructed.
-						const meta = inj.meta as { path?: string } | undefined;
-						recordLifecycleEvent({
-							stateRoot: activeRuntime.workspaceRoot,
-							injectionId: inj.injectionId,
-							phase: "delivered",
-							kind: inj.kind,
-							path: meta?.path,
-							now: new Date(),
-						});
-						if (ack) {
-							// ack:true on the pull = deliberate dismissal (escape
-							// hatch). Same guard as idu_ack_advisory: only
-							// write the `dismissed` event on a real
-							// transition. The #156 audit caught the
-							// phantom-dismissal bug; the MCP server
-							// twin and this CLI mirror were both fixed
-							// in the same commit.
-							const outcome = markInjectionAcked(
-								activeRuntime.workspaceRoot,
-								inj.injectionId,
-							);
-							if (outcome === "acked") {
-								recordLifecycleEvent({
-									stateRoot: activeRuntime.workspaceRoot,
-									injectionId: inj.injectionId,
-									phase: "dismissed",
-									kind: inj.kind,
-									reason: "idu-pending-injections ack:true",
-									now: new Date(),
-								});
-							}
-						}
-					}
-				}
-				const banner = pisoBannerLine(activeRuntime.workspaceRoot);
-				return ok(banner + formatPendingInjections(pending, ack));
-			}
+			case "pending-injections":
+				return handleIduPendingInjections(activeRuntime, rest);
 			case "idu-decision-ledger":
-			case "decision-ledger": {
-				// Syntax: idu-decision-ledger list [--project <id>] [--since <iso>] [--limit N]
-				let projectId = "";
-				let since: string | undefined;
-				let limit = 50;
-				for (const arg of rest) {
-					if (arg.startsWith("--project=")) {
-						projectId = arg.slice("--project=".length);
-						continue;
-					}
-					if (arg.startsWith("--since=")) {
-						since = arg.slice("--since=".length);
-						continue;
-					}
-					const m = /^--limit\s+(\d+)$/u.exec(arg);
-					if (m) limit = Number(m[1]);
-				}
-				if (!projectId) {
-					projectId = activeRuntime.workspaceRoot;
-				}
-				const dbPath = join(activeRuntime.workspaceRoot, "lab.db");
-				const decisions = listDecisions(dbPath, { projectId, since, limit });
-				return ok(
-					[
-						`Decision ledger for projectId=${projectId}`,
-						`count: ${decisions.length}`,
-						"",
-						...decisions.map((d) => {
-							const rationale = d.rationale ? ` — ${d.rationale}` : "";
-							return `[${d.id}] ${d.decidedAt} ${d.decidedBy} ${d.decision} ${d.targetKind}:${d.targetId}${d.profileRef ? ` (profile: ${d.profileRef})` : ""}${rationale}`;
-						}),
-					].join("\n"),
-				);
-			}
+			case "decision-ledger":
+				return handleIduDecisionLedger(activeRuntime, rest);
 			case "idu-outbox-prune":
-			case "outbox-prune": {
-				// Syntax: idu-outbox-prune [--older-than 30d] [--confirm]
-				let olderThanDays = 30;
-				let confirm = false;
-				for (const arg of rest) {
-					if (arg === "--confirm") {
-						confirm = true;
-						continue;
-					}
-					const m = /^--older-than\s+(\d+)([dhm])$/u.exec(arg);
-					if (m) {
-						const n = Number(m[1]);
-						const unit = m[2];
-						if (unit === "d") olderThanDays = n;
-						else if (unit === "h")
-							olderThanDays = Math.max(1, Math.round(n / 24));
-						else if (unit === "m")
-							olderThanDays = Math.max(1, Math.round(n / 60 / 24));
-					}
-				}
-				const plan = planPrune(activeRuntime.workspaceRoot, { olderThanDays });
-				if (!confirm) {
-					return ok(
-						[
-							"Outbox prune — DRY RUN (use --confirm to apply)",
-							`cutoff: ${plan.cutoff}`,
-							`proposals prunable: ${plan.proposals.length}`,
-							`injections prunable: ${plan.injections.length}`,
-							"",
-							"Nada se modifica. Re-correr con --confirm para archivar.",
-						].join("\n"),
-					);
-				}
-				const result = applyPrune(activeRuntime.workspaceRoot, plan, {
-					olderThanDays,
-				});
-				return ok(
-					[
-						"Outbox prune — applied",
-						`cutoff: ${result.cutoff}`,
-						`archive: ${result.archiveDir}`,
-						`archived: proposals=${result.archived.proposals}, injections=${result.archived.injections}`,
-						`removed (live): proposals=${result.removed.proposals}, injections=${result.removed.injections}`,
-					].join("\n"),
-				);
-			}
+			case "outbox-prune":
+				return handleIduOutboxPrune(activeRuntime, rest);
 			case "idu-subscribe-triggers":
 			case "subscribe-triggers":
-				return ok(formatTriggerSubscription());
+				return handleIduSubscribeTriggers();
 			case "idu-supervisor-trigger":
 			case "supervisor-trigger":
 				return handleSupervisorTrigger(activeRuntime, rest);
 			case "idu-trigger-engine":
-			case "trigger-engine": {
-				const subcommand = (rest.shift() ?? "status").toLowerCase();
-				const stateRoot = activeRuntime.workspaceRoot;
-				if (subcommand === "enable") {
-					return ok(
-						formatTriggerEngineConfigResult(
-							enableTriggerEngineConfig(stateRoot, {
-								source: "cli",
-								now: new Date(),
-							}),
-						),
-					);
-				}
-				if (subcommand === "disable") {
-					return ok(
-						formatTriggerEngineConfigResult(
-							disableTriggerEngineConfig(stateRoot, {
-								source: "cli",
-								now: new Date(),
-							}),
-						),
-					);
-				}
-				if (subcommand === "status") {
-					return ok(
-						formatTriggerEngineConfigStatus(
-							getTriggerEngineConfigStatus(stateRoot),
-						),
-					);
-				}
-				return fail(
-					`Subcomando no reconocido: ${subcommand}. Usá enable | disable | status.`,
-				);
-			}
+			case "trigger-engine":
+				return handleIduTriggerEngine(activeRuntime, rest);
 			case "idu-birth-repo-plan":
 			case "birth-repo-plan":
 				return handleBirthRepoPlan(activeRuntime, rest);
-			case "idu-trigger-show": {
-				const triggerId = rest[0];
-				if (!triggerId) {
-					return fail("Uso: idu-trigger-show <triggerId>");
-				}
-				const def = TRIGGER_DEFINITIONS.find((d) => d.id === triggerId);
-				if (!def) {
-					return fail(`Trigger not found: ${triggerId}`);
-				}
-				const cadenceMap: Record<string, string> = {
-					objective_reminder_hourly:
-						"1h after the master-plan-objective-cache.json `updatedAt`",
-					stuck_tasks_1h:
-						"1h after task_stuck event without subsequent task_created",
-					intention_decision_pending:
-						"30min after intention_decision_pending event",
-				};
-				const cadence = cadenceMap[def.id] || "not specified";
-				const output = [
-					`ID: ${def.id}`,
-					`Description: ${def.description}`,
-					`Kinds: ${def.kinds.join(", ")}`,
-					`Signature: ${def.signature}`,
-					`Contract:`,
-					`  - decisionRequired: ${def.contract.decisionRequired}`,
-					`  - severity: ${def.contract.severity}`,
-					`  - options: [${def.contract.options.join(", ")}]`,
-					`Cadence: ${cadence}`,
-				].join("\n");
-				return ok(output);
-			}
+			case "idu-trigger-show":
+				return handleIduTriggerShow(rest);
 			default:
 				return {
 					exitCode: 1,
