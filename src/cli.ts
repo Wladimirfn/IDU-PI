@@ -171,18 +171,13 @@ import {
 	type MasterPlanStatusResult,
 } from "./master-plan.js";
 import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
-import {
-	handleBirthStatus,
-	handleBirthExistingScan,
-	handleBirthBibliotecarioDiscovery,
-	handleBirthValidate,
-	handleBirthRepoPlan,
-	type BirthStatusEnvelope,
-	type BirthExistingScanEnvelope,
-	type BirthBibliotecarioEnvelope,
-	type BirthValidateEnvelope,
-	type BirthRepoPlanEnvelope,
-	type BirthRepoPlan,
+import type {
+	BirthStatusEnvelope,
+	BirthExistingScanEnvelope,
+	BirthBibliotecarioEnvelope,
+	BirthValidateEnvelope,
+	BirthRepoPlanEnvelope,
+	BirthRepoPlan,
 } from "./birth-runtime.js";
 import {
 	approveBirthGeneralSpec,
@@ -193,10 +188,7 @@ import {
 	type VisualDerivationPrompt,
 	type VisualDerivationResult,
 } from "./birth-general-spec-derive.js";
-import {
-	handleBirthPrototypeMaster,
-	type BirthPrototypeMasterEnvelope,
-} from "./birth-prototype-runtime.js";
+import type { BirthPrototypeMasterEnvelope } from "./birth-prototype-runtime.js";
 import { runTriggerEngineTickOptIn } from "./trigger-engine-invocation.js";
 import { runMcpContextPackAutoRefreshTick } from "./mcp-context-pack-auto-refresh-invocation.js";
 import { formatScheduledTickSkippedDetail } from "./alerts-scheduled-tick-skipped-detail.js";
@@ -817,6 +809,17 @@ import {
 	handleAlertsTick,
 	handleAlertsScheduledTick,
 } from "./cli/alerts/index.js";
+// PR 7j (Item 4): cluster D (birth) case wrappers for the dispatch switch.
+import {
+	handleBirthStatus,
+	handleBirthExistingScan,
+	handleBirthBibliotecarioDiscovery,
+	handleBirthValidate,
+	handleBirthGeneralSpec,
+	handleBirthGeneralSpecDerive,
+	handleBirthPrototypeMaster,
+	handleBirthRepoPlan,
+} from "./cli/birth/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2201,19 +2204,19 @@ export async function runCliCommand(
 			}
 			case "alerts":
 			case "idu-alerts":
-			return handleAlerts(activeRuntime, rest);
+				return handleAlerts(activeRuntime, rest);
 			case "events":
 			case "idu-events":
 				return handleEvents(activeRuntime, rest);
 			case "idu-alerts-status":
 			case "alerts-status":
-			return handleAlertsStatus(activeRuntime);
+				return handleAlertsStatus(activeRuntime);
 			case "idu-alerts-tick":
 			case "alerts-tick":
-			return handleAlertsTick(activeRuntime, rest);
+				return handleAlertsTick(activeRuntime, rest);
 			case "idu-alerts-scheduled-tick":
 			case "alerts-scheduled-tick":
-			return handleAlertsScheduledTick(activeRuntime, rest);
+				return handleAlertsScheduledTick(activeRuntime, rest);
 			case "idu-prepare":
 			case "prepare": {
 				const result = activeRuntime.prepare();
@@ -2443,22 +2446,22 @@ export async function runCliCommand(
 				return handleAgentLabReportConsolidationStatus(activeRuntime, rest);
 			case "idu-semantic-audit-status":
 			case "semantic-audit-status":
-			return handleSemanticAuditStatus(activeRuntime);
+				return handleSemanticAuditStatus(activeRuntime);
 			case "idu-semantic-audit-run":
 			case "semantic-audit-run":
-			return handleSemanticAuditRun(activeRuntime);
+				return handleSemanticAuditRun(activeRuntime);
 			case "idu-semantic-compact-draft":
 			case "semantic-compact-draft":
-			return handleSemanticCompactDraft(activeRuntime);
+				return handleSemanticCompactDraft(activeRuntime);
 			case "idu-semantic-compact-review":
 			case "semantic-compact-review":
-			return handleSemanticCompactReview(activeRuntime, rest);
+				return handleSemanticCompactReview(activeRuntime, rest);
 			case "idu-semantic-agent-tasks-review":
 			case "semantic-agent-tasks-review":
-			return handleSemanticAgentTasksReview(activeRuntime, rest);
+				return handleSemanticAgentTasksReview(activeRuntime, rest);
 			case "idu-semantic-agent-tasks-create":
 			case "semantic-agent-tasks-create":
-			return handleSemanticAgentTasksCreate(activeRuntime, rest);
+				return handleSemanticAgentTasksCreate(activeRuntime, rest);
 			case "idu-supervisor-tick":
 			case "supervisor-tick":
 				return handleSupervisorTick(activeRuntime);
@@ -2533,65 +2536,36 @@ export async function runCliCommand(
 				return handleSkillDraftsReview(activeRuntime, rest);
 			case "idu-task":
 			case "task":
-			return handleTask(activeRuntime, rest);
+				return handleTask(activeRuntime, rest);
 			case "idu-queue":
 			case "queue":
 			case "idu-queue-detail":
 			case "queue-detail":
-			return handleQueueDetail(activeRuntime);
+				return handleQueueDetail(activeRuntime);
 			case "idu-queue-clear-structured":
 			case "queue-clear-structured":
-			return handleQueueClearStructured(activeRuntime);
+				return handleQueueClearStructured(activeRuntime);
 			case "idu-queue-approve":
 			case "queue-approve":
 			case "queue_approve":
-			return handleQueueApprove(activeRuntime, rest);
+				return handleQueueApprove(activeRuntime, rest);
 			case "idu-queue-reject":
 			case "queue-reject":
 			case "queue_reject":
-			return handleQueueReject(activeRuntime, rest);
+				return handleQueueReject(activeRuntime, rest);
 			case "idu-queue-complete":
 			case "queue-complete":
 			case "queue_complete":
-			return handleQueueComplete(activeRuntime, rest);
+				return handleQueueComplete(activeRuntime, rest);
 			case "idu-birth-status":
 			case "birth-status":
-				return ok(
-					formatBirthStatus(
-						handleBirthStatus({
-							projectId: activeRuntime.projectId,
-							stateRoot: activeRuntime.workspaceRoot,
-						}),
-					),
-				);
+				return handleBirthStatus(activeRuntime);
 			case "idu-birth-existing-scan":
-			case "birth-existing-scan": {
-				const result = handleBirthExistingScan({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					projectPath: activeRuntime.projectPath,
-				});
-				return ok(formatBirthExistingScan(result));
-			}
+			case "birth-existing-scan":
+				return handleBirthExistingScan(activeRuntime);
 			case "idu-birth-bibliotecario-discovery":
-			case "birth-bibliotecario-discovery": {
-				const scan = readBirthArtifact<{ observed?: { docs?: string[] } }>(
-					activeRuntime.workspaceRoot,
-					"existing-scan",
-				);
-				const localRefs = (scan?.observed?.docs ?? [])
-					.slice(0, 5)
-					.map((p) => ({ path: p, quality: "secondary" as const }));
-				const result = handleBirthBibliotecarioDiscovery({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					localSourceRefs: localRefs,
-					requestedExternalCategories: [],
-					externalPermission: "not_requested",
-					masterPlanSummary: "",
-				});
-				return ok(formatBirthBibliotecario(result));
-			}
+			case "birth-bibliotecario-discovery":
+				return handleBirthBibliotecarioDiscovery(activeRuntime);
 			case "idu-onboard-project":
 			case "onboard-project": {
 				const result = runOnboardProject(
@@ -2627,89 +2601,17 @@ export async function runCliCommand(
 			case "skill-rating":
 				return handleSkillRating(activeRuntime, rest);
 			case "idu-birth-validate":
-			case "birth-validate": {
-				const result = handleBirthValidate({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					projectPath: activeRuntime.projectPath,
-				});
-				return ok(formatBirthValidate(result));
-			}
+			case "birth-validate":
+				return handleBirthValidate(activeRuntime);
 			case "idu-birth-general-spec":
-			case "birth-general-spec": {
-				if (!activeRuntime.workspaceRoot) {
-					return fail(
-						"General Spec approval requires an active project stateRoot.",
-					);
-				}
-				const input = parseBirthGeneralSpecCliInput(rest);
-				const result = await approveBirthGeneralSpec({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					sections: input.sections,
-					approvedBy: input.approvedBy,
-				});
-				const status = handleBirthStatus({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-				});
-				return ok(formatBirthGeneralSpec(result, status));
-			}
+			case "birth-general-spec":
+				return await handleBirthGeneralSpec(activeRuntime, rest);
 			case "idu-birth-general-spec-derive":
-			case "birth-general-spec-derive": {
-				if (!activeRuntime.workspaceRoot) {
-					return fail(
-						"General Spec derivation requires an active project stateRoot.",
-					);
-				}
-				const promptForRole = activeRuntime.promptForRole;
-				const result = await runVisualDerivation({
-					stateRoot: activeRuntime.workspaceRoot,
-					uiFiles: parseUiFiles(rest),
-					promptForRole:
-						promptForRole ?? (async () => ({ ok: false, output: "" })),
-				});
-				return ok(formatBirthGeneralSpecDerivation(result));
-			}
+			case "birth-general-spec-derive":
+				return await handleBirthGeneralSpecDerive(activeRuntime, rest);
 			case "idu-birth-prototype-master":
-			case "birth-prototype-master": {
-				const json = rest.join(" ").trim();
-				let action: "draft" | "review" | "approve" = "review";
-				let draft: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
-				let approvedBy: string | undefined;
-				if (json) {
-					let parsedUnknown: unknown;
-					try {
-						parsedUnknown = JSON.parse(json);
-					} catch (e) {
-						return fail(`JSON inválido: ${(e as Error).message}`);
-					}
-					if (typeof parsedUnknown === "object" && parsedUnknown !== null) {
-						const p = parsedUnknown as {
-							action?: string;
-							draft?: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
-							approvedBy?: string;
-						};
-						if (
-							p.action === "draft" ||
-							p.action === "review" ||
-							p.action === "approve"
-						) {
-							action = p.action;
-						}
-						draft = p.draft;
-						approvedBy = p.approvedBy;
-					}
-				}
-				const result = handleBirthPrototypeMaster({
-					action,
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					...(draft ? { draft } : {}),
-					...(approvedBy ? { approvedBy } : {}),
-				});
-				return ok(formatBirthPrototype(result));
-			}
+			case "birth-prototype-master":
+				return handleBirthPrototypeMaster(activeRuntime, rest);
 			case "idu-pending-injections":
 			case "pending-injections": {
 				const params = rest.join(" ").trim();
@@ -2889,29 +2791,8 @@ export async function runCliCommand(
 				);
 			}
 			case "idu-birth-repo-plan":
-			case "birth-repo-plan": {
-				const json = rest.join(" ").trim();
-				if (!json) return fail("Uso: idu-pi idu-birth-repo-plan <json-plan>");
-				let parsedUnknown: unknown;
-				try {
-					parsedUnknown = JSON.parse(json);
-				} catch (e) {
-					return fail(`JSON inválido: ${(e as Error).message}`);
-				}
-				// Accept both { repoPlan: {...} } envelope and raw { ... } body.
-				const parsed: BirthRepoPlan =
-					typeof parsedUnknown === "object" &&
-					parsedUnknown !== null &&
-					"repoPlan" in parsedUnknown
-						? (parsedUnknown as { repoPlan: BirthRepoPlan }).repoPlan
-						: (parsedUnknown as BirthRepoPlan);
-				const result = handleBirthRepoPlan({
-					projectId: activeRuntime.projectId,
-					stateRoot: activeRuntime.workspaceRoot,
-					repoPlan: parsed,
-				});
-				return ok(formatBirthRepoPlan(result));
-			}
+			case "birth-repo-plan":
+				return handleBirthRepoPlan(activeRuntime, rest);
 			case "idu-trigger-show": {
 				const triggerId = rest[0];
 				if (!triggerId) {
