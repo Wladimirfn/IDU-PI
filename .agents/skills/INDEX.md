@@ -7,6 +7,7 @@ Read this index first, then open only the matching SKILL.md.
 | bug-hunter | .agents/skills/bug-hunter/SKILL.md |
 | codebase-audit-pre-push | .agents/skills/codebase-audit-pre-push/SKILL.md |
 | jq | .agents/skills/jq/SKILL.md |
+| mcp-work-discipline | .agents/skills/mcp-work-discipline/SKILL.md |
 | performance-optimizer | .agents/skills/performance-optimizer/SKILL.md |
 | project-understanding | .agents/skills/project-understanding/SKILL.md |
 | skill-check | .agents/skills/skill-check/SKILL.md |
