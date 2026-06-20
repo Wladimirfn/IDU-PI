@@ -8,8 +8,11 @@
  * pins them): `dispatchTaskQueuePanelChoice`, `createCliTask`,
  * `approveStructuredTaskById`, `rejectStructuredTaskById`,
  * `completeStructuredTaskById`, `formatCliTaskResult`.
- * The 7 inline cases for `idu-queue*` and `idu-task` stay in cli.ts
- * (cluster A, extracted in a separate phase).
+ *
+ * PR 7h of 7 (Item 4). Switch decomposition.
+ *
+ * Re-exports the 6 case wrappers from handlers.ts (the 7 inline
+ * cases for `idu-queue*` and `idu-task` move here).
  */
 
 export {
@@ -27,3 +30,12 @@ export type {
 	TaskQueuePanelDispatchRuntime,
 	TaskQueuePanelDispatchResult,
 } from "./helpers.js";
+
+export {
+	handleQueueDetail,
+	handleQueueClearStructured,
+	handleQueueApprove,
+	handleQueueReject,
+	handleQueueComplete,
+	handleTask,
+} from "./handlers.js";

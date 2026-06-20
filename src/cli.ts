@@ -801,6 +801,15 @@ import {
 	handleSemanticAgentTasksReview,
 	handleSemanticAgentTasksCreate,
 } from "./cli/semantic/index.js";
+// PR 7h (Item 4): cluster I (queue) case wrappers for the dispatch switch.
+import {
+	handleQueueDetail,
+	handleQueueClearStructured,
+	handleQueueApprove,
+	handleQueueReject,
+	handleQueueComplete,
+	handleTask,
+} from "./cli/queue/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2532,59 +2541,28 @@ export async function runCliCommand(
 			case "skill-drafts-review":
 				return handleSkillDraftsReview(activeRuntime, rest);
 			case "idu-task":
-			case "task": {
-				if (!rest.length) return ok(formatTaskTemplateHelp());
-				const first = rest[0] as TaskTemplateKind;
-				const knownKinds: TaskTemplateKind[] = [
-					"bug",
-					"feature",
-					"refactor",
-					"docs",
-					"review",
-				];
-				const hasExplicitKind = knownKinds.includes(first);
-				const details = (hasExplicitKind ? rest.slice(1) : rest)
-					.join(" ")
-					.trim();
-				const kind = hasExplicitKind ? first : inferTaskTemplateKind(details);
-				const task = activeRuntime.createTask(kind, details);
-				return ok(activeRuntime.formatTask(task));
-			}
+			case "task":
+			return handleTask(activeRuntime, rest);
 			case "idu-queue":
 			case "queue":
 			case "idu-queue-detail":
 			case "queue-detail":
-				return ok(activeRuntime.queueDetail());
+			return handleQueueDetail(activeRuntime);
 			case "idu-queue-clear-structured":
-			case "queue-clear-structured": {
-				const count = activeRuntime.queueClearStructured();
-				return ok(`Cola estructurada limpiada: ${count} tarea(s).`);
-			}
+			case "queue-clear-structured":
+			return handleQueueClearStructured(activeRuntime);
 			case "idu-queue-approve":
 			case "queue-approve":
-			case "queue_approve": {
-				const id = requiredText(rest);
-				const task = activeRuntime.queueApprove(id);
-				if (!task) return fail(`task not found: ${id}`);
-				return ok(`Tarea aprobada: ${task.id}. No ejecuté IA ni AgentLabs.`);
-			}
+			case "queue_approve":
+			return handleQueueApprove(activeRuntime, rest);
 			case "idu-queue-reject":
 			case "queue-reject":
-			case "queue_reject": {
-				const id = requiredText(rest);
-				const task = activeRuntime.queueReject(id);
-				if (!task) return fail(`task not found: ${id}`);
-				return ok(`Tarea rechazada: ${task.id}.`);
-			}
+			case "queue_reject":
+			return handleQueueReject(activeRuntime, rest);
 			case "idu-queue-complete":
 			case "queue-complete":
-			case "queue_complete": {
-				const id = requiredText(rest.slice(0, 1));
-				const evidence = requiredText(rest.slice(1));
-				const task = activeRuntime.queueComplete?.(id, evidence);
-				if (!task) return fail("Uso: idu-pi queue-complete <id> <evidence>");
-				return ok(`Tarea completada: ${task.id}. Evidencia registrada.`);
-			}
+			case "queue_complete":
+			return handleQueueComplete(activeRuntime, rest);
 			case "idu-birth-status":
 			case "birth-status":
 				return ok(
