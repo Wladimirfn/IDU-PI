@@ -360,6 +360,7 @@ function matchesCluster(label, cluster) {
 			"cron-preflight",
 			"check-user-escalation",
 		],
+		skill: ["skill"],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -449,6 +450,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/agentlab/handlers.ts",
 	"src/cli/source/handlers.ts",
 	"src/cli/supervisor/handlers.ts",
+	"src/cli/skill/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
