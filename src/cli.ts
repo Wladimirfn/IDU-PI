@@ -792,6 +792,15 @@ import {
 	handleSkillDraftsReview,
 	handleSkillRating,
 } from "./cli/skill/index.js";
+// PR 7g (Item 4): cluster J (semantic) case wrappers for the dispatch switch.
+import {
+	handleSemanticAuditStatus,
+	handleSemanticAuditRun,
+	handleSemanticCompactDraft,
+	handleSemanticCompactReview,
+	handleSemanticAgentTasksReview,
+	handleSemanticAgentTasksCreate,
+} from "./cli/semantic/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2434,46 +2443,22 @@ export async function runCliCommand(
 				return handleAgentLabReportConsolidationStatus(activeRuntime, rest);
 			case "idu-semantic-audit-status":
 			case "semantic-audit-status":
-				return ok(
-					activeRuntime.formatSemanticAuditStatus(
-						activeRuntime.semanticAuditStatus(),
-					),
-				);
+			return handleSemanticAuditStatus(activeRuntime);
 			case "idu-semantic-audit-run":
 			case "semantic-audit-run":
-				return ok(
-					activeRuntime.formatSemanticAuditRun(
-						activeRuntime.semanticAuditRun(),
-					),
-				);
+			return handleSemanticAuditRun(activeRuntime);
 			case "idu-semantic-compact-draft":
 			case "semantic-compact-draft":
-				return ok(
-					activeRuntime.formatSemanticCompactionDraft(
-						activeRuntime.semanticCompactionDraft(),
-					),
-				);
+			return handleSemanticCompactDraft(activeRuntime);
 			case "idu-semantic-compact-review":
 			case "semantic-compact-review":
-				return ok(
-					activeRuntime.formatSemanticCompactionReview(
-						activeRuntime.semanticCompactionReview(requiredText(rest)),
-					),
-				);
+			return handleSemanticCompactReview(activeRuntime, rest);
 			case "idu-semantic-agent-tasks-review":
 			case "semantic-agent-tasks-review":
-				return ok(
-					activeRuntime.formatSemanticAgentTaskPlan(
-						activeRuntime.semanticAgentTaskPlan(requiredText(rest)),
-					),
-				);
+			return handleSemanticAgentTasksReview(activeRuntime, rest);
 			case "idu-semantic-agent-tasks-create":
 			case "semantic-agent-tasks-create":
-				return ok(
-					activeRuntime.formatSemanticAgentTaskCreationResult(
-						activeRuntime.semanticAgentTasksCreate(requiredText(rest)),
-					),
-				);
+			return handleSemanticAgentTasksCreate(activeRuntime, rest);
 			case "idu-supervisor-tick":
 			case "supervisor-tick":
 				return handleSupervisorTick(activeRuntime);

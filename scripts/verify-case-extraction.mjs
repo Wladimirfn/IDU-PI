@@ -361,6 +361,7 @@ function matchesCluster(label, cluster) {
 			"check-user-escalation",
 		],
 		skill: ["skill"],
+		semantic: ["semantic"],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -448,6 +449,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/source/handlers.ts",
 	"src/cli/supervisor/handlers.ts",
 	"src/cli/skill/handlers.ts",
+	"src/cli/semantic/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
