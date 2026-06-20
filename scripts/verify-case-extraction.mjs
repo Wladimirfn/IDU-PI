@@ -248,6 +248,50 @@ function stripTrailingBrace(body) {
 	return lines.join("\n");
 }
 
+/**
+ * Parse `import { X, Y as Z, ... } from "..."` declarations in a handlers.ts
+ * source and return a Map<aliasName, originalName> for every `as`-renamed
+ * import. These aliases are substituted in the wrapper body before
+ * byte-identity comparison, so a wrapper that uses `import { handleBirthX
+ * as runBirthX }` can still byte-equal a case body that calls
+ * `handleBirthX(...)`.
+ *
+ * Per the locked wrapper-naming template (`handle${pascal}`), helpers
+ * extracted in earlier PRs may share names with desired wrapper names.
+ * The alias is the legitimate resolution; the byte-identity check should
+ * not fail on it.
+ */
+function resolveImportAliases(helpersSrc) {
+	const aliases = new Map();
+	const importRe =
+		/import\s+(?:type\s+)?\{([^}]+)\}\s+from\s+["'][^"']+["']/g;
+	let m;
+	while ((m = importRe.exec(helpersSrc))) {
+		const names = m[1];
+		for (const part of names.split(",")) {
+			const trimmed = part.trim();
+			if (!trimmed) continue;
+			const asMatch = trimmed.match(/^(\w+)\s+as\s+(\w+)$/);
+			if (asMatch) {
+				aliases.set(asMatch[2], asMatch[1]);
+			}
+		}
+	}
+	return aliases;
+}
+
+/**
+ * Apply alias resolution: replace each `aliasName` with its original
+ * in the body. Word-boundary aware so partial matches don't fire.
+ */
+function applyAliases(body, aliases) {
+	let out = body;
+	for (const [alias, original] of aliases) {
+		out = out.replace(new RegExp(`\\b${alias}\\b`, "g"), original);
+	}
+	return out;
+}
+
 const mainSrc = execSync(`git show ${mainSha}:src/cli.ts`, {
 	encoding: "utf8",
 });
@@ -294,7 +338,10 @@ for (const target of targets) {
 		const caseBody = mainLines
 			.slice(group.bodyStart, group.bodyEnd + 1)
 			.join("\n");
-		const wrapperInner = normalizeIndent(stripSignature(handler.body));
+		const aliases = resolveImportAliases(src);
+		const wrapperInner = normalizeIndent(
+			stripSignature(applyAliases(handler.body, aliases)),
+		);
 		const expectedInner = normalizeIndent(
 			stripTrailingBrace(renameActiveRuntime(caseBody)),
 		);
@@ -323,6 +370,8 @@ if (totalDiff > 0) {
 	console.log("STOP: byte-identity violated. Per the auditor's contract:");
 	console.log("wrapper body must be byte-identical to case body");
 	console.log("(modulo `activeRuntime` → `runtime` rename + signature).");
+	console.log("Wrapper may use `import { X as Y }` aliases — those are resolved");
+	console.log("automatically (Y → X) before comparison. Other diffs are real drift.");
 	process.exit(1);
 }
 
@@ -364,6 +413,7 @@ function matchesCluster(label, cluster) {
 		semantic: ["semantic"],
 		queue: ["queue", "task"],
 		alerts: ["alerts"],
+		birth: ["birth"],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -454,6 +504,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/semantic/handlers.ts",
 	"src/cli/queue/handlers.ts",
 	"src/cli/alerts/handlers.ts",
+	"src/cli/birth/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
@@ -562,9 +613,7 @@ function _sanityCheckGateFunctions() {
 	for (const fn of fns) {
 		if (typeof fn !== "function") {
 			console.log(`STOP: a gate function is not defined.`);
-			console.log(
-				"This usually means the script was refactored and a",
-			);
+			console.log("This usually means the script was refactored and a");
 			console.log("function was deleted. Restore it before re-running.");
 			process.exit(1);
 		}

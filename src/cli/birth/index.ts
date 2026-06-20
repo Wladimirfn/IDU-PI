@@ -22,3 +22,14 @@ export {
 	formatBirthRepoPlan,
 	formatBirthPrototype,
 } from "./helpers.js";
+
+export {
+	handleBirthStatus,
+	handleBirthExistingScan,
+	handleBirthBibliotecarioDiscovery,
+	handleBirthValidate,
+	handleBirthGeneralSpec,
+	handleBirthGeneralSpecDerive,
+	handleBirthPrototypeMaster,
+	handleBirthRepoPlan,
+} from "./handlers.js";
