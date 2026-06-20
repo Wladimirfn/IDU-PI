@@ -780,6 +780,18 @@ import {
 	handleSupervisorLearningRulesRollback,
 	handleSupervisorTrigger,
 } from "./cli/supervisor/index.js";
+// PR 7f (Item 4): cluster H (skill) case wrappers for the dispatch switch.
+import {
+	handleSkillImprovementsReview,
+	handleSkillImprovementsCreate,
+	handleSkillImprovementsStatus,
+	handleSkillImprovementsApprove,
+	handleSkillImprovementsReject,
+	handleSkillImprovementsDefer,
+	handleSkillDraftsCreate,
+	handleSkillDraftsReview,
+	handleSkillRating,
+} from "./cli/skill/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2514,80 +2526,28 @@ export async function runCliCommand(
 			return handleSupervisorLearningRulesRollback(activeRuntime, rest);
 			case "idu-skill-improvements-review":
 			case "skill-improvements-review":
-				return ok(
-					activeRuntime.formatSkillImprovementPlan(
-						activeRuntime.skillImprovementPlan(requiredText(rest)),
-					),
-				);
+			return handleSkillImprovementsReview(activeRuntime, rest);
 			case "idu-skill-improvements-create":
 			case "skill-improvements-create":
-				return ok(
-					activeRuntime.formatSkillImprovementCreationResult(
-						activeRuntime.skillImprovementCreate(requiredText(rest)),
-					),
-				);
+			return handleSkillImprovementsCreate(activeRuntime, rest);
 			case "idu-skill-improvements-status":
 			case "skill-improvements-status":
-				return ok(
-					activeRuntime.formatSkillImprovementStatus(
-						activeRuntime.skillImprovementStatus(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleSkillImprovementsStatus(activeRuntime, rest);
 			case "idu-skill-improvements-approve":
-			case "skill-improvements-approve": {
-				const decision = requiredDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSkillImprovementDecisionResult(
-						activeRuntime.skillImprovementApprove(
-							decision.pathOrLatest,
-							decision.proposalIdOrAll,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "skill-improvements-approve":
+			return handleSkillImprovementsApprove(activeRuntime, rest);
 			case "idu-skill-improvements-reject":
-			case "skill-improvements-reject": {
-				const decision = requiredDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSkillImprovementDecisionResult(
-						activeRuntime.skillImprovementReject(
-							decision.pathOrLatest,
-							decision.proposalIdOrAll,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "skill-improvements-reject":
+			return handleSkillImprovementsReject(activeRuntime, rest);
 			case "idu-skill-improvements-defer":
-			case "skill-improvements-defer": {
-				const decision = requiredDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSkillImprovementDecisionResult(
-						activeRuntime.skillImprovementDefer(
-							decision.pathOrLatest,
-							decision.proposalIdOrAll,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "skill-improvements-defer":
+			return handleSkillImprovementsDefer(activeRuntime, rest);
 			case "idu-skill-drafts-create":
 			case "skill-drafts-create":
-				return ok(
-					activeRuntime.formatSkillDraftCreationResult(
-						activeRuntime.skillDraftsCreate(rest.join(" ").trim() || "latest"),
-					),
-				);
+			return handleSkillDraftsCreate(activeRuntime, rest);
 			case "idu-skill-drafts-review":
 			case "skill-drafts-review":
-				return ok(
-					activeRuntime.formatSkillDraftReview(
-						activeRuntime.skillDraftReview(rest.join(" ").trim() || "latest"),
-					),
-				);
+			return handleSkillDraftsReview(activeRuntime, rest);
 			case "idu-task":
 			case "task": {
 				if (!rest.length) return ok(formatTaskTemplateHelp());
@@ -2712,19 +2672,8 @@ export async function runCliCommand(
 				return ok(formatBibliotecarioInit(result));
 			}
 			case "idu-skill-rating":
-			case "skill-rating": {
-				const result = runSkillRating(rest, {
-					stateRoot: activeRuntime.workspaceRoot,
-				});
-				if (!result.ok) {
-					return {
-						exitCode: result.exitCode,
-						stdout: "",
-						stderr: formatSkillRating(result),
-					};
-				}
-				return ok(formatSkillRating(result));
-			}
+			case "skill-rating":
+			return handleSkillRating(activeRuntime, rest);
 			case "idu-birth-validate":
 			case "birth-validate": {
 				const result = handleBirthValidate({

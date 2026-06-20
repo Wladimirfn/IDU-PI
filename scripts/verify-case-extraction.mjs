@@ -464,6 +464,14 @@ function parseAllFunctionNames(src) {
 	return names;
 }
 
+function parseExportedFunctions(src) {
+	const re = /^export\s+(?:async\s+)?function\s+(\w+)/gm;
+	const names = [];
+	let m;
+	while ((m = re.exec(src))) names.push(m[1]);
+	return names;
+}
+
 function checkCrossHandlerDuplication() {
 	const fileToFns = new Map();
 	for (const file of ALL_HANDLER_FILES) {
@@ -577,4 +585,187 @@ if (hasAnyHandler) {
 		console.log("and import it from both cli.ts and the handler file(s).");
 		process.exit(1);
 	}
+}
+
+// =====================================================================
+// Delegation guard (added in PR 7f follow-up after the auditor caught
+// the dead-code no-op).
+//
+// The byte-identity test verifies the wrapper body matches the case
+// body. The duplication guard verifies the wrappers don't shadow cli.ts
+// internals. But NEITHER verifies that cli.ts actually CALLS the
+// wrappers. A "no-op" PR that just adds handler files without rewiring
+// the switch passes both gates — the wrappers become dead code, the
+// case bodies stay inline, and the test suite still passes (behavior
+// is unchanged).
+//
+// This guard closes that blind spot by requiring, for every wrapper
+// `handleX` exported from any handler file: cli.ts MUST contain at
+// least one `return handleX(...)` call. If a wrapper is never called
+// from cli.ts, it is dead code.
+//
+// Two checks:
+//
+//   (C) Delegation: for every wrapper exported by a handler file,
+//       `return <wrapperName>(...)` MUST appear in cli.ts (the dispatch
+//       switch must call the wrapper). At least one match per wrapper.
+//
+//   (D) Body extraction: the case body that the wrapper replaced must
+//       NOT be inlined in cli.ts. We approximate this by checking that
+//       the case label's runtime-method call (the first inner runtime
+//       call inside the wrapper body) does NOT appear in cli.ts AFTER
+//       the case label. If it does, the case body is still inline.
+//
+// Both checks are run AFTER the byte-identity + duplication gates
+// and are blocking.
+// =====================================================================
+
+function checkDelegation() {
+	// Read cli.ts from the WORKING TREE (post-extraction state).
+	let cliSrc;
+	try {
+		cliSrc = readFileSync("src/cli.ts", "utf8");
+	} catch {
+		return [];
+	}
+	const fileToWrappers = new Map();
+	for (const file of ALL_HANDLER_FILES) {
+		try {
+			const src = readFileSync(file, "utf8");
+			const wrappers = parseExportedFunctions(src);
+			if (wrappers.length > 0) fileToWrappers.set(file, wrappers);
+		} catch {
+			// Handler file may not exist yet for un-extracted clusters.
+		}
+	}
+	const missing = [];
+	for (const [file, wrappers] of fileToWrappers) {
+		for (const wrapper of wrappers) {
+			// Match `return [await] <wrapper>(` — a real delegation call.
+			// Some handlers are async; the dispatcher calls them with
+			// `return await handleX(...)`. We accept both forms.
+			const re = new RegExp(
+				`return\\s+(?:await\\s+)?${wrapper}\\s*\\(`,
+				"g",
+			);
+			if (!re.test(cliSrc)) {
+				missing.push({ wrapper, file });
+			}
+		}
+	}
+	return missing;
+}
+
+function checkBodyExtracted() {
+	// For each wrapper, the case body contains a specific runtime-method
+	// call. We approximate "body extracted" by checking that the
+	// wrapper's runtime call (the first one inside it) does NOT appear
+	// in cli.ts. If it does, the case body is still inline.
+	//
+	// Strategy: extract the first `runtime.X(...)` call from the wrapper
+	// body. Grep cli.ts for that pattern. If found, FAIL.
+	const fileToWrappers = new Map();
+	for (const file of ALL_HANDLER_FILES) {
+		try {
+			const src = readFileSync(file, "utf8");
+			const wrappers = parseExportedFunctions(src);
+			if (wrappers.length > 0) fileToWrappers.set(file, wrappers);
+		} catch {
+			// ignore
+		}
+	}
+	const leakedBodies = [];
+	for (const [file, wrappers] of fileToWrappers) {
+		for (const wrapper of wrappers) {
+			const src = readFileSync(file, "utf8");
+			// Find the wrapper body and extract the first runtime.X(...) call.
+			const handlerRe = new RegExp(
+				`export\\s+(?:async\\s+)?function\\s+${wrapper}\\s*\\([^)]*\\)\\s*(?::\\s*Promise<[^>]+>)?\\s*\\{([\\s\\S]*?)\\n\\}`,
+			);
+			const m = handlerRe.exec(src);
+			if (!m) continue;
+			const body = m[1];
+			// Find first runtime.X(...) call inside the body.
+			const callRe = /runtime\.([A-Za-z_]\w*)\s*\(/;
+			const cm = callRe.exec(body);
+			if (!cm) continue;
+			const methodName = cm[1];
+			// Grep cli.ts for `activeRuntime.<methodName>(` or
+			// `runtime.<methodName>(` outside of any string. We use a
+			// simple substring check — if the method name appears as a
+			// call (with `(`), it's likely still inline.
+			const cliSrc = readFileSync("src/cli.ts", "utf8");
+			// Count occurrences of `.methodName(` in cli.ts.
+			// 1 or more = body may still be inline.
+			const inlineRe = new RegExp(
+				`\\.${methodName}\\s*\\(`,
+				"g",
+			);
+			const matches = cliSrc.match(inlineRe);
+			if (matches && matches.length > 0) {
+				// Allow up to 1 occurrence (which is in the wrapper file
+				// itself, NOT cli.ts — but we're reading cli.ts here).
+				// If 0: body is gone. If >=1: body may still be inline.
+				leakedBodies.push({
+					wrapper,
+					methodName,
+					count: matches.length,
+				});
+			}
+		}
+	}
+	return leakedBodies;
+}
+
+const delegationFailures = (() => {
+	let failures = 0;
+
+	const missing = checkDelegation();
+	if (missing.length > 0) {
+		failures++;
+		console.log(
+			`  FAIL: ${missing.length} wrapper(s) exported but NEVER CALLED from cli.ts:`,
+		);
+		for (const { wrapper, file } of missing) {
+			console.log(
+				`    - ${wrapper} (exported by ${file}) — DEAD CODE`,
+			);
+		}
+	} else {
+		console.log("  OK: every handler wrapper is called from cli.ts");
+	}
+
+	const leaked = checkBodyExtracted();
+	if (leaked.length > 0) {
+		failures++;
+		console.log(
+			`  WARN: ${leaked.length} wrapper(s) have runtime calls that still appear in cli.ts:`,
+		);
+		for (const { wrapper, methodName, count } of leaked) {
+			console.log(
+				`    - ${wrapper}: .${methodName}( appears ${count}× in cli.ts (may indicate inline body)`,
+			);
+		}
+	} else {
+		console.log(
+			"  OK: no inline case bodies detected for extracted wrappers",
+		);
+	}
+
+	return failures;
+})();
+
+if (delegationFailures > 0) {
+	console.log("");
+	console.log("STOP: delegation guard failed.");
+	console.log(
+		"Per the auditor's contract, every extracted wrapper must be CALLED from cli.ts.",
+	);
+	console.log(
+		"If you see DEAD CODE: rewire cli.ts (import handler + replace case body with `return handleX(...)`).",
+	);
+	console.log(
+		"If you see inline bodies: ensure the case body was replaced, not duplicated.",
+	);
+	process.exit(1);
 }
