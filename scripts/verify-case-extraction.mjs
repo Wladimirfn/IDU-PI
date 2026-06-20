@@ -363,6 +363,7 @@ function matchesCluster(label, cluster) {
 		skill: ["skill"],
 		semantic: ["semantic"],
 		queue: ["queue", "task"],
+		alerts: ["alerts"],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -452,6 +453,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/skill/handlers.ts",
 	"src/cli/semantic/handlers.ts",
 	"src/cli/queue/handlers.ts",
+	"src/cli/alerts/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

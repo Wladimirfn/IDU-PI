@@ -810,6 +810,13 @@ import {
 	handleQueueComplete,
 	handleTask,
 } from "./cli/queue/index.js";
+// PR 7i (Item 4): cluster B (alerts) case wrappers for the dispatch switch.
+import {
+	handleAlerts,
+	handleAlertsStatus,
+	handleAlertsTick,
+	handleAlertsScheduledTick,
+} from "./cli/alerts/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2194,35 +2201,19 @@ export async function runCliCommand(
 			}
 			case "alerts":
 			case "idu-alerts":
-				return handleCliAlertCommand(activeRuntime, rest);
+			return handleAlerts(activeRuntime, rest);
 			case "events":
 			case "idu-events":
 				return handleEvents(activeRuntime, rest);
 			case "idu-alerts-status":
 			case "alerts-status":
-				return ok(
-					formatCliAutonomousAlertReport(
-						buildCliAutonomousAlertStatus(activeRuntime),
-					),
-				);
+			return handleAlertsStatus(activeRuntime);
 			case "idu-alerts-tick":
 			case "alerts-tick":
-				return ok(
-					formatCliAutonomousAlertReport(
-						runCliAutonomousAlertTick(activeRuntime, {
-							allowTaskCreation: rest.includes("--allow-task-creation"),
-						}),
-					),
-				);
+			return handleAlertsTick(activeRuntime, rest);
 			case "idu-alerts-scheduled-tick":
 			case "alerts-scheduled-tick":
-				return ok(
-					formatCliAutonomousAlertScheduledTick(
-						runCliAutonomousAlertScheduledTick(activeRuntime, {
-							allowTaskCreation: rest.includes("--allow-task-creation"),
-						}),
-					),
-				);
+			return handleAlertsScheduledTick(activeRuntime, rest);
 			case "idu-prepare":
 			case "prepare": {
 				const result = activeRuntime.prepare();
