@@ -825,8 +825,6 @@ import type {
 	TaskQueuePanelDispatchResult,
 } from "./cli/queue/index.js";
 
-
-
 export type CliRuntime = {
 	projectId: string;
 	projectPath: string;
@@ -2147,7 +2145,7 @@ export async function runCliCommand(
 		switch (command) {
 			case "automaticov1":
 			case "idu-automaticov1":
-			return await handleAutomaticov1(activeRuntime, command, rest);
+				return await handleAutomaticov1(activeRuntime, command, rest);
 			case "status":
 				return ok(
 					activeRuntime.formatConnection(activeRuntime.inspectConnection()),
@@ -2181,7 +2179,7 @@ export async function runCliCommand(
 				return handleCliAlertCommand(activeRuntime, rest);
 			case "events":
 			case "idu-events":
-			return handleEvents(activeRuntime, rest);
+				return handleEvents(activeRuntime, rest);
 			case "idu-alerts-status":
 			case "alerts-status":
 				return ok(
@@ -2222,19 +2220,19 @@ export async function runCliCommand(
 				);
 			case "idu-master-plan-status":
 			case "master-plan-status":
-			return handleMasterPlanStatus(activeRuntime);
+				return handleMasterPlanStatus(activeRuntime);
 			case "idu-master-plan-review":
 			case "master-plan-review":
-			return handleMasterPlanReview(activeRuntime, rest);
+				return handleMasterPlanReview(activeRuntime, rest);
 			case "idu-master-plan-approve":
 			case "master-plan-approve":
-			return handleMasterPlanApprove(activeRuntime, rest);
+				return handleMasterPlanApprove(activeRuntime, rest);
 			case "idu-master-plan-reject":
 			case "master-plan-reject":
-			return handleMasterPlanReject(activeRuntime, rest);
+				return handleMasterPlanReject(activeRuntime, rest);
 			case "idu-master-plan-redraft":
 			case "master-plan-redraft":
-			return handleMasterPlanRedraft(activeRuntime, rest);
+				return handleMasterPlanRedraft(activeRuntime, rest);
 			case "idu-hygiene-migrate":
 			case "hygiene-migrate": {
 				const parsed = parseHygieneMigrateArgs(rest);
@@ -2295,49 +2293,49 @@ export async function runCliCommand(
 			}
 			case "idu-source-status":
 			case "source-status":
-			return handleSourceStatus(activeRuntime);
+				return handleSourceStatus(activeRuntime);
 			case "idu-source-add":
 			case "source-add":
-			return handleSourceAdd(activeRuntime, rest);
+				return handleSourceAdd(activeRuntime, rest);
 			case "idu-source-remove":
 			case "source-remove":
-			return handleSourceRemove(activeRuntime, rest);
+				return handleSourceRemove(activeRuntime, rest);
 			case "idu-source-read":
 			case "source-read":
-			return handleSourceRead(activeRuntime, rest);
+				return handleSourceRead(activeRuntime, rest);
 			case "idu-source-extract":
 			case "source-extract":
-			return handleSourceExtract(activeRuntime, rest);
+				return handleSourceExtract(activeRuntime, rest);
 			case "idu-source-report":
 			case "source-report":
-			return handleSourceReport(activeRuntime, rest);
+				return handleSourceReport(activeRuntime, rest);
 			case "idu-source-research":
 			case "source-research":
-			return handleSourceResearch(activeRuntime, rest);
+				return handleSourceResearch(activeRuntime, rest);
 			case "idu-source-digest":
 			case "source-digest":
-			return handleSourceDigest(activeRuntime, rest);
+				return handleSourceDigest(activeRuntime, rest);
 			case "idu-source-digest-status":
 			case "source-digest-status":
-			return handleSourceDigestStatus(activeRuntime);
+				return handleSourceDigestStatus(activeRuntime);
 			case "idu-source-chunk-read":
 			case "source-chunk-read":
-			return handleSourceChunkRead(activeRuntime, rest);
+				return handleSourceChunkRead(activeRuntime, rest);
 			case "idu-source-recommend":
 			case "source-recommend":
-			return handleSourceRecommend(activeRuntime, rest);
+				return handleSourceRecommend(activeRuntime, rest);
 			case "idu-source-required-actions":
 			case "source-required-actions":
-			return handleSourceRequiredActions(activeRuntime);
+				return handleSourceRequiredActions(activeRuntime);
 			case "idu-source-skill-candidates-create":
 			case "source-skill-candidates-create":
-			return handleSourceSkillCandidatesCreate(activeRuntime, rest);
+				return handleSourceSkillCandidatesCreate(activeRuntime, rest);
 			case "idu-source-skill-candidates-review":
 			case "source-skill-candidates-review":
-			return handleSourceSkillCandidatesReview(activeRuntime, rest);
+				return handleSourceSkillCandidatesReview(activeRuntime, rest);
 			case "idu-source-refresh":
 			case "source-refresh":
-			return handleSourceRefresh(activeRuntime);
+				return handleSourceRefresh(activeRuntime);
 			case "idu-preflight":
 			case "preflight": {
 				const report = activeRuntime.preflight(requiredText(rest));
@@ -2373,7 +2371,7 @@ export async function runCliCommand(
 				return ok(activeRuntime.formatPostflight(report));
 			}
 			case "idu-run-cron-preflight":
-			return await handleRunCronPreflight(activeRuntime, rest);
+				return await handleRunCronPreflight(activeRuntime, rest);
 			case "idu-objective-status": {
 				// PR-A of objective-injection (PISO gate read path).
 				// Read-only: no side effects, no enqueue. Use this to verify
@@ -2393,17 +2391,17 @@ export async function runCliCommand(
 				);
 			}
 			case "idu-check-user-escalation":
-			return await handleCheckUserEscalation(activeRuntime);
+				return await handleCheckUserEscalation(activeRuntime);
 			case "idu-usage-status":
 			case "usage-status":
-			return await handleUsageStatus(activeRuntime);
+				return await handleUsageStatus(activeRuntime);
 			case "idu-lab-review-plan":
 			case "lab-review-plan":
-			return handleLabReviewPlan(activeRuntime, rest);
+				return handleLabReviewPlan(activeRuntime, rest);
 			case "idu-review":
 			case "review":
 			case "revisar":
-			return await handleReview(activeRuntime);
+				return await handleReview(activeRuntime);
 			case "idu-model-invocation-status":
 			case "model-invocation-status":
 				return handleModelInvocationStatus(activeRuntime, rest);
@@ -2418,22 +2416,22 @@ export async function runCliCommand(
 				return handleRoleEngineStatus(activeRuntime, rest);
 			case "idu-agentlab-request-create":
 			case "agentlab-request-create":
-			return handleAgentLabRequestCreate(activeRuntime, rest);
+				return handleAgentLabRequestCreate(activeRuntime, rest);
 			case "idu-agentlab-request-review":
 			case "agentlab-request-review":
-			return handleAgentLabRequestReview(activeRuntime, rest);
+				return handleAgentLabRequestReview(activeRuntime, rest);
 			case "idu-agentlab-review-run":
 			case "agentlab-review-run":
-			return await handleAgentLabReviewRun(activeRuntime, rest);
+				return await handleAgentLabReviewRun(activeRuntime, rest);
 			case "idu-agentlab-review-status":
 			case "agentlab-review-status":
-			return handleAgentLabReviewStatus(activeRuntime, rest);
+				return handleAgentLabReviewStatus(activeRuntime, rest);
 			case "idu-agentlab-report-consolidate":
 			case "agentlab-report-consolidate":
-			return handleAgentLabReportConsolidate(activeRuntime, rest);
+				return handleAgentLabReportConsolidate(activeRuntime, rest);
 			case "idu-agentlab-report-consolidation-status":
 			case "agentlab-report-consolidation-status":
-			return handleAgentLabReportConsolidationStatus(activeRuntime, rest);
+				return handleAgentLabReportConsolidationStatus(activeRuntime, rest);
 			case "idu-semantic-audit-status":
 			case "semantic-audit-status":
 				return ok(
@@ -2478,76 +2476,76 @@ export async function runCliCommand(
 				);
 			case "idu-supervisor-tick":
 			case "supervisor-tick":
-			return handleSupervisorTick(activeRuntime);
+				return handleSupervisorTick(activeRuntime);
 			case "idu-execution-director-tick":
 			case "execution-director-tick":
-			return handleExecutionDirectorTick(activeRuntime);
+				return handleExecutionDirectorTick(activeRuntime);
 			case "idu-proposal-outbox":
 			case "proposal-outbox":
-			return handleProposalOutbox(activeRuntime);
+				return handleProposalOutbox(activeRuntime);
 			case "idu-proposal-detail":
 			case "proposal-detail":
-			return handleProposalDetail(activeRuntime, rest);
+				return handleProposalDetail(activeRuntime, rest);
 			case "idu-supervisor-improvements-review":
 			case "supervisor-improvements-review":
-			return handleSupervisorImprovementsReview(activeRuntime, rest);
+				return handleSupervisorImprovementsReview(activeRuntime, rest);
 			case "idu-supervisor-improvements-create":
 			case "supervisor-improvements-create":
-			return handleSupervisorImprovementsCreate(activeRuntime, rest);
+				return handleSupervisorImprovementsCreate(activeRuntime, rest);
 			case "idu-supervisor-improvements-status":
 			case "supervisor-improvements-status":
-			return handleSupervisorImprovementsStatus(activeRuntime, rest);
+				return handleSupervisorImprovementsStatus(activeRuntime, rest);
 			case "idu-supervisor-improvements-approve":
 			case "supervisor-improvements-approve":
-			return handleSupervisorImprovementsApprove(activeRuntime, rest);
+				return handleSupervisorImprovementsApprove(activeRuntime, rest);
 			case "idu-supervisor-improvements-reject":
 			case "supervisor-improvements-reject":
-			return handleSupervisorImprovementsReject(activeRuntime, rest);
+				return handleSupervisorImprovementsReject(activeRuntime, rest);
 			case "idu-supervisor-improvements-defer":
 			case "supervisor-improvements-defer":
-			return handleSupervisorImprovementsDefer(activeRuntime, rest);
+				return handleSupervisorImprovementsDefer(activeRuntime, rest);
 			case "idu-supervisor-improvements-apply":
 			case "supervisor-improvements-apply":
-			return handleSupervisorImprovementsApply(activeRuntime, rest);
+				return handleSupervisorImprovementsApply(activeRuntime, rest);
 			case "idu-supervisor-learning-rules-status":
 			case "supervisor-learning-rules-status":
-			return handleSupervisorLearningRulesStatus(activeRuntime);
+				return handleSupervisorLearningRulesStatus(activeRuntime);
 			case "idu-supervisor-learning-rules-test":
 			case "supervisor-learning-rules-test":
-			return handleSupervisorLearningRulesTest(activeRuntime);
+				return handleSupervisorLearningRulesTest(activeRuntime);
 			case "idu-supervisor-learning-rules-disable":
 			case "supervisor-learning-rules-disable":
-			return handleSupervisorLearningRulesDisable(activeRuntime, rest);
+				return handleSupervisorLearningRulesDisable(activeRuntime, rest);
 			case "idu-supervisor-learning-rules-enable":
 			case "supervisor-learning-rules-enable":
-			return handleSupervisorLearningRulesEnable(activeRuntime, rest);
+				return handleSupervisorLearningRulesEnable(activeRuntime, rest);
 			case "idu-supervisor-learning-rules-rollback":
 			case "supervisor-learning-rules-rollback":
-			return handleSupervisorLearningRulesRollback(activeRuntime, rest);
+				return handleSupervisorLearningRulesRollback(activeRuntime, rest);
 			case "idu-skill-improvements-review":
 			case "skill-improvements-review":
-			return handleSkillImprovementsReview(activeRuntime, rest);
+				return handleSkillImprovementsReview(activeRuntime, rest);
 			case "idu-skill-improvements-create":
 			case "skill-improvements-create":
-			return handleSkillImprovementsCreate(activeRuntime, rest);
+				return handleSkillImprovementsCreate(activeRuntime, rest);
 			case "idu-skill-improvements-status":
 			case "skill-improvements-status":
-			return handleSkillImprovementsStatus(activeRuntime, rest);
+				return handleSkillImprovementsStatus(activeRuntime, rest);
 			case "idu-skill-improvements-approve":
 			case "skill-improvements-approve":
-			return handleSkillImprovementsApprove(activeRuntime, rest);
+				return handleSkillImprovementsApprove(activeRuntime, rest);
 			case "idu-skill-improvements-reject":
 			case "skill-improvements-reject":
-			return handleSkillImprovementsReject(activeRuntime, rest);
+				return handleSkillImprovementsReject(activeRuntime, rest);
 			case "idu-skill-improvements-defer":
 			case "skill-improvements-defer":
-			return handleSkillImprovementsDefer(activeRuntime, rest);
+				return handleSkillImprovementsDefer(activeRuntime, rest);
 			case "idu-skill-drafts-create":
 			case "skill-drafts-create":
-			return handleSkillDraftsCreate(activeRuntime, rest);
+				return handleSkillDraftsCreate(activeRuntime, rest);
 			case "idu-skill-drafts-review":
 			case "skill-drafts-review":
-			return handleSkillDraftsReview(activeRuntime, rest);
+				return handleSkillDraftsReview(activeRuntime, rest);
 			case "idu-task":
 			case "task": {
 				if (!rest.length) return ok(formatTaskTemplateHelp());
@@ -2673,7 +2671,7 @@ export async function runCliCommand(
 			}
 			case "idu-skill-rating":
 			case "skill-rating":
-			return handleSkillRating(activeRuntime, rest);
+				return handleSkillRating(activeRuntime, rest);
 			case "idu-birth-validate":
 			case "birth-validate": {
 				const result = handleBirthValidate({
@@ -2900,7 +2898,7 @@ export async function runCliCommand(
 				return ok(formatTriggerSubscription());
 			case "idu-supervisor-trigger":
 			case "supervisor-trigger":
-			return handleSupervisorTrigger(activeRuntime, rest);
+				return handleSupervisorTrigger(activeRuntime, rest);
 			case "idu-trigger-engine":
 			case "trigger-engine": {
 				const subcommand = (rest.shift() ?? "status").toLowerCase();
@@ -3003,21 +3001,6 @@ export async function runCliCommand(
 	}
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 async function runBootstrapIduCommand(): Promise<string> {
 	const config = loadConfig({ requireTelegram: false });
 	process.env.AGENT_WORKSPACE_ROOT ??= config.agentWorkspaceRoot;
@@ -3116,17 +3099,6 @@ async function runBootstrapIduCommand(): Promise<string> {
 		.join("\n");
 }
 
-
-
-
-
-
-
-
-
-
-
-
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	const normalizedArgs = normalizeCliArgs(args);
@@ -3141,72 +3113,6 @@ async function main(): Promise<void> {
 	if (result.stderr) console.error(result.stderr);
 	process.exit(result.exitCode);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 if (
 	process.argv[1] &&

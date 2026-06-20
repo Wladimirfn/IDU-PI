@@ -379,10 +379,7 @@ function findHandlerForLabel(helpersSrc, label) {
 		`handle${pascal}Status`,
 	];
 	for (const c of candidates) {
-		const re = new RegExp(
-			`^export\\s+(?:async\\s+)?function\\s+${c}\\b`,
-			"m",
-		);
+		const re = new RegExp(`^export\\s+(?:async\\s+)?function\\s+${c}\\b`, "m");
 		if (re.test(helpersSrc)) return c;
 	}
 	const exportRe = /^export\s+(?:async\s+)?function\s+(\w+)/gm;
@@ -531,18 +528,48 @@ function checkHandlerVsCliInternals() {
 }
 
 // Run duplication checks (only when at least one handler file is present).
+// FAIL-CLOSED: any error reading a handler file aborts the gate (exit≠0).
+// A silent "file doesn't exist" catch would let the gate pass with no checks.
 const hasAnyHandler = ALL_HANDLER_FILES.some((f) => {
 	try {
 		readFileSync(f, "utf8");
 		return true;
-	} catch {
-		return false;
+	} catch (e) {
+		// Re-throw with context — don't swallow.
+		throw new Error(`Cannot read handler file ${f}: ${e.message}`);
 	}
 });
+
+// FAIL-CLOSED sanity check: if any gate function is not a function
+// (e.g. accidentally deleted by a refactor), abort. A silent skip
+// would let the gate "pass" with no checks.
+// Note: this block must be placed AFTER all gate function
+// declarations because ESM doesn't hoist `function` declarations
+// across module top-level statements the way CommonJS does.
+function _sanityCheckGateFunctions() {
+	const fns = [
+		checkCrossHandlerDuplication,
+		checkHandlerVsCliInternals,
+		checkDelegation,
+		checkBodyExtracted,
+	];
+	for (const fn of fns) {
+		if (typeof fn !== "function") {
+			console.log(`STOP: a gate function is not defined.`);
+			console.log(
+				"This usually means the script was refactored and a",
+			);
+			console.log("function was deleted. Restore it before re-running.");
+			process.exit(1);
+		}
+	}
+}
+_sanityCheckGateFunctions();
 
 if (hasAnyHandler) {
 	console.log("");
 	console.log("=== Duplication guard ===");
+
 	let dupFailures = 0;
 
 	const crossHandler = checkCrossHandlerDuplication();
@@ -622,21 +649,18 @@ if (hasAnyHandler) {
 
 function checkDelegation() {
 	// Read cli.ts from the WORKING TREE (post-extraction state).
-	let cliSrc;
-	try {
-		cliSrc = readFileSync("src/cli.ts", "utf8");
-	} catch {
-		return [];
-	}
+	// FAIL-CLOSED: any failure here aborts the gate (exit≠0), not a
+	// silent pass. A silent pass here would re-introduce the dead-code
+	// no-op bug class (PR 7f was caught exactly because the gate failed;
+	// if it had silently passed, the no-op would have merged).
+	const cliSrc = readFileSync("src/cli.ts", "utf8");
 	const fileToWrappers = new Map();
 	for (const file of ALL_HANDLER_FILES) {
-		try {
-			const src = readFileSync(file, "utf8");
-			const wrappers = parseExportedFunctions(src);
-			if (wrappers.length > 0) fileToWrappers.set(file, wrappers);
-		} catch {
-			// Handler file may not exist yet for un-extracted clusters.
-		}
+		// FAIL-CLOSED: any I/O error here aborts the gate. A silent
+		// empty map would let the gate "pass" with no checks.
+		const src = readFileSync(file, "utf8");
+		const wrappers = parseExportedFunctions(src);
+		if (wrappers.length > 0) fileToWrappers.set(file, wrappers);
 	}
 	const missing = [];
 	for (const [file, wrappers] of fileToWrappers) {
@@ -644,10 +668,7 @@ function checkDelegation() {
 			// Match `return [await] <wrapper>(` — a real delegation call.
 			// Some handlers are async; the dispatcher calls them with
 			// `return await handleX(...)`. We accept both forms.
-			const re = new RegExp(
-				`return\\s+(?:await\\s+)?${wrapper}\\s*\\(`,
-				"g",
-			);
+			const re = new RegExp(`return\\s+(?:await\\s+)?${wrapper}\\s*\\(`, "g");
 			if (!re.test(cliSrc)) {
 				missing.push({ wrapper, file });
 			}
@@ -666,13 +687,10 @@ function checkBodyExtracted() {
 	// body. Grep cli.ts for that pattern. If found, FAIL.
 	const fileToWrappers = new Map();
 	for (const file of ALL_HANDLER_FILES) {
-		try {
-			const src = readFileSync(file, "utf8");
-			const wrappers = parseExportedFunctions(src);
-			if (wrappers.length > 0) fileToWrappers.set(file, wrappers);
-		} catch {
-			// ignore
-		}
+		// FAIL-CLOSED: any I/O or parse error aborts the gate.
+		const src = readFileSync(file, "utf8");
+		const wrappers = parseExportedFunctions(src);
+		if (wrappers.length > 0) fileToWrappers.set(file, wrappers);
 	}
 	const leakedBodies = [];
 	for (const [file, wrappers] of fileToWrappers) {
@@ -697,10 +715,7 @@ function checkBodyExtracted() {
 			const cliSrc = readFileSync("src/cli.ts", "utf8");
 			// Count occurrences of `.methodName(` in cli.ts.
 			// 1 or more = body may still be inline.
-			const inlineRe = new RegExp(
-				`\\.${methodName}\\s*\\(`,
-				"g",
-			);
+			const inlineRe = new RegExp(`\\.${methodName}\\s*\\(`, "g");
 			const matches = cliSrc.match(inlineRe);
 			if (matches && matches.length > 0) {
 				// Allow up to 1 occurrence (which is in the wrapper file
@@ -727,9 +742,7 @@ const delegationFailures = (() => {
 			`  FAIL: ${missing.length} wrapper(s) exported but NEVER CALLED from cli.ts:`,
 		);
 		for (const { wrapper, file } of missing) {
-			console.log(
-				`    - ${wrapper} (exported by ${file}) — DEAD CODE`,
-			);
+			console.log(`    - ${wrapper} (exported by ${file}) — DEAD CODE`);
 		}
 	} else {
 		console.log("  OK: every handler wrapper is called from cli.ts");
@@ -747,9 +760,7 @@ const delegationFailures = (() => {
 			);
 		}
 	} else {
-		console.log(
-			"  OK: no inline case bodies detected for extracted wrappers",
-		);
+		console.log("  OK: no inline case bodies detected for extracted wrappers");
 	}
 
 	return failures;
