@@ -352,6 +352,14 @@ function matchesCluster(label, cluster) {
 			"revisar",
 		],
 		source: ["source"],
+		supervisor: [
+			"supervisor-tick",
+			"supervisor-improvements",
+			"supervisor-learning-rules",
+			"supervisor-trigger",
+			"cron-preflight",
+			"check-user-escalation",
+		],
 	};
 	const prefixes = map[cluster] || [cluster];
 	return prefixes.some((p) => label.includes(p));
@@ -440,6 +448,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/master-plan/handlers.ts",
 	"src/cli/agentlab/handlers.ts",
 	"src/cli/source/handlers.ts",
+	"src/cli/supervisor/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

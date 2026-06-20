@@ -761,6 +761,25 @@ import {
 	handleSourceSkillCandidatesReview,
 	handleSourceRefresh,
 } from "./cli/source/index.js";
+// PR 7e (Item 4): cluster G (supervisor) case wrappers for the dispatch switch.
+import {
+	handleRunCronPreflight,
+	handleCheckUserEscalation,
+	handleSupervisorTick,
+	handleSupervisorImprovementsReview,
+	handleSupervisorImprovementsCreate,
+	handleSupervisorImprovementsStatus,
+	handleSupervisorImprovementsApprove,
+	handleSupervisorImprovementsReject,
+	handleSupervisorImprovementsDefer,
+	handleSupervisorImprovementsApply,
+	handleSupervisorLearningRulesStatus,
+	handleSupervisorLearningRulesTest,
+	handleSupervisorLearningRulesDisable,
+	handleSupervisorLearningRulesEnable,
+	handleSupervisorLearningRulesRollback,
+	handleSupervisorTrigger,
+} from "./cli/supervisor/index.js";
 import {
 	modelAssignmentOptions,
 	modelAssignmentOptionGroups,
@@ -2341,26 +2360,8 @@ export async function runCliCommand(
 				});
 				return ok(activeRuntime.formatPostflight(report));
 			}
-			case "idu-run-cron-preflight": {
-				// Cron entry point: runs postflight → sensor → AgentLab →
-				// supervisor chain and writes a supervisor_advisory to
-				// injections.jsonl. Reuses the same promptForRole as the
-				// MCP path so role-rails and cooldowns are shared.
-				const result = await activeRuntime.runCronPreflight?.({
-					changedFiles: rest,
-				});
-				if (!result) {
-					return ok("Cron preflight: not available in this runtime\n");
-				}
-				const advisoryLine = result.supervisorAdvisory
-					? (result.supervisorAdvisory.advisory?.summary ??
-						result.supervisorAdvisory.reason ??
-						"ok")
-					: "null";
-				return ok(
-					`Cron preflight: sensorImpulses=${result.sensorImpulses.length} supervisorAdvisory=${advisoryLine}\n`,
-				);
-			}
+			case "idu-run-cron-preflight":
+			return await handleRunCronPreflight(activeRuntime, rest);
 			case "idu-objective-status": {
 				// PR-A of objective-injection (PISO gate read path).
 				// Read-only: no side effects, no enqueue. Use this to verify
@@ -2379,23 +2380,8 @@ export async function runCliCommand(
 						`  state_file: ${reminderExists ? statePath : "not created yet"}\n`,
 				);
 			}
-			case "idu-check-user-escalation": {
-				// PR-105c. Reads last-user-interaction.json (if present) and
-				// runs the user escalation check. Writes user-escalations.jsonl
-				// if any threshold is breached.
-				const result = await activeRuntime.checkUserEscalation?.({});
-				if (!result) {
-					return ok("User escalation: not available in this runtime\n");
-				}
-				if (result.shouldEscalate) {
-					return ok(
-						`User escalation: shouldEscalate=true reasons=${result.reasons.join(",")} critical=${result.counts.critical} total=${result.counts.total} hoursSince=${result.hoursSinceLastInteraction.toFixed(1)} escalationId=${result.escalationId}\n`,
-					);
-				}
-				return ok(
-					`User escalation: shouldEscalate=false critical=${result.counts.critical} total=${result.counts.total} hoursSince=${result.hoursSinceLastInteraction.toFixed(1)}\n`,
-				);
-			}
+			case "idu-check-user-escalation":
+			return await handleCheckUserEscalation(activeRuntime);
 			case "idu-usage-status":
 			case "usage-status":
 			return await handleUsageStatus(activeRuntime);
@@ -2480,9 +2466,7 @@ export async function runCliCommand(
 				);
 			case "idu-supervisor-tick":
 			case "supervisor-tick":
-				return ok(
-					activeRuntime.formatSupervisorTick(activeRuntime.supervisorTick()),
-				);
+			return handleSupervisorTick(activeRuntime);
 			case "idu-execution-director-tick":
 			case "execution-director-tick":
 			return handleExecutionDirectorTick(activeRuntime);
@@ -2494,122 +2478,40 @@ export async function runCliCommand(
 			return handleProposalDetail(activeRuntime, rest);
 			case "idu-supervisor-improvements-review":
 			case "supervisor-improvements-review":
-				return ok(
-					activeRuntime.formatSupervisorImprovementPlan(
-						activeRuntime.supervisorImprovementPlan(requiredText(rest)),
-					),
-				);
+			return handleSupervisorImprovementsReview(activeRuntime, rest);
 			case "idu-supervisor-improvements-create":
 			case "supervisor-improvements-create":
-				return ok(
-					activeRuntime.formatSupervisorImprovementCreationResult(
-						activeRuntime.supervisorImprovementCreate(requiredText(rest)),
-					),
-				);
+			return handleSupervisorImprovementsCreate(activeRuntime, rest);
 			case "idu-supervisor-improvements-status":
 			case "supervisor-improvements-status":
-				return ok(
-					activeRuntime.formatSupervisorImprovementStatus(
-						activeRuntime.supervisorImprovementStatus(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleSupervisorImprovementsStatus(activeRuntime, rest);
 			case "idu-supervisor-improvements-approve":
-			case "supervisor-improvements-approve": {
-				const decision = requiredDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSupervisorImprovementDecisionResult(
-						activeRuntime.supervisorImprovementApprove(
-							decision.pathOrLatest,
-							decision.proposalIdOrAll,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "supervisor-improvements-approve":
+			return handleSupervisorImprovementsApprove(activeRuntime, rest);
 			case "idu-supervisor-improvements-reject":
-			case "supervisor-improvements-reject": {
-				const decision = requiredDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSupervisorImprovementDecisionResult(
-						activeRuntime.supervisorImprovementReject(
-							decision.pathOrLatest,
-							decision.proposalIdOrAll,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "supervisor-improvements-reject":
+			return handleSupervisorImprovementsReject(activeRuntime, rest);
 			case "idu-supervisor-improvements-defer":
-			case "supervisor-improvements-defer": {
-				const decision = requiredDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSupervisorImprovementDecisionResult(
-						activeRuntime.supervisorImprovementDefer(
-							decision.pathOrLatest,
-							decision.proposalIdOrAll,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "supervisor-improvements-defer":
+			return handleSupervisorImprovementsDefer(activeRuntime, rest);
 			case "idu-supervisor-improvements-apply":
 			case "supervisor-improvements-apply":
-				return ok(
-					activeRuntime.formatSupervisorLearningRulesApplyResult(
-						activeRuntime.supervisorImprovementsApply(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleSupervisorImprovementsApply(activeRuntime, rest);
 			case "idu-supervisor-learning-rules-status":
 			case "supervisor-learning-rules-status":
-				return ok(
-					activeRuntime.formatSupervisorLearningRulesStatus(
-						activeRuntime.supervisorLearningRulesStatus(),
-					),
-				);
+			return handleSupervisorLearningRulesStatus(activeRuntime);
 			case "idu-supervisor-learning-rules-test":
 			case "supervisor-learning-rules-test":
-				return ok(
-					activeRuntime.formatSupervisorLearningRulesTest(
-						activeRuntime.supervisorLearningRulesTest(),
-					),
-				);
+			return handleSupervisorLearningRulesTest(activeRuntime);
 			case "idu-supervisor-learning-rules-disable":
-			case "supervisor-learning-rules-disable": {
-				const decision = requiredRuleDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSupervisorLearningRuleDecision(
-						activeRuntime.supervisorLearningRulesDisable(
-							decision.ruleId,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "supervisor-learning-rules-disable":
+			return handleSupervisorLearningRulesDisable(activeRuntime, rest);
 			case "idu-supervisor-learning-rules-enable":
-			case "supervisor-learning-rules-enable": {
-				const decision = requiredRuleDecisionParts(rest);
-				return ok(
-					activeRuntime.formatSupervisorLearningRuleDecision(
-						activeRuntime.supervisorLearningRulesEnable(
-							decision.ruleId,
-							decision.reason,
-						),
-					),
-				);
-			}
+			case "supervisor-learning-rules-enable":
+			return handleSupervisorLearningRulesEnable(activeRuntime, rest);
 			case "idu-supervisor-learning-rules-rollback":
 			case "supervisor-learning-rules-rollback":
-				return ok(
-					activeRuntime.formatSupervisorLearningRulesRollback(
-						activeRuntime.supervisorLearningRulesRollback(
-							rest.join(" ").trim() || "latest",
-						),
-					),
-				);
+			return handleSupervisorLearningRulesRollback(activeRuntime, rest);
 			case "idu-skill-improvements-review":
 			case "skill-improvements-review":
 				return ok(
@@ -3048,40 +2950,8 @@ export async function runCliCommand(
 			case "subscribe-triggers":
 				return ok(formatTriggerSubscription());
 			case "idu-supervisor-trigger":
-			case "supervisor-trigger": {
-				const subcommand = (rest.shift() ?? "status").toLowerCase();
-				const stateRoot = activeRuntime.workspaceRoot;
-				if (subcommand === "enable") {
-					return ok(
-						formatSupervisorTriggerResult(
-							enableSupervisorTrigger(stateRoot, {
-								source: "cli",
-								now: new Date(),
-							}),
-						),
-					);
-				}
-				if (subcommand === "disable") {
-					return ok(
-						formatSupervisorTriggerResult(
-							disableSupervisorTrigger(stateRoot, {
-								source: "cli",
-								now: new Date(),
-							}),
-						),
-					);
-				}
-				if (subcommand === "status") {
-					return ok(
-						formatSupervisorTriggerStatus(
-							getSupervisorTriggerStatus(stateRoot),
-						),
-					);
-				}
-				return fail(
-					`Subcomando no reconocido: ${subcommand}. Usá enable | disable | status.`,
-				);
-			}
+			case "supervisor-trigger":
+			return handleSupervisorTrigger(activeRuntime, rest);
 			case "idu-trigger-engine":
 			case "trigger-engine": {
 				const subcommand = (rest.shift() ?? "status").toLowerCase();
