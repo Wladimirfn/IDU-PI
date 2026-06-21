@@ -135,6 +135,11 @@ const CLUSTER_PREFIXES = {
 		"idu_role_engine_control",
 		"idu_role_engine_status",
 	],
+	"supervisor-context": [
+		"idu_supervisor_context_pack",
+		"idu_orchestrator_procedure",
+		"idu_task_context",
+	],
 };
 
 /**
@@ -612,6 +617,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/session/handlers.ts",
 	"src/mcp/supervisor-trigger/handlers.ts",
 	"src/mcp/role/handlers.ts",
+	"src/mcp/supervisor-context/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

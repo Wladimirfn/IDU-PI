@@ -220,6 +220,11 @@ import {
 	handleRoleEngineStatus,
 } from "./mcp/role/index.js";
 import {
+	handleOrchestratorProcedure,
+	handleSupervisorContextPack,
+	handleTaskContext,
+} from "./mcp/supervisor-context/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -1701,7 +1706,7 @@ export function workerBoundaryData(): JsonObject {
 	};
 }
 
-function buildOrchestratorProcedure(
+export function buildOrchestratorProcedure(
 	purpose: string,
 	request: string,
 	runtime: CliRuntime,
@@ -2467,148 +2472,12 @@ async function dispatchTool(
 				],
 			});
 		}
-		case "idu_supervisor_context_pack": {
-			if (!runtime.masterPlanReview) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const request = requiredText(args, "request");
-			const pack = buildSupervisorContextPack(
-				runtime,
-				request,
-				booleanArg(args, "includePlanSnapshot", false),
-			);
-			const supervisorConsultation = pack.supervisorConsultation as
-				| SupervisorConsultation
-				| undefined;
-			pack.decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation:
-					supervisorConsultation?.supervisorRecommendation ?? "warn",
-				severity: supervisorConsultation?.severity ?? "warning",
-				confidence: supervisorConsultation?.confidence ?? 0.78,
-				summary: String(pack.summary),
-				requiresHuman: Boolean(pack.humanApprovalRequired),
-				orchestratorDecisionRequired: true,
-				allowedToProceed: supervisorConsultation?.proceed ?? true,
-				evidenceRefs: supervisorConsultation?.evidenceRefs ?? [
-					"readme:vision",
-					"plan:snapshot",
-					"task:context",
-				],
-				nextActions: arrayField(pack, "autonomyGates").map(String),
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: String(pack.summary),
-				data: pack,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Context pack advisory: no implementé, no escribí archivos y no ejecuté AgentLabs.",
-					"Inyecta metas y gates; el orquestador decide y ejecuta.",
-				],
-			});
-		}
-		case "idu_orchestrator_procedure": {
-			const purpose = requiredOneOf(args, "purpose", [
-				"create_plan",
-				"update_plan",
-				"implement_change",
-				"postflight_review",
-			]);
-			const request = stringArg(args, "request") ?? "";
-			const procedure = buildOrchestratorProcedure(
-				purpose,
-				request,
-				runtime,
-				resolution,
-			);
-			procedure.decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: "warn",
-				severity: "info",
-				confidence: 0.7,
-				summary: String(procedure.summary),
-				requiresHuman: false,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: true,
-				evidenceRefs: ["project:resolution", "procedure:must_consult"],
-				nextActions: [String(procedure.recommendedNext)],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: String(procedure.summary),
-				data: procedure,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Idu-pi MCP informa y guía; el orquestador decide y comunica al usuario.",
-					"AgentLabs son audit-only: no implementan ni crean workspaces.",
-				],
-			});
-		}
-		case "idu_task_context": {
-			const request = requiredText(args, "request");
-			const report = runtime.preflight(request);
-			const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
-			const decisionEnvelope = decisionEnvelopeFromAdvisory(
-				name,
-				alignmentAdvisory,
-			);
-			const supervisorConsultation = buildConsultationFromAdvisory({
-				source: name,
-				planObjective: planObjectiveForRuntime(runtime),
-				advisory: alignmentAdvisory as unknown as JsonObject,
-				risks: [
-					String(report.risk),
-					...arrayField(report as unknown as JsonObject, "warnings").map(
-						String,
-					),
-				],
-				gates: ["Preflight antes de delegar", "Orquestador decide si procede"],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Contexto asesor: ${alignmentAdvisory.recommendation}`,
-				data: {
-					alignmentAdvisory,
-					decisionEnvelope,
-					supervisorConsultation,
-					governanceConfig: governanceConfigData(),
-					workerBoundary: workerBoundaryData(),
-					report,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"No ejecuté AgentLabs ni escribí archivos.",
-					"El orquestador debe pasar este contexto a sus subagentes normales si decide implementar.",
-				],
-			});
-		}
+		case "idu_supervisor_context_pack":
+			return await handleSupervisorContextPack(name, args, runtime, resolution);
+		case "idu_orchestrator_procedure":
+			return await handleOrchestratorProcedure(name, args, runtime, resolution);
+		case "idu_task_context":
+			return await handleTaskContext(name, args, runtime, resolution);
 		case "idu_preflight": {
 			const request = requiredText(args, "request");
 			const report = runtime.preflight(request);
@@ -5586,7 +5455,7 @@ type PlanSnapshot = JsonObject & {
 	contextBudget: ContextBudgetUsage;
 };
 
-type SupervisorConsultation = JsonObject & {
+export type SupervisorConsultation = JsonObject & {
 	version: 1;
 	authority: "advisory";
 	source: string;
@@ -5648,7 +5517,7 @@ function buildSupervisorConsultation(input: {
 	};
 }
 
-function planObjectiveForRuntime(runtime: CliRuntime): string | undefined {
+export function planObjectiveForRuntime(runtime: CliRuntime): string | undefined {
 	if (!runtime.masterPlanReview) return undefined;
 	try {
 		const review = runtime.masterPlanReview("latest");
@@ -5662,7 +5531,7 @@ function planObjectiveForRuntime(runtime: CliRuntime): string | undefined {
 	}
 }
 
-function buildConsultationFromAdvisory(input: {
+export function buildConsultationFromAdvisory(input: {
 	source: string;
 	planObjective?: string;
 	advisory: JsonObject;
@@ -6795,7 +6664,7 @@ function buildTaskPackage(
 	};
 }
 
-function arrayField(source: JsonObject, key: string): unknown[] {
+export function arrayField(source: JsonObject, key: string): unknown[] {
 	const value = source[key];
 	return Array.isArray(value) ? value : [];
 }
