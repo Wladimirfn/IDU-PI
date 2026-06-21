@@ -962,3 +962,45 @@ if (delegationFailures > 0) {
 	);
 	process.exit(1);
 }
+
+// Structural check: no duplicate case labels. The PR 3 splice introduced
+// a literal `case "X":\t\tcase "X": {` on a single line because the
+// replacement string ended with a label that was already in the file.
+// This guard detects that artifact pattern across the dispatch file.
+function checkDuplicateCaseLabels() {
+	const src = readFileSync(dispatchFile, "utf8");
+	const lines = src.split("\n");
+	const dupes = [];
+	// Pattern: any line containing 2+ `case "X":` labels (whether
+	// space-, tab-, or nothing-separated). This catches the splice
+	// artifact and any other accidental duplication.
+	const re = /case\s+"([^"]+)"\s*:.*case\s+"([^"]+)"\s*:/;
+	for (let i = 0; i < lines.length; i++) {
+		const m = re.exec(lines[i]);
+		if (m) {
+			dupes.push({ line: i + 1, labels: [m[1], m[2]], text: lines[i] });
+		}
+	}
+	return dupes;
+}
+
+const duplicateLabels = checkDuplicateCaseLabels();
+if (duplicateLabels.length > 0) {
+	console.log("");
+	console.log("STOP: duplicate case label detected.");
+	for (const d of duplicateLabels) {
+		console.log(`  L${d.line}: ${d.labels.join(", ")}`);
+		console.log(`    ${d.text.trim()}`);
+	}
+	console.log(
+		"Two `case \"X\":` labels on the same line usually means a splice left",
+	);
+	console.log(
+		"the original label in place after inserting a replacement. Inspect",
+	);
+	console.log("the splice script and the surrounding switch block.");
+	process.exit(1);
+} else {
+	console.log("  OK: no duplicate case labels in dispatch file");
+}
+

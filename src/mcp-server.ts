@@ -1919,7 +1919,7 @@ async function dispatchTool(
 				runtime,
 				resolution,
 			);
-		case "idu_prepare":		case "idu_prepare": {
+		case "idu_prepare": {
 			const result = runtime.prepare();
 			return envelope({
 				stateRoot: "",
