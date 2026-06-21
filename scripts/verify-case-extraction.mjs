@@ -126,6 +126,13 @@ const CLUSTER_PREFIXES = {
 		"idu_deactivate",
 		"idu_project_reset_state",
 	],
+	bibliotecario: [
+		"idu_prepare",
+		"idu_bibliotecario_init",
+		"idu_model_invocation_status",
+		"idu_skill_rating",
+		"idu_bibliotecario_proactive_advisory",
+	],
 };
 
 /**
@@ -601,6 +608,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/single/handlers.ts",
 	"src/mcp/lifecycle/handlers.ts",
 	"src/mcp/session/handlers.ts",
+	"src/mcp/bibliotecario/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
