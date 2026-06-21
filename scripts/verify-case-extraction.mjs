@@ -52,9 +52,10 @@ const targets = args.slice(1).map((spec) => {
 });
 
 /**
- * Find the dispatch switch in cli.ts. Returns the line index of the
- * opening `switch (command)` and a function that, given an inner line,
- * returns the depth of `{` from the switch's perspective.
+ * Find the dispatch switch in the dispatch file. Matches `switch (command)`
+ * (cli.ts) or `switch (name)` (mcp-server.ts). Returns the FIRST match's
+ * bounds — important for mcp-server.ts which has two switch(name) blocks
+ * (lifecycle + main dispatch).
  */
 function findSwitch(lines) {
 	let switchStart = -1;
@@ -63,7 +64,7 @@ function findSwitch(lines) {
 	let inSwitch = false;
 	for (let i = 0; i < lines.length; i++) {
 		const l = lines[i];
-		if (!inSwitch && /\bswitch\s*\(\s*command\s*\)/.test(l)) {
+		if (!inSwitch && /\bswitch\s*\(\s*(command|name)\s*\)/.test(l)) {
 			switchStart = i;
 			inSwitch = true;
 			depth = 0;
@@ -75,7 +76,11 @@ function findSwitch(lines) {
 			}
 			if (depth === 0 && /[{}]/.test(l)) {
 				switchEnd = i;
-				inSwitch = false;
+				// Return IMMEDIATELY after the first switch closes — we
+				// only want the first switch. Without this, the second
+				// switch (mcp-server.ts has 2: lifecycle + main dispatch)
+				// would overwrite our bounds.
+				return { switchStart, switchEnd };
 			}
 		}
 	}
@@ -291,7 +296,15 @@ function applyAliases(body, aliases) {
 	return out;
 }
 
-const mainSrc = execSync(`git show ${mainSha}:src/cli.ts`, {
+// Derive the dispatch file from the handler file path. cli.ts breaks
+// dispatch in src/cli.ts; mcp-server breaks in src/mcp-server.ts. We
+// auto-detect from the handler file's directory.
+const dispatchFile =
+	targets[0].file.startsWith("src/mcp")
+		? "src/mcp-server.ts"
+		: "src/cli.ts";
+
+const mainSrc = execSync(`git show ${mainSha}:${dispatchFile}`, {
 	encoding: "utf8",
 });
 const mainLines = mainSrc.split("\n");
@@ -440,9 +453,18 @@ function matchesCluster(label, cluster) {
 			"idu-trigger-engine",
 			"idu-trigger-show",
 		],
+		lifecycle: [
+			"idu_project_status",
+			"idu_project_enroll",
+			"idu_bootstrap_project",
+			"idu_start",
+		],
 	};
 	const prefixes = map[cluster] || [cluster];
-	return prefixes.some((p) => label.includes(p));
+	// Normalize underscore/hyphen — cli.ts labels use hyphens, mcp-server
+	// labels use underscores. The cluster prefix matches either.
+	const normalize = (s) => s.replace(/_/g, "-");
+	return prefixes.some((p) => normalize(label).includes(normalize(p)));
 }
 
 function findHandlerForLabel(helpersSrc, label) {
@@ -543,6 +565,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/alerts/handlers.ts",
 	"src/cli/birth/handlers.ts",
 	"src/cli/single/handlers.ts",
+	"src/mcp/lifecycle/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
@@ -595,17 +618,23 @@ function checkHandlerVsCliInternals() {
 	let cliSrc;
 	try {
 		// Read from the CURRENT working tree, not from `main`. The
-		// guard must compare against the cli.ts that will exist
-		// AFTER the PR merges — which is the working tree's cli.ts,
-		// not main's pre-PR cli.ts.
-		cliSrc = readFileSync("src/cli.ts", "utf8");
+		// guard must compare against the dispatch file that will exist
+		// AFTER the PR merges — which is the working tree's file,
+		// not main's pre-PR file.
+		cliSrc = readFileSync(dispatchFile, "utf8");
 	} catch {
 		return [];
 	}
 	const cliInternals = new Set(parseAllFunctionNames(cliSrc));
 
 	const violations = [];
+	// Same track filtering as checkDelegation — cross-track handlers
+	// would always be flagged because their local helpers don't exist
+	// in the dispatch file's track.
+	const dispatchTrack = dispatchFile.startsWith("src/mcp") ? "mcp" : "cli";
 	for (const file of ALL_HANDLER_FILES) {
+		const fileTrack = file.startsWith("src/mcp") ? "mcp" : "cli";
+		if (fileTrack !== dispatchTrack) continue;
 		let src;
 		try {
 			src = readFileSync(file, "utf8");
@@ -685,9 +714,7 @@ if (hasAnyHandler) {
 			`  FAIL: ${handlerVsCli.length} handler file(s) shadow cli.ts internals — extract to a shared module instead:`,
 		);
 		for (const { fn, handlerFile } of handlerVsCli) {
-			console.log(
-				`    - ${fn} (defined in cli.ts AND ${handlerFile})`,
-			);
+			console.log(`    - ${fn} (defined in cli.ts AND ${handlerFile})`);
 		}
 	} else {
 		console.log("  OK: no handler file shadows a cli.ts internal");
@@ -741,14 +768,24 @@ if (hasAnyHandler) {
 // =====================================================================
 
 function checkDelegation() {
-	// Read cli.ts from the WORKING TREE (post-extraction state).
+	// Read the dispatch file from the WORKING TREE (post-extraction state).
 	// FAIL-CLOSED: any failure here aborts the gate (exit≠0), not a
 	// silent pass. A silent pass here would re-introduce the dead-code
 	// no-op bug class (PR 7f was caught exactly because the gate failed;
 	// if it had silently passed, the no-op would have merged).
-	const cliSrc = readFileSync("src/cli.ts", "utf8");
+	const cliSrc = readFileSync(dispatchFile, "utf8");
 	const fileToWrappers = new Map();
+	// Only check handlers in the same track as the dispatch file.
+	// cli-track handlers (src/cli/...) are dispatched from src/cli.ts;
+	// mcp-track handlers (src/mcp/...) are dispatched from src/mcp-server.ts.
+	// Cross-track checks would always report CLI wrappers as "DEAD CODE"
+	// from an mcp-server.ts extraction (and vice versa).
+	const dispatchTrack = dispatchFile.startsWith("src/mcp") ? "mcp" : "cli";
 	for (const file of ALL_HANDLER_FILES) {
+		const fileTrack = file.startsWith("src/mcp") ? "mcp" : "cli";
+		if (fileTrack !== dispatchTrack) {
+			continue;
+		}
 		// FAIL-CLOSED: any I/O error here aborts the gate. A silent
 		// empty map would let the gate "pass" with no checks.
 		const src = readFileSync(file, "utf8");
@@ -805,7 +842,7 @@ function checkBodyExtracted() {
 			// `runtime.<methodName>(` outside of any string. We use a
 			// simple substring check — if the method name appears as a
 			// call (with `(`), it's likely still inline.
-			const cliSrc = readFileSync("src/cli.ts", "utf8");
+			const cliSrc = readFileSync(dispatchFile, "utf8");
 			// Count occurrences of `.methodName(` in cli.ts.
 			// 1 or more = body may still be inline.
 			const inlineRe = new RegExp(`\\.${methodName}\\s*\\(`, "g");

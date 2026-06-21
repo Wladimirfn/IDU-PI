@@ -199,6 +199,12 @@ import type {
 // re-exports them so existing imports (mcp-server.js → IduMcpToolName,
 // JsonObject, etc.) keep working without changes.
 import {
+	handleBootstrapProject,
+	handleProjectEnroll,
+	handleProjectStatus,
+	handleStart,
+} from "./mcp/lifecycle/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -278,7 +284,6 @@ export type IduMcpProjectResolution = {
 	errors: string[];
 };
 
-
 export type IduMcpRuntimeFactory = (projectPath?: string) => CliRuntime;
 export type IduMcpProjectResolver = (
 	projectPath?: string,
@@ -302,8 +307,6 @@ export type McpJsonRpcResponse = {
 	result?: unknown;
 	error?: { code: number; message: string; data?: unknown };
 };
-
-
 
 const TOOLS: IduMcpToolDefinition[] = [
 	tool(
@@ -1567,7 +1570,7 @@ async function handleLine(
 	if (response) writeResponse(response);
 }
 
-type IduProjectLifecycleToolName =
+export type IduProjectLifecycleToolName =
 	| "idu_project_status"
 	| "idu_project_enroll"
 	| "idu_bootstrap_project"
@@ -1602,178 +1605,32 @@ async function handleProjectLifecycleTool(
 		const config = loadConfig({ requireTelegram: false });
 		const registryPath = resolveIduRegistryPath();
 		switch (name) {
-			case "idu_project_status": {
-				const projectPath = resolveLifecycleProjectPath(
-					stringArg(args, "projectPath"),
-				);
-				const status = projectInstallStatus({
-					projectPath,
-					workspaceRoot: config.agentWorkspaceRoot,
-					allowedRoots: config.allowedRoots,
-					registryPath,
-					mcpAvailable: true,
-				});
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId: status.projectId,
-					projectPath: status.projectPath,
-					summary: status.registered
-						? "Proyecto registrado en Idu-pi."
-						: "Proyecto no registrado en Idu-pi.",
-					data: { ...status },
-					safeNotes: ["Solo leí estado; no escribí registry ni archivos."],
-				});
-			}
-			case "idu_project_enroll": {
-				const projectPath = requiredText(args, "projectPath");
-				const result = projectEnroll({
-					projectPath,
-					projectId: stringArg(args, "projectId"),
-					workspaceRoot: config.agentWorkspaceRoot,
-					allowedRoots: config.allowedRoots,
-					registryPath,
-				});
-				return envelope(projectEnrollEnvelope(name, result));
-			}
-			case "idu_bootstrap_project": {
-				const projectPath = requiredText(args, "projectPath");
-				const allowCreateDrafts = booleanArg(args, "allowCreateDrafts", false);
-				const activate = booleanArg(args, "activate", false);
-				if (!allowCreateDrafts) {
-					const result = projectEnroll({
-						projectPath,
-						workspaceRoot: config.agentWorkspaceRoot,
-						allowedRoots: config.allowedRoots,
-						registryPath,
-					});
-					if (activate) {
-						configureProjectSessionStore(result.statePaths);
-						activateIduSession(result.project.id);
-					}
-					return envelope({
-						stateRoot: "",
-
-						...projectEnrollEnvelope(name, result),
-						summary: activate
-							? "Proyecto enrolado y guardrails activados; no creé drafts porque allowCreateDrafts=false."
-							: "Proyecto enrolado; no creé drafts porque allowCreateDrafts=false.",
-						data: {
-							project: result.project,
-							statePaths: result.statePaths,
-							created: result.created,
-							allowCreateDrafts,
-							activated: activate,
-						},
-					});
-				}
-				const result = runIduBootstrap({
-					projectPath,
+			case "idu_project_status":
+				return await handleProjectStatus(
+					name,
+					args,
+					options,
 					config,
 					registryPath,
-					activate,
-					consentGiven: true,
-				});
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId: result.project.id,
-					projectPath: result.project.path,
-					summary: activate
-						? "Bootstrap completo: drafts seguros creados/verificados y guardrails activados."
-						: "Bootstrap completo: drafts seguros creados/verificados sin activar guardrails.",
-					data: {
-						project: result.project,
-						statePaths: result.statePaths,
-						created: result.created,
-						existing: result.existing,
-						alreadyBootstrapped: result.alreadyBootstrapped,
-						shouldRunPrepare: result.shouldRunPrepare,
-						allowCreateDrafts,
-						activated: activate,
-					},
-					safeNotes: [
-						"Project Core/Constitution son drafts hasta confirmación humana.",
-						"No ejecuté AgentLabs.",
-						"No hice commit ni push.",
-					],
-					errors: result.criticalDecisions,
-				});
-			}
-			case "idu_start": {
-				const resolution = (
-					options.projectResolver ?? resolveMcpProjectContext
-				)(stringArg(args, "projectPath"));
-				if (resolution.status === "unregistered_project") {
-					return envelope({
-						stateRoot: resolution.stateRoot,
-
-						ok: false,
-						tool: name,
-						projectId: resolution.projectId,
-						projectPath: resolution.projectPath,
-						summary:
-							"Proyecto no registrado; idu_start no enrola automáticamente.",
-						data: {
-							resolutionStatus: resolution.status,
-							recommendedNext:
-								"Usá idu_project_enroll o idu_bootstrap_project explícitamente.",
-						},
-						safeNotes: [
-							...resolution.safeNotes,
-							"No escribí registry ni drafts desde idu_start.",
-						],
-						errors: resolution.errors,
-					});
-				}
-				if (resolution.status === "invalid_project") {
-					return envelope({
-						stateRoot: resolution.stateRoot,
-
-						ok: false,
-						tool: name,
-						projectId: resolution.projectId,
-						projectPath: resolution.projectPath,
-						summary: "Proyecto inválido para Idu-pi MCP.",
-						data: { resolutionStatus: resolution.status },
-						safeNotes: resolution.safeNotes,
-						errors: resolution.errors,
-					});
-				}
-				const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
-					resolution.projectPath,
 				);
-				activateIduSession(runtime.projectId);
-				const supervisorStartup = runtime.supervisorOnIduActivation();
-				const connection = runtime.inspectConnection();
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: `Idu-pi activo; alignment=${connection.alignmentStatus}.`,
-					data: {
-						resolutionStatus: resolution.status,
-						active: true,
-						configStatus: connection.configStatus,
-						alignmentStatus: connection.alignmentStatus,
-						recommendedNext: connection.recommendedNext,
-						supervisorStartup: compactSupervisorStartup(supervisorStartup),
-						connection,
-					},
-					safeNotes: [
-						...resolution.safeNotes,
-						"idu_start no enrola proyectos ni crea drafts.",
-						"Arranque supervisor ejecutado con límites seguros; no ejecuta AgentLabs ni aplica reglas por sí solo.",
-					],
-				});
-			}
+			case "idu_project_enroll":
+				return await handleProjectEnroll(
+					name,
+					args,
+					options,
+					config,
+					registryPath,
+				);
+			case "idu_bootstrap_project":
+				return await handleBootstrapProject(
+					name,
+					args,
+					options,
+					config,
+					registryPath,
+				);
+			case "idu_start":
+				return await handleStart(name, args, options);
 		}
 	} catch (error) {
 		return envelope({
@@ -1790,26 +1647,7 @@ async function handleProjectLifecycleTool(
 	}
 }
 
-function compactSupervisorStartup(
-	startup:
-		| {
-				status: string;
-				trigger: string;
-				reason?: string;
-				summary: string;
-				safety: JsonObject;
-		  }
-		| undefined,
-): JsonObject | null {
-	if (!startup) return null;
-	return {
-		status: startup.status,
-		trigger: startup.trigger,
-		reason: startup.reason,
-		summary: startup.summary,
-		safety: startup.safety,
-	};
-}
+
 
 function governanceConfigData(): JsonObject {
 	const config = loadConfig({ requireTelegram: false });
@@ -1925,44 +1763,7 @@ function buildOrchestratorProcedure(
 	};
 }
 
-function configureProjectSessionStore(
-	statePaths: ProjectEnrollResult["statePaths"],
-): void {
-	configureIduSessionStore({
-		workspaceRoot: statePaths.stateRoot,
-		filePath: statePaths.sessionStatePath,
-	});
-}
 
-function projectEnrollEnvelope(
-	name: IduMcpToolName,
-	result: ProjectEnrollResult,
-): Parameters<typeof envelope>[0] {
-	return {
-		ok: true,
-		tool: name,
-		projectId: result.project.id,
-		projectPath: result.project.path,
-		summary:
-			"Proyecto enrolado con estado aislado; no creé drafts ni ejecuté scans.",
-		data: {
-			project: result.project,
-			statePaths: result.statePaths,
-			created: result.created,
-		},
-		safeNotes: [
-			...result.safeNotes,
-			"No creé Project Core ni Constitution.",
-			"No ejecuté scan ni AgentLabs.",
-		],
-	};
-}
-
-function resolveLifecycleProjectPath(inputProjectPath?: string): string {
-	if (inputProjectPath?.trim()) return inputProjectPath.trim();
-	const resolution = resolveMcpProjectContext();
-	return resolution.projectPath;
-}
 
 function readRuntimeStructuredTasks(runtime: CliRuntime): {
 	status: "available" | "unavailable";
@@ -6163,7 +5964,7 @@ type SupervisorConsultation = JsonObject & {
 	agentLabs: { mode: "audit_only"; autoRun: false; suggested: string[] };
 };
 
-function defaultRuntimeFactory(projectPath?: string): CliRuntime {
+export function defaultRuntimeFactory(projectPath?: string): CliRuntime {
 	return createCliRuntime({ projectPath, requireTelegramConfig: false });
 }
 
@@ -7401,15 +7202,6 @@ function stableActionId(title: string): string {
 	return `plan-action-${slug || "next"}`;
 }
 
-
-
-
-
-
-
-
-
-
 function isToolName(name: string): name is IduMcpToolName {
 	return TOOLS.some((toolDefinition) => toolDefinition.name === name);
 }
@@ -7453,14 +7245,6 @@ function jsonRpcError(
 function writeResponse(response: McpJsonRpcResponse): void {
 	stdout.write(`${JSON.stringify(response)}\n`);
 }
-
-
-
-
-
-
-
-
 
 function activeMcpProjectId(
 	runtime: CliRuntime,
@@ -7639,8 +7423,6 @@ function agentLabSpecialtiesArg(
 	return { values: [...new Set(rawValues)] as AgentLabSpecialty[], errors: [] };
 }
 
-
-
 function parseTaskList(text: string): StructuredTask[] {
 	try {
 		const parsed = JSON.parse(text) as unknown;
@@ -7702,12 +7484,9 @@ function agentLabStatusWorkloadEnvelope(status: {
 	});
 }
 
-
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
-
-
 
 if (
 	process.argv[1] &&
