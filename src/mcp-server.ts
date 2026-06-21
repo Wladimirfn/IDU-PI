@@ -211,6 +211,11 @@ import {
 	handleStatus,
 } from "./mcp/session/index.js";
 import {
+	handleSupervisorSelfMaintenanceAdvisory,
+	handleSupervisorTrigger,
+	handleTriggerEngine,
+} from "./mcp/supervisor-trigger/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -1653,7 +1658,7 @@ async function handleProjectLifecycleTool(
 	}
 }
 
-function governanceConfigData(): JsonObject {
+export function governanceConfigData(): JsonObject {
 	const config = loadConfig({ requireTelegram: false });
 	return {
 		...config.iduGovernance,
@@ -1662,7 +1667,7 @@ function governanceConfigData(): JsonObject {
 	};
 }
 
-function workerBoundaryData(): JsonObject {
+export function workerBoundaryData(): JsonObject {
 	return {
 		orchestratorOwns: [
 			"decisión final",
@@ -1838,7 +1843,7 @@ function safeRuntimeProjectConstitutionStatus(projectPath: string) {
 	}
 }
 
-function buildRuntimeSelfMaintenanceReport(
+export function buildRuntimeSelfMaintenanceReport(
 	runtime: CliRuntime,
 	stateRoot: string,
 ): {
@@ -2068,146 +2073,10 @@ async function dispatchTool(
 				safeNotes: resolution.safeNotes,
 			});
 		}
-		case "idu_supervisor_trigger": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const action = supervisorTriggerActionArg(args);
-			if (!action) {
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"action must be one of: enable, disable, status",
-				);
-			}
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			if (action === "enable") {
-				const result = enableSupervisorTrigger(stateRoot, { source: "cli" });
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId,
-					projectPath: runtime.projectPath,
-					summary: "Supervisor trigger enabled.",
-					data: {
-						action,
-						result,
-						output: formatSupervisorTriggerResult(result),
-					},
-					safeNotes: resolution.safeNotes,
-				});
-			}
-			if (action === "disable") {
-				const result = disableSupervisorTrigger(stateRoot, { source: "cli" });
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId,
-					projectPath: runtime.projectPath,
-					summary: "Supervisor trigger disabled.",
-					data: {
-						action,
-						result,
-						output: formatSupervisorTriggerResult(result),
-					},
-					safeNotes: resolution.safeNotes,
-				});
-			}
-			const status = getSupervisorTriggerStatus(stateRoot);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: `Supervisor trigger is ${status.enabled ? "enabled" : "disabled"}.`,
-				data: { action, status, output: formatSupervisorTriggerStatus(status) },
-				safeNotes: resolution.safeNotes,
-			});
-		}
-		case "idu_trigger_engine": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const action = supervisorTriggerActionArg(args);
-			if (!action) {
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"action must be one of: enable, disable, status",
-				);
-			}
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			if (action === "enable") {
-				const result = enableTriggerEngineConfig(stateRoot, { source: "cli" });
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId,
-					projectPath: runtime.projectPath,
-					summary: "Trigger engine enabled.",
-					data: {
-						action,
-						result,
-						output: formatTriggerEngineConfigResult(result),
-					},
-					safeNotes: resolution.safeNotes,
-				});
-			}
-			if (action === "disable") {
-				const result = disableTriggerEngineConfig(stateRoot, { source: "cli" });
-				return envelope({
-					stateRoot: "",
-
-					ok: true,
-					tool: name,
-					projectId,
-					projectPath: runtime.projectPath,
-					summary: "Trigger engine disabled.",
-					data: {
-						action,
-						result,
-						output: formatTriggerEngineConfigResult(result),
-					},
-					safeNotes: resolution.safeNotes,
-				});
-			}
-			const status = getTriggerEngineConfigStatus(stateRoot);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: `Trigger engine is ${status.enabled ? "enabled" : "disabled"}.`,
-				data: {
-					action,
-					status,
-					output: formatTriggerEngineConfigStatus(status),
-				},
-				safeNotes: resolution.safeNotes,
-			});
-		}
+		case "idu_supervisor_trigger":
+			return await handleSupervisorTrigger(name, args, runtime, resolution);
+		case "idu_trigger_engine":
+			return await handleTriggerEngine(name, args, runtime, resolution);
 		case "idu_role_engine_control": {
 			const projectId = activeMcpProjectId(runtime, resolution);
 			if (!projectId)
@@ -3692,65 +3561,13 @@ async function dispatchTool(
 				],
 			});
 		}
-		case "idu_supervisor_self_maintenance_advisory": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const selfMaintenance = buildRuntimeSelfMaintenanceReport(
+		case "idu_supervisor_self_maintenance_advisory":
+			return await handleSupervisorSelfMaintenanceAdvisory(
+				name,
+				args,
 				runtime,
-				stateRoot,
+				resolution,
 			);
-			const taskRead = selfMaintenance.taskRead;
-			const report = selfMaintenance.report;
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: report.signals.length ? "warn" : "allow",
-				severity: report.signals.some((signal) => signal.severity === "high")
-					? "warning"
-					: "info",
-				confidence: report.signals.length ? 0.8 : 0.7,
-				summary: `Supervisor self-maintenance advisory signals: ${report.signals.length}`,
-				requiresHuman: false,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: false,
-				evidenceRefs: report.signals.map((signal) => signal.id),
-				nextActions: report.recommendedActions,
-				requiredActions: report.signals.length
-					? [
-							{
-								id: "supervisor-self-maintenance-orchestrator-review",
-								owner: "orchestrator",
-								action: "review_self_maintenance_advisory_before_changes",
-								reason:
-									"Self-maintenance signals are advisory and must not trigger automatic writes, task creation, AgentLabs, rules, or skill changes.",
-								blocking: true,
-							},
-						]
-					: [],
-			});
-			const safeNotes = [
-				...resolution.safeNotes,
-				...report.safeNotes,
-				"No creé tareas, no modifiqué reglas, no modifiqué skills y no toqué AgentLabs.",
-				...taskRead.safeNotes,
-			];
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Supervisor self-maintenance advisory signals: ${report.signals.length}`,
-				data: {
-					decisionEnvelope,
-					report,
-					signals: report.signals,
-					structuredTaskInputStatus: taskRead.status,
-					governanceConfig: governanceConfigData(),
-					workerBoundary: workerBoundaryData(),
-				},
-				safeNotes,
-			});
-		}
 		case "idu_birth_status": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			const env = handleBirthStatus({
@@ -7156,7 +6973,7 @@ function writeResponse(response: McpJsonRpcResponse): void {
 	stdout.write(`${JSON.stringify(response)}\n`);
 }
 
-function activeMcpProjectId(
+export function activeMcpProjectId(
 	runtime: CliRuntime,
 	resolution: IduMcpProjectResolution,
 ): string | undefined {
@@ -7164,7 +6981,7 @@ function activeMcpProjectId(
 	return candidate.trim() ? candidate.trim() : undefined;
 }
 
-function invalidMcpInput(
+export function invalidMcpInput(
 	name: IduMcpToolName,
 	runtime: CliRuntime,
 	resolution: IduMcpProjectResolution,
@@ -7204,7 +7021,7 @@ function scoreArg(
 	return { ok: true, text, value };
 }
 
-function supervisorTriggerActionArg(
+export function supervisorTriggerActionArg(
 	args: JsonObject,
 ): "enable" | "disable" | "status" | undefined {
 	const direct = stringArg(args, "action");

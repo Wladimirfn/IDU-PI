@@ -126,6 +126,11 @@ const CLUSTER_PREFIXES = {
 		"idu_deactivate",
 		"idu_project_reset_state",
 	],
+	"supervisor-trigger": [
+		"idu_supervisor_trigger",
+		"idu_trigger_engine",
+		"idu_supervisor_self_maintenance_advisory",
+	],
 };
 
 /**
@@ -601,6 +606,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/single/handlers.ts",
 	"src/mcp/lifecycle/handlers.ts",
 	"src/mcp/session/handlers.ts",
+	"src/mcp/supervisor-trigger/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
