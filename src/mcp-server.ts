@@ -409,6 +409,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 	tool("idu_deactivate", "Desactiva guardrails automáticos de Idu-pi.", {
 		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 	}),
+	tool(
+		"idu_objective_status",
+		"Lee el estado actual del PISO gate (objective reminder): blocking injection + reminderStatePath. Read-only mirror del CLI `idu-objective-status`.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
 	tool("idu_prepare", "Ejecuta prepare seguro sin IA ni AgentLabs.", {
 		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
 	}),

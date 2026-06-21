@@ -1161,7 +1161,10 @@ test("mcp server lists Idu-pi tools", async () => {
 	// 84 baseline + 1 for idu_hygiene_migrate (sub-PR 3 of self-hygiene)
 	// + 1 for idu_hygiene_sweep (Item 3c sub-PR B of 3)
 	// + 1 for idu_ack_advisory (Item 3c sub-PR C of 3, forward obligation #2 from PR #153)
-	assert.equal(tools.length, 87);
+	// + 1 for idu_objective_status (PR-drift fix: it was dispatched at L3599
+	//   but missing from the catalog. Fixed in the same PR that adds the
+	//   dispatch↔TOOLS consistency freeze test.)
+	assert.equal(tools.length, 88);
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {
