@@ -216,6 +216,10 @@ import {
 	handleTriggerEngine,
 } from "./mcp/supervisor-trigger/index.js";
 import {
+	handleRoleEngineControl,
+	handleRoleEngineStatus,
+} from "./mcp/role/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -2077,101 +2081,10 @@ async function dispatchTool(
 			return await handleSupervisorTrigger(name, args, runtime, resolution);
 		case "idu_trigger_engine":
 			return await handleTriggerEngine(name, args, runtime, resolution);
-		case "idu_role_engine_control": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const action = roleEngineControlActionArg(args);
-			if (!action) {
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"action must be one of: enable, disable",
-				);
-			}
-			const role = roleEngineRoleArg(args);
-			if (role === "invalid") {
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					`role must be one of: ${Object.keys(DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled).join(", ")}`,
-				);
-			}
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const result =
-				action === "enable"
-					? enableRoleEngineConfig(stateRoot, role)
-					: disableRoleEngineConfig(stateRoot, role);
-			const roleEngineBinding = runtime.rebindRoleEngine?.();
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: `Role engine ${role ? `role ${role} ` : ""}${action}d.`,
-				data: {
-					action,
-					role,
-					result,
-					...(roleEngineBinding ? { roleEngineBinding } : {}),
-					output: formatRoleEngineConfigResult(result),
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"No invoqué modelos; sólo actualicé el opt-in persistente.",
-				],
-			});
-		}
-		case "idu_role_engine_status": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const role = roleEngineRoleArg(args);
-			if (role === "invalid") {
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					`role must be one of: ${Object.keys(DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled).join(", ")}`,
-				);
-			}
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const status = getRoleEngineConfigStatus(stateRoot);
-			const runtimeStatus = runtime.getRoleEngineStatus?.();
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: `Role engine is ${status.enabled ? "enabled" : "disabled"}.`,
-				data: {
-					role,
-					status,
-					...(role ? { roleEnabled: status.roleEnabled[role] } : {}),
-					...(runtimeStatus ? { runtimeStatus } : {}),
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Consulta de estado: no invoqué modelos.",
-				],
-			});
-		}
+		case "idu_role_engine_control":
+			return await handleRoleEngineControl(name, args, runtime, resolution);
+		case "idu_role_engine_status":
+			return await handleRoleEngineStatus(name, args, runtime, resolution);
 		case "idu_master_plan_status": {
 			if (!runtime.masterPlanStatus) {
 				return envelope({
@@ -7034,14 +6947,14 @@ export function supervisorTriggerActionArg(
 	return undefined;
 }
 
-function roleEngineControlActionArg(
+export function roleEngineControlActionArg(
 	args: JsonObject,
 ): "enable" | "disable" | undefined {
 	const action = supervisorTriggerActionArg(args);
 	return action === "enable" || action === "disable" ? action : undefined;
 }
 
-function roleEngineRoleArg(
+export function roleEngineRoleArg(
 	args: JsonObject,
 ): IduModelRoleId | "invalid" | undefined {
 	const value = stringArg(args, "role");
