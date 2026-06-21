@@ -140,6 +140,11 @@ const CLUSTER_PREFIXES = {
 		"idu_orchestrator_procedure",
 		"idu_task_context",
 	],
+	preflight: [
+		"idu_preflight",
+		"idu_advisory",
+		"idu_postflight",
+	],
 };
 
 /**
@@ -618,6 +623,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/supervisor-trigger/handlers.ts",
 	"src/mcp/role/handlers.ts",
 	"src/mcp/supervisor-context/handlers.ts",
+	"src/mcp/preflight/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
