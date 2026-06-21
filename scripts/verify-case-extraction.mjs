@@ -51,36 +51,128 @@ const targets = args.slice(1).map((spec) => {
 	};
 });
 
+// Module-level cluster map. Used by matchesCluster AND by the caller
+// of findSwitch to look up a target case label (the first prefix of
+// the cluster) so the right switch(name) block is selected.
+const CLUSTER_PREFIXES = {
+	role: [
+		"role-engine",
+		"orchestrator-advisory",
+		"model-invocation-status",
+		"idu-role",
+		"idu-orchestrator",
+		"idu-model",
+	],
+	alerts: ["alerts", "idu-alerts", "supervisor-self-maintenance"],
+	"master-plan": [
+		"master-plan",
+		"automaticov1",
+		"events",
+		"execution-director",
+		"proposal",
+	],
+	agentlab: [
+		"agentlab",
+		"usage-status",
+		"lab-review-plan",
+		"review",
+		"revisar",
+	],
+	source: ["source"],
+	supervisor: [
+		"supervisor-tick",
+		"supervisor-improvements",
+		"supervisor-learning-rules",
+		"supervisor-trigger",
+		"cron-preflight",
+		"check-user-escalation",
+	],
+	skill: ["skill"],
+	semantic: ["semantic"],
+	queue: ["queue", "task"],
+	birth: ["birth"],
+	single: [
+		"status",
+		"idu",
+		"idu-off",
+		"idu-status",
+		"idu-prepare",
+		"idu-project-reset-state",
+		"idu-hygiene-migrate",
+		"idu-ack-advisory",
+		"idu-hygiene-sweep",
+		"idu-preflight",
+		"idu-advisory",
+		"idu-postflight",
+		"idu-objective-status",
+		"idu-onboard-project",
+		"idu-bibliotecario-init",
+		"idu-pending-injections",
+		"idu-decision-ledger",
+		"idu-outbox-prune",
+		"idu-subscribe-triggers",
+		"idu-trigger-engine",
+		"idu-trigger-show",
+	],
+	lifecycle: [
+		"idu_project_status",
+		"idu_project_enroll",
+		"idu_bootstrap_project",
+		"idu_start",
+	],
+	session: [
+		"idu_status",
+		"idu_activate",
+		"idu_deactivate",
+		"idu_project_reset_state",
+	],
+};
+
 /**
  * Find the dispatch switch in the dispatch file. Matches `switch (command)`
  * (cli.ts) or `switch (name)` (mcp-server.ts). Returns the FIRST match's
  * bounds — important for mcp-server.ts which has two switch(name) blocks
  * (lifecycle + main dispatch).
  */
-function findSwitch(lines) {
+function findSwitch(lines, targetLabel) {
+	// Find the FIRST switch that contains the target case label.
+	// mcp-server.ts has 2 switch(name) blocks: lifecycle (4 cases) +
+	// dispatchTool (~83 cases). When extracting `session` cluster
+	// (idu_status, idu_activate, ...), we want the dispatchTool switch.
+	// When extracting `lifecycle`, we want the lifecycle switch.
 	let switchStart = -1;
 	let switchEnd = -1;
 	let depth = 0;
 	let inSwitch = false;
+	let foundTarget = false;
 	for (let i = 0; i < lines.length; i++) {
 		const l = lines[i];
 		if (!inSwitch && /\bswitch\s*\(\s*(command|name)\s*\)/.test(l)) {
 			switchStart = i;
 			inSwitch = true;
 			depth = 0;
+			foundTarget = false;
 		}
 		if (inSwitch) {
+			// Detect if this switch contains the target case label.
+			if (targetLabel && new RegExp(`case\\s+"${targetLabel}"`).test(l)) {
+				foundTarget = true;
+			}
 			for (const ch of l) {
 				if (ch === "{") depth++;
 				else if (ch === "}") depth--;
 			}
 			if (depth === 0 && /[{}]/.test(l)) {
 				switchEnd = i;
-				// Return IMMEDIATELY after the first switch closes — we
-				// only want the first switch. Without this, the second
-				// switch (mcp-server.ts has 2: lifecycle + main dispatch)
-				// would overwrite our bounds.
-				return { switchStart, switchEnd };
+				if (!targetLabel || foundTarget) {
+					// Either no target specified (legacy), or the target
+					// case is in this switch — return its bounds.
+					return { switchStart, switchEnd };
+				}
+				// Otherwise, keep looking for the next switch.
+				inSwitch = false;
+				switchStart = -1;
+				switchEnd = -1;
 			}
 		}
 	}
@@ -299,16 +391,26 @@ function applyAliases(body, aliases) {
 // Derive the dispatch file from the handler file path. cli.ts breaks
 // dispatch in src/cli.ts; mcp-server breaks in src/mcp-server.ts. We
 // auto-detect from the handler file's directory.
-const dispatchFile =
-	targets[0].file.startsWith("src/mcp")
-		? "src/mcp-server.ts"
-		: "src/cli.ts";
+const dispatchFile = targets[0].file.startsWith("src/mcp")
+	? "src/mcp-server.ts"
+	: "src/cli.ts";
 
 const mainSrc = execSync(`git show ${mainSha}:${dispatchFile}`, {
 	encoding: "utf8",
 });
 const mainLines = mainSrc.split("\n");
-const { switchStart, switchEnd } = findSwitch(mainLines);
+// Pick a representative case label from the first target's cluster
+// so findSwitch can disambiguate between multiple switch(name) blocks
+// in mcp-server.ts (lifecycle + dispatchTool). We use the first
+// cluster prefix from the module-level CLUSTER_PREFIXES map.
+const targetLabel = (() => {
+	if (!targets[0].file.startsWith("src/mcp")) return null;
+	const clusterPrefixes = CLUSTER_PREFIXES[targets[0].label];
+	return clusterPrefixes && clusterPrefixes.length > 0
+		? clusterPrefixes[0]
+		: null;
+})();
+const { switchStart, switchEnd } = findSwitch(mainLines, targetLabel);
 const groups = extractCaseGroups(mainLines, switchStart, switchEnd);
 
 const handlersByLabel = new Map();
@@ -392,75 +494,7 @@ if (totalDiff > 0) {
 }
 
 function matchesCluster(label, cluster) {
-	const map = {
-		role: [
-			"role-engine",
-			"orchestrator-advisory",
-			"model-invocation-status",
-			"idu-role",
-			"idu-orchestrator",
-			"idu-model",
-		],
-		alerts: ["alerts", "idu-alerts", "supervisor-self-maintenance"],
-		"master-plan": [
-			"master-plan",
-			"automaticov1",
-			"events",
-			"execution-director",
-			"proposal",
-		],
-		agentlab: [
-			"agentlab",
-			"usage-status",
-			"lab-review-plan",
-			"review",
-			"revisar",
-		],
-		source: ["source"],
-		supervisor: [
-			"supervisor-tick",
-			"supervisor-improvements",
-			"supervisor-learning-rules",
-			"supervisor-trigger",
-			"cron-preflight",
-			"check-user-escalation",
-		],
-		skill: ["skill"],
-		semantic: ["semantic"],
-		queue: ["queue", "task"],
-		alerts: ["alerts"],
-		birth: ["birth"],
-		single: [
-			"status",
-			"idu",
-			"idu-off",
-			"idu-status",
-			"idu-prepare",
-			"idu-project-reset-state",
-			"idu-hygiene-migrate",
-			"idu-ack-advisory",
-			"idu-hygiene-sweep",
-			"idu-preflight",
-			"idu-advisory",
-			"idu-postflight",
-			"idu-objective-status",
-			"idu-onboard-project",
-			"idu-bibliotecario-init",
-			"idu-pending-injections",
-			"idu-decision-ledger",
-			"idu-outbox-prune",
-			"idu-subscribe-triggers",
-			"idu-trigger-engine",
-			"idu-trigger-show",
-		],
-		lifecycle: [
-			"idu_project_status",
-			"idu_project_enroll",
-			"idu_bootstrap_project",
-			"idu_start",
-		],
-	};
-	const prefixes = map[cluster] || [cluster];
+	const prefixes = CLUSTER_PREFIXES[cluster] || [cluster];
 	// Normalize underscore/hyphen — cli.ts labels use hyphens, mcp-server
 	// labels use underscores. The cluster prefix matches either.
 	const normalize = (s) => s.replace(/_/g, "-");
@@ -566,6 +600,7 @@ const ALL_HANDLER_FILES = [
 	"src/cli/birth/handlers.ts",
 	"src/cli/single/handlers.ts",
 	"src/mcp/lifecycle/handlers.ts",
+	"src/mcp/session/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
@@ -589,7 +624,15 @@ function parseExportedFunctions(src) {
 
 function checkCrossHandlerDuplication() {
 	const fileToFns = new Map();
+	// Track filter — cross-track wrappers (cli vs mcp) may share the same
+	// name because they live in different dispatch files. Without this
+	// filter, the dup guard would always flag cli/single/handlers.ts'
+	// handleStatus as a duplicate of mcp/session/handlers.ts'
+	// handleStatus, even though they belong to different switches.
+	const dispatchTrack = dispatchFile.startsWith("src/mcp") ? "mcp" : "cli";
 	for (const file of ALL_HANDLER_FILES) {
+		const fileTrack = file.startsWith("src/mcp") ? "mcp" : "cli";
+		if (fileTrack !== dispatchTrack) continue;
 		try {
 			const src = readFileSync(file, "utf8");
 			const fns = parseAllFunctionNames(src);
@@ -814,6 +857,15 @@ function checkBodyExtracted() {
 	// in cli.ts. If it does, the case body is still inline.
 	//
 	// Strategy: extract the first `runtime.X(...)` call from the wrapper
+	//
+	// TRACK FILTER: this check is only meaningful for the cli track.
+	// mcp-server.ts contains many helper functions (buildOrchestratorProcedure,
+	// pre-processor callbacks, etc.) that legitimately call
+	// `runtime.X()` for purposes unrelated to the dispatched case bodies.
+	// The check would false-positive on those. For the mcp track, the
+	// byte-identity gate is the authoritative proof.
+	if (dispatchFile.startsWith("src/mcp")) return [];
+
 	// body. Grep cli.ts for that pattern. If found, FAIL.
 	const fileToWrappers = new Map();
 	for (const file of ALL_HANDLER_FILES) {
