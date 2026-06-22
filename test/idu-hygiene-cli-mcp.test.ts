@@ -422,6 +422,7 @@ test("Bootstrap consent: when .idu/ does not exist and consentGiven=false, throw
 				runIduBootstrap({
 					projectPath,
 					config: makeConfig(root),
+					registryPath: join(root, "registry", "projects.json"),
 					consentGiven: false,
 				}),
 			/Bootstrap cancelled: idu-pi requires consent/u,
@@ -443,6 +444,7 @@ test("Bootstrap consent: when .idu/ does not exist and consentGiven=undefined, a
 				runIduBootstrap({
 					projectPath,
 					config: makeConfig(root),
+					registryPath: join(root, "registry", "projects.json"),
 				}),
 			/Bootstrap cancelled: idu-pi requires consent/u,
 		);
@@ -465,6 +467,7 @@ test("Bootstrap consent: when .idu/ already exists, proceeds without explicit co
 		const result = runIduBootstrap({
 			projectPath,
 			config: makeConfig(root),
+			registryPath: join(root, "registry", "projects.json"),
 		});
 		assert.ok(result.project);
 		// Consent record was written
@@ -497,6 +500,7 @@ test("Bootstrap consent: explicit consentGiven=true records source='explicit'", 
 		const result = runIduBootstrap({
 			projectPath,
 			config: makeConfig(root),
+			registryPath: join(root, "registry", "projects.json"),
 			consentGiven: true,
 		});
 		const stateRoot = result.statePaths.stateRoot;

@@ -32,12 +32,31 @@ if (-not $StateRoot) {
 
 $PowerShell = (Get-Command powershell.exe).Source
 # Wrap the env var setting in a small PowerShell bootstrap so the
-# child process inherits IDU_PI_TICK_STATE_ROOT. The shell prefix
-# `KEY="value"` is bash, not PowerShell — using it from
-# New-ScheduledTaskAction does nothing on Windows.
+# child process inherits IDU_PI_TICK_STATE_ROOT + the workspace +
+# registry context derived from it. The shell prefix `KEY="value"`
+# is bash, not PowerShell — using it from New-ScheduledTaskAction
+# does nothing on Windows.
+#
+# IDU_PI_REGISTRY_PATH is the lever: with no DEFAULT_CWD, the tick
+# can't resolve the active project from the package-root default
+# registry (`<packageRoot>/data/projects.json`). Pointing the
+# registry to the workspace-root canonical registry
+# (`<workspaceRoot>/registry/projects.json`, per the onboarding
+# convention in `src/cli-onboard-project.ts:99`) gives the runtime
+# a registry that has the real project registered.
 $BootstrapScript = Join-Path $Root 'scripts/idu-supervisor-tick-bootstrap.ps1'
+# The operator convention is `<workspaceRoot>/projects/<id>` for
+# the stateRoot (e.g. `bridge-agents/projects/idu-pi` => workspace
+# `bridge-agents`). Two `Split-Path -Parent` calls climb the
+# `projects/<id>` segment. The on-disk registry lives at
+# `<workspaceRoot>/registry/projects.json` per the onboarding
+# convention in `src/cli-onboard-project.ts:99`.
+$WorkspaceRoot = (Split-Path -Parent (Split-Path -Parent "$StateRoot"))
+$RegistryPath = Join-Path $WorkspaceRoot 'registry/projects.json'
 $BootstrapContent = @"
 `$env:IDU_PI_TICK_STATE_ROOT = "$StateRoot"
+`$env:AGENT_WORKSPACE_ROOT = "$WorkspaceRoot"
+`$env:IDU_PI_REGISTRY_PATH = "$RegistryPath"
 & "$TickScript"
 "@
 Set-Content -Path $BootstrapScript -Value $BootstrapContent -Encoding UTF8
