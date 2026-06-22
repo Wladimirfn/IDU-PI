@@ -183,6 +183,14 @@ const CLUSTER_PREFIXES = {
 		"idu_skill_for_task",
 		"idu_skill_draft_from_lessons",
 	],
+	injections: [
+		"idu_pending_injections",
+		"idu_hygiene_migrate",
+		"idu_hygiene_sweep",
+		"idu_ack_advisory",
+		"idu_outbox_prune",
+		"idu_subscribe_triggers",
+	],
 };
 
 /**
@@ -669,6 +677,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/supervisor-tick/handlers.ts",
 	"src/mcp/objective/handlers.ts",
 	"src/mcp/genesis/handlers.ts",
+	"src/mcp/injections/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
