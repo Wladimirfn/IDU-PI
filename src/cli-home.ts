@@ -22,6 +22,7 @@ import {
 	type ToolStatus,
 } from "./idu-installer.js";
 import { resolveProjectStatePaths } from "./project-state.js";
+import { loadProjectCore } from "./project-core.js";
 import { slugifyProjectId } from "./projects.js";
 import {
 	buildIduUsageReport,
@@ -682,15 +683,18 @@ function detectGitRoot(
 
 function projectCoreStatus(
 	projectPath: string,
-	exists: (path: string) => boolean,
+	_exists: (path: string) => boolean,
 ): CliHomeProjectStatus["projectCore"] {
-	const corePath = join(projectPath, "config", "project-core.json");
-	if (!exists(corePath)) return "pending";
+	// F-Item3a: route through the canonical loader (Layout A via
+	// readIdPathWithMigration). The pre-fix version hardcoded
+	// Layout B (`<projectPath>/config/project-core.json`); the canonical
+	// file lives at `<projectPath>/.idu/config/project-core.json`.
+	// The pre-fix returned "pending" even when the file at Layout A
+	// was `status: "confirmed"`. `loadProjectCore` handles both
+	// layouts + one-time migration internally.
 	try {
-		const parsed = JSON.parse(readFileSync(corePath, "utf8")) as {
-			status?: string;
-		};
-		return parsed.status === "confirmed" ? "confirmed" : "pending";
+		const core = loadProjectCore(projectPath);
+		return core.status === "confirmed" ? "confirmed" : "pending";
 	} catch {
 		return "pending";
 	}

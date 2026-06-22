@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { LabDbRepository } from "./lab-db-repository.js";
 import { writeBirthArtifact } from "./birth-artifacts.js";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 import type { BlueprintArtifact } from "./genesis-mission.js";
 import type { BirthGeneralSpec } from "./birth-general-spec.js";
 import type { BugFinding } from "./lab-db.js";
@@ -43,11 +44,24 @@ export function collectDraftInputs(
 		compactionEvents: [],
 	};
 
-	// 1. project-flows.json from synced config
-	const flowsPath = join(stateRoot, "config", "project-flows.json");
-	const flows = readJsonSafe<ProjectFlows>(flowsPath);
-	if (flows) {
-		inputs.flows = flows;
+	// 1. project-flows.json from synced config (F-Item3a: route through
+	// the canonical path — Layout A via readIdPathWithMigration. The
+	// previous version hardcoded Layout B `config/project-flows.json`
+	// which does NOT exist on real projects; the canonical file lives
+	// at `.idu/config/project-flows.json`. We only set `inputs.flows`
+	// when the project has the file. The canonical `loadProjectFlows`
+	// would validate the schema and throw on partial flows; the inputs
+	// collector tolerates partial flows, so we read raw + parse JSON
+	// without validation here.)
+	const flowsMigrated = readIdPathWithMigration(stateRoot, "project-flows.json");
+	if (flowsMigrated.content !== null) {
+		try {
+			inputs.flows = JSON.parse(flowsMigrated.content) as ProjectFlows;
+		} catch {
+			// Skip malformed flows — the canonical loader (elsewhere)
+			// validates and would throw; the inputs collector is
+			// lenient by design.
+		}
 	}
 
 	// 2. birth/blueprint.json

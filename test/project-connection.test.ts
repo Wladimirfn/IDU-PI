@@ -61,14 +61,19 @@ function inspect(options: {
 }
 
 function writeProjectConfig(projectPath: string): void {
+	// F-Item3a: project-flows.json lives at Layout A (`.idu/config/`)
+	// per the territory model. project-blueprint.json still lives at
+	// Layout B (`config/`) — that's the canonical location for that
+	// file and `inspectProjectConfigFile` checks Layout B for it.
 	mkdirSync(join(projectPath, "config"), { recursive: true });
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	cpSync(
 		"config/default-blueprint.json",
 		join(projectPath, "config", "project-blueprint.json"),
 	);
 	cpSync(
 		"config/default-flows.json",
-		join(projectPath, "config", "project-flows.json"),
+		join(projectPath, ".idu", "config", "project-flows.json"),
 	);
 }
 
@@ -247,8 +252,9 @@ test("warnings if project state directory does not exist", () => {
 test("connected if local configs exist but are invalid", () => {
 	const projectPath = tempDir();
 	mkdirSync(join(projectPath, "config"), { recursive: true });
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(join(projectPath, "config", "project-blueprint.json"), "{}\n");
-	writeFileSync(join(projectPath, "config", "project-flows.json"), "{}\n");
+	writeFileSync(join(projectPath, ".idu", "config", "project-flows.json"), "{}\n");
 
 	const report = inspect({
 		registry: registry(projectPath),
@@ -320,7 +326,7 @@ test("formatProjectConnectionReport shows needs_understanding", () => {
 		projectId: "demo",
 		projectPath: "C:\\demo",
 		problems: [
-			"Falta config/project-flows.json project-local; se usaría default.",
+			"Falta .idu/config/project-flows.json project-local; se usaría default.",
 		],
 		warnings: [],
 		recommendedNext: "/config init_project_config",
@@ -333,7 +339,7 @@ test("formatProjectConnectionReport shows needs_understanding", () => {
 		text,
 		/Idu-pi conectado, pero el proyecto necesita comprensión\./,
 	);
-	assert.match(text, /Problemas:\n- Falta config\/project-flows\.json/);
+	assert.match(text, /Problemas:\n- Falta \.idu\/config\/project-flows\.json/);
 	assert.match(text, /Siguiente recomendado:\n\/config init_project_config/);
 });
 

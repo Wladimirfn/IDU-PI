@@ -225,7 +225,7 @@ export function inspectProjectConnection(
 	for (const config of [blueprint, flows]) {
 		if (!config.exists) {
 			problems.push(
-				`Falta config/${config.path.endsWith("project-blueprint.json") ? "project-blueprint.json" : "project-flows.json"} project-local; se usaría default.`,
+				`Falta ${config.path} project-local; se usaría default.`,
 			);
 		} else if (!config.valid) {
 			problems.push(
@@ -420,14 +420,22 @@ function inspectProjectConfigFile(
 	fileName: "project-blueprint.json" | "project-flows.json",
 	validate: (value: unknown) => { ok: boolean; errors: string[] },
 ): ProjectConfigConnectionStatus {
-	const path = join(projectPath, "config", fileName);
+	// F-Item3a: project-flows.json lives at Layout A (`.idu/config/`),
+	// not Layout B (`config/`). The previous version hardcoded Layout B
+	// for both files, which returned `exists: false` for flows on real
+	// projects. project-blueprint.json legitimately lives at Layout B
+	// (canonical for that file), so we branch by `fileName`.
+	const path =
+		fileName === "project-flows.json"
+			? join(projectPath, ".idu", "config", fileName)
+			: join(projectPath, "config", fileName);
 	if (!existsSync(path)) {
 		return {
 			exists: false,
 			source: "default",
 			valid: false,
 			path,
-			errors: [`config/${fileName} is missing`],
+			errors: [`${fileName} is missing`],
 		};
 	}
 	try {

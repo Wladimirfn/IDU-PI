@@ -165,3 +165,144 @@ test("handleBirthRepoPlan grants repoWritesAllowed only when push is approved AN
 		ctx.cleanup();
 	}
 });
+
+// =========================================================================
+// REGRESSION: Project Core path-mismatch bug (Item-3a migration gap)
+//
+// loadProjectCoreSnapshot (src/birth-runtime.ts:235) used to look at
+// `<stateRoot>/config/project-core.json` (Layout B legacy) instead of
+// `<stateRoot>/.idu/config/project-core.json` (Layout A canonical, per
+// territory model). File at Layout A → loader returns undefined →
+// `core?.status ?? "missing"` falls through → gate mints "current=missing"
+// even when project-core.json has `status: "confirmed"`.
+//
+// The canonical loader `loadProjectCore` (src/project-core.ts:122) uses
+// `readIdPathWithMigration` which prefers Layout A and one-time renames
+// the legacy Layout B to A on first read. The fix routes
+// `loadProjectCoreSnapshot` through that API.
+// =========================================================================
+
+test("F-Item3a RED→GREEN: handleBirthStatus reports coreStatus=confirmed when .idu/config/project-core.json has status=confirmed (Layout A)", () => {
+	const ctx = makeProject();
+	try {
+		// Layout A: <stateRoot>/.idu/config/project-core.json (canonical)
+		mkdirSync(join(ctx.stateRoot, ".idu", "config"), { recursive: true });
+		writeFileSync(
+			join(ctx.stateRoot, ".idu", "config", "project-core.json"),
+			`${JSON.stringify({
+				version: "1.0.0",
+				projectName: "demo",
+				projectGoal: "Demo project for birth regression test.",
+				problemStatement: "Stub.",
+				targetUsers: ["orchestrator"],
+				projectType: "demo",
+				complexityLevel: "small",
+				deploymentTarget: "local",
+				securityLevel: "low",
+				dataSensitivity: "none",
+				preferredStack: ["TypeScript"],
+				rejectedStack: [],
+				architectureStyle: "monolith",
+				includedScope: ["demo"],
+				excludedScope: [],
+				initialModules: ["demo"],
+				criticalFlows: ["demo"],
+				successCriteria: ["demo runs"],
+				validationCommands: ["pnpm test"],
+				humanDecisions: [
+					"Human approval is required before confirming this Project Core.",
+				],
+				assumptions: [],
+				openQuestions: [],
+				status: "confirmed",
+				createdAt: "2026-06-22T00:00:00.000Z",
+				updatedAt: "2026-06-22T00:00:00.000Z",
+			})}\n`,
+			"utf8",
+		);
+		const result = handleBirthStatus({
+			projectId: "demo",
+			stateRoot: ctx.stateRoot,
+		});
+		// Pre-fix: blockingReasons includes "Project Core must be confirmed; current=missing."
+		// Post-fix: that reason must NOT be present (core is confirmed at Layout A).
+		const missingReason = result.blockingReasons.find((r) =>
+			/Project Core must be confirmed; current=missing\./u.test(r),
+		);
+		assert.equal(
+			missingReason,
+			undefined,
+			`handleBirthStatus should NOT report coreStatus=missing when .idu/config/project-core.json has status=confirmed. Got blockingReasons: ${JSON.stringify(result.blockingReasons)}`,
+		);
+	} finally {
+		ctx.cleanup();
+	}
+});
+
+test("F-Item3a RED→GREEN: handleBirthRepoPlan unblocks when .idu/config/project-core.json has status=confirmed (Layout A)", () => {
+	const ctx = makeProject();
+	try {
+		// Layout A: <stateRoot>/.idu/config/project-core.json (canonical)
+		mkdirSync(join(ctx.stateRoot, ".idu", "config"), { recursive: true });
+		writeFileSync(
+			join(ctx.stateRoot, ".idu", "config", "project-core.json"),
+			`${JSON.stringify({
+				version: "1.0.0",
+				projectName: "demo",
+				projectGoal: "Demo project for birth regression test.",
+				problemStatement: "Stub.",
+				targetUsers: ["orchestrator"],
+				projectType: "demo",
+				complexityLevel: "small",
+				deploymentTarget: "local",
+				securityLevel: "low",
+				dataSensitivity: "none",
+				preferredStack: ["TypeScript"],
+				rejectedStack: [],
+				architectureStyle: "monolith",
+				includedScope: ["demo"],
+				excludedScope: [],
+				initialModules: ["demo"],
+				criticalFlows: ["demo"],
+				successCriteria: ["demo runs"],
+				validationCommands: ["pnpm test"],
+				humanDecisions: [
+					"Human approval is required before confirming this Project Core.",
+				],
+				assumptions: [],
+				openQuestions: [],
+				status: "confirmed",
+				createdAt: "2026-06-22T00:00:00.000Z",
+				updatedAt: "2026-06-22T00:00:00.000Z",
+			})}\n`,
+			"utf8",
+		);
+		const result = handleBirthRepoPlan({
+			projectId: "demo",
+			stateRoot: ctx.stateRoot,
+			repoPlan: {
+				repoName: "demo",
+				visibility: "private",
+				owner: "elmas",
+				license: "MIT",
+				initialReadmePolicy: "minimal",
+				remoteProvider: "github",
+				pushApproved: true,
+				branchPolicy: "main",
+				ciExpectation: "pnpm test",
+			},
+		});
+		// Pre-fix: blockingReasons includes "Project Core must be confirmed before repo plan; current=missing."
+		const missingReason = result.decision.blockingReasons.find((r) =>
+			/Project Core must be confirmed before repo plan; current=missing\./u.test(r),
+		);
+		assert.equal(
+			missingReason,
+			undefined,
+			`handleBirthRepoPlan should NOT report coreStatus=missing when .idu/config/project-core.json has status=confirmed. Got blockingReasons: ${JSON.stringify(result.decision.blockingReasons)}`,
+		);
+	} finally {
+		ctx.cleanup();
+	}
+});
+

@@ -350,8 +350,12 @@ export function runPrepare(context: RuntimeContext): IduPrepareResult {
 
 export function loadConfirmedProjectConstitution(projectPath: string | undefined) {
 	if (!projectPath) return undefined;
-	const corePath = join(projectPath, "config", "project-core.json");
-	if (!existsSync(corePath)) return undefined;
+	// F-Item3a: route through the canonical loader (Layout A via
+	// readIdPathWithMigration). The pre-fix version hardcoded
+	// Layout B (`<projectPath>/config/project-core.json`) which fails
+	// when the canonical Layout A file exists — the pre-check returned
+	// false and the function bailed before `loadProjectCore` could find
+	// the file at Layout A.
 	try {
 		const core = loadProjectCore(projectPath);
 		if (core.status !== "confirmed") return undefined;

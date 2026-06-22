@@ -26,9 +26,14 @@ test("collectDraftInputs returns only compactionEvents when all optional inputs 
 test("collectDraftInputs reads project-flows.json when present", async () => {
 	const stateRoot = makeStateRoot();
 	try {
-		mkdirSync(join(stateRoot, "config"), { recursive: true });
+		// F-Item3a: project-flows.json lives at Layout A (`.idu/config/`)
+		// per the territory model. The previous test wrote at Layout B
+		// which is the legacy location — `loadProjectFlows` migrates
+		// Layout B to A on first read, so writing at A is the canonical
+		// way to assert the loader finds it.
+		mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 		writeFileSync(
-			join(stateRoot, "config", "project-flows.json"),
+			join(stateRoot, ".idu", "config", "project-flows.json"),
 			JSON.stringify({
 				version: "1.0.0",
 				projectType: "test",

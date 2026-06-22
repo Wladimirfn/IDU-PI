@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 import { readBirthArtifact, writeBirthArtifact } from "./birth-artifacts.js";
 import {
 	evaluateBibliotecarioAcquisition,
@@ -232,10 +233,19 @@ function inferMode(
 }
 
 function loadProjectCoreSnapshot(stateRoot: string): ProjectCore | undefined {
-	const path = join(stateRoot, "config", "project-core.json");
-	if (!existsSync(path)) return undefined;
+	// F-Item3a: route through readIdPathWithMigration (Layout A canonical,
+	// one-time migration from Layout B). The previous version hardcoded
+	// Layout B (`<stateRoot>/config/project-core.json`) which does NOT
+	// exist on real projects — the canonical file lives at
+	// `<stateRoot>/.idu/config/project-core.json`. The legacy path
+	// caused `core?.status ?? "missing"` to fall through to "missing"
+	// even when the file said `status: "confirmed"`. See test
+	// `F-Item3a RED→GREEN: handleBirthStatus reports coreStatus=confirmed`
+	// for the regression.
+	const migrated = readIdPathWithMigration(stateRoot, "project-core.json");
+	if (migrated.content === null) return undefined;
 	try {
-		return JSON.parse(readFileSync(path, "utf8")) as ProjectCore;
+		return JSON.parse(migrated.content) as ProjectCore;
 	} catch {
 		return undefined;
 	}
