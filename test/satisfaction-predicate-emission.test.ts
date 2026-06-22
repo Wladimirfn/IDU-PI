@@ -778,3 +778,137 @@ test("AUDITOR-FIX-gemelo: ack:true on ghost id does NOT write a new dismissed ev
 		cleanup();
 	}
 });
+
+// =========================================================================
+// F-W2-2: supervisor_advisory expiry
+// defaultPredicateForKind returns null for supervisor_advisory → the
+// advisory has no satisfaction predicate. Pre-fix, evaluateSatisfactionPredicates
+// silently skipped it (`if (!predicate) continue;`) so it accumulated as
+// pending forever. Fix: apply a default-expiry (24h) + per-kind ack policy
+// (supervisor_advisory = ack-on-expired, advisory-only).
+// =========================================================================
+
+test("F-W2-2 RED→GREEN: expiredAckPolicy(supervisor_advisory) returns ack-on-expired", () => {
+	assert.equal(
+		expiredAckPolicy("supervisor_advisory"),
+		"ack-on-expired",
+		"supervisor_advisory is advisory-only (no forced-pull) → ack-on-expired",
+	);
+});
+
+test("F-W2-2 RED→GREEN: supervisor_advisory past 24h window expires + acks (default-expiry for kinds without predicate)", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		const deliveredAt = new Date("2026-06-15T10:00:00Z");
+		const now = new Date("2026-06-16T11:00:00Z"); // 25h after — past 24h window
+		// Write the supervisor_advisory to injections.jsonl (mimics
+		// writeSupervisorAdvisory's append). markInjectionAcked reads
+		// this file, so it must exist for the ack to succeed.
+		mkdirSync(root, { recursive: true });
+		writeFileSync(
+			join(root, "injections.jsonl"),
+			`${JSON.stringify({
+				ts: deliveredAt.toISOString(),
+				kind: "supervisor_advisory",
+				summary: "1 critical, 0 medium, 0 low",
+				counts: { critical: 1, medium: 0, low: 0 },
+				advisoryId: "sa-test-1",
+				injectionId: "sa-test-1",
+				triggerId: "supervisor_categorize",
+				acked: false,
+				decisionEnvelope: {
+					severity: "critical",
+					summary: "1 critical, 0 medium, 0 low",
+					options: ["review_critical", "acknowledge"],
+				},
+			})}\n`,
+			"utf8",
+		);
+		// emitted + delivered (F-W2-1 made sure emitted is written; the
+		// pull path writes delivered).
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: "sa-test-1",
+			phase: "emitted",
+			kind: "supervisor_advisory",
+			now: deliveredAt,
+		});
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: "sa-test-1",
+			phase: "delivered",
+			kind: "supervisor_advisory",
+			now: deliveredAt,
+		});
+		mkdirSync(join(root, "logs"), { recursive: true });
+		evaluateSatisfactionPredicates({ stateRoot: root, now });
+		// Assert: an `expired` event was written for the supervisor_advisory.
+		const events = readInjectionLifecycle(root, "sa-test-1");
+		const expired = events.find((e) => e.phase === "expired");
+		assert.ok(
+			expired,
+			`expected an 'expired' event for supervisor_advisory past 24h, got: ${JSON.stringify(events)}`,
+		);
+		// Assert: the injection was acked (ack-on-expired policy).
+		const injectionsPath = join(root, "injections.jsonl");
+		const lines = readFileSync(injectionsPath, "utf8")
+			.split("\n")
+			.filter(Boolean);
+		const sa = JSON.parse(lines[0]) as { acked?: boolean };
+		assert.equal(
+			sa.acked,
+			true,
+			"supervisor_advisory past 24h must be acked (ack-on-expired policy: advisory-only, not forced-pull)",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("F-W2-2 RED→GREEN: supervisor_advisory within 24h window does NOT expire (silent wait)", () => {
+	const { root, cleanup } = makeRoot();
+	try {
+		const deliveredAt = new Date("2026-06-16T10:00:00Z");
+		const now = new Date("2026-06-16T18:00:00Z"); // 8h after, within 24h window
+		mkdirSync(root, { recursive: true });
+		writeFileSync(
+			join(root, "injections.jsonl"),
+			`${JSON.stringify({
+				ts: deliveredAt.toISOString(),
+				kind: "supervisor_advisory",
+				summary: "1 critical, 0 medium, 0 low",
+				counts: { critical: 1, medium: 0, low: 0 },
+				advisoryId: "sa-test-2",
+				injectionId: "sa-test-2",
+				triggerId: "supervisor_categorize",
+				acked: false,
+			})}\n`,
+			"utf8",
+		);
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: "sa-test-2",
+			phase: "emitted",
+			kind: "supervisor_advisory",
+			now: deliveredAt,
+		});
+		recordLifecycleEvent({
+			stateRoot: root,
+			injectionId: "sa-test-2",
+			phase: "delivered",
+			kind: "supervisor_advisory",
+			now: deliveredAt,
+		});
+		mkdirSync(join(root, "logs"), { recursive: true });
+		evaluateSatisfactionPredicates({ stateRoot: root, now });
+		const events = readInjectionLifecycle(root, "sa-test-2");
+		const expired = events.find((e) => e.phase === "expired");
+		assert.equal(
+			expired,
+			undefined,
+			"supervisor_advisory within 24h window must NOT expire (silent wait)",
+		);
+	} finally {
+		cleanup();
+	}
+});

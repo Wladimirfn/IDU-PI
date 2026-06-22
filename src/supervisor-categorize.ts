@@ -24,6 +24,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { consultSupervisor, type ConsultResult } from "./supervisor-consult.js";
+import { recordInjectionEmitted } from "./cron-preflight.js";
 import type { SensorMatch } from "./sensors.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { IduModelRoleId } from "./model-assignments.js";
@@ -240,4 +241,17 @@ export function writeSupervisorAdvisory(
 		})}\n`,
 		"utf8",
 	);
+	// F-W2-1: pair the injection with its `emitted` lifecycle event so
+	// the cron evaluator (and the invariant `every injection has an
+	// emitted event`) holds for supervisor_advisory too. Without this
+	// hook, supervisor_advisory stays invisible to the lifecycle log
+	// and the only thing observable is the delivered event written
+	// later when the orchestrator pulls via idu_pending_injections —
+	// which the live-verify flagged as 5 delivered / 0 emitted.
+	recordInjectionEmitted({
+		stateRoot,
+		injectionId: advisory.advisoryId,
+		kind: advisory.kind,
+		now: advisory.ts ? new Date(advisory.ts) : new Date(),
+	});
 }

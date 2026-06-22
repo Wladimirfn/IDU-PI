@@ -228,6 +228,14 @@ export function expiredAckPolicy(
 			// Hygiene advisories are advisory-only — they don't have
 			// forced-pull semantics. Ack-on-expired is the right policy.
 			return "ack-on-expired";
+		case "supervisor_advisory":
+			// F-W2-2: supervisor_advisory is also advisory-only.
+			// It's surfaced via idu_pending_injections pull, but
+			// there's no forced-pull semantics (no universal escalation
+			// hooks for it). Ack-on-expired prevents the leak that
+			// happened when the kind had no predicate at all (the
+			// pre-fix `if (!predicate) continue;` skip looped forever).
+			return "ack-on-expired";
 		default:
 			// Default: forced-pull (e.g. objective_reminder). Item 5's
 			// universal escalation handles the surfacing of ignored
@@ -236,6 +244,19 @@ export function expiredAckPolicy(
 			return "no-ack-on-expired";
 	}
 }
+
+/**
+ * Default-expiry window for kinds whose `defaultPredicateForKind` returns
+ * null (no built-in satisfaction predicate). After the window passes
+ * past the deliveredAt, the cron evaluator marks the advisory `expired`
+ * and applies `expiredAckPolicy` to decide whether to ack.
+ *
+ * Pre-fix (F-W2-2): such kinds were silently skipped via
+ * `if (!predicate) continue;` and accumulated as pending forever.
+ * 24h is the default: long enough for the orchestrator to see + ack
+ * via `idu_ack_advisory`, short enough to bound pending-list growth.
+ */
+export const DEFAULT_EXPIRY_WINDOW_MS = 24 * 60 * 60 * 1000; // 24h
 
 /**
  * Iterate over pending advisories (last phase = delivered) and evaluate
@@ -262,7 +283,36 @@ export function evaluateSatisfactionPredicates(input: {
 			advisory.kind ?? "",
 			advisory.path ? { path: advisory.path } : undefined,
 		);
-		if (!predicate) continue;
+		// F-W2-2: kinds without a built-in predicate (e.g. supervisor_advisory)
+		// used to be silently skipped here, accumulating as pending forever.
+		// Apply the default-expiry window so they still resolve out of pending
+		// (via `expired` + per-kind ack policy).
+		if (!predicate) {
+			const deliveredMs = Date.parse(advisory.ts);
+			const pastDefaultWindow =
+				input.now.getTime() > deliveredMs + DEFAULT_EXPIRY_WINDOW_MS;
+			if (pastDefaultWindow) {
+				recordLifecycleEvent({
+					stateRoot: input.stateRoot,
+					injectionId: advisory.injectionId,
+					phase: "expired",
+					kind: advisory.kind,
+					reason: "default-expiry window passed (no predicate for kind)",
+					now: input.now,
+				});
+				const policy = expiredAckPolicy(advisory.kind ?? "");
+				if (policy === "ack-on-expired") {
+					try {
+						markInjectionAcked(input.stateRoot, advisory.injectionId);
+					} catch {
+						// Non-fatal
+					}
+				}
+			}
+			// Within default-expiry window: silent wait (same as the
+			// tool-called path's "within window, no call yet" case).
+			continue;
+		}
 		const evaluation = evaluatePredicate({
 			predicate,
 			deliveredAt: advisory.ts,
