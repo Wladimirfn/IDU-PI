@@ -301,6 +301,10 @@ import {
 	handleSourceStatus,
 } from "./mcp/source/index.js";
 import {
+	handleArchitecturalPruningPlan,
+	handleContextPruningAdvisory,
+} from "./mcp/pruning/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -2210,113 +2214,10 @@ async function dispatchTool(
 			return await handleSupervisorConsult(name, args, runtime, resolution);
 		case "idu_supervisor_cron_plan":
 			return await handleSupervisorCronPlan(name, args, runtime, resolution);
-		case "idu_architectural_pruning_plan": {
-			const plan = buildArchitecturalPruningPlan({
-				projectId: runtime.projectId,
-			});
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: "warn",
-				severity: "warning",
-				confidence: 0.78,
-				summary: "Architectural pruning plan requires review before changes.",
-				requiresHuman: true,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: false,
-				evidenceRefs: plan.candidates.map((candidate) => candidate.id),
-				nextActions: plan.recommendedNext,
-				requiredActions: [
-					{
-						id: "architectural-pruning-human-review",
-						owner: "human",
-						action: "review_pruning_plan_before_changes",
-						reason:
-							"Architectural pruning must not be applied without human/orchestrator approval.",
-						blocking: true,
-					},
-				],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Architectural pruning candidates: ${plan.candidates.length}`,
-				data: {
-					decisionEnvelope,
-					plan,
-					candidates: plan.candidates,
-					governanceConfig: governanceConfigData(),
-					workerBoundary: workerBoundaryData(),
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Plan de poda advisory-only: no borré archivos ni apliqué refactors.",
-					"No aprobé recomendaciones, no ejecuté AgentLabs y no escribí reportes runtime.",
-				],
-			});
-		}
-		case "idu_context_pruning_advisory": {
-			const report = buildContextPruningAdvisoryReport({
-				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
-				projectId: runtime.projectId,
-				repoRoot: runtime.projectPath,
-			});
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: report.signals.length ? "warn" : "allow",
-				severity: report.signals.some((signal) => signal.severity === "high")
-					? "warning"
-					: "info",
-				confidence: 0.8,
-				summary: `Semantic debt advisory signals: ${report.signals.length}`,
-				requiresHuman: false,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: false,
-				evidenceRefs: report.signals.map((signal) => signal.id),
-				nextActions: [
-					"Review signals before adding more context or sources.",
-					"Revalidate stale evidence before plan decisions depend on it.",
-					"Do not delete, archive, refactor, or promote contracts from this report alone.",
-				],
-				requiredActions: report.signals.length
-					? [
-							{
-								id: "semantic-debt-orchestrator-review",
-								owner: "orchestrator",
-								action: "review_semantic_debt_signals_before_cleanup",
-								reason:
-									"Semantic debt signals are advisory and must not trigger automatic cleanup.",
-								blocking: true,
-							},
-						]
-					: [],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Semantic debt advisory signals: ${report.signals.length}`,
-				data: {
-					decisionEnvelope,
-					report,
-					signals: report.signals,
-					governanceConfig: governanceConfigData(),
-					workerBoundary: workerBoundaryData(),
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Reporte de deuda semántica advisory-only: no borré archivos, no archivé fuentes y no apliqué refactors.",
-					"No promoví contratos, no degradé contratos, no ejecuté AgentLabs y no escribí analytics remota.",
-					"No guardé prompts ni documentos crudos; sólo devolví conteos, ids, rutas y metadatos derivados.",
-				],
-			});
-		}
+		case "idu_architectural_pruning_plan":
+			return await handleArchitecturalPruningPlan(name, args, runtime, resolution);
+		case "idu_context_pruning_advisory":
+			return await handleContextPruningAdvisory(name, args, runtime, resolution);
 		case "idu_autonomous_alerts_status":
 			return await handleAutonomousAlertsStatus(name, args, runtime, resolution);
 		case "idu_autonomous_alerts_tick":

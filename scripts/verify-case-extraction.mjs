@@ -229,6 +229,10 @@ const CLUSTER_PREFIXES = {
 		"idu_source_skill_candidates_review",
 		"idu_source_refresh",
 	],
+	pruning: [
+		"idu_architectural_pruning_plan",
+		"idu_context_pruning_advisory",
+	],
 };
 
 /**
@@ -719,6 +723,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/birth/handlers.ts",
 	"src/mcp/master-plan/handlers.ts",
 	"src/mcp/source/handlers.ts",
+	"src/mcp/pruning/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
