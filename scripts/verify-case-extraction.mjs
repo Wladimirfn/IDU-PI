@@ -145,6 +145,10 @@ const CLUSTER_PREFIXES = {
 		"idu_advisory",
 		"idu_postflight",
 	],
+	external: [
+		"idu_external_intelligence_report",
+		"idu_external_source_recommend",
+	],
 };
 
 /**
@@ -624,6 +628,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/role/handlers.ts",
 	"src/mcp/supervisor-context/handlers.ts",
 	"src/mcp/preflight/handlers.ts",
+	"src/mcp/external/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
