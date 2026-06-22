@@ -284,6 +284,23 @@ import {
 	handleTaskPackageCreate,
 } from "./mcp/master-plan/index.js";
 import {
+	handleSourceAdd,
+	handleSourceChunkRead,
+	handleSourceDigest,
+	handleSourceDigestStatus,
+	handleSourceExtract,
+	handleSourceRead,
+	handleSourceRecommendForTask,
+	handleSourceRefresh,
+	handleSourceRemove,
+	handleSourceReport,
+	handleSourceRequiredActions,
+	handleSourceResearchReport,
+	handleSourceSkillCandidatesCreate,
+	handleSourceSkillCandidatesReview,
+	handleSourceStatus,
+} from "./mcp/source/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -2581,378 +2598,38 @@ async function dispatchTool(
 			return await handleQueueComplete(name, args, runtime, resolution);
 		case "idu_semantic_audit_status":
 			return await handleSemanticAuditStatus(name, args, runtime, resolution);
-		case "idu_source_status": {
-			const status = runtime.sourceLibraryStatus();
-			return envelope({
-				stateRoot: "",
-
-				ok: status.errors.length === 0,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source Library: ${status.state} (${status.sources.length} sources)`,
-				data: { status },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Solo leí Source Library en stateRoot.",
-					"No promoví contratos ni ejecuté AgentLabs.",
-				],
-				errors: status.errors,
-			});
-		}
-		case "idu_source_add": {
-			const result = runtime.sourceLibraryAdd(requiredText(args, "path"));
-			return envelope({
-				stateRoot: "",
-
-				ok: result.errors.length === 0,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source agregada: ${result.addedSource?.id ?? "sin fuente"}`,
-				data: { result, addedSource: result.addedSource },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Copié documentación bajo stateRoot/Doc/<project>/Source Library; texto legible puede generar snapshots/Markdown seguros.",
-					"PDFs intentan conversión best-effort desde texto embebido; no hice OCR ni parsing pesado.",
-					"No promoví contratos ni ejecuté AgentLabs.",
-				],
-				errors: result.errors,
-			});
-		}
-		case "idu_source_remove": {
-			const result = runtime.sourceLibraryRemove(
-				requiredText(args, "sourceId"),
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: result.errors.length === 0,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source removida: ${result.removedSource?.id ?? "sin fuente"}`,
-				data: { result, removedSource: result.removedSource },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Removí sólo archivos registrados dentro de Source Library stateRoot.",
-					"No cambié contratos, Project Core, Constitution, flows ni skills.",
-					"No ejecuté AgentLabs.",
-				],
-				errors: result.errors,
-			});
-		}
-		case "idu_source_read": {
-			const result = withSourceContentBudget(
-				runtime.sourceLibraryRead(requiredText(args, "sourceId")),
-				"source_chunk_read",
-				"result.content",
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source read: ${result.source.id} status=${result.readStatus}`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Leí sólo fuentes registradas en Source Library stateRoot.",
-					"No cambié contratos ni ejecuté AgentLabs.",
-					"No consulté web/live sources.",
-				],
-			});
-		}
-		case "idu_source_extract": {
-			const result = runtime.sourceLibraryExtract(
-				requiredText(args, "sourceId"),
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source extract: ${result.source.id} status=${result.extractionStatus}`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Extracción de texto escribe sólo bajo Source Library stateRoot cuando corresponde.",
-					"PDFs convertidos se leen desde Markdown seguro; PDFs sin texto embebido quedan metadata-only. No hice OCR ni parsing pesado.",
-					"No cambié contratos ni ejecuté AgentLabs.",
-				],
-			});
-		}
-		case "idu_source_report": {
-			const result = runtime.sourceLibraryReport(
-				requiredText(args, "sourceId"),
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source report: ${result.source.id} extraction=${result.extractionStatus}`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Reporté metadata de fuente registrada solamente.",
-					"No cambié contratos ni ejecuté AgentLabs.",
-				],
-			});
-		}
-		case "idu_source_research_report": {
-			const result = withSourceResearchBudget(
-				runtime.sourceLibraryResearch(requiredText(args, "query")),
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source research: ${result.signals.length} señales`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Investigué sólo fuentes registradas y texto extraído/legible.",
-					"No consulté web/live sources.",
-					"No promoví contratos ni ejecuté AgentLabs.",
-				],
-			});
-		}
-		case "idu_source_digest": {
-			const result = runtime.sourceDigest(requiredText(args, "sourceId"));
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source digest: ${result.sourceId} mode=${result.processingMode}`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Digest/chunks escritos bajo stateRoot/Doc/<project>/sources/{chunks,digests} y source-library-index.json.",
-					"No consulté web/live sources ni ejecuté AgentLabs.",
-					"No promoví contratos.",
-				],
-			});
-		}
-		case "idu_source_digest_status": {
-			const result = runtime.sourceDigestStatus();
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source digest status: ${result.digests.length} fuentes`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Leí sólo estado de digests en Source Library stateRoot.",
-					"No promoví contratos ni ejecuté AgentLabs.",
-				],
-			});
-		}
-		case "idu_source_chunk_read": {
-			const result = withSourceContentBudget(
-				runtime.sourceChunkRead(
-					requiredText(args, "sourceId"),
-					requiredText(args, "chunkId"),
-				),
-				"source_chunk_read",
-				"result.content",
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source chunk read: ${result.chunkId}`,
-				data: { result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Leí sólo chunks registrados bajo Source Library stateRoot.",
-					"No consulté web/live sources ni ejecuté AgentLabs.",
-				],
-			});
-		}
-		case "idu_source_recommend_for_task": {
-			const rawResult = runtime.sourceRecommend(requiredText(args, "request"));
-			const result = boundSourceRecommendationForInjection(rawResult);
-			const matches = arrayField(result, "matches") as JsonObject[];
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: matches.length > 0 ? "warn" : "allow",
-				severity: matches.length > 0 ? "warning" : "info",
-				confidence: 0.68,
-				summary: `Source recommendations: ${matches.length} matches`,
-				requiresHuman: false,
-				orchestratorDecisionRequired: matches.length > 0,
-				allowedToProceed: true,
-				evidenceRefs: matches.map(
-					(match) => `source:${String(match.sourceId)}`,
-				),
-				nextActions: matches.map((match) =>
-					String(match.orchestratorInstruction ?? ""),
-				),
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source recommendations: ${matches.length} matches`,
-				data: { result, decisionEnvelope },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Recomendé fuentes/chunks desde índice local; el orquestador decide y manda subagentes.",
-					"No implementé, no consulté web/live sources y no ejecuté AgentLabs.",
-					"No promoví contratos.",
-				],
-			});
-		}
-		case "idu_source_required_actions": {
-			const result = runtime.sourceRequiredActions();
-			const evidenceGateways =
-				buildSourceRequiredActionsEvidenceGateways(result);
-			const decisionEnvelope = decisionEnvelopeFromEvidence(
-				name,
-				`Source required actions: ${result.actions.length}`,
-				evidenceGateways,
-				{
-					recommendation:
-						result.actions.length > 0 ? "needs_evidence" : "allow",
-					severity: result.actions.length > 0 ? "needs_approval" : "info",
-					confidence: 0.86,
-					requiresHuman: false,
-					orchestratorDecisionRequired: result.actions.length > 0,
-					nextActions: result.actions.map(
-						(action) => action.requiredAction.instructions,
-					),
-				},
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source required actions: ${result.actions.length}`,
-				data: {
-					result,
-					actions: result.actions,
-					evidenceGateways,
-					decisionEnvelope,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Listé fuentes que requieren lector bibliotecario; el orquestador debe despachar el subagente.",
-					"No implementé, no ejecuté AgentLabs y no consulté web/live sources.",
-					"No promoví contratos.",
-				],
-			});
-		}
-		case "idu_source_skill_candidates_create": {
-			const result = runtime.sourceSkillCandidatesCreate(
-				stringArg(args, "selector") ?? "all",
-			);
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: result.report.candidates.length
-					? "needs_approval"
-					: "allow",
-				severity: result.report.candidates.length ? "warning" : "info",
-				confidence: 0.72,
-				summary: `Source skill candidates: ${result.report.candidates.length}`,
-				requiresHuman: true,
-				orchestratorDecisionRequired: result.report.candidates.length > 0,
-				allowedToProceed: true,
-				evidenceRefs: result.report.candidates.flatMap(
-					(candidate) => candidate.evidenceRefs,
-				),
-				nextActions: [
-					"Human/orchestrator must review before any skill promotion.",
-					"Optional future AgentLab review can audit comprehension and duplicates.",
-				],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source skill candidates: ${result.report.candidates.length}`,
-				data: { result, decisionEnvelope },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Creé sólo un reporte JSON bajo stateRoot/reports.",
-					"No instalé skills, no escribí .agents/.atl y no promoví contratos.",
-					"tokens/cost: no medido.",
-				],
-			});
-		}
-		case "idu_source_skill_candidates_review": {
-			const review = runtime.sourceSkillCandidatesReview(
-				stringArg(args, "pathOrLatest") ?? "latest",
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: review.ok,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: review.ok
-					? `Source skill candidate report valid: ${review.report.candidates.length} candidates`
-					: `Source skill candidate report invalid: ${review.errors.length} errors`,
-				data: { review },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Validé reporte advisory/reports-only; no instalé skills ni ejecuté AgentLabs.",
-					"tokens/cost: no medido.",
-				],
-				errors: review.ok ? [] : review.errors,
-			});
-		}
+		case "idu_source_status":
+			return await handleSourceStatus(name, args, runtime, resolution);
+		case "idu_source_add":
+			return await handleSourceAdd(name, args, runtime, resolution);
+		case "idu_source_remove":
+			return await handleSourceRemove(name, args, runtime, resolution);
+		case "idu_source_read":
+			return await handleSourceRead(name, args, runtime, resolution);
+		case "idu_source_extract":
+			return await handleSourceExtract(name, args, runtime, resolution);
+		case "idu_source_report":
+			return await handleSourceReport(name, args, runtime, resolution);
+		case "idu_source_research_report":
+			return await handleSourceResearchReport(name, args, runtime, resolution);
+		case "idu_source_digest":
+			return await handleSourceDigest(name, args, runtime, resolution);
+		case "idu_source_digest_status":
+			return await handleSourceDigestStatus(name, args, runtime, resolution);
+		case "idu_source_chunk_read":
+			return await handleSourceChunkRead(name, args, runtime, resolution);
+		case "idu_source_recommend_for_task":
+			return await handleSourceRecommendForTask(name, args, runtime, resolution);
+		case "idu_source_required_actions":
+			return await handleSourceRequiredActions(name, args, runtime, resolution);
+		case "idu_source_skill_candidates_create":
+			return await handleSourceSkillCandidatesCreate(name, args, runtime, resolution);
+		case "idu_source_skill_candidates_review":
+			return await handleSourceSkillCandidatesReview(name, args, runtime, resolution);
 		case "idu_skill_draft_from_lessons":
 			return await handleSkillDraftFromLessons(name, args, runtime, resolution);
-		case "idu_source_refresh": {
-			const status = runtime.sourceLibraryRefresh();
-			return envelope({
-				stateRoot: "",
-
-				ok: status.errors.length === 0,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Source Library refresh: ${status.state}`,
-				data: { status },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Refresh recalculó estado/hashes en stateRoot únicamente.",
-					"No cambié contratos, Project Core, Constitution, flows ni skills.",
-					"No ejecuté AgentLabs.",
-				],
-				errors: status.errors,
-			});
-		}
+		case "idu_source_refresh":
+			return await handleSourceRefresh(name, args, runtime, resolution);
 		case "idu_agentlab_request_create":
 			return await handleAgentLabRequestCreate(name, args, runtime, resolution);
 		case "idu_agentlab_review_run":
@@ -3419,7 +3096,7 @@ function boundSupervisorSourceRecommendation(
 	};
 }
 
-function boundSourceRecommendationForInjection(
+export function boundSourceRecommendationForInjection(
 	report: SourceRecommendationReport,
 ): JsonObject {
 	const bounded = boundSupervisorSourceRecommendation(report);
@@ -3728,7 +3405,7 @@ function budgetJsonArray(
 	};
 }
 
-function withSourceContentBudget<
+export function withSourceContentBudget<
 	T extends { content: string; truncated?: boolean },
 >(
 	result: T,
@@ -3760,7 +3437,7 @@ function withSourceContentBudget<
 	};
 }
 
-function withSourceResearchBudget<
+export function withSourceResearchBudget<
 	T extends {
 		searchedSourceIds?: string[];
 		signals?: unknown[];

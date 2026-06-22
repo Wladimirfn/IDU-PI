@@ -212,6 +212,23 @@ const CLUSTER_PREFIXES = {
 		"idu_continuation_proposal",
 		"idu_task_package_create",
 	],
+	source: [
+		"idu_source_status",
+		"idu_source_add",
+		"idu_source_remove",
+		"idu_source_read",
+		"idu_source_extract",
+		"idu_source_report",
+		"idu_source_research_report",
+		"idu_source_digest",
+		"idu_source_digest_status",
+		"idu_source_chunk_read",
+		"idu_source_recommend_for_task",
+		"idu_source_required_actions",
+		"idu_source_skill_candidates_create",
+		"idu_source_skill_candidates_review",
+		"idu_source_refresh",
+	],
 };
 
 /**
@@ -701,6 +718,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/injections/handlers.ts",
 	"src/mcp/birth/handlers.ts",
 	"src/mcp/master-plan/handlers.ts",
+	"src/mcp/source/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
