@@ -191,6 +191,16 @@ const CLUSTER_PREFIXES = {
 		"idu_outbox_prune",
 		"idu_subscribe_triggers",
 	],
+	birth: [
+		"idu_birth_status",
+		"idu_birth_existing_scan",
+		"idu_birth_bibliotecario_discovery",
+		"idu_birth_prototype_master",
+		"idu_birth_general_spec",
+		"idu_birth_general_spec_derive",
+		"idu_birth_validate",
+		"idu_birth_repo_plan",
+	],
 };
 
 /**
@@ -678,6 +688,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/objective/handlers.ts",
 	"src/mcp/genesis/handlers.ts",
 	"src/mcp/injections/handlers.ts",
+	"src/mcp/birth/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

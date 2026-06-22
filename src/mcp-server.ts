@@ -88,16 +88,6 @@ import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
 import { runAutomaticov1AdvisoryCycle } from "./automaticov1-cycle.js";
 import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
 import {
-	handleBirthStatus,
-	handleBirthExistingScan,
-	handleBirthBibliotecarioDiscovery,
-	handleBirthValidate,
-	handleBirthRepoPlan,
-	type BirthRepoPlan,
-} from "./birth-runtime.js";
-import { approveBirthGeneralSpec } from "./birth-general-spec-runtime.js";
-import { runVisualDerivation } from "./birth-general-spec-derive.js";
-import {
 	runGenesisMissionConfirm,
 	runGenesisMissionDraft,
 } from "./genesis-mission-tools.js";
@@ -107,7 +97,6 @@ import {
 } from "./skills-index-runtime.js";
 import { packSkillsIndex } from "./skills-index.js";
 import { readTaxonomyGuide } from "./taxonomy-placement.js";
-import { handleBirthPrototypeMaster } from "./birth-prototype-runtime.js";
 import {
 	readPendingInjections,
 	markInjectionAcked,
@@ -273,6 +262,16 @@ import {
 	handlePendingInjections,
 	handleSubscribeTriggers,
 } from "./mcp/injections/index.js";
+import {
+	handleBirthBibliotecarioDiscovery,
+	handleBirthExistingScan,
+	handleBirthGeneralSpec,
+	handleBirthGeneralSpecDerive,
+	handleBirthPrototypeMaster,
+	handleBirthRepoPlan,
+	handleBirthStatus,
+	handleBirthValidate,
+} from "./mcp/birth/index.js";
 import {
 	SAFE_BASE_NOTES,
 	asRecord,
@@ -2667,300 +2666,28 @@ async function dispatchTool(
 				runtime,
 				resolution,
 			);
-		case "idu_birth_status": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const env = handleBirthStatus({
-				projectId: runtime.projectId,
-				stateRoot,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_state=${env.state} allowed=${env.allowedToImplement} repo=${env.repoWritesAllowed}`,
-				data: { birth: env },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Birth status is advisory; readiness is derived from existing Idu-pi contracts.",
-					"repoWritesAllowed remains false until Project Core + Master Plan are confirmed/approved AND a human push approval is recorded.",
-				],
-			});
-		}
-		case "idu_birth_existing_scan": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			if (!runtime.projectPath) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Existing project scan requires an active project path.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["active project path is missing"],
-				});
-			}
-			const env = handleBirthExistingScan({
-				projectId: runtime.projectId,
-				stateRoot,
-				projectPath: runtime.projectPath,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_scan=${env.scan.scanId} pkg=${env.scan.observed.packageManager}`,
-				data: { birth: env },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Scan is read-only; artifacts written only under stateRoot/birth/.",
-					"Detected specs stay in status=draft until human approval.",
-				],
-			});
-		}
-		case "idu_birth_bibliotecario_discovery": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const scan = readBirthArtifact<{ observed?: { docs?: string[] } }>(
-				stateRoot,
-				"existing-scan",
-			);
-			const localRefs = (scan?.observed?.docs ?? [])
-				.slice(0, 5)
-				.map((p) => ({ path: p, quality: "secondary" as const }));
-			const env = handleBirthBibliotecarioDiscovery({
-				projectId: runtime.projectId,
-				stateRoot,
-				localSourceRefs: localRefs,
-				requestedExternalCategories: [],
-				externalPermission: "not_requested",
-				masterPlanSummary: "",
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_bibliotecario_status=${env.discovery.status} ideas=${env.discovery.ideas.length}`,
-				data: { birth: env },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Bibliotecario ideas are idea_only; no automatic decision or contract is created.",
-					"External fetch requires explicit human permission.",
-				],
-			});
-		}
-		case "idu_birth_prototype_master": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const params = args as {
-				action?: "draft" | "review" | "approve";
-				draft?: Parameters<typeof handleBirthPrototypeMaster>[0]["draft"];
-				approvedBy?: string;
-			};
-			const action = params.action ?? "review";
-			const env = handleBirthPrototypeMaster({
-				action,
-				projectId: runtime.projectId,
-				stateRoot,
-				...(params.draft ? { draft: params.draft } : {}),
-				...(params.approvedBy ? { approvedBy: params.approvedBy } : {}),
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_prototype_status=${env.prototype.status}`,
-				data: { birth: env },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Master Prototype is approved only by explicit human action.",
-					"Only stateRoot/birth/prototype-master.json is written.",
-				],
-			});
-		}
-		case "idu_birth_general_spec": {
-			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary:
-						"General Spec approval requires an active project stateRoot.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["active project stateRoot is missing"],
-				});
-			}
-			const params = args as JsonObject;
-			const sections = parseGeneralSpecSectionsArg(params.sections);
-			const birth = await approveBirthGeneralSpec({
-				projectId: runtime.projectId,
-				stateRoot: resolution.stateRoot,
-				sections,
-				approvedBy: stringArg(params, "approvedBy") ?? "owner",
-			});
-			const readiness = handleBirthStatus({
-				projectId: runtime.projectId,
-				stateRoot: resolution.stateRoot,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_general_spec_status=${birth.generalSpec.status}`,
-				data: { birth, readiness },
-				safeNotes: [
-					...resolution.safeNotes,
-					"General Spec approval is explicit owner input; no derivation, model call, or Telegram surface was used.",
-					"Only stateRoot/birth/general-spec.json is written.",
-				],
-			});
-		}
-		case "idu_birth_general_spec_derive": {
-			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary:
-						"General Spec derivation requires an active project stateRoot.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["active project stateRoot is missing"],
-				});
-			}
-			const params = args as JsonObject;
-			const promptForRole = runtime.promptForRole;
-			const result = await runVisualDerivation({
-				stateRoot: resolution.stateRoot,
-				uiFiles: stringListArg(params, "uiFiles"),
-				promptForRole:
-					promptForRole ?? (async () => ({ ok: false, output: "" })),
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_general_spec_derive applied=${result.appliedCount}`,
-				data: { derivation: result },
-				safeNotes: [
-					...resolution.safeNotes,
-					"General Spec visual derivation is owner-invoked only; approveBirthGeneralSpec does not auto-trigger it.",
-					"Only stateRoot/birth/general-spec.json is written.",
-				],
-			});
-		}
+		case "idu_birth_status":
+			return await handleBirthStatus(name, args, runtime, resolution);
+		case "idu_birth_existing_scan":
+			return await handleBirthExistingScan(name, args, runtime, resolution);
+		case "idu_birth_bibliotecario_discovery":
+			return await handleBirthBibliotecarioDiscovery(name, args, runtime, resolution);
+		case "idu_birth_prototype_master":
+			return await handleBirthPrototypeMaster(name, args, runtime, resolution);
+		case "idu_birth_general_spec":
+			return await handleBirthGeneralSpec(name, args, runtime, resolution);
+		case "idu_birth_general_spec_derive":
+			return await handleBirthGeneralSpecDerive(name, args, runtime, resolution);
 		case "idu_genesis_mission_draft":
 			return await handleGenesisMissionDraft(name, args, runtime, resolution);
 		case "idu_genesis_mission_confirm":
 			return await handleGenesisMissionConfirm(name, args, runtime, resolution);
 		case "idu_skill_for_task":
 			return await handleSkillForTask(name, args, runtime, resolution);
-		case "idu_birth_validate": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			if (!runtime.projectPath) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Birth validate requires an active project path.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["active project path is missing"],
-				});
-			}
-			const env = handleBirthValidate({
-				projectId: runtime.projectId,
-				stateRoot,
-				projectPath: runtime.projectPath,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_validate state=${env.readiness.state}`,
-				data: { birth: env },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Birth validate runs read-only scan + Bibliotecario + readiness; nothing is written except under stateRoot/birth/.",
-				],
-			});
-		}
-		case "idu_birth_repo_plan": {
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const params = args as {
-				repoPlan?: Partial<BirthRepoPlan>;
-			};
-			const plan: BirthRepoPlan = {
-				repoName: String(params.repoPlan?.repoName ?? runtime.projectId),
-				visibility:
-					params.repoPlan?.visibility === "public" ? "public" : "private",
-				owner: String(params.repoPlan?.owner ?? ""),
-				license: String(params.repoPlan?.license ?? "MIT"),
-				initialReadmePolicy: String(
-					params.repoPlan?.initialReadmePolicy ?? "minimal",
-				),
-				remoteProvider:
-					(params.repoPlan?.remoteProvider as
-						| "github"
-						| "gitlab"
-						| "other"
-						| undefined) ?? "github",
-				pushApproved: Boolean(params.repoPlan?.pushApproved),
-				branchPolicy: String(params.repoPlan?.branchPolicy ?? "main"),
-				ciExpectation: String(params.repoPlan?.ciExpectation ?? ""),
-			};
-			const env = handleBirthRepoPlan({
-				projectId: runtime.projectId,
-				stateRoot,
-				repoPlan: plan,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: env.decision.repoWritesAllowed,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `birth_repo_plan repoWritesAllowed=${env.decision.repoWritesAllowed}`,
-				data: { birth: env },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Repo plan is evaluated only; no git init/push is executed by Idu-pi.",
-					"Human push approval is required and recorded before any repoWritesAllowed=true.",
-				],
-			});
-		}
+		case "idu_birth_validate":
+			return await handleBirthValidate(name, args, runtime, resolution);
+		case "idu_birth_repo_plan":
+			return await handleBirthRepoPlan(name, args, runtime, resolution);
 		case "idu_pending_injections":
 			return await handlePendingInjections(name, args, runtime, resolution);
 		case "idu_hygiene_migrate":
