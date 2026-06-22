@@ -157,6 +157,11 @@ const CLUSTER_PREFIXES = {
 	semantic: [
 		"idu_semantic_audit_status",
 	],
+	agentlab: [
+		"idu_agentlab_request_create",
+		"idu_agentlab_review_run",
+		"idu_agentlab_review_status",
+	],
 };
 
 /**
@@ -639,6 +644,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/external/handlers.ts",
 	"src/mcp/task-queue/handlers.ts",
 	"src/mcp/semantic/handlers.ts",
+	"src/mcp/agentlab/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

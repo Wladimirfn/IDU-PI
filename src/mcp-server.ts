@@ -240,6 +240,11 @@ import {
 } from "./mcp/task-queue/index.js";
 import { handleSemanticAuditStatus } from "./mcp/semantic/index.js";
 import {
+	handleAgentLabRequestCreate,
+	handleAgentLabReviewRun,
+	handleAgentLabReviewStatus,
+} from "./mcp/agentlab/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -4703,248 +4708,12 @@ async function dispatchTool(
 				errors: status.errors,
 			});
 		}
-		case "idu_agentlab_request_create": {
-			const source = requiredOneOf(args, "source", [
-				"postflight",
-				"master-plan",
-				"skill-draft",
-				"external-source-intelligence",
-				"specialist-audit-plan",
-			]);
-			const selector = stringArg(args, "selector") ?? "latest";
-			const specialties = agentLabSpecialtiesArg(args, "specialties");
-			if (source === "specialist-audit-plan" && specialties.errors.length > 0) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Solicitud AgentLab specialist-audit-plan inválida.",
-					data: {},
-					safeNotes: [
-						...resolution.safeNotes,
-						"No ejecuté AgentLabs.",
-						"No creé solicitud AgentLab inválida.",
-					],
-					errors: specialties.errors,
-				});
-			}
-			const objective = stringArg(args, "objective");
-			const context = stringArg(args, "context");
-			// B5 PR3 v2 (REQ-B5-5): accept the optional `model` and
-			// `stateRoot` args so the CLI/MCP surfaces can pick a
-			// canonical model id or fall back to the create-time
-			// auto-pick.
-			const model = stringArg(args, "model");
-			const stateRoot = stringArg(args, "stateRoot");
-			const sourceLibraryEvidence =
-				source === "external-source-intelligence"
-					? compactSourceLibraryEvidence(
-							runtime.sourceRecommend(context ?? objective ?? selector),
-						)
-					: undefined;
-			const plan = runtime.agentLabRequestCreate(source, selector, {
-				objective,
-				context,
-				specialties: specialties.values,
-				externalSourceLibraryEvidence: sourceLibraryEvidence,
-				...(model !== undefined ? { model } : {}),
-				...(stateRoot !== undefined ? { stateRoot } : {}),
-			});
-			const workloadEnvelope =
-				plan.workloadEnvelope ??
-				buildAgentLabWorkloadEnvelope({
-					status: "requested",
-					statusReason:
-						"Solicitud AgentLab creada; no ejecuta revisión automáticamente.",
-					generatedAt: plan.generatedAt,
-					source: "mcp",
-					requests: plan.requests,
-				});
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: plan.errors.length > 0 ? "block" : "warn",
-				severity: plan.errors.length > 0 ? "needs_approval" : "warning",
-				confidence: 0.72,
-				summary: `Solicitud AgentLab creada: ${plan.path ?? "sin ruta"}`,
-				requiresHuman: false,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: plan.errors.length === 0,
-				evidenceRefs: plan.requests.map(
-					(request) => `agentlab-request:${request.specialty}`,
-				),
-				suggestedAgentLabs: [
-					...new Set(plan.requests.map((request) => request.specialty)),
-				],
-				nextActions: [
-					"Run idu_agentlab_review_run only by explicit orchestrator decision.",
-				],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: plan.errors.length === 0,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Solicitud AgentLab creada: ${plan.path ?? "sin ruta"}`,
-				data: {
-					decisionEnvelope,
-					workloadEnvelope,
-					requestFilePath: plan.path,
-					specialties: [
-						...new Set(plan.requests.map((request) => request.specialty)),
-					],
-					plan,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"No ejecuté AgentLabs.",
-					"Solicitud formal solamente.",
-					...(source === "external-source-intelligence"
-						? [
-								"Usé sólo Source Library/digests locales cuando estuvieron disponibles; no hice web/live fetch.",
-							]
-						: []),
-				],
-				errors: plan.errors,
-			});
-		}
-		case "idu_agentlab_review_run": {
-			const selector = stringArg(args, "selector") ?? "latest";
-			const result = await runtime.agentLabReviewRun(selector);
-			const aggregateStatus = aggregateRunStatus(
-				result.runs.map((run) => run.status),
-			);
-			const envelopeStatus =
-				aggregateStatus === "unknown" ? "skipped" : aggregateStatus;
-			const workloadEnvelope =
-				result.workloadEnvelope ??
-				buildAgentLabWorkloadEnvelope({
-					status: envelopeStatus as
-						| "completed"
-						| "partial"
-						| "timed_out"
-						| "skipped"
-						| "failed"
-						| "security_violation",
-					statusReason: `AgentLab run aggregate status: ${aggregateStatus}.`,
-					generatedAt: result.generatedAt,
-					source: "mcp",
-					runs: result.runs,
-				});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `AgentLab review run: ${result.consolidatedSummary}`,
-				data: {
-					workloadEnvelope,
-					runFilePath: result.path,
-					status: aggregateStatus,
-					findingsCount: result.consolidatedFindings.length,
-					securityViolations: result.runs.filter(
-						(run) => run.status === "security_violation",
-					).length,
-					result,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					...result.safeNotes,
-					"AgentLab review runner debe respetar sandbox/clone guard.",
-				],
-			});
-		}
-		case "idu_agentlab_review_status": {
-			const selector = stringArg(args, "selector") ?? "latest";
-			const status = runtime.agentLabReviewStatus(selector);
-			const runs = status.result?.runs ?? [];
-			const workloadEnvelope = agentLabStatusWorkloadEnvelope(status);
-			const recommendations = runs.flatMap((run) => run.recommendations);
-			const agentLabRequiresHuman =
-				!status.valid ||
-				status.result?.requiresHumanApproval === true ||
-				runs.some((run) => run.requiresHumanApproval) ||
-				recommendations.some(
-					(recommendation) => recommendation.requiresHumanApproval,
-				);
-			const agentLabHumanActions = agentLabRequiresHuman
-				? [
-						{
-							id: "agentlab-review-human-approval",
-							owner: "human" as const,
-							action: "review_agentlab_before_proceeding",
-							reason:
-								"AgentLab status or recommendation requires human/orchestrator approval.",
-							blocking: true,
-							data: {
-								recommendedNext: status.result?.recommendedNext,
-								recommendations: recommendations
-									.filter(
-										(recommendation) => recommendation.requiresHumanApproval,
-									)
-									.map((recommendation) => recommendation.title),
-							},
-						},
-					]
-				: [];
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: status.valid
-					? agentLabRequiresHuman
-						? "ask_human"
-						: "warn"
-					: "block",
-				severity: agentLabRequiresHuman ? "needs_approval" : "warning",
-				confidence: 0.74,
-				summary: status.valid
-					? `Estado AgentLab: ${status.name}`
-					: "Estado AgentLab inválido.",
-				requiresHuman: agentLabRequiresHuman,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: status.valid && !agentLabRequiresHuman,
-				evidenceRefs: (status.result?.consolidatedFindings ?? []).map(
-					(finding, index) => `agentlab-finding:${index + 1}:${finding.title}`,
-				),
-				requiredActions: agentLabHumanActions,
-				suggestedAgentLabs: runs.map((run) => run.specialty),
-				nextActions: recommendations.map(
-					(recommendation) => recommendation.suggestedNextStep,
-				),
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: status.valid,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: status.valid
-					? `Estado AgentLab: ${status.name}`
-					: "Estado AgentLab inválido.",
-				data: {
-					decisionEnvelope,
-					workloadEnvelope,
-					statusBySpecialty: Object.fromEntries(
-						runs.map((run) => [run.specialty, run.status]),
-					),
-					findings: status.result?.consolidatedFindings ?? [],
-					recommendations,
-					testsSuggested: runs.flatMap((run) => run.testsSuggested),
-					status,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Solo leí reporte AgentLab; no ejecuté labs.",
-				],
-				errors: status.errors,
-			});
-		}
+		case "idu_agentlab_request_create":
+			return await handleAgentLabRequestCreate(name, args, runtime, resolution);
+		case "idu_agentlab_review_run":
+			return await handleAgentLabReviewRun(name, args, runtime, resolution);
+		case "idu_agentlab_review_status":
+			return await handleAgentLabReviewStatus(name, args, runtime, resolution);
 	}
 	throw new Error(`Tool ${name} is handled before runtime dispatch.`);
 }
@@ -6356,7 +6125,7 @@ const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([
 	"general",
 ]);
 
-function compactSourceLibraryEvidence(
+export function compactSourceLibraryEvidence(
 	report: SourceRecommendationReport,
 ): AgentLabSourceLibraryEvidence {
 	const bounded = boundSourceRecommendationForInjection(report);
@@ -6426,7 +6195,7 @@ function stringArrayValue(value: unknown): string[] {
 		: [];
 }
 
-function agentLabSpecialtiesArg(
+export function agentLabSpecialtiesArg(
 	args: JsonObject,
 	key: string,
 ): { values?: AgentLabSpecialty[]; errors: string[] } {
@@ -6457,7 +6226,7 @@ function isStructuredTask(value: unknown): value is StructuredTask {
 	);
 }
 
-function aggregateRunStatus(statuses: string[]): string {
+export function aggregateRunStatus(statuses: string[]): string {
 	if (statuses.includes("security_violation")) return "security_violation";
 	if (statuses.includes("timed_out")) return "timed_out";
 	if (statuses.includes("failed")) return "failed";
@@ -6467,7 +6236,7 @@ function aggregateRunStatus(statuses: string[]): string {
 	return "unknown";
 }
 
-function agentLabStatusWorkloadEnvelope(status: {
+export function agentLabStatusWorkloadEnvelope(status: {
 	valid: boolean;
 	errors: string[];
 	result?: {
