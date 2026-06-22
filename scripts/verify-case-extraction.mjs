@@ -162,6 +162,14 @@ const CLUSTER_PREFIXES = {
 		"idu_agentlab_review_run",
 		"idu_agentlab_review_status",
 	],
+	"supervisor-tick": [
+		"idu_supervisor_tick",
+		"idu_execution_director_tick",
+		"idu_proposal_outbox",
+		"idu_proposal_detail",
+		"idu_supervisor_consult",
+		"idu_supervisor_cron_plan",
+	],
 };
 
 /**
@@ -645,6 +653,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/task-queue/handlers.ts",
 	"src/mcp/semantic/handlers.ts",
 	"src/mcp/agentlab/handlers.ts",
+	"src/mcp/supervisor-tick/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
