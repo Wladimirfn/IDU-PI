@@ -154,6 +154,9 @@ const CLUSTER_PREFIXES = {
 		"idu_queue_detail",
 		"idu_queue_complete",
 	],
+	semantic: [
+		"idu_semantic_audit_status",
+	],
 };
 
 /**
@@ -635,6 +638,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/preflight/handlers.ts",
 	"src/mcp/external/handlers.ts",
 	"src/mcp/task-queue/handlers.ts",
+	"src/mcp/semantic/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

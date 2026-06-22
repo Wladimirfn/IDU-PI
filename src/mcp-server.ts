@@ -238,6 +238,7 @@ import {
 	handleQueueDetail,
 	handleTask,
 } from "./mcp/task-queue/index.js";
+import { handleSemanticAuditStatus } from "./mcp/semantic/index.js";
 import {
 	SAFE_BASE_NOTES,
 	asRecord,
@@ -4254,29 +4255,8 @@ async function dispatchTool(
 			return await handleQueueDetail(name, args, runtime, resolution);
 		case "idu_queue_complete":
 			return await handleQueueComplete(name, args, runtime, resolution);
-		case "idu_semantic_audit_status": {
-			const report = runtime.semanticAuditStatus();
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `shouldRun=${String(report.decision.shouldRun)} trigger=${report.decision.triggerReason}`,
-				data: {
-					stats: report.stats,
-					checkpoint: report.checkpoint,
-					shouldRun: report.decision.shouldRun,
-					triggerReason: report.decision.triggerReason,
-					report,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Solo leí estado de auditoría semántica.",
-				],
-			});
-		}
+		case "idu_semantic_audit_status":
+			return await handleSemanticAuditStatus(name, args, runtime, resolution);
 		case "idu_source_status": {
 			const status = runtime.sourceLibraryStatus();
 			return envelope({
