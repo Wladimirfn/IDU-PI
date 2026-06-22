@@ -170,6 +170,13 @@ const CLUSTER_PREFIXES = {
 		"idu_supervisor_consult",
 		"idu_supervisor_cron_plan",
 	],
+	objective: [
+		"idu_objective_status",
+		"idu_autonomous_alerts_status",
+		"idu_autonomous_alerts_tick",
+		"idu_autonomous_alerts_control",
+		"idu_automaticov1_cycle",
+	],
 };
 
 /**
@@ -654,6 +661,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/semantic/handlers.ts",
 	"src/mcp/agentlab/handlers.ts",
 	"src/mcp/supervisor-tick/handlers.ts",
+	"src/mcp/objective/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
