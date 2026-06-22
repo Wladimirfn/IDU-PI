@@ -305,6 +305,13 @@ import {
 	handleContextPruningAdvisory,
 } from "./mcp/pruning/index.js";
 import {
+	handleBibliotecarioInit,
+	handleBibliotecarioProactiveAdvisory,
+	handleModelInvocationStatus,
+	handlePrepare,
+	handleSkillRating,
+} from "./mcp/bibliotecario/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -2013,155 +2020,14 @@ async function dispatchTool(
 				runtime,
 				resolution,
 			);
-		case "idu_prepare": {
-			const result = runtime.prepare();
-			return envelope({
-				stateRoot: "",
-
-				ok: result.errors.length === 0,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: result.recommendedNext,
-				data: result as unknown as JsonObject,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Prepare seguro: no ejecuté IA ni AgentLabs.",
-				],
-				errors: result.errors,
-			});
-		}
-		case "idu_bibliotecario_init": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const init = runBibliotecarioInit({ stateRoot, projectId });
-			if (!init.ok) {
-				return invalidMcpInput(name, runtime, resolution, init.error, {
-					stateRoot,
-				});
-			}
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: `Bibliotecario inicializado para ${projectId}.`,
-				data: {
-					activeProjectId: projectId,
-					init,
-					output: formatBibliotecarioInit(init),
-				},
-				safeNotes: resolution.safeNotes,
-			});
-		}
-		case "idu_model_invocation_status": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-			const labDbPath = runtime.labDbPath ?? join(stateRoot, "lab.db");
-			const limit = positiveIntegerArg(args, "limit");
-			if (args.limit !== undefined && limit === undefined) {
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"limit must be a positive integer",
-				);
-			}
-			const result = buildModelInvocationStatusOrError({
-				projectId,
-				stateRoot,
-				labDbPath,
-				options: {
-					...(stringArg(args, "role") ? { role: stringArg(args, "role") } : {}),
-					...(limit !== undefined ? { limit } : {}),
-				},
-			});
-			if (!result.ok)
-				return invalidMcpInput(name, runtime, resolution, result.error, {
-					labDbPath,
-				});
-			const formatter =
-				runtime.formatModelInvocationStatus ?? formatModelInvocationStatus;
-			const output = `lab.db path: ${labDbPath}\n${formatter(result.report)}`;
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: "Estado de invocaciones de modelos generado.",
-				data: {
-					labDbPath,
-					output,
-					report: result.report as unknown as JsonObject,
-				},
-				safeNotes: resolution.safeNotes,
-			});
-		}
-		case "idu_skill_rating": {
-			const projectId = activeMcpProjectId(runtime, resolution);
-			if (!projectId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"project id must be non-empty",
-				);
-			const proposalId = stringArg(args, "proposalId");
-			if (!proposalId)
-				return invalidMcpInput(
-					name,
-					runtime,
-					resolution,
-					"proposalId must be non-empty",
-				);
-			const score = scoreArg(args, "score");
-			if (!score.ok)
-				return invalidMcpInput(name, runtime, resolution, score.error);
-			const result = runSkillRating([proposalId, score.text], {
-				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
-			});
-			if (!result.ok) {
-				return invalidMcpInput(name, runtime, resolution, result.error, {
-					proposalId,
-					score: score.value,
-					exitCode: result.exitCode,
-				});
-			}
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId,
-				projectPath: runtime.projectPath,
-				summary: `Skill rating registrado: ${proposalId}=${result.score}.`,
-				data: {
-					proposalId: result.proposalId,
-					score: result.score,
-					recommendation: result.recommendation,
-					output: formatSkillRating(result),
-				},
-				safeNotes: resolution.safeNotes,
-			});
-		}
+		case "idu_prepare":
+			return await handlePrepare(name, args, runtime, resolution);
+		case "idu_bibliotecario_init":
+			return await handleBibliotecarioInit(name, args, runtime, resolution);
+		case "idu_model_invocation_status":
+			return await handleModelInvocationStatus(name, args, runtime, resolution);
+		case "idu_skill_rating":
+			return await handleSkillRating(name, args, runtime, resolution);
 		case "idu_supervisor_trigger":
 			return await handleSupervisorTrigger(name, args, runtime, resolution);
 		case "idu_trigger_engine":
@@ -2267,226 +2133,8 @@ async function dispatchTool(
 			return await handleSubscribeTriggers(name, args, runtime, resolution);
 		case "idu_automaticov1_cycle":
 			return await handleAutomaticov1Cycle(name, args, runtime, resolution);
-		case "idu_bibliotecario_proactive_advisory": {
-			const request = requiredText(args, "request");
-			const sourceRecommendations = runtime.sourceRecommend(request);
-			const requiredSourceActions = runtime.sourceRequiredActions();
-			const externalRegistry = recommendExternalSources({
-				projectId: runtime.projectId,
-				request,
-				domains: stringListArg(args, "domains") as ExternalSourceDomain[],
-				language: stringArg(args, "language"),
-				framework: stringArg(args, "framework"),
-				maxMatches: positiveIntegerArg(args, "maxMatches"),
-			});
-			const semanticDebt = buildContextPruningAdvisoryReport({
-				stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
-				projectId: runtime.projectId,
-				repoRoot: runtime.projectPath,
-			});
-			let skillReview: JsonObject;
-			let skillReviewStatus = "missing";
-			try {
-				skillReview = compactSourceSkillCandidateReview(
-					runtime.sourceSkillCandidatesReview("latest"),
-				);
-				skillReviewStatus = skillReview.ok === true ? "available" : "missing";
-			} catch (error) {
-				skillReviewStatus = "missing";
-				skillReview = compactSourceSkillCandidateReview({
-					ok: false,
-					errors: [error instanceof Error ? error.message : String(error)],
-				});
-			}
-			const planLibrarian = {
-				surface: "plan_librarian",
-				recommendation: "review_evidence_before_plan_or_contract_change",
-				evidenceRefs: ["plan:snapshot", "source:recommendations"],
-				requiredReads: [
-					"Plan Maestro vigente",
-					"master-plan.flows.json",
-					"Doc/<project>/04-contratos-aprobados.md",
-					"Source Library recommendation refs",
-				],
-				contractPromotionAllowed: false,
-				limitations: [
-					"No crea, aprueba ni rechaza Plan Maestro.",
-					"No promueve contratos; sólo pide evidencia y revisión del orquestador.",
-				],
-			};
-			const boundedSourceRecommendations =
-				boundSourceRecommendationForInjection(sourceRecommendations);
-			const boundedSourceMatches = arrayField(
-				boundedSourceRecommendations,
-				"matches",
-			) as JsonObject[];
-			const evidencePolicy = externalRegistry.evidencePolicy;
-			const sourceEcosystem = {
-				surface: "source_ecosystem",
-				local: {
-					matches: boundedSourceMatches.map((match) => ({
-						sourceId: String(match.sourceId ?? ""),
-						title: String(match.title ?? ""),
-						chunkIds: arrayField(match, "chunkIds").map(String),
-						confidence: String(match.confidence ?? "low"),
-						whyRelevant: String(match.whyRelevant ?? ""),
-					})),
-					missingKnowledge: arrayField(
-						boundedSourceRecommendations,
-						"missingKnowledge",
-					).map(String),
-					limitations: arrayField(
-						boundedSourceRecommendations,
-						"limitations",
-					).map(String),
-					requiredActions: requiredSourceActions.actions,
-					contextPressure: boundedSourceRecommendations.contextPressure,
-				},
-				externalRegistry: {
-					matches: externalRegistry.matches.map((match) => ({
-						sourceId: match.sourceId,
-						name: match.name,
-						category: match.category,
-						whyRelevant: match.whyRelevant,
-						automationMode: match.automationMode,
-						promotionAllowed: match.promotionAllowed,
-						claimType: match.claimType,
-						evidenceRole: match.evidenceRole,
-						canonicality: match.canonicality,
-						requiresCorroboration: match.requiresCorroboration,
-						forbiddenAsSoleAuthority: match.forbiddenAsSoleAuthority,
-						policyWarnings: match.policyWarnings.slice(0, 4),
-					})),
-					limitations: externalRegistry.limitations,
-					fetchAllowed: externalRegistry.fetchAllowed,
-					rawDocsStored: externalRegistry.rawDocsStored,
-				},
-				rawContentIncluded: false,
-				webFetchAllowed: false,
-				contractPromotionAllowed: false,
-			};
-			const skillOptimization = {
-				surface: "skill_optimization",
-				recommendation: "proposal_only",
-				skillPromotionAllowed: false,
-				writesAllowed: false,
-				installAllowed: false,
-				existingCandidateReportStatus: skillReviewStatus,
-				existingCandidateReport: skillReview,
-				limitations: [
-					"No crea ni instala skills desde esta advisory.",
-					"Las skills se proponen, el supervisor enruta, el humano/orquestador aprueba y un único writer aplica.",
-				],
-			};
-			const failureSemanticDebt = {
-				surface: "failure_semantic_debt",
-				signals: semanticDebt.signals.map((signal) => ({
-					id: signal.id,
-					category: signal.category,
-					severity: signal.severity,
-					evidenceRefs: signal.evidenceRefs,
-					summary: signal.summary,
-					recommendedAction: signal.recommendedAction,
-				})),
-				totals: semanticDebt.totals,
-				limitations: semanticDebt.limitations,
-			};
-			const contextPressure = semanticDebt.signals.some(
-				(signal) => signal.severity === "high",
-			)
-				? "high"
-				: semanticDebt.signals.length > 0
-					? "medium"
-					: "low";
-			const resourceContextCheck = {
-				rawContentIncluded: false,
-				webFetchAllowed: false,
-				writesAllowed: false,
-				agentLabAutoRunAllowed: false,
-				contractPromotionAllowed: false,
-				skillPromotionAllowed: false,
-				tokenCostMeasured: false,
-				estimatedTokenUse: "not_measured",
-				pressure: contextPressure,
-				surfacesConsulted: 4,
-				localSourceMatches: boundedSourceMatches.length,
-				externalRegistryMatches: externalRegistry.matches.length,
-				semanticDebtSignals: semanticDebt.signals.length,
-				contextBudgetSignals: semanticDebt.totals.contextQualityEvents,
-				recommendation:
-					contextPressure === "high"
-						? "review_resource_and_semantic_debt_before_adding_more_context"
-						: contextPressure === "medium"
-							? "review_before_adding_more_context"
-							: "bounded_context_ok",
-			};
-			const evidenceRefs = [
-				...boundedSourceMatches.map(
-					(match) => `source:${String(match.sourceId)}`,
-				),
-				...externalRegistry.matches.map(
-					(match) => `external-source:${match.sourceId}`,
-				),
-				...semanticDebt.signals.map((signal) => signal.id),
-			];
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: "warn",
-				severity: semanticDebt.signals.some(
-					(signal) => signal.severity === "high",
-				)
-					? "warning"
-					: "info",
-				confidence: 0.78,
-				summary: "Bibliotecario proactive advisory surfaces composed.",
-				requiresHuman: false,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: false,
-				evidenceRefs,
-				nextActions: [
-					"Use this advisory to choose a bounded next slice; do not implement from it directly.",
-					"Ask human/orchestrator before contracts, skills, AgentLabs, dependency updates, or cleanup.",
-					"Prefer exact source/chunk refs and resource checks over loading broad docs.",
-				],
-				requiredActions: [
-					{
-						id: "bibliotecario-surfaces-orchestrator-review",
-						owner: "orchestrator",
-						action: "review_bibliotecario_surfaces_before_changes",
-						reason:
-							"Composite Bibliotecario advisory coordinates evidence but must not authorize implementation, contract promotion, skill writes, web fetch, or AgentLabs.",
-						blocking: true,
-					},
-				],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: "Bibliotecario proactive advisory surfaces composed.",
-				data: {
-					decisionEnvelope,
-					planLibrarian,
-					evidencePolicy,
-					sourceEcosystem,
-					skillOptimization,
-					failureSemanticDebt,
-					resourceContextCheck,
-					governanceConfig: governanceConfigData(),
-					workerBoundary: workerBoundaryData(),
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Bibliotecario proactive advisory es sólo coordinación de evidencia; no implementa.",
-					"No hice writes, no consulté web/live sources, no promoví contratos ni skills.",
-					"No ejecuté AgentLabs ni creé solicitudes AgentLab.",
-					"No incluí documentos, chunks, prompts ni reportes crudos; sólo refs, conteos y metadata compacta.",
-				],
-			});
-		}
+		case "idu_bibliotecario_proactive_advisory":
+			return await handleBibliotecarioProactiveAdvisory(name, args, runtime, resolution);
 		case "idu_external_intelligence_report":
 			return await handleExternalIntelligenceReport(name, args, runtime, resolution);
 		case "idu_external_source_recommend":
@@ -3883,7 +3531,7 @@ export function invalidMcpInput(
 	});
 }
 
-function scoreArg(
+export function scoreArg(
 	args: JsonObject,
 	key: string,
 ): { ok: true; text: string; value: number } | { ok: false; error: string } {
@@ -3979,7 +3627,7 @@ export function compactSourceLibraryEvidence(
 	};
 }
 
-function compactSourceSkillCandidateReview(review: unknown): JsonObject {
+export function compactSourceSkillCandidateReview(review: unknown): JsonObject {
 	if (!isRecord(review)) {
 		return {
 			ok: false,

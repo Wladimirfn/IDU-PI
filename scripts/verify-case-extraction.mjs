@@ -233,6 +233,13 @@ const CLUSTER_PREFIXES = {
 		"idu_architectural_pruning_plan",
 		"idu_context_pruning_advisory",
 	],
+	bibliotecario: [
+		"idu_prepare",
+		"idu_bibliotecario_init",
+		"idu_model_invocation_status",
+		"idu_skill_rating",
+		"idu_bibliotecario_proactive_advisory",
+	],
 };
 
 /**
@@ -724,6 +731,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/master-plan/handlers.ts",
 	"src/mcp/source/handlers.ts",
 	"src/mcp/pruning/handlers.ts",
+	"src/mcp/bibliotecario/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {
@@ -1125,5 +1133,97 @@ if (duplicateLabels.length > 0) {
 	process.exit(1);
 } else {
 	console.log("  OK: no duplicate case labels in dispatch file");
+}
+
+// =====================================================================
+// CLOSEOUT CHECK: every case body in dispatchTool must delegate.
+// Catches any case that was reverted from a wrapper back to inline
+// (e.g. a PR was lost/never merged). The freeze test (count tools)
+// is not enough — it only verifies that each tool still resolves
+// somewhere in the dispatch, not that it went through a wrapper.
+// This check looks for the structural pattern: a `case "X":` followed
+// by an opening brace (inline body) rather than a `return await handle`
+// (delegation).
+// Both checks are run AFTER the byte-identity gate and are blocking.
+// =====================================================================
+function checkNoInlineBodies() {
+	// Only applies to mcp-track. cli-track uses switch(command) with a
+	// different structure (one helper per command, not per case).
+	if (!dispatchFile.startsWith("src/mcp")) return [];
+	const src = readFileSync(dispatchFile, "utf8");
+	const lines = src.split("\n");
+	// Find the SECOND switch(name) block (the dispatchTool function).
+	// mcp-server.ts has 2 switch(name) blocks: lifecycle (L1613) +
+	// dispatchTool (~L1972). We want the second one.
+	const switchLocations = [];
+	const switchRe = /^\s*switch\s+\(name\)\s*\{/;
+	for (let i = 0; i < lines.length; i++) {
+		if (switchRe.exec(lines[i])) {
+			switchLocations.push(i);
+		}
+	}
+	if (switchLocations.length < 2) return [];
+	const dispatchStart = switchLocations[1];
+	// Find matching close brace.
+	let depth = 0;
+	let dispatchEnd = -1;
+	for (let i = dispatchStart; i < lines.length; i++) {
+		for (const ch of lines[i]) {
+			if (ch === "{") depth++;
+			else if (ch === "}") depth--;
+		}
+		if (depth === 0) {
+			dispatchEnd = i;
+			break;
+		}
+	}
+	if (dispatchEnd === -1) return [];
+	const inlines = [];
+	// Pattern: case "X": { ... body ... } (inline)
+	// vs.       case "X":     return await handleX(...); (delegated)
+	const caseRe = /^\s*case\s+"([^"]+)"\s*:\s*\{?\s*$/;
+	for (let i = dispatchStart; i < dispatchEnd; i++) {
+		const m = caseRe.exec(lines[i]);
+		if (!m) continue;
+		const label = m[1];
+		const hasOpenBrace = /\{\s*$/.test(lines[i]);
+		// Multi-line case label syntax: `case "X":` on one line, `{`
+		// on the next. Check the next non-empty line.
+		let opensBody = hasOpenBrace;
+		if (!opensBody) {
+			for (let j = i + 1; j < Math.min(i + 5, dispatchEnd); j++) {
+				const trimmed = lines[j].trim();
+				if (trimmed === "") continue;
+				if (trimmed === "{" || /^\{/.test(trimmed)) {
+					opensBody = true;
+				}
+				break;
+			}
+		}
+		if (opensBody) {
+			inlines.push({ label, line: i + 1 });
+		}
+	}
+	return inlines;
+}
+
+const inlines = checkNoInlineBodies();
+if (inlines.length > 0) {
+	console.log("");
+	console.log("STOP: case body in dispatchTool is not a delegation.");
+	for (const { label, line } of inlines) {
+		console.log(`  L${line}: case "${label}"`);
+	}
+	console.log(
+		"Every case in dispatchTool must be a one-liner `return await handleX(...)`.",
+	);
+	console.log(
+		"This usually means a wrapper PR was lost/never merged, or a case",
+	);
+	console.log("body was reintroduced inline after extraction. Inspect the");
+	console.log("missing cluster's branch and either re-merge or re-extract.");
+	process.exit(1);
+} else {
+	console.log("  OK: every dispatchTool case delegates (0 inline bodies)");
 }
 
