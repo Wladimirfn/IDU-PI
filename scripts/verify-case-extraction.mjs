@@ -177,6 +177,12 @@ const CLUSTER_PREFIXES = {
 		"idu_autonomous_alerts_control",
 		"idu_automaticov1_cycle",
 	],
+	genesis: [
+		"idu_genesis_mission_draft",
+		"idu_genesis_mission_confirm",
+		"idu_skill_for_task",
+		"idu_skill_draft_from_lessons",
+	],
 };
 
 /**
@@ -662,6 +668,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/agentlab/handlers.ts",
 	"src/mcp/supervisor-tick/handlers.ts",
 	"src/mcp/objective/handlers.ts",
+	"src/mcp/genesis/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

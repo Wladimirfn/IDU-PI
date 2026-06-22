@@ -260,6 +260,12 @@ import {
 	handleObjectiveStatus,
 } from "./mcp/objective/index.js";
 import {
+	handleGenesisMissionConfirm,
+	handleGenesisMissionDraft,
+	handleSkillDraftFromLessons,
+	handleSkillForTask,
+} from "./mcp/genesis/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -2860,145 +2866,12 @@ async function dispatchTool(
 				],
 			});
 		}
-		case "idu_genesis_mission_draft": {
-			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary:
-						"Genesis mission draft requires an enrolled project stateRoot.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["enrolled project stateRoot is missing"],
-				});
-			}
-			const result = runGenesisMissionDraft({
-				stateRoot: resolution.stateRoot,
-				projectPath: runtime.projectPath,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `mission-draft persisted for ${result.missionDraft.projectId}`,
-				data: { missionDraft: result.missionDraft },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Mission draft is unconfirmed until idu_genesis_mission_confirm runs.",
-					"Only stateRoot/birth/mission-draft.json is written.",
-				],
-			});
-		}
-		case "idu_genesis_mission_confirm": {
-			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary:
-						"Genesis mission confirm requires an enrolled project stateRoot.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["enrolled project stateRoot is missing"],
-				});
-			}
-			const owner = stringArg(args, "owner");
-			if (!owner) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary:
-						"Genesis mission confirm requires an explicit owner argument.",
-					data: {},
-					safeNotes: [
-						...resolution.safeNotes,
-						"No stateRoot file was written.",
-					],
-					errors: ["owner is required"],
-				});
-			}
-			const result = runGenesisMissionConfirm({
-				stateRoot: resolution.stateRoot,
-				projectPath: runtime.projectPath,
-				owner,
-			});
-			if (!result.ok) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: result.error ?? "Mission confirm failed.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: [result.error ?? "mission confirm failed"],
-				});
-			}
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `blueprint confirmed by ${result.blueprint.confirmedBy}`,
-				data: { blueprint: result.blueprint },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Owner-invoked only; no auto-trigger from idu_genesis_mission_draft.",
-					"Only stateRoot/birth/blueprint.json is written.",
-				],
-			});
-		}
-		case "idu_skill_for_task": {
-			if (resolution.status !== "registered_project" || !resolution.stateRoot) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "idu_skill_for_task requires an enrolled project stateRoot.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["enrolled project stateRoot is missing"],
-				});
-			}
-			const request = requiredText(args, "request");
-			const skills = loadSkillsForTask(resolution.stateRoot, request);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `skills ranked: ${skills.length} matches`,
-				data: { request, skills },
-				safeNotes: [
-					...resolution.safeNotes,
-					"Skills index is read from lab.db; no stateRoot or lab.db writes.",
-					"No auto-promotion of skills or contracts.",
-				],
-			});
-		}
+		case "idu_genesis_mission_draft":
+			return await handleGenesisMissionDraft(name, args, runtime, resolution);
+		case "idu_genesis_mission_confirm":
+			return await handleGenesisMissionConfirm(name, args, runtime, resolution);
+		case "idu_skill_for_task":
+			return await handleSkillForTask(name, args, runtime, resolution);
 		case "idu_birth_validate": {
 			const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 			if (!runtime.projectPath) {
@@ -4002,82 +3875,8 @@ async function dispatchTool(
 				errors: review.ok ? [] : review.errors,
 			});
 		}
-		case "idu_skill_draft_from_lessons": {
-			const rawMode = stringArg(args, "mode") ?? "proposal-only";
-			const mode = rawMode as SkillDraftFromLessonsMode;
-			if (mode !== "proposal-only" && mode !== "approved-only") {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Modo inválido para skill draft from lessons.",
-					data: { mode: rawMode },
-					safeNotes: [
-						...resolution.safeNotes,
-						"No generé propuestas ni drafts de skill.",
-					],
-					errors: ["mode must be proposal-only or approved-only"],
-				});
-			}
-			const result = runtime.skillDraftFromLessons({
-				mode,
-				selector: stringArg(args, "selector"),
-			});
-			const createdCount =
-				result.mode === "proposal-only"
-					? result.createdProposals.length
-					: result.createdDrafts.length;
-			const decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: createdCount ? "needs_approval" : "needs_evidence",
-				severity: createdCount ? "warning" : "info",
-				confidence: 0.78,
-				summary:
-					result.mode === "proposal-only"
-						? `Skill proposals from lessons: ${createdCount}`
-						: `Skill drafts from approved proposals: ${createdCount}`,
-				requiresHuman: true,
-				orchestratorDecisionRequired: true,
-				allowedToProceed: false,
-				evidenceRefs: [
-					...(result.semanticDraftPath
-						? [`semantic-draft:${result.semanticDraftPath}`]
-						: []),
-					...(result.proposalsPath
-						? [`skill-proposals:${result.proposalsPath}`]
-						: []),
-					...(result.skillDraftPath
-						? [`skill-draft:${result.skillDraftPath}`]
-						: []),
-				],
-				requiredActions: result.requiredActions.map((action, index) => ({
-					id: `skill-draft-from-lessons-${index + 1}`,
-					owner: "orchestrator",
-					action,
-					reason:
-						"Skill learning artifacts require explicit human/orchestrator approval.",
-					blocking: false,
-				})),
-				nextActions: result.nextActions,
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary:
-					result.mode === "proposal-only"
-						? `Skill proposals from lessons: ${createdCount}`
-						: `Skill drafts from approved proposals: ${createdCount}`,
-				data: { result, decisionEnvelope },
-				safeNotes: [...resolution.safeNotes, ...result.safeNotes],
-			});
-		}
+		case "idu_skill_draft_from_lessons":
+			return await handleSkillDraftFromLessons(name, args, runtime, resolution);
 		case "idu_source_refresh": {
 			const status = runtime.sourceLibraryRefresh();
 			return envelope({
