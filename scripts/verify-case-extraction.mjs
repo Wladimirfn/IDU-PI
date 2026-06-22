@@ -149,6 +149,11 @@ const CLUSTER_PREFIXES = {
 		"idu_external_intelligence_report",
 		"idu_external_source_recommend",
 	],
+	"task-queue": [
+		"idu_task",
+		"idu_queue_detail",
+		"idu_queue_complete",
+	],
 };
 
 /**
@@ -629,6 +634,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/supervisor-context/handlers.ts",
 	"src/mcp/preflight/handlers.ts",
 	"src/mcp/external/handlers.ts",
+	"src/mcp/task-queue/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

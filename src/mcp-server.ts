@@ -234,6 +234,11 @@ import {
 	handleExternalSourceRecommend,
 } from "./mcp/external/index.js";
 import {
+	handleQueueComplete,
+	handleQueueDetail,
+	handleTask,
+} from "./mcp/task-queue/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -4243,107 +4248,12 @@ async function dispatchTool(
 			return await handleExternalIntelligenceReport(name, args, runtime, resolution);
 		case "idu_external_source_recommend":
 			return await handleExternalSourceRecommend(name, args, runtime, resolution);
-		case "idu_task": {
-			const text = requiredText(args, "text");
-			const kind = inferTaskTemplateKind(text);
-			const task = runtime.createTask(kind, text);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Tarea registrada: ${task.id}; guard=${task.guardStatus ?? "clear"}`,
-				data: task as unknown as JsonObject,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Registré tarea estructurada; no ejecuté IA ni AgentLabs.",
-				],
-			});
-		}
-		case "idu_queue_detail": {
-			const runtimeWithList = runtime as CliRuntime & {
-				listTasks?: () => StructuredTask[];
-			};
-			const tasks = runtimeWithList.listTasks
-				? runtimeWithList.listTasks()
-				: parseTaskList(runtime.queueDetail());
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `${tasks.length} tarea(s) en cola estructurada.`,
-				data: {
-					tasks: tasks.map((task) => ({
-						id: task.id,
-						text: task.text,
-						priority: task.priority,
-						semanticPriority: task.semanticPriority,
-						status: task.status,
-						completionEvidence: task.completionEvidence,
-						guardStatus: task.guardStatus ?? "clear",
-						guardRisk: task.guardRisk,
-						guardReason: task.guardReason,
-					})),
-					guardStatus: tasks.some(
-						(task) =>
-							task.status !== "done" &&
-							task.guardStatus === "needs_confirmation",
-					)
-						? "needs_confirmation"
-						: "clear",
-				},
-				safeNotes: resolution.safeNotes,
-			});
-		}
-		case "idu_queue_complete": {
-			const taskId = requiredText(args, "taskId");
-			const evidence = requiredText(args, "evidence");
-			const runtimeWithComplete = runtime as CliRuntime & {
-				queueComplete?: (
-					idOrPrefix: string,
-					evidence: string,
-				) => StructuredTask | undefined;
-			};
-			const task = runtimeWithComplete.queueComplete?.(taskId, evidence);
-			if (!task) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Tarea no encontrada para completar.",
-					data: { taskId },
-					safeNotes: resolution.safeNotes,
-					errors: ["Tarea no encontrada para completar."],
-				});
-			}
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Tarea completada: ${task.id}`,
-				data: {
-					taskId: task.id,
-					status: task.status,
-					task: task as unknown as JsonObject,
-				},
-				safeNotes: [
-					...resolution.safeNotes,
-					"Marqué tarea como completada con evidencia explícita.",
-					"No ejecuté IA ni AgentLabs.",
-				],
-			});
-		}
+		case "idu_task":
+			return await handleTask(name, args, runtime, resolution);
+		case "idu_queue_detail":
+			return await handleQueueDetail(name, args, runtime, resolution);
+		case "idu_queue_complete":
+			return await handleQueueComplete(name, args, runtime, resolution);
 		case "idu_semantic_audit_status": {
 			const report = runtime.semanticAuditStatus();
 			return envelope({
@@ -6549,7 +6459,7 @@ function agentLabSpecialtiesArg(
 	return { values: [...new Set(rawValues)] as AgentLabSpecialty[], errors: [] };
 }
 
-function parseTaskList(text: string): StructuredTask[] {
+export function parseTaskList(text: string): StructuredTask[] {
 	try {
 		const parsed = JSON.parse(text) as unknown;
 		if (Array.isArray(parsed)) return parsed.filter(isStructuredTask);
