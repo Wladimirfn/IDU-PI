@@ -201,6 +201,17 @@ const CLUSTER_PREFIXES = {
 		"idu_birth_validate",
 		"idu_birth_repo_plan",
 	],
+	"master-plan": [
+		"idu_master_plan_status",
+		"idu_master_plan_create",
+		"idu_master_plan_review",
+		"idu_master_plan_approve",
+		"idu_master_plan_reject",
+		"idu_plan_snapshot",
+		"idu_next_advisory_action",
+		"idu_continuation_proposal",
+		"idu_task_package_create",
+	],
 };
 
 /**
@@ -689,6 +700,7 @@ const ALL_HANDLER_FILES = [
 	"src/mcp/genesis/handlers.ts",
 	"src/mcp/injections/handlers.ts",
 	"src/mcp/birth/handlers.ts",
+	"src/mcp/master-plan/handlers.ts",
 ];
 
 function parseAllFunctionNames(src) {

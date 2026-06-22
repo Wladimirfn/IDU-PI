@@ -273,6 +273,17 @@ import {
 	handleBirthValidate,
 } from "./mcp/birth/index.js";
 import {
+	handleContinuationProposal,
+	handleMasterPlanApprove,
+	handleMasterPlanCreate,
+	handleMasterPlanReject,
+	handleMasterPlanReview,
+	handleMasterPlanStatus,
+	handleNextAdvisoryAction,
+	handlePlanSnapshot,
+	handleTaskPackageCreate,
+} from "./mcp/master-plan/index.js";
+import {
 	SAFE_BASE_NOTES,
 	asRecord,
 	booleanArg,
@@ -2138,388 +2149,24 @@ async function dispatchTool(
 			return await handleRoleEngineControl(name, args, runtime, resolution);
 		case "idu_role_engine_status":
 			return await handleRoleEngineStatus(name, args, runtime, resolution);
-		case "idu_master_plan_status": {
-			if (!runtime.masterPlanStatus) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const status = runtime.masterPlanStatus();
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Plan Maestro: ${status.status}`,
-				data: status as unknown as JsonObject,
-				safeNotes: [...resolution.safeNotes, "No regeneré el Plan Maestro."],
-			});
-		}
-		case "idu_master_plan_create": {
-			if (!runtime.masterPlanRedraft) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const result = runtime.masterPlanRedraft(stringArg(args, "reason"));
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Plan Maestro creado: ${result.plan.status}`,
-				data: {
-					status: result.plan.status,
-					jsonPath: result.jsonPath,
-					markdownPath: result.markdownPath,
-					flowArtifact: result.plan.flowArtifact,
-					plan: result.plan,
-				} as unknown as JsonObject,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Creé/regeneré sólo artefactos de gobernanza en stateRoot.",
-					"No ejecuté AgentLabs, no apliqué flows y no toqué el repo real.",
-				],
-			});
-		}
-		case "idu_master_plan_review": {
-			if (!runtime.masterPlanReview) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const review = runtime.masterPlanReview(
-				stringArg(args, "selector") ?? "latest",
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: review.plan.status !== "incompatible",
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Review Plan Maestro: ${review.plan.status}`,
-				data: review as unknown as JsonObject,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Review sin regenerar ni ejecutar AgentLabs.",
-				],
-				errors:
-					review.plan.status === "incompatible"
-						? review.plan.criticalRisks
-						: [],
-			});
-		}
-		case "idu_master_plan_approve": {
-			if (!runtime.masterPlanApprove) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const result = runtime.masterPlanApprove(
-				stringArg(args, "selector") ?? "latest",
-				stringArg(args, "reason"),
-				"mcp",
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Plan Maestro aprobado: ${result.plan.status}`,
-				data: {
-					status: result.plan.status,
-					jsonPath: result.jsonPath,
-					markdownPath: result.markdownPath,
-					flowArtifact: result.plan.flowArtifact,
-					approval: result.plan.approval,
-					plan: result.plan,
-				} as unknown as JsonObject,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Aprobé explícitamente sólo el Plan Maestro en stateRoot.",
-					"No apliqué flows, no ejecuté AgentLabs y no toqué el repo real.",
-				],
-			});
-		}
-		case "idu_master_plan_reject": {
-			if (!runtime.masterPlanReject) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const result = runtime.masterPlanReject(
-				stringArg(args, "selector") ?? "latest",
-				stringArg(args, "reason"),
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Plan Maestro rechazado: ${result.plan.status}`,
-				data: {
-					status: result.plan.status,
-					jsonPath: result.jsonPath,
-					markdownPath: result.markdownPath,
-					flowArtifact: result.plan.flowArtifact,
-					approval: result.plan.approval,
-					plan: result.plan,
-				} as unknown as JsonObject,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Rechacé explícitamente sólo el Plan Maestro en stateRoot.",
-					"No borré drafts, no ejecuté AgentLabs y no toqué el repo real.",
-				],
-			});
-		}
-		case "idu_plan_snapshot": {
-			if (!runtime.masterPlanReview) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const review = runtime.masterPlanReview(
-				stringArg(args, "selector") ?? "latest",
-			);
-			const snapshot = buildPlanSnapshot(review, runtime);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Snapshot Plan Maestro: ${snapshot.planStatus}`,
-				data: snapshot,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Snapshot compacto: no regeneré Plan Maestro ni ejecuté AgentLabs.",
-				],
-			});
-		}
-		case "idu_next_advisory_action": {
-			if (!runtime.masterPlanReview) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const request = stringArg(args, "request") ?? "";
-			const review = runtime.masterPlanReview("latest");
-			const advisoryAction = buildNextAdvisoryAction(
-				buildPlanSnapshot(review, runtime),
-				request,
-				stringArg(args, "mode") ?? "from_plan",
-				stringArg(args, "maxScope") ?? "small",
-			);
-			advisoryAction.decisionEnvelope = buildDecisionEnvelope({
-				tool: name,
-				recommendation: String(advisoryAction.recommendation),
-				severity: "info",
-				confidence: 0.72,
-				summary: String((advisoryAction.candidateAction as JsonObject).title),
-				requiresHuman: false,
-				orchestratorDecisionRequired: Boolean(
-					advisoryAction.orchestratorDecisionRequired,
-				),
-				allowedToProceed: true,
-				evidenceRefs: ["plan:snapshot", "candidate_action"],
-				nextActions: [String(advisoryAction.recommendation)],
-			});
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Acción candidata: ${String((advisoryAction.candidateAction as JsonObject).title)}`,
-				data: advisoryAction,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Acción candidata solamente: Idu-pi no implementa.",
-					"No ejecuté AgentLabs; el orquestador decide llamadas explícitas.",
-				],
-			});
-		}
-		case "idu_continuation_proposal": {
-			if (!runtime.masterPlanReview) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const review = runtime.masterPlanReview("latest");
-			const proposal = buildContinuationProposal(
-				runtime,
-				buildPlanSnapshot(review, runtime),
-				stringArg(args, "request") ?? "",
-				positiveIntegerArg(args, "autonomyWindowMinutes"),
-				stringArg(args, "maxScope") ?? "small",
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: String(proposal.summary),
-				data: proposal,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Propuesta de continuidad solamente: Idu-pi no implementa.",
-					"No ejecuté AgentLabs; el orquestador decide llamadas explícitas.",
-					"Ejecutar idu_postflight antes de cerrar la próxima tarea.",
-				],
-			});
-		}
-		case "idu_task_package_create": {
-			if (!runtime.masterPlanReview) {
-				return envelope({
-					stateRoot: "",
-
-					ok: false,
-					tool: name,
-					projectId: runtime.projectId,
-					projectPath: runtime.projectPath,
-					summary: "Master Plan no disponible en este runtime.",
-					data: {},
-					safeNotes: resolution.safeNotes,
-					errors: ["Master Plan no disponible en este runtime."],
-				});
-			}
-			const request = requiredText(args, "request");
-			const review = runtime.masterPlanReview("latest");
-			const snapshot = buildPlanSnapshot(review, runtime);
-			const advisoryAction = buildNextAdvisoryAction(
-				snapshot,
-				request,
-				"from_request",
-				"small",
-			);
-			const taskPackage = buildTaskPackage(
-				snapshot,
-				advisoryAction,
-				request,
-				stringArg(args, "actionId"),
-				booleanArg(args, "includePlanSnapshot", false),
-			);
-			const taskPackageEvidenceGateways =
-				buildTaskPackageEvidenceGateways(taskPackage);
-			taskPackage.evidenceGateways = taskPackageEvidenceGateways;
-			taskPackage.decisionEnvelope = decisionEnvelopeFromEvidence(
-				name,
-				String(taskPackage.recommendation),
-				taskPackageEvidenceGateways,
-				{
-					recommendation: String(taskPackage.recommendation),
-					severity: taskPackage.humanApprovalRequired
-						? "needs_approval"
-						: "warning",
-					confidence: 0.74,
-					requiresHuman: Boolean(taskPackage.humanApprovalRequired),
-					orchestratorDecisionRequired: Boolean(
-						taskPackage.orchestratorDecisionRequired,
-					),
-					nextActions: [String(taskPackage.recommendation)],
-				},
-			);
-			return envelope({
-				stateRoot: "",
-
-				ok: true,
-				tool: name,
-				projectId: runtime.projectId,
-				projectPath: runtime.projectPath,
-				summary: `Paquete de tarea advisory: ${taskPackage.id}`,
-				data: taskPackage,
-				safeNotes: [
-					...resolution.safeNotes,
-					"Paquete para subagentes normales; Idu-pi no implementa.",
-					"Governance-review del orquestador debe ocurrir antes del worker.",
-				],
-			});
-		}
+		case "idu_master_plan_status":
+			return await handleMasterPlanStatus(name, args, runtime, resolution);
+		case "idu_master_plan_create":
+			return await handleMasterPlanCreate(name, args, runtime, resolution);
+		case "idu_master_plan_review":
+			return await handleMasterPlanReview(name, args, runtime, resolution);
+		case "idu_master_plan_approve":
+			return await handleMasterPlanApprove(name, args, runtime, resolution);
+		case "idu_master_plan_reject":
+			return await handleMasterPlanReject(name, args, runtime, resolution);
+		case "idu_plan_snapshot":
+			return await handlePlanSnapshot(name, args, runtime, resolution);
+		case "idu_next_advisory_action":
+			return await handleNextAdvisoryAction(name, args, runtime, resolution);
+		case "idu_continuation_proposal":
+			return await handleContinuationProposal(name, args, runtime, resolution);
+		case "idu_task_package_create":
+			return await handleTaskPackageCreate(name, args, runtime, resolution);
 		case "idu_supervisor_context_pack":
 			return await handleSupervisorContextPack(name, args, runtime, resolution);
 		case "idu_orchestrator_procedure":
@@ -3909,7 +3556,7 @@ function compactHumanVisionLine(line: string): string {
 	return `${normalized.slice(0, 77).trimEnd()}…`;
 }
 
-function buildPlanSnapshot(
+export function buildPlanSnapshot(
 	review: MasterPlanReviewResult,
 	runtime: CliRuntime,
 ): PlanSnapshot {
@@ -4148,7 +3795,7 @@ function withSourceResearchBudget<
 	};
 }
 
-function buildNextAdvisoryAction(
+export function buildNextAdvisoryAction(
 	snapshot: PlanSnapshot,
 	request: string,
 	mode: string,
@@ -4232,7 +3879,7 @@ function buildNextAdvisoryAction(
 	};
 }
 
-function buildContinuationProposal(
+export function buildContinuationProposal(
 	runtime: CliRuntime,
 	snapshot: PlanSnapshot,
 	request: string,
@@ -4460,7 +4107,7 @@ function isHighContinuationRisk(risk: unknown): boolean {
 	return risk === "high" || risk === "blocker";
 }
 
-function buildTaskPackage(
+export function buildTaskPackage(
 	snapshot: PlanSnapshot,
 	advisoryAction: JsonObject,
 	request: string,
