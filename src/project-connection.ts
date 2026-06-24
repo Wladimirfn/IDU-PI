@@ -420,15 +420,20 @@ function inspectProjectConfigFile(
 	fileName: "project-blueprint.json" | "project-flows.json",
 	validate: (value: unknown) => { ok: boolean; errors: string[] },
 ): ProjectConfigConnectionStatus {
-	// F-Item3a: project-flows.json lives at Layout A (`.idu/config/`),
-	// not Layout B (`config/`). The previous version hardcoded Layout B
-	// for both files, which returned `exists: false` for flows on real
-	// projects. project-blueprint.json legitimately lives at Layout B
-	// (canonical for that file), so we branch by `fileName`.
-	const path =
-		fileName === "project-flows.json"
-			? join(projectPath, ".idu", "config", fileName)
-			: join(projectPath, "config", fileName);
+	// F-Blueprint-Inspector-Drift fix: mirror the loaders'
+	// `readIdPathWithMigration` policy — Layout A (`.idu/config/`)
+	// preferred, Layout B (`config/`) fallback — WITHOUT migrating.
+	// Inspect must be side-effect-free: read+report only.
+	//
+	// Constitution is intentionally NOT handled here — its loader does
+	// NOT use the migration reader (Layout B is its canonical location).
+	const layoutAPath = join(projectPath, ".idu", "config", fileName);
+	const layoutBPath = join(projectPath, "config", fileName);
+	const path = existsSync(layoutAPath)
+		? layoutAPath
+		: existsSync(layoutBPath)
+			? layoutBPath
+			: layoutAPath;
 	if (!existsSync(path)) {
 		return {
 			exists: false,
