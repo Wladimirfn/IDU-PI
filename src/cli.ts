@@ -1873,7 +1873,15 @@ export async function runCliCommand(
 		const activeRuntime =
 			runtime ??
 			createCliRuntime({
-				createRegistryIfMissing: command !== "status",
+				// The supervisor tick (idu-run-cron-preflight) must fail loud
+				// when the registry is missing — auto-creating a "default"
+				// project would silently audit whatever defaultCwd points at,
+				// which is a foot-gun. Same posture as `status`: read-only,
+				// no side effects, no auto-create. Other commands (idu,
+				// install, setup, etc.) keep the auto-create UX for first-use
+				// onboarding.
+				createRegistryIfMissing:
+					command !== "status" && command !== "idu-run-cron-preflight",
 				requireTelegramConfig: false,
 			});
 		configureIduSessionStore(
@@ -2343,7 +2351,13 @@ async function main(): Promise<void> {
 	const result = await runCliCommand(args);
 	if (result.stdout) console.log(result.stdout);
 	if (result.stderr) console.error(result.stderr);
-	process.exit(result.exitCode);
+	// Use exitCode instead of process.exit() so Node drains the event
+	// loop and flushes stdout/stderr before the process ends. Without
+	// this, on Windows runners (Node 22+), console.error + process.exit()
+	// can drop stderr (e.g. the L946 "No hay proyecto activo" error
+	// from createCliRuntime), which breaks subprocess-stdout-capture
+	// assertions like test/idu-supervisor-tick-resolves-project.test.ts.
+	process.exitCode = result.exitCode;
 }
 
 if (

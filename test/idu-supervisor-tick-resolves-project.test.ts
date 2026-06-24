@@ -101,6 +101,14 @@ test(
 			const result = await runCli({
 				IDU_PI_TICK_STATE_ROOT: stateRoot,
 				AGENT_WORKSPACE_ROOT: stateRoot,
+				// Hermetic isolation: this test must not depend on
+				// `process.env.DEFAULT_CWD` / `ALLOWED_ROOTS` left over
+				// from sibling test files. Pass the temp dir explicitly
+				// so `loadConfig` does not throw "Missing required env var:
+				// DEFAULT_CWD" before the registry-resolution code path
+				// can run. Wave 1 contract assertion unchanged.
+				DEFAULT_CWD: stateRoot,
+				ALLOWED_ROOTS: stateRoot,
 			});
 			const out = `${result.stdout}\n${result.stderr}`;
 			assert.match(
@@ -124,6 +132,9 @@ test(
 				IDU_PI_TICK_STATE_ROOT: stateRoot,
 				AGENT_WORKSPACE_ROOT: stateRoot,
 				IDU_PI_REGISTRY_PATH: registryPath,
+				// Hermetic isolation: same as the RED case above.
+				DEFAULT_CWD: stateRoot,
+				ALLOWED_ROOTS: stateRoot,
 			});
 			const out = `${result.stdout}\n${result.stderr}`;
 			assert.doesNotMatch(
