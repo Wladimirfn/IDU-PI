@@ -525,3 +525,93 @@ test("PR-0: enrolled project inspection uses explicit stateRoot without double n
 		"inspection must not warn about a double-nested stateRoot/projects/demo path",
 	);
 });
+
+// F-Blueprint-Inspector-Drift regression guards.
+// Pre-fix these tests are RED: the inspector hardcoded Layout B for
+// blueprint and Layout A for flows, so a file in the other layout was
+// reported as missing even though the loader would have found it.
+
+test("inspector finds project-blueprint.json in Layout A (.idu/config) — pre-fix RED", () => {
+	const projectPath = tempDir();
+	// Only Layout A — no file in config/
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	writeFileSync(
+		join(projectPath, ".idu", "config", "project-blueprint.json"),
+		"{}",
+		"utf8",
+	);
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+	});
+
+	assert.equal(
+		report.blueprint?.exists,
+		true,
+		"inspector must find blueprint in Layout A — pre-fix this was false (drift)",
+	);
+	assert.equal(report.blueprint?.source, "project-local");
+	assert.equal(report.blueprint?.valid, false);
+	assert.match(
+		report.blueprint?.path ?? "",
+		/\.idu[\\/]+config[\\/]+project-blueprint\.json$/,
+	);
+});
+
+test("inspector finds project-flows.json in Layout B (config) — pre-fix RED", () => {
+	const projectPath = tempDir();
+	// Only Layout B — no file in .idu/config/
+	mkdirSync(join(projectPath, "config"), { recursive: true });
+	writeFileSync(
+		join(projectPath, "config", "project-flows.json"),
+		"{}",
+		"utf8",
+	);
+
+	const report = inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+	});
+
+	assert.equal(
+		report.flows?.exists,
+		true,
+		"inspector must find flows in Layout B — pre-fix this was false (drift)",
+	);
+	assert.equal(report.flows?.source, "project-local");
+	assert.equal(report.flows?.valid, false);
+	assert.match(
+		report.flows?.path ?? "",
+		/[\\/]config[\\/]+project-flows\.json$/,
+	);
+});
+
+test("inspector does NOT migrate files between Layout A and Layout B", () => {
+	const projectPath = tempDir();
+	// Blueprint in Layout A only — verify inspector reads it
+	// without moving it.
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	const blueprintPathA = join(
+		projectPath,
+		".idu",
+		"config",
+		"project-blueprint.json",
+	);
+	writeFileSync(blueprintPathA, "{}", "utf8");
+
+	inspect({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath],
+	});
+
+	assert.ok(
+		existsSync(blueprintPathA),
+		"blueprint must remain in Layout A after inspect — inspector must not migrate",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		false,
+		"inspector must not create a Layout B copy of blueprint",
+	);
+});
