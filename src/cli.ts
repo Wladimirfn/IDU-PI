@@ -2351,7 +2351,13 @@ async function main(): Promise<void> {
 	const result = await runCliCommand(args);
 	if (result.stdout) console.log(result.stdout);
 	if (result.stderr) console.error(result.stderr);
-	process.exit(result.exitCode);
+	// Use exitCode instead of process.exit() so Node drains the event
+	// loop and flushes stdout/stderr before the process ends. Without
+	// this, on Windows runners (Node 22+), console.error + process.exit()
+	// can drop stderr (e.g. the L946 "No hay proyecto activo" error
+	// from createCliRuntime), which breaks subprocess-stdout-capture
+	// assertions like test/idu-supervisor-tick-resolves-project.test.ts.
+	process.exitCode = result.exitCode;
 }
 
 if (
