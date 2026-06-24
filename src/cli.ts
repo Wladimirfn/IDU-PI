@@ -1873,7 +1873,15 @@ export async function runCliCommand(
 		const activeRuntime =
 			runtime ??
 			createCliRuntime({
-				createRegistryIfMissing: command !== "status",
+				// The supervisor tick (idu-run-cron-preflight) must fail loud
+				// when the registry is missing — auto-creating a "default"
+				// project would silently audit whatever defaultCwd points at,
+				// which is a foot-gun. Same posture as `status`: read-only,
+				// no side effects, no auto-create. Other commands (idu,
+				// install, setup, etc.) keep the auto-create UX for first-use
+				// onboarding.
+				createRegistryIfMissing:
+					command !== "status" && command !== "idu-run-cron-preflight",
 				requireTelegramConfig: false,
 			});
 		configureIduSessionStore(
