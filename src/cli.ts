@@ -1240,7 +1240,10 @@ export function createCliRuntime(
 				dbPath: labDbPath,
 				reportsPath: reportsPath,
 				workspaceRoot: runtimeWorkspaceRoot,
-				...semanticCompactionProjectContext(activeProject.path),
+				...semanticCompactionProjectContext(
+					activeProject.path,
+					masterPlanStateRoot,
+				),
 			}),
 		formatSemanticCompactionDraft,
 		semanticCompactionReview: (pathOrLatest) =>
@@ -1540,7 +1543,10 @@ export function createCliRuntime(
 					dbPath: labDbPath,
 					reportsPath,
 					workspaceRoot: runtimeWorkspaceRoot,
-					...semanticCompactionProjectContext(activeProject.path),
+					...semanticCompactionProjectContext(
+						activeProject.path,
+						masterPlanStateRoot,
+					),
 				},
 				createSkillImprovementProposals: (pathOrLatest) =>
 					createSkillImprovementProposals(pathOrLatest, reportsPath, {

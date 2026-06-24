@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -162,15 +162,49 @@ test("evaluateConstitutionGates blocks skipping tests", () => {
 });
 
 test("loadProjectConstitution loads local file or default", () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "pi-constitution-"));
-	tempDirs.push(projectPath);
-	mkdirSync(join(projectPath, "config"));
+	// Migration to stateRoot-based loader: constitution now lives at
+	// <stateRoot>/config/project-constitution.json (Layout B), not at
+	// <projectPath>/config/. The fixture creates a stateRoot and writes
+	// there to keep the no-op behavior for the path == stateRoot case.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-constitution-"));
+	tempDirs.push(stateRoot);
+	mkdirSync(join(stateRoot, "config"));
 	const constitution = deriveConstitutionFromProjectCore(confirmedCore());
 	writeFileSync(
-		join(projectPath, "config", "project-constitution.json"),
+		join(stateRoot, "config", "project-constitution.json"),
 		`${JSON.stringify(constitution, null, 2)}\n`,
 		"utf8",
 	);
 
-	assert.equal(loadProjectConstitution(projectPath).projectName, "Idu PI");
+	assert.equal(loadProjectConstitution(stateRoot).projectName, "Idu PI");
+});
+
+test("loadProjectConstitution reads from stateRoot, not projectPath (path != stateRoot)", () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "pi-constitution-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-state-"));
+	tempDirs.push(projectPath, stateRoot);
+
+	// Constitution lives ONLY in stateRoot/config/. projectPath is empty.
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	const constitution = deriveConstitutionFromProjectCore(confirmedCore());
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		`${JSON.stringify(constitution, null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadProjectConstitution(stateRoot);
+	assert.equal(loaded.projectName, "Idu PI");
+
+	// Guard anti-migración: el loader NO debe haber consultado ni escrito en projectPath.
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-constitution.json")),
+		false,
+		"loader must not consult projectPath (no migration as side effect)",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-constitution.json")),
+		false,
+		"loader must not consult Layout A in projectPath",
+	);
 });

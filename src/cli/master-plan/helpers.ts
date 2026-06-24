@@ -43,7 +43,7 @@ export function loadCliExecutionReadiness(runtime: CliRuntime) {
 	);
 	return buildIduExecutionReadiness({
 		coreStatus: safeProjectCoreStatus(runtime.projectPath),
-		constitutionStatus: safeProjectConstitutionStatus(runtime.projectPath),
+		constitutionStatus: safeProjectConstitutionStatus(runtime.workspaceRoot),
 		taskTreeStatus: taskTree.status,
 		mcpContextPackStaleness: usageReport.mcpContextPackStaleness,
 	});
@@ -57,9 +57,9 @@ export function safeProjectCoreStatus(projectPath: string) {
 	}
 }
 
-export function safeProjectConstitutionStatus(projectPath: string) {
+export function safeProjectConstitutionStatus(stateRoot: string) {
 	try {
-		return loadProjectConstitution(projectPath).status;
+		return loadProjectConstitution(stateRoot).status;
 	} catch {
 		return "unknown" as const;
 	}

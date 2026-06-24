@@ -264,7 +264,10 @@ export function buildPreflightReport(
 		connection.flows.valid
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
-	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
+	const constitution = loadConfirmedProjectConstitution(
+		connection.projectPath,
+		context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+	);
 	return analyzeProjectPreflight(request, {
 		connection,
 		blueprint,
@@ -287,7 +290,10 @@ export function buildPostflightReport(
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
-	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
+	const constitution = loadConfirmedProjectConstitution(
+		connection.projectPath,
+		context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+	);
 	const report = analyzeProjectPostflight({
 		projectPath,
 		connectionReport: connection,
@@ -348,7 +354,10 @@ export function runPrepare(context: RuntimeContext): IduPrepareResult {
 	return result;
 }
 
-export function loadConfirmedProjectConstitution(projectPath: string | undefined) {
+export function loadConfirmedProjectConstitution(
+	projectPath: string | undefined,
+	stateRoot: string | undefined,
+) {
 	if (!projectPath) return undefined;
 	// F-Item3a: route through the canonical loader (Layout A via
 	// readIdPathWithMigration). The pre-fix version hardcoded
@@ -360,12 +369,12 @@ export function loadConfirmedProjectConstitution(projectPath: string | undefined
 		const core = loadProjectCore(projectPath);
 		if (core.status !== "confirmed") return undefined;
 		const constitutionPath = join(
-			projectPath,
+			stateRoot ?? projectPath,
 			"config",
 			"project-constitution.json",
 		);
 		return existsSync(constitutionPath)
-			? loadProjectConstitution(projectPath)
+			? loadProjectConstitution(stateRoot ?? projectPath)
 			: deriveConstitutionFromProjectCore(core);
 	} catch {
 		return undefined;

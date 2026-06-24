@@ -567,7 +567,7 @@ export function generateMasterPlanDraft(input: {
 		status: "running",
 		message: "Preparando ingeniería inversa de flujos y arquitectura",
 	});
-	const source = readSourceStatuses(projectPath, signals);
+	const source = readSourceStatuses(projectPath, stateRoot, signals);
 	const autoDepth = decideAutoDepth(signals, source);
 	input.onProgress?.({
 		stage: "reverse_engineering",
@@ -4021,12 +4021,13 @@ function selectAgentLabs(
 
 function readSourceStatuses(
 	projectPath: string,
+	stateRoot: string,
 	signals: ProjectSignals,
 ): MasterPlanSource {
 	return {
 		projectCoreStatus: safeStatus(() => loadProjectCore(projectPath).status),
 		constitutionStatus: safeStatus(
-			() => loadProjectConstitution(projectPath).status,
+			() => loadProjectConstitution(stateRoot).status,
 		),
 		blueprintStatus: safeStatus(() =>
 			loadProjectBlueprint(projectPath) ? "available" : "missing",

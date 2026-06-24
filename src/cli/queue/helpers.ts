@@ -113,7 +113,10 @@ export function createCliTask(
 	return task;
 }
 
-export function semanticCompactionProjectContext(projectPath: string): {
+export function semanticCompactionProjectContext(
+	projectPath: string,
+	stateRoot: string,
+): {
 	projectCore?: string;
 	constitution?: string;
 } {
@@ -121,9 +124,9 @@ export function semanticCompactionProjectContext(projectPath: string): {
 		const core = loadProjectCore(projectPath);
 		if (core.status !== "confirmed") return {};
 		const constitution = existsSync(
-			join(projectPath, "config", "project-constitution.json"),
+			join(stateRoot, "config", "project-constitution.json"),
 		)
-			? loadProjectConstitution(projectPath)
+			? loadProjectConstitution(stateRoot)
 			: deriveConstitutionFromProjectCore(core);
 		return {
 			projectCore: formatProjectCoreForPrompt(core),

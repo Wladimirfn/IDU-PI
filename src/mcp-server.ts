@@ -1915,9 +1915,7 @@ export function loadRuntimeExecutionReadiness(runtime: CliRuntime, stateRoot: st
 	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot, 500));
 	return buildIduExecutionReadiness({
 		coreStatus: safeRuntimeProjectCoreStatus(runtime.projectPath),
-		constitutionStatus: safeRuntimeProjectConstitutionStatus(
-			runtime.projectPath,
-		),
+		constitutionStatus: safeRuntimeProjectConstitutionStatus(stateRoot),
 		taskTreeStatus: taskTree.status,
 		mcpContextPackStaleness: usageReport.mcpContextPackStaleness,
 	});
@@ -1931,9 +1929,9 @@ function safeRuntimeProjectCoreStatus(projectPath: string) {
 	}
 }
 
-function safeRuntimeProjectConstitutionStatus(projectPath: string) {
+function safeRuntimeProjectConstitutionStatus(stateRoot: string) {
 	try {
-		return loadProjectConstitution(projectPath).status;
+		return loadProjectConstitution(stateRoot).status;
 	} catch {
 		return "unknown" as const;
 	}

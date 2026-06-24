@@ -763,7 +763,10 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection.flows.valid
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
-	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
+	const constitution = loadConfirmedProjectConstitution(
+		connection.projectPath,
+		activeProjectStateRoot(),
+	);
 	return analyzeProjectPreflight(request, {
 		connection,
 		blueprint,
@@ -871,7 +874,10 @@ function buildPostflightReport(): ProjectPostflightReport {
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
-	const constitution = loadConfirmedProjectConstitution(connection.projectPath);
+	const constitution = loadConfirmedProjectConstitution(
+		connection.projectPath,
+		activeProjectStateRoot(),
+	);
 	const report = analyzeProjectPostflight({
 		projectPath,
 		connectionReport: connection,
@@ -894,7 +900,10 @@ function buildPostflightReport(): ProjectPostflightReport {
 	};
 }
 
-function loadConfirmedProjectConstitution(projectPath: string | undefined) {
+function loadConfirmedProjectConstitution(
+	projectPath: string | undefined,
+	stateRoot: string | undefined,
+) {
 	if (!projectPath) return undefined;
 	// F-Item3a: route through the canonical loader (Layout A via
 	// readIdPathWithMigration). The pre-fix version hardcoded
@@ -906,12 +915,12 @@ function loadConfirmedProjectConstitution(projectPath: string | undefined) {
 		const core = loadProjectCore(projectPath);
 		if (core.status !== "confirmed") return undefined;
 		const constitutionPath = join(
-			projectPath,
+			stateRoot ?? projectPath,
 			"config",
 			"project-constitution.json",
 		);
 		return existsSync(constitutionPath)
-			? loadProjectConstitution(projectPath)
+			? loadProjectConstitution(stateRoot ?? projectPath)
 			: deriveConstitutionFromProjectCore(core);
 	} catch {
 		return undefined;
@@ -1624,7 +1633,10 @@ function parsePauseMinutes(text: string | undefined): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 
-function semanticCompactionProjectContext(projectPath: string): {
+function semanticCompactionProjectContext(
+	projectPath: string,
+	stateRoot: string,
+): {
 	projectCore?: string;
 	constitution?: string;
 } {
@@ -1632,9 +1644,9 @@ function semanticCompactionProjectContext(projectPath: string): {
 		const core = loadProjectCore(projectPath);
 		if (core.status !== "confirmed") return {};
 		const constitution = existsSync(
-			join(projectPath, "config", "project-constitution.json"),
+			join(stateRoot, "config", "project-constitution.json"),
 		)
-			? loadProjectConstitution(projectPath)
+			? loadProjectConstitution(stateRoot)
 			: deriveConstitutionFromProjectCore(core);
 		return {
 			projectCore: formatProjectCoreForPrompt(core),
@@ -2061,7 +2073,10 @@ bot.command("semantic_compact_draft", async (ctx) => {
 				dbPath: labDbPath(),
 				reportsPath: reportsPath(),
 				workspaceRoot: config.agentWorkspaceRoot,
-				...semanticCompactionProjectContext(activeProjectPath()),
+				...semanticCompactionProjectContext(
+					activeProjectPath(),
+					activeProjectStateRoot(),
+				),
 			}),
 		),
 	);

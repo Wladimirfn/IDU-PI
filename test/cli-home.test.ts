@@ -383,7 +383,10 @@ test("current project panel recommends core confirmation for draft project core"
 	const root = tempDir("idu-cli-home-core-confirm-");
 	try {
 		const projectPath = join(root, "project");
-		const configPath = join(projectPath, "config");
+		mkdirSync(projectPath, { recursive: true });
+		const workspaceRoot = join(root, "workspace");
+		const stateRoot = join(workspaceRoot, "projects", "project");
+		const configPath = join(stateRoot, "config");
 		mkdirSync(configPath, { recursive: true });
 		writeFileSync(
 			join(configPath, "project-core.json"),
@@ -395,7 +398,6 @@ test("current project panel recommends core confirmation for draft project core"
 			JSON.stringify({ sourceCoreStatus: "draft" }),
 			"utf8",
 		);
-		const workspaceRoot = join(root, "workspace");
 		const registryPath = join(root, "projects.json");
 		writeFileSync(
 			registryPath,
@@ -406,7 +408,7 @@ test("current project panel recommends core confirmation for draft project core"
 						id: "project",
 						name: "project",
 						path: projectPath,
-						stateRoot: join(workspaceRoot, "projects", "project"),
+						stateRoot,
 					},
 				],
 			}),
@@ -439,7 +441,12 @@ test("current project panel shows active Constitution status", () => {
 	const root = tempDir("idu-cli-home-constitution-");
 	try {
 		const projectPath = join(root, "project");
-		const configPath = join(projectPath, "config");
+		mkdirSync(projectPath, { recursive: true });
+		const workspaceRoot = join(root, "workspace");
+		// Migration to stateRoot-based reader: constitution now lives at
+		// <stateRoot>/config/project-constitution.json (Layout B).
+		const stateRoot = join(workspaceRoot, "projects", "project");
+		const configPath = join(stateRoot, "config");
 		mkdirSync(configPath, { recursive: true });
 		writeFileSync(
 			join(configPath, "project-constitution.json"),
@@ -452,7 +459,7 @@ test("current project panel shows active Constitution status", () => {
 			env: {
 				DEFAULT_CWD: projectPath,
 				ALLOWED_ROOTS: root,
-				AGENT_WORKSPACE_ROOT: join(root, "workspace"),
+				AGENT_WORKSPACE_ROOT: workspaceRoot,
 				PATH: "",
 			},
 			runner: () => undefined,

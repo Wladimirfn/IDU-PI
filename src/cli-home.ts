@@ -552,7 +552,7 @@ function detectHomeProjectStatus(
 			stateRoot: paths.stateRoot,
 			supervisor: "unknown",
 			projectCore: projectCoreStatus(candidatePath, options.exists),
-			constitution: constitutionStatus(candidatePath, options.exists),
+			constitution: constitutionStatus(paths.stateRoot, options.exists),
 			allowedRoot: "unknown",
 			recommendedNext: "enroll",
 			warning:
@@ -579,7 +579,7 @@ function detectHomeProjectStatus(
 				stateRoot: paths.stateRoot,
 				supervisor: "unknown",
 				projectCore: projectCoreStatus(canonicalCandidate, options.exists),
-				constitution: constitutionStatus(canonicalCandidate, options.exists),
+				constitution: constitutionStatus(paths.stateRoot, options.exists),
 				allowedRoot: false,
 				recommendedNext: "enroll",
 				warning:
@@ -609,7 +609,7 @@ function detectHomeProjectStatus(
 			reportsDir: status.reportsDir,
 			supervisor,
 			projectCore,
-			constitution: constitutionStatus(canonicalCandidate, options.exists),
+			constitution: constitutionStatus(status.stateRoot, options.exists),
 			allowedRoot: true,
 			recommendedNext: recommendedProjectNext(
 				status.registered,
@@ -701,11 +701,11 @@ function projectCoreStatus(
 }
 
 function constitutionStatus(
-	projectPath: string,
+	stateRoot: string,
 	exists: (path: string) => boolean,
 ): CliHomeProjectStatus["constitution"] {
 	const constitutionPath = join(
-		projectPath,
+		stateRoot,
 		"config",
 		"project-constitution.json",
 	);
