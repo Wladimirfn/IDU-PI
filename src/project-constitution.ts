@@ -120,10 +120,8 @@ export function validateProjectConstitution(
 	};
 }
 
-export function loadProjectConstitution(
-	projectPath: string,
-): ProjectConstitution {
-	const localPath = join(projectPath, "config", "project-constitution.json");
+export function loadProjectConstitution(stateRoot: string): ProjectConstitution {
+	const localPath = join(stateRoot, "config", "project-constitution.json");
 	const path = existsSync(localPath) ? localPath : defaultConstitutionPath();
 	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
 	const result = validateProjectConstitution(parsed);
@@ -575,6 +573,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 		: undefined;
 }
 
+// TODO(hygiene-future-batch): defaultConstitutionPath is cwd-fragile — replace with stateRoot-based fallback or remove
 function defaultConstitutionPath(): string {
 	return join(process.cwd(), "config", "default-constitution.json");
 }
