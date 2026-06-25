@@ -21,6 +21,21 @@ async function withTempProject(
 	}
 }
 
+async function withTempProjectAndStateRoot(
+	fn: (projectPath: string, stateRoot: string) => void | Promise<void>,
+): Promise<void> {
+	// Slice 2/5: projectPath and stateRoot are distinct temp dirs so we can
+	// assert that the loader resolves under stateRoot, not projectPath.
+	const projectPath = mkdtempSync(join(tmpdir(), "idu-blueprint-project-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-blueprint-stateroot-"));
+	try {
+		await fn(projectPath, stateRoot);
+	} finally {
+		await rm(projectPath, { recursive: true, force: true });
+		await rm(stateRoot, { recursive: true, force: true });
+	}
+}
+
 function validBlueprint(overrides: Record<string, unknown> = {}) {
 	return {
 		projectName: "Local Project",
@@ -112,5 +127,33 @@ test("loadProjectBlueprint does not write files", async () => {
 		loadProjectBlueprint(projectPath);
 
 		assert.equal(existsSync(localPath), false);
+	});
+});
+
+test("loadProjectBlueprint reads from stateRoot, not projectPath (path != stateRoot)", async () => {
+	// Slice 2/5 split-brain guard: blueprint must resolve under stateRoot
+	// even when stateRoot is a different directory than projectPath.
+	await withTempProjectAndStateRoot((projectPath, stateRoot) => {
+		// Blueprint lives ONLY in stateRoot (Layout A).
+		mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+		writeFileSync(
+			join(stateRoot, ".idu", "config", "project-blueprint.json"),
+			JSON.stringify(validBlueprint({ projectName: "StateRoot Blueprint" })),
+		);
+
+		const blueprint = loadProjectBlueprint(stateRoot);
+
+		assert.equal(blueprint.projectName, "StateRoot Blueprint");
+		// Guard: loader must not have consulted projectPath at all.
+		assert.equal(
+			existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+			false,
+			"loader must not consult Layout A in projectPath",
+		);
+		assert.equal(
+			existsSync(join(projectPath, "config", "project-blueprint.json")),
+			false,
+			"loader must not consult Layout B in projectPath",
+		);
 	});
 });

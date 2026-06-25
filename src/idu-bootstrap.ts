@@ -172,7 +172,11 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	});
 	if (input.activate ?? true) activateIduSession(project.id);
 
-	const configResult = initProjectConfig(projectPath, project.id);
+	const configResult = initProjectConfig(
+		projectPath,
+		statePaths.stateRoot,
+		project.id,
+	);
 	created.push(...configResult.created);
 	existing.push(...configResult.existing);
 

@@ -54,6 +54,7 @@ test("inspectProjectConfig reports missing project-local assets", () => {
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
+		stateRoot: projectPath,
 		allowedRoots: [projectPath],
 		agentProfiles: [
 			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
@@ -84,6 +85,7 @@ test("inspectProjectConfig reports existing project-local assets and workspace s
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
+		stateRoot,
 		allowedRoots: [projectPath],
 		agentProfiles: [
 			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
@@ -134,12 +136,12 @@ test("initProjectBlueprint creates config and blueprint when missing", () => {
 	const stateRoot = tempStateRoot();
 
 	const result = initProjectBlueprint(projectPath, stateRoot, "active-demo");
-	const blueprintPath = join(projectPath, ".idu", "config", "project-blueprint.json");
+	const blueprintPath = join(stateRoot, ".idu", "config", "project-blueprint.json");
 	const blueprint = JSON.parse(readFileSync(blueprintPath, "utf8")) as {
 		projectName: string;
 	};
 
-	assert.equal(existsSync(join(projectPath, ".idu", "config")), true);
+	assert.equal(existsSync(join(stateRoot, ".idu", "config")), true);
 	assert.ok(result.created.includes(".idu/config/project-blueprint.json"));
 	assert.equal(blueprint.projectName, "active-demo");
 });
@@ -147,8 +149,8 @@ test("initProjectBlueprint creates config and blueprint when missing", () => {
 test("initProjectBlueprint does not overwrite existing blueprint", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
-	const blueprintPath = join(projectPath, ".idu", "config", "project-blueprint.json");
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	const blueprintPath = join(stateRoot, ".idu", "config", "project-blueprint.json");
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(blueprintPath, '{"projectName":"custom"}\n', "utf8");
 
 	const result = initProjectBlueprint(projectPath, stateRoot, "ignored");
@@ -158,6 +160,32 @@ test("initProjectBlueprint does not overwrite existing blueprint", () => {
 		'{"projectName":"custom"}\n',
 	);
 	assert.ok(result.existing.includes(".idu/config/project-blueprint.json"));
+});
+
+test("initProjectBlueprint writes only under stateRoot (split-brain guard)", () => {
+	// Slice 2/5 split-brain guard: when stateRoot !== projectPath, the writer
+	// must land the file under stateRoot and NOT touch projectPath.
+	const projectPath = join(tempDir(), "demo-project");
+	mkdirSync(projectPath, { recursive: true });
+	const stateRoot = tempStateRoot();
+
+	initProjectBlueprint(projectPath, stateRoot, "split-brain-demo");
+
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
+		true,
+		"blueprint must exist under stateRoot",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+		false,
+		"blueprint must NOT exist under projectPath",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		false,
+		"blueprint must NOT exist under projectPath legacy layout",
+	);
 });
 
 test("initProjectFlows creates flows when missing", () => {
@@ -197,7 +225,7 @@ test("initProjectConfig creates both project config files", () => {
 	assert.ok(result.created.includes(".idu/config/project-flows.json"));
 	assert.match(formatInitProjectConfigResult(result), /init_project_config/);
 	assert.equal(
-		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+		existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
 		true,
 	);
 	assert.equal(
@@ -213,27 +241,43 @@ test("initProjectConfig infers safe projectName from folder", () => {
 
 	initProjectConfig(projectPath, stateRoot);
 	const blueprint = JSON.parse(
-		readFileSync(join(projectPath, ".idu", "config", "project-blueprint.json"), "utf8"),
+		readFileSync(join(stateRoot, ".idu", "config", "project-blueprint.json"), "utf8"),
 	) as { projectName: string };
 
 	assert.equal(blueprint.projectName, "folder-project");
 });
 
-test("initProjectConfig writes only under projectPath", () => {
-	const root = tempDir();
-	const projectPath = join(root, "project");
-	const stateRoot = tempStateRoot();
+test("initProjectConfig writes only under stateRoot (split-brain guard)", () => {
+	// Slice 2/5 split-brain guard: when stateRoot !== projectPath, the writer
+	// must land the file under stateRoot and NOT touch projectPath.
+	const projectPath = join(tempDir(), "demo-project");
 	mkdirSync(projectPath, { recursive: true });
+	const stateRoot = tempStateRoot();
 
-	initProjectConfig(projectPath, stateRoot, "demo");
+	initProjectConfig(projectPath, stateRoot, "split-brain-config-demo");
 
 	assert.equal(
-		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+		existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
 		true,
+		"blueprint must exist under stateRoot",
+	);
+	// Slice 2/5: blueprint lives under stateRoot; flows stays under projectPath
+	// until Slice 4 moves it. So flows DOES live under projectPath — that is
+	// the post-Slice-2 territory, not a split-brain regression.
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
+		true,
+		"blueprint must exist under stateRoot",
 	);
 	assert.equal(
-		existsSync(join(root, "config", "project-blueprint.json")),
+		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+		true,
+		"flows must exist under projectPath (Slice 4 territory)",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 		false,
+		"blueprint must NOT exist under projectPath",
 	);
 });
 
@@ -247,6 +291,7 @@ test("inspectProjectConfig reports missing project config and recommends init", 
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
+		stateRoot,
 		allowedRoots: [projectPath],
 		agentProfiles: [
 			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
@@ -279,6 +324,7 @@ test("inspectProjectConfig reports valid local project config", () => {
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
+		stateRoot,
 		allowedRoots: [projectPath],
 		agentProfiles: [
 			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
@@ -313,12 +359,14 @@ test("inspectProjectConfig reports invalid project config without throwing", () 
 	const workspaceRoot = join(projectPath, ".workspaces");
 	initProjectAssets(projectPath, stateRoot);
 	initWorkspaceRoot(workspaceRoot);
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, ".idu", "config", "project-blueprint.json"),
+		join(stateRoot, ".idu", "config", "project-blueprint.json"),
 		"{ invalid",
 		"utf8",
 	);
+	// Slice 2/5: flows stays under projectPath until Slice 4.
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(
 		join(projectPath, ".idu", "config", "project-flows.json"),
 		"{}",
@@ -328,6 +376,7 @@ test("inspectProjectConfig reports invalid project config without throwing", () 
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
+		stateRoot,
 		allowedRoots: [projectPath],
 		agentProfiles: [
 			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
@@ -355,8 +404,9 @@ test("inspectProjectConfig reports invalid project config without throwing", () 
 
 test("inspectProjectMap detects default map in use", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 
-	const result = inspectProjectMap(projectPath, {
+	const result = inspectProjectMap(projectPath, stateRoot, {
 		activeProjectId: "sistema_de_mantencion",
 		activeProjectName: "Sistema de Mantención",
 	});
@@ -384,7 +434,7 @@ test("inspectProjectMap detects valid project-local map", () => {
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.equal(result.source, "project-local");
 	assert.equal(result.issues.length, 0);
@@ -402,7 +452,7 @@ test("inspectProjectMap detects module without screens", () => {
 	flows.modules[0].screens = [];
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /módulo sin pantallas/u);
 });
@@ -418,7 +468,7 @@ test("inspectProjectMap detects screen with missing module", () => {
 	flows.screens[0].module = "missing-module";
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /pantalla.*missing-module/u);
 });
@@ -434,7 +484,7 @@ test("inspectProjectMap detects flow with missing module", () => {
 	flows.flows[0].module = "missing-module";
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /flow.*missing-module/u);
 });
@@ -450,7 +500,7 @@ test("inspectProjectMap detects step without from or to", () => {
 	delete flows.flows[0].steps[0].from;
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /step sin from\/to/u);
 });
@@ -466,7 +516,7 @@ test("inspectProjectMap detects dataStore without ownerModule", () => {
 	delete flows.dataStores[0].ownerModule;
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /dataStore.*ownerModule/u);
 });
@@ -482,7 +532,7 @@ test("inspectProjectMap detects invalid moduleConnection", () => {
 	flows.moduleConnections[0].toModule = "missing-module";
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /moduleConnection.*missing-module/u);
 });
@@ -499,15 +549,16 @@ test("inspectProjectMap detects uiElement without selector or label", () => {
 	delete flows.uiElements[0].label;
 	writeFileSync(flowsPath, JSON.stringify(flows), "utf8");
 
-	const result = inspectProjectMap(projectPath);
+	const result = inspectProjectMap(projectPath, stateRoot);
 
 	assert.match(result.issues.join("\n"), /uiElement.*selector.*label/u);
 });
 
 test("inspectProjectMap does not write files", () => {
 	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
 
-	inspectProjectMap(projectPath);
+	inspectProjectMap(projectPath, stateRoot);
 
 	assert.equal(
 		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
@@ -575,6 +626,7 @@ test("formatConfigOverview and formatConfigDoctor hide secrets and show next ste
 	const report = inspectProjectConfig({
 		projectId: "demo",
 		projectPath,
+		stateRoot,
 		allowedRoots: [projectPath],
 		agentProfiles: [
 			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
@@ -599,4 +651,24 @@ test("formatConfigOverview and formatConfigDoctor hide secrets and show next ste
 		formatInitAssetsResult(initProjectAssets(projectPath, stateRoot)),
 		/Assets/,
 	);
+});
+
+test("inspectProjectMap resolves blueprint under stateRoot, not projectPath (dynamic path)", () => {
+	// Slice 2/5 dynamic-path guard for config-wizard.ts:563 — the
+	// `usesLocalBlueprint` flag (and the loader call) must follow stateRoot
+	// even when stateRoot is a different directory than projectPath.
+	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "dynamic-path-demo");
+
+	// inspectProjectMap reading from stateRoot: source must be project-local.
+	const resultFromStateRoot = inspectProjectMap(projectPath, stateRoot);
+	assert.equal(resultFromStateRoot.source, "project-local");
+
+	// inspectProjectMap reading from projectPath as both projectPath and
+	// stateRoot (mirroring the legacy shape, where stateRoot defaulted to
+	// projectPath): no blueprint exists there, so source is default — proves
+	// the resolver follows stateRoot, not projectPath.
+	const resultFromProjectPath = inspectProjectMap(projectPath, projectPath);
+	assert.equal(resultFromProjectPath.source, "default");
 });

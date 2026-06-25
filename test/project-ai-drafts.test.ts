@@ -21,12 +21,21 @@ import {
 
 const tempDirs: string[] = [];
 
-function tempProject(): { projectPath: string; reportsDir: string } {
+function tempProject(): {
+	projectPath: string;
+	stateRoot: string;
+	reportsDir: string;
+} {
 	const projectPath = mkdtempSync(join(tmpdir(), "pi-ai-draft-"));
-	tempDirs.push(projectPath);
+	// Slice 2/5: blueprint now lives under stateRoot. Use a separate temp
+	// dir for stateRoot so tests reflect the post-slice territory model.
+	// NOTE: flows remains under projectPath for now — Slice 4 moves flows
+	// to stateRoot, so we keep flows accessible to loadProjectFlows via
+	// its current projectPath-based migration.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-ai-draft-state-"));
+	tempDirs.push(projectPath, stateRoot);
 	const reportsDir = join(projectPath, "reports-out");
 	mkdirSync(reportsDir, { recursive: true });
-	mkdirSync(join(projectPath, "config"), { recursive: true });
 	mkdirSync(join(projectPath, "docs"), { recursive: true });
 	writeFileSync(
 		join(projectPath, "README.md"),
@@ -48,17 +57,19 @@ function tempProject(): { projectPath: string; reportsDir: string } {
 		"SECRET_TOKEN=super-secret-value\n",
 		"utf8",
 	);
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, "config", "project-blueprint.json"),
+		join(stateRoot, "config", "project-blueprint.json"),
 		JSON.stringify(validBlueprint("current"), null, 2),
 		"utf8",
 	);
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, "config", "project-flows.json"),
+		join(projectPath, ".idu", "config", "project-flows.json"),
 		JSON.stringify(validFlows(), null, 2),
 		"utf8",
 	);
-	return { projectPath, reportsDir };
+	return { projectPath, stateRoot, reportsDir };
 }
 
 after(() => {
@@ -66,9 +77,10 @@ after(() => {
 });
 
 test("createAiProjectBlueprintDraft creates warning draft in reports only", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-20T10:11:12Z"),
 		generate: async () => JSON.stringify(validBlueprint("ai")),
@@ -102,7 +114,7 @@ test("createAiProjectBlueprintDraft creates warning draft in reports only", asyn
 });
 
 test("createAiProjectFlowsDraft creates warning draft from scan context in reports only", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	writeFileSync(
 		join(projectPath, "index.html"),
 		'<button id="save">Save</button>',
@@ -111,6 +123,7 @@ test("createAiProjectFlowsDraft creates warning draft from scan context in repor
 	let prompt = "";
 	const result = await createAiProjectFlowsDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-20T10:11:12Z"),
 		generate: async (input: string) => {
@@ -147,10 +160,11 @@ test("createAiProjectFlowsDraft creates warning draft from scan context in repor
 });
 
 test("AI draft context does not include simulated secrets", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	let prompt = "";
 	await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async (input: string) => {
 			prompt = input;
@@ -164,9 +178,10 @@ test("AI draft context does not include simulated secrets", async () => {
 });
 
 test("invalid AI JSON is saved as raw output with warning", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => "not json",
 	});
@@ -183,9 +198,10 @@ test("invalid AI JSON is saved as raw output with warning", async () => {
 });
 
 test("AI draft failure returns clear error without writing draft", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await createAiProjectFlowsDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => {
 			throw new Error("Pi unavailable");
@@ -201,9 +217,10 @@ test("AI draft failure returns clear error without writing draft", async () => {
 });
 
 test("reviewAiProjectBlueprintDraft reviews a valid draft", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const draft = await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () =>
 			JSON.stringify({
@@ -218,6 +235,7 @@ test("reviewAiProjectBlueprintDraft reviews a valid draft", async () => {
 		draft.path,
 		projectPath,
 		reportsDir,
+		stateRoot,
 	);
 
 	assert.equal(review.validDraft, true);
@@ -230,7 +248,7 @@ test("reviewAiProjectBlueprintDraft reviews a valid draft", async () => {
 });
 
 test("reviewAiProjectFlowsDraft reviews a valid draft", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const proposed = validFlows();
 	proposed.modules[0] = {
 		...proposed.modules[0],
@@ -264,6 +282,7 @@ test("reviewAiProjectFlowsDraft reviews a valid draft", async () => {
 	};
 	const draft = await createAiProjectFlowsDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => JSON.stringify(proposed),
 	});
@@ -283,15 +302,17 @@ test("reviewAiProjectFlowsDraft reviews a valid draft", async () => {
 });
 
 test("review AI latest works for blueprint and flows", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-20T10:00:00Z"),
 		generate: async () => JSON.stringify(validBlueprint("old")),
 	});
 	await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-20T11:00:00Z"),
 		generate: async () =>
@@ -299,6 +320,7 @@ test("review AI latest works for blueprint and flows", async () => {
 	});
 	await createAiProjectFlowsDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-20T10:00:00Z"),
 		generate: async () => JSON.stringify(validFlows()),
@@ -307,6 +329,7 @@ test("review AI latest works for blueprint and flows", async () => {
 	nextFlows.flows[0] = { ...nextFlows.flows[0], id: "latest-flow" };
 	await createAiProjectFlowsDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-20T11:00:00Z"),
 		generate: async () => JSON.stringify(nextFlows),
@@ -316,6 +339,7 @@ test("review AI latest works for blueprint and flows", async () => {
 		"latest",
 		projectPath,
 		reportsDir,
+		stateRoot,
 	);
 	const flows = reviewAiProjectFlowsDraft("latest", projectPath, reportsDir);
 
@@ -328,12 +352,13 @@ test("review AI latest works for blueprint and flows", async () => {
 });
 
 test("review AI latest without drafts does not throw", () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 
 	const blueprint = reviewAiProjectBlueprintDraft(
 		"latest",
 		projectPath,
 		reportsDir,
+		stateRoot,
 	);
 	const flows = reviewAiProjectFlowsDraft("latest", projectPath, reportsDir);
 
@@ -344,9 +369,10 @@ test("review AI latest without drafts does not throw", () => {
 });
 
 test("review reports invalid warning and rawOutput without throwing", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const rawDraft = await createAiProjectBlueprintDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => "not json",
 	});
@@ -369,11 +395,13 @@ test("review reports invalid warning and rawOutput without throwing", async () =
 		rawDraft.path,
 		projectPath,
 		reportsDir,
+		stateRoot,
 	);
 	const warningReview = reviewAiProjectBlueprintDraft(
 		badWarningPath,
 		projectPath,
 		reportsDir,
+		stateRoot,
 	);
 
 	assert.equal(rawReview.validJson, false);
@@ -384,17 +412,20 @@ test("review reports invalid warning and rawOutput without throwing", async () =
 });
 
 test("reviewAiProjectFlowsDraft detects ID conflicts and does not write config", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
+	// Slice 2/5: blueprint lives under stateRoot; flows stays under
+	// projectPath/.idu/config until Slice 4 moves it to stateRoot.
 	const beforeBlueprint = readFileSync(
-		join(projectPath, "config", "project-blueprint.json"),
+		join(stateRoot, "config", "project-blueprint.json"),
 		"utf8",
 	);
 	const beforeFlows = readFileSync(
-		join(projectPath, "config", "project-flows.json"),
+		join(projectPath, ".idu", "config", "project-flows.json"),
 		"utf8",
 	);
 	const draft = await createAiProjectFlowsDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => JSON.stringify(validFlows()),
 	});
@@ -406,10 +437,10 @@ test("reviewAiProjectFlowsDraft detects ID conflicts and does not write config",
 	assert.ok(review.idConflicts.includes("screen:home"));
 	assert.ok(review.possibleDuplicates.length > 0);
 	// Territory model: reviewAiProjectFlowsDraft only reads project-flows
-	// (via loadProjectFlows), so blueprint stays in legacy until a reader
-	// for it triggers the migration. The flows file moves to .idu/.
+	// (via loadProjectFlows), so blueprint stays in place. The flows file
+	// stays at Layout A in projectPath until Slice 4.
 	assert.equal(
-		readFileSync(join(projectPath, "config", "project-blueprint.json"), "utf8"),
+		readFileSync(join(stateRoot, "config", "project-blueprint.json"), "utf8"),
 		beforeBlueprint,
 	);
 	assert.equal(

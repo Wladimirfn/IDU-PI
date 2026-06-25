@@ -4030,7 +4030,7 @@ function readSourceStatuses(
 			() => loadProjectConstitution(stateRoot).status,
 		),
 		blueprintStatus: safeStatus(() =>
-			loadProjectBlueprint(projectPath) ? "available" : "missing",
+			loadProjectBlueprint(stateRoot) ? "available" : "missing",
 		),
 		flowsStatus: safeStatus(() => {
 			// F-Item3a: project-flows.json lives at Layout A (`.idu/config/`).

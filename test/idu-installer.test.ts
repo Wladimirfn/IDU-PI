@@ -662,13 +662,12 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 			existsSync(join(projectPath, ".idu", "config", "project-core.json")),
 			true,
 		);
-		// Territory model: project-blueprint is written to <repo>/.idu/config/
-		// (the new governance location), not <repo>/config/>.
+		// Slice 2/5: project-blueprint now lives under stateRoot (Layout A).
+		const stateRoot = join(workspaceRoot, "projects", "sistema_de_mantencion");
 		assert.equal(
-			existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+			existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
 			true,
 		);
-		const stateRoot = join(workspaceRoot, "projects", "sistema_de_mantencion");
 		assert.equal(existsSync(join(stateRoot, "master-plan.current.json")), true);
 		assert.equal(existsSync(join(stateRoot, "master-plan.memory.json")), true);
 		assert.equal(existsSync(join(stateRoot, "master-plan.json")), true);

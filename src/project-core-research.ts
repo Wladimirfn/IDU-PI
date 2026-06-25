@@ -60,6 +60,7 @@ export type ProjectCoreResearchDraft = {
 
 export type ProjectCoreResearchOptions = {
 	projectPath: string;
+	stateRoot: string;
 	reportsDir: string;
 	generate: GenerateResearchDraft;
 	now?: () => Date;
@@ -90,6 +91,7 @@ export type ProjectCoreResearchReview = {
 export function buildProjectCoreResearchPrompt(
 	coreOrProjectPath: ProjectCore | string,
 	context = "",
+	stateRoot?: string,
 ): string {
 	const core =
 		typeof coreOrProjectPath === "string"
@@ -97,7 +99,10 @@ export function buildProjectCoreResearchPrompt(
 			: coreOrProjectPath;
 	const safeContext =
 		typeof coreOrProjectPath === "string"
-			? collectSafeProjectCoreResearchContext(coreOrProjectPath)
+			? collectSafeProjectCoreResearchContext(
+					coreOrProjectPath,
+					stateRoot ?? coreOrProjectPath,
+				)
 			: context;
 	return [
 		"Generá un research draft para Project Core.",
@@ -124,7 +129,11 @@ export async function saveProjectCoreResearchDraft(
 	let rawOutput: string;
 	try {
 		rawOutput = await options.generate(
-			buildProjectCoreResearchPrompt(options.projectPath),
+			buildProjectCoreResearchPrompt(
+				options.projectPath,
+				"",
+				options.stateRoot,
+			),
 		);
 	} catch (error) {
 		return {
@@ -243,7 +252,10 @@ export function formatProjectCoreResearchReview(
 	].join("\n");
 }
 
-function collectSafeProjectCoreResearchContext(projectPath: string): string {
+function collectSafeProjectCoreResearchContext(
+	projectPath: string,
+	stateRoot: string,
+): string {
 	const parts: string[] = [];
 	for (const relativePath of ["README.md", "package.json"]) {
 		const content = readSmallTextFile(join(projectPath, relativePath));
@@ -259,14 +271,14 @@ function collectSafeProjectCoreResearchContext(projectPath: string): string {
 			if (content) parts.push(`## docs/${basename(entry)}\n${content}`);
 		}
 	}
-	parts.push("## project-blueprint\n" + safeBlueprint(projectPath));
+	parts.push("## project-blueprint\n" + safeBlueprint(stateRoot));
 	parts.push("## project-flows\n" + safeFlows(projectPath));
 	return clamp(parts.join("\n\n"), MAX_CONTEXT_CHARS);
 }
 
-function safeBlueprint(projectPath: string): string {
+function safeBlueprint(stateRoot: string): string {
 	try {
-		return formatBlueprintForPrompt(loadProjectBlueprint(projectPath));
+		return formatBlueprintForPrompt(loadProjectBlueprint(stateRoot));
 	} catch (error) {
 		return `No pude leer project-blueprint: ${error instanceof Error ? error.message : String(error)}`;
 	}

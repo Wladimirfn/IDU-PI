@@ -27,11 +27,12 @@ const MAX_CONTEXT_CHARS = 1800;
 
 export function loadLabProjectContext(
 	projectPath: string,
+	stateRoot: string,
 ): LabProjectContext | undefined {
 	try {
 		const flows = loadProjectFlows(projectPath);
 		return formatLabProjectContext(
-			formatBlueprintForPrompt(loadProjectBlueprint(projectPath)),
+			formatBlueprintForPrompt(loadProjectBlueprint(stateRoot)),
 			formatFlowsForPrompt(flows),
 			safeScanProjectMapForPrompt(projectPath, flows),
 		);
