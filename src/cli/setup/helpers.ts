@@ -377,7 +377,8 @@ export function loadConfirmedProjectConstitution(
 	// false and the function bailed before `loadProjectCore` could find
 	// the file at Layout A.
 	try {
-		const core = loadProjectCore(projectPath);
+		// Slice 3/5: loader reads from stateRoot, not projectPath.
+		const core = loadProjectCore(stateRoot ?? projectPath);
 		if (core.status !== "confirmed") return undefined;
 		const constitutionPath = join(
 			stateRoot ?? projectPath,

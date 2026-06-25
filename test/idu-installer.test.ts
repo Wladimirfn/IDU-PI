@@ -654,16 +654,16 @@ test("CLI /idu bootstraps external project and second call fast-paths", async ()
 			first.stdout,
 			/¿Creamos el proyecto base\?|Plan preparado para firma humana/u,
 		);
-		// Territory model: project-core.json lives under <repo>/.idu/config/.
-		// Note: <repo>/config/project-core.json is migrated on first read by
-		// loadProjectCore, so the legacy path may or may not exist depending
-		// on the order of reader calls. We assert the new location.
+		// Slice 3/5: project-core.json now lives under <stateRoot>/.idu/config/.
+		// Note: <stateRoot>/config/project-core.json is migrated on first
+		// read by loadProjectCore, so the legacy path may or may not exist
+		// depending on the order of reader calls. We assert the new location.
+		const stateRoot = join(workspaceRoot, "projects", "sistema_de_mantencion");
 		assert.equal(
-			existsSync(join(projectPath, ".idu", "config", "project-core.json")),
+			existsSync(join(stateRoot, ".idu", "config", "project-core.json")),
 			true,
 		);
 		// Slice 2/5: project-blueprint now lives under stateRoot (Layout A).
-		const stateRoot = join(workspaceRoot, "projects", "sistema_de_mantencion");
 		assert.equal(
 			existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
 			true,

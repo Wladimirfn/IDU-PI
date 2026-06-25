@@ -106,15 +106,15 @@ test("answerProjectCoreWizard creates ProjectCore draft when complete", async ()
 			result = answerProjectCoreWizard(options(paths), answer);
 
 		assert.equal(result?.completed, true);
-		// Territory model: project-core.json lives under <repo>/.idu/config/.
+		// Slice 3/5: project-core.json lives under <stateRoot>/.idu/config/.
 		const corePath = join(
-			paths.projectPath,
+			paths.stateRoot,
 			".idu",
 			"config",
 			"project-core.json",
 		);
 		assert.ok(existsSync(corePath));
-		const core = loadProjectCore(paths.projectPath);
+		const core = loadProjectCore(paths.stateRoot);
 		assert.equal(core.status, "draft");
 		assert.equal(core.projectGoal, answers[0]);
 		assert.equal(core.problemStatement, answers[1]);
@@ -136,9 +136,9 @@ test("answerProjectCoreWizard creates ProjectCore draft when complete", async ()
 
 test("answerProjectCoreWizard does not overwrite confirmed ProjectCore", async () => {
 	await withTempPaths((paths) => {
-		mkdirSync(join(paths.projectPath, ".idu", "config"), { recursive: true });
+		mkdirSync(join(paths.stateRoot, ".idu", "config"), { recursive: true });
 		writeFileSync(
-			join(paths.projectPath, ".idu", "config", "project-core.json"),
+			join(paths.stateRoot, ".idu", "config", "project-core.json"),
 			JSON.stringify({
 				version: "1.0.0",
 				projectName: "Confirmed",
@@ -173,7 +173,7 @@ test("answerProjectCoreWizard does not overwrite confirmed ProjectCore", async (
 			for (const answer of answers)
 				answerProjectCoreWizard(options(paths), answer);
 		}, /Project Core confirmed/u);
-		const core = loadProjectCore(paths.projectPath);
+		const core = loadProjectCore(paths.stateRoot);
 		assert.equal(core.projectGoal, "Keep me");
 		assert.equal(core.status, "confirmed");
 	});
@@ -224,5 +224,73 @@ test("wizard does not modify blueprint or flows", async () => {
 
 		assert.equal(readFileSync(blueprintPath, "utf8"), "blueprint untouched");
 		assert.equal(readFileSync(flowsPath, "utf8"), "flows untouched");
+	});
+});
+
+test("wizard writes Project Core only under stateRoot (split-brain guard)", async () => {
+	// Slice 3/5 split-brain guard: when stateRoot !== projectPath, the
+	// wizard's writeProjectCoreDraft must land under stateRoot and NOT
+	// touch projectPath.
+	await withTempPaths((paths) => {
+		startProjectCoreWizard(options(paths));
+		for (const answer of answers)
+			answerProjectCoreWizard(options(paths), answer);
+
+		assert.equal(
+			existsSync(
+				join(paths.stateRoot, ".idu", "config", "project-core.json"),
+			),
+			true,
+			"core must exist under stateRoot",
+		);
+		assert.equal(
+			existsSync(join(paths.projectPath, ".idu", "config", "project-core.json")),
+			false,
+			"core must NOT exist under projectPath",
+		);
+	});
+});
+
+test("getProjectCoreWizardStatus resolves core under stateRoot, not projectPath (dynamic path)", async () => {
+	// Slice 3/5 dynamic-path guard: wizard status must reflect stateRoot.
+	await withTempPaths((paths) => {
+		// Pre-seed a confirmed core ONLY under stateRoot.
+		mkdirSync(join(paths.stateRoot, ".idu", "config"), { recursive: true });
+		writeFileSync(
+			join(paths.stateRoot, ".idu", "config", "project-core.json"),
+			JSON.stringify({
+				version: "1.0.0",
+				projectName: "Dynamic StateRoot Core",
+				projectGoal: "Goal",
+				problemStatement: "Problem",
+				targetUsers: ["admin"],
+				projectType: "telegram-bot",
+				complexityLevel: "medium",
+				deploymentTarget: "server",
+				securityLevel: "high",
+				dataSensitivity: "medium",
+				preferredStack: [],
+				rejectedStack: [],
+				architectureStyle: "x",
+				includedScope: ["a"],
+				excludedScope: [],
+				initialModules: [],
+				criticalFlows: [],
+				successCriteria: [],
+				validationCommands: [],
+				humanDecisions: [],
+				assumptions: [],
+				openQuestions: [],
+				status: "confirmed",
+				createdAt: "2026-05-01T00:00:00.000Z",
+				updatedAt: "2026-05-01T00:00:00.000Z",
+			}),
+		);
+
+		const status = getProjectCoreWizardStatus(options(paths));
+
+		assert.match(status.text, /Project Core local: existe/u);
+		assert.match(status.text, /Dynamic StateRoot Core/u);
+		assert.match(status.text, /Estado: confirmed/u);
 	});
 });

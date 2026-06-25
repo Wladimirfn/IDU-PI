@@ -14,6 +14,7 @@ import {
 	resolve,
 } from "node:path";
 import {
+	corePath,
 	loadProjectCore,
 	type ProjectCore,
 	validateProjectCore,
@@ -80,13 +81,14 @@ export type ProjectCoreConfirmationOptions = {
 export function confirmProjectCore(
 	options: ProjectCoreConfirmationOptions,
 ): ProjectCoreConfirmationResult {
-	const corePath = projectCorePath(options.projectPath);
+	const targetPath = corePath(options.stateRoot);
 	const now = (options.now ?? (() => new Date()))();
-	const base = baseResult("blocked", corePath);
-	// Migration guard: prefer <repo>/.idu/config/project-core.json; if not
-	// found, attempt to migrate from <repo>/config/project-core.json.
+	const base = baseResult("blocked", targetPath);
+	// Slice 3/5: migration guard runs against stateRoot, not projectPath.
+	// Migration guard: prefer <stateRoot>/.idu/config/project-core.json; if not
+	// found, attempt to migrate from <stateRoot>/config/project-core.json.
 	const migrated = readIdPathWithMigration(
-		options.projectPath,
+		options.stateRoot,
 		"project-core.json",
 	);
 	if (migrated.content === null) {
@@ -100,10 +102,10 @@ export function confirmProjectCore(
 		};
 	}
 
-	const core = loadProjectCore(options.projectPath);
+	const core = loadProjectCore(options.stateRoot);
 	if (core.status === "confirmed") {
 		return {
-			...baseResult("already_confirmed", corePath),
+			...baseResult("already_confirmed", targetPath),
 			ok: true,
 			status: "confirmed",
 			alreadyConfirmed: true,
@@ -181,7 +183,7 @@ export function confirmProjectCore(
 	);
 	writeProjectCore(options.projectPath, options.stateRoot, validation.core);
 	return {
-		...baseResult("confirmed", corePath),
+		...baseResult("confirmed", targetPath),
 		ok: true,
 		status: "confirmed",
 		backupPath,
@@ -194,10 +196,10 @@ export function confirmProjectCore(
 export function rejectProjectCore(
 	options: ProjectCoreConfirmationOptions,
 ): ProjectCoreConfirmationResult {
-	const corePath = projectCorePath(options.projectPath);
+	const targetPath = corePath(options.stateRoot);
 	const now = (options.now ?? (() => new Date()))();
-	const base = baseResult("blocked", corePath);
-	if (!existsSync(corePath)) {
+	const base = baseResult("blocked", targetPath);
+	if (!existsSync(targetPath)) {
 		return {
 			...base,
 			errors: [
@@ -207,7 +209,7 @@ export function rejectProjectCore(
 				"No existe config/project-core.json. Ejecuta /idu_define_project primero.",
 		};
 	}
-	const core = loadProjectCore(options.projectPath);
+	const core = loadProjectCore(options.stateRoot);
 	const rejectedAt = now.toISOString();
 	const updatedCore: ProjectCore = {
 		...core,
@@ -238,7 +240,7 @@ export function rejectProjectCore(
 	);
 	writeProjectCore(options.projectPath, options.stateRoot, validation.core);
 	return {
-		...baseResult("rejected", corePath),
+		...baseResult("rejected", targetPath),
 		ok: true,
 		status: validation.core.status,
 		backupPath,
@@ -250,10 +252,10 @@ export function rejectProjectCore(
 export function diffProjectCore(
 	options: ProjectCoreConfirmationOptions,
 ): ProjectCoreDiffResult {
-	const corePath = projectCorePath(options.projectPath);
+	const targetPath = corePath(options.stateRoot);
 	const result: ProjectCoreDiffResult = {
 		ok: false,
-		path: corePath,
+		path: targetPath,
 		completeFields: [],
 		incompleteFields: [],
 		openQuestions: [],
@@ -261,13 +263,13 @@ export function diffProjectCore(
 		differences: [],
 		errors: [],
 	};
-	if (!existsSync(corePath)) {
+	if (!existsSync(targetPath)) {
 		result.errors.push(
 			"No existe config/project-core.json. Ejecuta /idu_define_project primero.",
 		);
 		return result;
 	}
-	const core = loadProjectCore(options.projectPath);
+	const core = loadProjectCore(options.stateRoot);
 	result.ok = true;
 	result.status = core.status;
 	result.completeFields = CRITICAL_FIELDS.filter((field) =>
@@ -357,16 +359,13 @@ function baseResult(
 	};
 }
 
-function projectCorePath(projectPath: string): string {
-	return join(projectPath, ".idu", "config", "project-core.json");
-}
-
 function writeProjectCore(
 	projectPath: string,
 	stateRoot: string,
 	core: ProjectCore,
 ): void {
-	const path = projectCorePath(projectPath);
+	// Slice 3/5: write under stateRoot/.idu/config/ via the shared helper.
+	const path = corePath(stateRoot);
 	assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(core, null, 2)}\n`, "utf8");
@@ -383,7 +382,8 @@ function backupProjectCore(
 		`project-core.backup-${timestamp(now)}.json`,
 	);
 	assertAllowedWrite(backupPath, { stateRoot, repoRoot: projectPath });
-	const migrated = readIdPathWithMigration(projectPath, "project-core.json");
+	// Slice 3/5: backup source is read from stateRoot, not projectPath.
+	const migrated = readIdPathWithMigration(stateRoot, "project-core.json");
 	if (migrated.content !== null) {
 		writeFileSync(backupPath, migrated.content, "utf8");
 	}

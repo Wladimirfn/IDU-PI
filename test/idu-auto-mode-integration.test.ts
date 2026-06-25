@@ -224,7 +224,10 @@ function applyAutoGuardIfActive(
 
 test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and guarded queue", async () => {
 	await withTempProject(async ({ projectPath, stateRoot, reportsDir }) => {
-		const corePath = join(projectPath, "config", "project-core.json");
+		// Slice 3/5: the loader reads from stateRoot, so the draft must be
+		// seeded under stateRoot/.idu/config/ (Layout A).
+		const corePath = join(stateRoot, ".idu", "config", "project-core.json");
+		mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 		writeFileSync(
 			corePath,
 			`${JSON.stringify(completeDraftCore(), null, "\t")}\n`,
@@ -247,7 +250,7 @@ test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and gua
 			),
 		);
 
-		const confirmedCore = loadProjectCore(projectPath);
+		const confirmedCore = loadProjectCore(stateRoot);
 		assert.equal(confirmedCore.status, "confirmed");
 		assert.ok(
 			confirmedCore.humanDecisions.some(

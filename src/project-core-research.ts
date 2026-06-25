@@ -91,18 +91,23 @@ export type ProjectCoreResearchReview = {
 export function buildProjectCoreResearchPrompt(
 	coreOrProjectPath: ProjectCore | string,
 	context = "",
-	stateRoot?: string,
+	stateRoot: string,
 ): string {
+	// Slice 3/5: when the first arg is a string, it is the projectPath
+	// (used to read README, package.json, docs, and flows). stateRoot is
+	// required and is where loadProjectCore / safeBlueprint read from.
+	// The `?? coreOrProjectPath` fallback that used to live here was dead
+	// code AND a latent split-brain trap: a future caller passing the
+	// wrong arg ordering would silently feed projectPath into
+	// loadProjectCore. Removed; auditor verified stateRoot is required
+	// on ProjectCoreResearchOptions and all callers pass it.
 	const core =
 		typeof coreOrProjectPath === "string"
-			? loadProjectCore(coreOrProjectPath)
+			? loadProjectCore(stateRoot)
 			: coreOrProjectPath;
 	const safeContext =
 		typeof coreOrProjectPath === "string"
-			? collectSafeProjectCoreResearchContext(
-					coreOrProjectPath,
-					stateRoot ?? coreOrProjectPath,
-				)
+			? collectSafeProjectCoreResearchContext(coreOrProjectPath, stateRoot)
 			: context;
 	return [
 		"Generá un research draft para Project Core.",
@@ -141,7 +146,8 @@ export async function saveProjectCoreResearchDraft(
 			error: `No pude generar research draft Project Core: ${error instanceof Error ? error.message : String(error)}`,
 		};
 	}
-	const core = loadProjectCore(options.projectPath);
+	// Slice 3/5: loadProjectCore reads from stateRoot, not projectPath.
+	const core = loadProjectCore(options.stateRoot);
 	const parsed = parseJson(rawOutput);
 	const recommendations = parsed.ok
 		? extractRecommendations(parsed.value)

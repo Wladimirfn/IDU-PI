@@ -112,15 +112,34 @@ const DATA_SENSITIVITY_LEVELS = [
 ] as const;
 const STATUSES = ["draft", "proposed", "confirmed", "stale"] as const;
 
-export function loadProjectCore(projectPath: string): ProjectCore {
-	// Territory: prefer <repo>/.idu/config/project-core.json, with one-time
-	// migration from <repo>/config/project-core.json.
-	const migrated = readIdPathWithMigration(projectPath, "project-core.json");
+/**
+ * Slice 3/5: shared writer/reader path for project-core.json. Replaces the
+ * duplicated `projectCorePath` helpers in project-core-wizard.ts and
+ * project-core-confirmation.ts. Layout is hardcoded to A
+ * (`<stateRoot>/.idu/config/project-core.json`); the loader uses
+ * `readIdPathWithMigration` which still does A-pref-B-fallback, so this
+ * helper intentionally covers only Layout A.
+ *
+ * Out-of-scope for Slice 3: the layout-axis discrepancy between this
+ * helper (A-hardcoded) and `loadProjectCore` (A-pref-B via
+ * `readIdPathWithMigration`). Logged as a finding for future cleanup —
+ * NOT fixed in this PR.
+ */
+export function corePath(stateRoot: string): string {
+	return join(stateRoot, ".idu", "config", "project-core.json");
+}
+
+export function loadProjectCore(stateRoot: string): ProjectCore {
+	// Slice 3/5: loader reads from stateRoot, not projectPath. When
+	// stateRoot === projectPath (hermetic/test paths) behavior is preserved.
+	// Territory: prefer <stateRoot>/.idu/config/project-core.json, with one-time
+	// migration from <stateRoot>/config/project-core.json.
+	const migrated = readIdPathWithMigration(stateRoot, "project-core.json");
 	let corePath: string;
 	let raw: string;
 	if (migrated.content !== null) {
 		raw = migrated.content;
-		corePath = join(projectPath, ".idu", "config", "project-core.json");
+		corePath = join(stateRoot, ".idu", "config", "project-core.json");
 	} else {
 		corePath = defaultCorePath();
 		raw = readFileSync(corePath, "utf8");

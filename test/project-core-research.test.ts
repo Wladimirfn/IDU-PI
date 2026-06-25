@@ -32,6 +32,10 @@ function tempProject(): {
 	// NOTE: flows remains under projectPath for now — Slice 4 moves flows
 	// to stateRoot, so we keep flows accessible to loadProjectFlows via
 	// its current projectPath-based migration.
+	// Slice 3/5: core also lives under stateRoot. Seeding under stateRoot/
+	// .idu/config/ (Layout A) so loadProjectCore(stateRoot) finds it
+	// without needing migration. The "does not write config" test seeds
+	// under stateRoot/config/ (Layout B) instead, to exercise migration.
 	const stateRoot = mkdtempSync(join(tmpdir(), "pi-core-research-state-"));
 	tempDirs.push(projectPath, stateRoot);
 	const reportsDir = join(projectPath, "reports-out");
@@ -39,9 +43,10 @@ function tempProject(): {
 	mkdirSync(join(projectPath, "docs"), { recursive: true });
 	mkdirSync(reportsDir, { recursive: true });
 	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	const core = createDefaultProjectCore("Demo Core");
 	writeFileSync(
-		join(projectPath, "config", "project-core.json"),
+		join(stateRoot, ".idu", "config", "project-core.json"),
 		JSON.stringify(
 			{
 				...core,
@@ -129,9 +134,30 @@ test("saveProjectCoreResearchDraft creates file in reports", async () => {
 });
 
 test("saveProjectCoreResearchDraft does not write config/project-core.json", async () => {
-	const { projectPath, stateRoot, reportsDir } = tempProject();
-	const corePath = join(projectPath, "config", "project-core.json");
-	const before = readFileSync(corePath, "utf8");
+	// Slice 3/5: seed a legacy Layout B core under stateRoot so the
+	// migration guard inside loadProjectCore(stateRoot) moves it. This
+	// intentionally bypasses tempProject() — which seeds Layout A — so we
+	// exercise the actual migration path.
+	const projectPath = mkdtempSync(join(tmpdir(), "pi-core-research-migrate-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-core-research-migrate-state-"));
+	tempDirs.push(projectPath, stateRoot);
+	const reportsDir = join(projectPath, "reports-out");
+	mkdirSync(reportsDir, { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	mkdirSync(join(projectPath, "docs"), { recursive: true });
+	const core = createDefaultProjectCore("Demo Core");
+	const corePath = join(stateRoot, "config", "project-core.json");
+	const before = JSON.stringify(
+		{
+			...core,
+			projectGoal: "Goal",
+			problemStatement: "Problem",
+			status: "draft",
+		},
+		null,
+		2,
+	);
+	writeFileSync(corePath, `${before}\n`, "utf8");
 
 	await saveProjectCoreResearchDraft({
 		projectPath,
@@ -142,10 +168,11 @@ test("saveProjectCoreResearchDraft does not write config/project-core.json", asy
 
 	// Territory model: loadProjectCore (called inside saveProjectCoreResearchDraft
 	// to read sourceCoreStatus) uses migration guard and moves the legacy file
-	// to <repo>/.idu/config/project-core.json. We compare against the migrated
-	// path; the content must be unchanged.
-	const migratedPath = join(projectPath, ".idu", "config", "project-core.json");
-	assert.equal(readFileSync(migratedPath, "utf8"), before);
+	// from <stateRoot>/config/project-core.json to
+	// <stateRoot>/.idu/config/project-core.json. We compare against the
+	// migrated path; the content must be unchanged.
+	const migratedPath = join(stateRoot, ".idu", "config", "project-core.json");
+	assert.equal(readFileSync(migratedPath, "utf8"), `${before}\n`);
 });
 
 test("saved ProjectCore research draft includes warning", async () => {

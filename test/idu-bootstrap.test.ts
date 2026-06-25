@@ -54,9 +54,14 @@ test("idu bootstrap enrolls project and creates state, core, constitution, bluep
 		assert.equal(existsSync(result.statePaths.agentLabReportsDir), true);
 		assert.ok(result.created.includes(result.statePaths.stateRoot));
 		assert.ok(result.created.includes(result.statePaths.reportsDir));
-		// Territory model: governance files live under <repo>/.idu/config/.
+		// Slice 3/5: core now lives under stateRoot (Layout A). bootstrap inline
+		// writes there, loader reads from there. Constitution writer is
+		// out-of-scope for Slice 3 — the inline still writes to projectPath
+		// (separate finding for future slice, see issue #170).
 		assert.equal(
-			existsSync(join(projectPath, ".idu", "config", "project-core.json")),
+			existsSync(
+				join(result.statePaths.stateRoot, ".idu", "config", "project-core.json"),
+			),
 			true,
 		);
 		assert.equal(
@@ -79,7 +84,7 @@ test("idu bootstrap enrolls project and creates state, core, constitution, bluep
 		);
 		const core = JSON.parse(
 			readFileSync(
-				join(projectPath, ".idu", "config", "project-core.json"),
+				join(result.statePaths.stateRoot, ".idu", "config", "project-core.json"),
 				"utf8",
 			),
 		) as { status: string };

@@ -911,8 +911,9 @@ function loadConfirmedProjectConstitution(
 	// when the canonical Layout A file exists — the pre-check returned
 	// false and the function bailed before `loadProjectCore` could find
 	// the file at Layout A.
+	// Slice 3/5: loader reads from stateRoot, not projectPath.
 	try {
-		const core = loadProjectCore(projectPath);
+		const core = loadProjectCore(stateRoot ?? projectPath);
 		if (core.status !== "confirmed") return undefined;
 		const constitutionPath = join(
 			stateRoot ?? projectPath,
@@ -1642,7 +1643,8 @@ function semanticCompactionProjectContext(
 	constitution?: string;
 } {
 	try {
-		const core = loadProjectCore(projectPath);
+		// Slice 3/5: loader reads from stateRoot, not projectPath.
+		const core = loadProjectCore(stateRoot);
 		if (core.status !== "confirmed") return {};
 		const constitution = existsSync(
 			join(stateRoot, "config", "project-constitution.json"),
