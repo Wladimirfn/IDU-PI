@@ -35,17 +35,17 @@ function tempProject(): {
 	const stateRoot = mkdtempSync(join(tmpdir(), "pi-core-confirm-state-"));
 	tempDirs.push(projectPath, stateRoot);
 	const reportsDir = join(projectPath, "reports");
-	// Write to <repo>/.idu/config/project-core.json (the new territory) so
-	// tests don't need migration guard. Some tests still write to the
-	// legacy <repo>/config/ to verify migration behavior — those use a
-	// dedicated helper instead.
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	// Slice 3/5: write to <stateRoot>/.idu/config/project-core.json (the
+	// new territory) so tests don't need migration guard. Some tests still
+	// write to the legacy <stateRoot>/config/ to verify migration behavior
+	// — those use a dedicated helper instead.
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	mkdirSync(join(projectPath, "reports"), { recursive: true });
 	return {
 		projectPath,
 		stateRoot,
 		reportsDir,
-		corePath: join(projectPath, ".idu", "config", "project-core.json"),
+		corePath: join(stateRoot, ".idu", "config", "project-core.json"),
 	};
 }
 

@@ -4466,8 +4466,19 @@ test("idu_bootstrap_project creates drafts only when explicitly allowed and acti
 			activate: false,
 		});
 		assert.equal(noDrafts.ok, true);
+		// Slice 3/5: bootstrap inline writes core under stateRoot, not
+		// projectPath. So noDrafts (allowCreateDrafts:false) must NOT have
+		// any core file under the new stateRoot.
 		assert.equal(
-			existsSync(join(noDraftsPath, ".idu", "config", "project-core.json")),
+			existsSync(
+				join(
+					(noDrafts.data as { statePaths: { stateRoot: string } }).statePaths
+						.stateRoot,
+					".idu",
+					"config",
+					"project-core.json",
+				),
+			),
 			false,
 		);
 
@@ -4478,7 +4489,15 @@ test("idu_bootstrap_project creates drafts only when explicitly allowed and acti
 		});
 		assert.equal(withDraftsInactive.ok, true);
 		assert.equal(
-			existsSync(join(draftsPath, ".idu", "config", "project-core.json")),
+			existsSync(
+				join(
+					(withDraftsInactive.data as { statePaths: { stateRoot: string } })
+						.statePaths.stateRoot,
+					".idu",
+					"config",
+					"project-core.json",
+				),
+			),
 			true,
 		);
 		assert.equal(

@@ -93,9 +93,11 @@ export function buildProjectCoreResearchPrompt(
 	context = "",
 	stateRoot?: string,
 ): string {
+	// Slice 3/5: when coreOrProjectPath is a string, it now represents
+	// stateRoot (not projectPath). loadProjectCore reads from stateRoot.
 	const core =
 		typeof coreOrProjectPath === "string"
-			? loadProjectCore(coreOrProjectPath)
+			? loadProjectCore(stateRoot ?? coreOrProjectPath)
 			: coreOrProjectPath;
 	const safeContext =
 		typeof coreOrProjectPath === "string"
