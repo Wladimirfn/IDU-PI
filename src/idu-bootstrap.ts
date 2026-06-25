@@ -214,7 +214,12 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 		}
 	}
 
-	const constitutionPath = join(projectPath, PROJECT_CONSTITUTION);
+	// Slice 1/5 reader + Slice 3/5 core path swap: constitution lives under
+	// stateRoot/.idu/config/, not projectPath. The previous writer landed on
+	// projectPath, which created a live split-brain post-Slice-1: loadProjectConstitution
+	// read from stateRoot, bootstrap wrote to projectPath. First fresh bootstrap
+	// post-Slice-1 created constitution where the loader did not read.
+	const constitutionPath = join(statePaths.stateRoot, PROJECT_CONSTITUTION);
 	if (!existsSync(constitutionPath)) {
 		try {
 			const core = JSON.parse(readFileSync(corePath, "utf8")) as unknown;
