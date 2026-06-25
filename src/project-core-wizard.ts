@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { assertAllowedWrite } from "./idu-scratch.js";
 import {
+	corePath,
 	createDefaultProjectCore,
 	loadProjectCore,
 	summarizeProjectCore,
@@ -160,7 +161,7 @@ export function getProjectCoreWizardStatus(options: ProjectCoreWizardOptions): {
 	text: string;
 } {
 	const state = readWizardState(options);
-	const localCorePath = projectCorePath(options.projectPath);
+	const localCorePath = corePath(options.stateRoot);
 	if (!existsSync(localCorePath)) {
 		return {
 			...(state ? { state } : {}),
@@ -171,7 +172,7 @@ export function getProjectCoreWizardStatus(options: ProjectCoreWizardOptions): {
 			].join("\n"),
 		};
 	}
-	const core = loadProjectCore(options.projectPath);
+	const core = loadProjectCore(options.stateRoot);
 	return {
 		...(state ? { state } : {}),
 		core,
@@ -246,7 +247,7 @@ function buildDraftCore(
 	options: ProjectCoreWizardOptions,
 	state: ProjectCoreWizardState,
 ): ProjectCore {
-	const existing = readExistingLocalCore(options.projectPath);
+	const existing = readExistingLocalCore(options.projectPath, options.stateRoot);
 	if (existing?.status === "confirmed") {
 		throw new Error(
 			"Project Core confirmed: no puedo sobreescribir una verdad confirmada.",
@@ -300,16 +301,21 @@ function writeProjectCoreDraft(
 			`Project Core draft inválido: ${validation.errors.join("; ")}`,
 		);
 	}
-	const path = projectCorePath(projectPath);
+	// Slice 3/5: write under stateRoot/.idu/config/ via the shared helper.
+	const path = corePath(stateRoot);
 	assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(core, null, 2)}\n`);
 }
 
-function readExistingLocalCore(projectPath: string): ProjectCore | undefined {
-	const path = projectCorePath(projectPath);
+function readExistingLocalCore(
+	projectPath: string,
+	stateRoot: string,
+): ProjectCore | undefined {
+	// Slice 3/5: read under stateRoot/.idu/config/ via the shared helper.
+	const path = corePath(stateRoot);
 	if (!existsSync(path)) return undefined;
-	return loadProjectCore(projectPath);
+	return loadProjectCore(stateRoot);
 }
 
 function readWizardState(
@@ -334,10 +340,6 @@ function writeWizardState(
 
 function wizardStatePath(workspaceRoot: string): string {
 	return join(workspaceRoot, "reports", "project-core-wizard-state.json");
-}
-
-function projectCorePath(projectPath: string): string {
-	return join(projectPath, ".idu", "config", "project-core.json");
 }
 
 function currentIso(options: ProjectCoreWizardOptions): string {
