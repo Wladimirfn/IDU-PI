@@ -23,7 +23,8 @@ export function createLabFindingRuleValidator(
 	stateRoot: string,
 ): LabFindingRuleValidator {
 	const blueprint = loadProjectBlueprint(stateRoot);
-	const flows = loadProjectFlows(projectPath);
+	// Slice 4/5: flows reads from stateRoot (same as blueprint).
+	const flows = loadProjectFlows(stateRoot);
 	return (finding) =>
 		validateFindingAgainstRules(
 			parsedFindingToAgentLabFinding(finding),

@@ -193,7 +193,7 @@ test("initProjectFlows creates flows when missing", () => {
 	const stateRoot = tempStateRoot();
 
 	const result = initProjectFlows(projectPath, stateRoot);
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		projectType: string;
 	};
@@ -202,11 +202,39 @@ test("initProjectFlows creates flows when missing", () => {
 	assert.equal(flows.projectType, "real-project-functional-map");
 });
 
+// MANDATORY TEST #1 (Slice 4/5): Split-brain write guard for initProjectFlows.
+// When projectPath !== stateRoot, the flows writer must land at stateRoot
+// and NOT touch projectPath. Mirrors the Slice 2 initProjectBlueprint guard
+// (test/config-wizard.test.ts:165) and the Slice 3 initProjectCore guard.
+test("initProjectFlows writes only under stateRoot (split-brain guard)", () => {
+	const projectPath = join(tempDir(), "demo-project");
+	mkdirSync(projectPath, { recursive: true });
+	const stateRoot = tempStateRoot();
+
+	initProjectFlows(projectPath, stateRoot);
+
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-flows.json")),
+		true,
+		"flows must exist under stateRoot",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+		false,
+		"flows must NOT exist under projectPath (Slice 4 move)",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		false,
+		"flows must NOT exist under projectPath legacy layout",
+	);
+});
+
 test("initProjectFlows does not overwrite existing flows", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(flowsPath, '{"projectType":"custom"}\n', "utf8");
 
 	const result = initProjectFlows(projectPath, stateRoot);
@@ -229,7 +257,7 @@ test("initProjectConfig creates both project config files", () => {
 		true,
 	);
 	assert.equal(
-		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+		existsSync(join(stateRoot, ".idu", "config", "project-flows.json")),
 		true,
 	);
 });
@@ -248,8 +276,9 @@ test("initProjectConfig infers safe projectName from folder", () => {
 });
 
 test("initProjectConfig writes only under stateRoot (split-brain guard)", () => {
-	// Slice 2/5 split-brain guard: when stateRoot !== projectPath, the writer
-	// must land the file under stateRoot and NOT touch projectPath.
+	// Slice 4/5 split-brain guard: when stateRoot !== projectPath, the writer
+	// must land BOTH blueprint AND flows under stateRoot and NOT touch
+	// projectPath. After Slice 4, both files follow the same ROOT rule.
 	const projectPath = join(tempDir(), "demo-project");
 	mkdirSync(projectPath, { recursive: true });
 	const stateRoot = tempStateRoot();
@@ -261,23 +290,20 @@ test("initProjectConfig writes only under stateRoot (split-brain guard)", () => 
 		true,
 		"blueprint must exist under stateRoot",
 	);
-	// Slice 2/5: blueprint lives under stateRoot; flows stays under projectPath
-	// until Slice 4 moves it. So flows DOES live under projectPath — that is
-	// the post-Slice-2 territory, not a split-brain regression.
 	assert.equal(
-		existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
+		existsSync(join(stateRoot, ".idu", "config", "project-flows.json")),
 		true,
-		"blueprint must exist under stateRoot",
-	);
-	assert.equal(
-		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
-		true,
-		"flows must exist under projectPath (Slice 4 territory)",
+		"flows must exist under stateRoot (Slice 4 move)",
 	);
 	assert.equal(
 		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
 		false,
 		"blueprint must NOT exist under projectPath",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+		false,
+		"flows must NOT exist under projectPath (Slice 4 move)",
 	);
 });
 
@@ -365,10 +391,10 @@ test("inspectProjectConfig reports invalid project config without throwing", () 
 		"{ invalid",
 		"utf8",
 	);
-	// Slice 2/5: flows stays under projectPath until Slice 4.
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	// Slice 4/5: flows now live under stateRoot alongside blueprint.
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, ".idu", "config", "project-flows.json"),
+		join(stateRoot, ".idu", "config", "project-flows.json"),
 		"{}",
 		"utf8",
 	);
@@ -445,7 +471,7 @@ test("inspectProjectMap detects module without screens", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		modules: Array<{ screens: string[] }>;
 	};
@@ -461,7 +487,7 @@ test("inspectProjectMap detects screen with missing module", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		screens: Array<{ module: string }>;
 	};
@@ -477,7 +503,7 @@ test("inspectProjectMap detects flow with missing module", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		flows: Array<{ module: string }>;
 	};
@@ -493,7 +519,7 @@ test("inspectProjectMap detects step without from or to", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		flows: Array<{ steps: Array<{ from?: string }> }>;
 	};
@@ -509,7 +535,7 @@ test("inspectProjectMap detects dataStore without ownerModule", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		dataStores: Array<{ ownerModule?: string }>;
 	};
@@ -525,7 +551,7 @@ test("inspectProjectMap detects invalid moduleConnection", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		moduleConnections: Array<{ toModule: string }>;
 	};
@@ -541,7 +567,7 @@ test("inspectProjectMap detects uiElement without selector or label", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
 	initProjectConfig(projectPath, stateRoot, "demo");
-	const flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
 		uiElements: Array<{ selector?: string; label?: string }>;
 	};
@@ -565,7 +591,7 @@ test("inspectProjectMap does not write files", () => {
 		false,
 	);
 	assert.equal(
-		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+		existsSync(join(stateRoot, ".idu", "config", "project-flows.json")),
 		false,
 	);
 });
@@ -673,6 +699,26 @@ test("inspectProjectMap resolves blueprint under stateRoot, not projectPath (dyn
 	assert.equal(resultFromProjectPath.source, "default");
 });
 
+// MANDATORY TEST #3 (Slice 4/5): inspectProjectMap usesLocalFlows + flows
+// branch must follow stateRoot, not projectPath. Mirrors the Slice 2
+// dynamic-path guard at config-wizard.test.ts:682.
+test("inspectProjectMap resolves flows under stateRoot, not projectPath (dynamic path)", () => {
+	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
+	initProjectConfig(projectPath, stateRoot, "flows-dynamic-path-demo");
+
+	// Flow file written under stateRoot only. inspectProjectMap must see
+	// it and report project-local — not silently fall back to projectPath.
+	const resultFromStateRoot = inspectProjectMap(projectPath, stateRoot);
+	assert.equal(resultFromStateRoot.source, "project-local");
+
+	// Mirror with projectPath as both: projectPath is empty here (init
+	// wrote to stateRoot), so source must be default — proves flows
+	// reads follow stateRoot, not projectPath.
+	const resultFromProjectPath = inspectProjectMap(projectPath, projectPath);
+	assert.equal(resultFromProjectPath.source, "default");
+});
+
 // Issue #172 split-brain guard: config-wizard.ts:321 used to do
 // `const stateRoot = options.stateRoot ?? options.projectPath`, which would
 // silently feed projectPath into projectConfigStatus when stateRoot was
@@ -748,4 +794,25 @@ test("inspectProjectConfig returns default blueprint when stateRoot has none (pa
 	assert.equal(report.projectConfig.blueprint.exists, false);
 	assert.equal(report.projectConfig.blueprint.source, "default");
 	assert.equal(report.projectConfig.blueprint.valid, true);
+});
+
+// MANDATORY TEST #5 (Slice 4/5): No-op when path === stateRoot.
+// Pre-Slice-4 invariant: when stateRoot === projectPath, all reads/writes
+// behave identically to the pre-refactor world (loads from where writes
+// land). After Slice 4, this invariant must still hold — the only path
+// resolution is by ROOT (stateRoot), and writes/reads both use it.
+test("initProjectFlows behaves identically when path === stateRoot (no-op)", () => {
+	const projectPath = tempDir();
+	const stateRoot = projectPath;
+
+	const result = initProjectFlows(projectPath, stateRoot);
+	const flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
+	const flows = JSON.parse(readFileSync(flowsPath, "utf8")) as {
+		projectType: string;
+	};
+
+	assert.ok(result.created.includes(".idu/config/project-flows.json"));
+	assert.equal(flows.projectType, "real-project-functional-map");
+	// Layout B fallback path must NOT exist — Slice 4 uses Layout A only.
+	assert.equal(existsSync(join(stateRoot, "config", "project-flows.json")), false);
 });

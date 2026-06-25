@@ -260,7 +260,9 @@ export function buildPreflightReport(
 		connection.projectPath &&
 		connection.flows?.source === "project-local" &&
 		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
+			? loadProjectFlows(
+					context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				)
 			: undefined;
 	const constitution = loadConfirmedProjectConstitution(
 		context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
@@ -284,7 +286,9 @@ export function buildPostflightReport(
 		connection.projectPath &&
 		connection.flows?.source === "project-local" &&
 		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
+			? loadProjectFlows(
+					context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
 	const constitution = loadConfirmedProjectConstitution(
@@ -336,12 +340,29 @@ export function runPrepare(context: RuntimeContext): IduPrepareResult {
 					activeProjectName: context.activeProject.name,
 				},
 			),
-		loadProjectFlows: () => loadProjectFlows(projectPath),
-		scanProjectMap: (flows) => scanProjectMap(projectPath, flows),
+		loadProjectFlows: () =>
+			loadProjectFlows(
+				context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+			),
+		scanProjectMap: (flows) =>
+			scanProjectMap(
+				projectPath,
+				context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				flows,
+			),
 		suggestProjectFlows: (flows) =>
-			suggestProjectFlowsFromScan(projectPath, flows),
+			suggestProjectFlowsFromScan(
+				projectPath,
+				context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				flows,
+			),
 		draftProjectFlows: (flows) =>
-			saveProjectFlowsDraft(projectPath, flows, reportsPath),
+			saveProjectFlowsDraft(
+				projectPath,
+				context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				flows,
+				reportsPath,
+			),
 		reviewProjectFlowsDraft: (draftPathOrLatest, flows) =>
 			reviewProjectFlowsDraft(draftPathOrLatest, flows, reportsPath),
 		postflight: () => buildPostflightReport(context),

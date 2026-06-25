@@ -148,13 +148,18 @@ const MANY_INLINE_ONCLICK_THRESHOLD = 3;
 
 export function scanProjectMap(
 	projectPath: string,
+	stateRoot: string,
 	flows: ProjectFlows,
 ): ProjectMapScanResult {
 	const scannedFiles = listScannableFiles(projectPath);
+	// Slice 4/5: mapSource check now resolves from stateRoot. The
+	// projectPath param remains for listScannableFiles() — the scan target
+	// is the repo content, not the config location. LAYOUT FROZEN:
+	// hardcoded Layout A (do not switch to readIdPathWithMigration).
 	const result: ProjectMapScanResult = {
 		projectPath,
 		mapSource: existsSync(
-			join(projectPath, ".idu", "config", "project-flows.json"),
+			join(stateRoot, ".idu", "config", "project-flows.json"),
 		)
 			? "project-local"
 			: "default",
@@ -233,9 +238,10 @@ Solo lectura: no escribí archivos, no generé project-flows, no usé IA, no eje
 
 export function suggestProjectFlowsFromScan(
 	projectPath: string,
+	stateRoot: string,
 	flows: ProjectFlows,
 ): ProjectFlowSuggestions {
-	const scan = scanProjectMap(projectPath, flows);
+	const scan = scanProjectMap(projectPath, stateRoot, flows);
 	const mappedScreenPaths = new Set(
 		flows.screens.map((screen) => normalizePath(screen.path)),
 	);
@@ -386,16 +392,18 @@ export function applyProjectFlowsDraft(
 		);
 		return result;
 	}
-	// Territory: read <repo>/.idu/config/project-flows.json with one-time
-	// migration from <repo>/config/project-flows.json (atomic rename).
-	const migrated = readIdPathWithMigration(projectPath, "project-flows.json");
+	// Slice 4/5: applyProjectFlowsDraft already accepts stateRoot; the
+	// read+write paths now use it. LAYOUT FROZEN at :398: hardcoded Layout A
+	// (do not switch to readIdPathWithMigration — pre-existing layout
+	// characteristic for future cleanup, same as readLooseProjectFlows).
+	const migrated = readIdPathWithMigration(stateRoot, "project-flows.json");
 	if (migrated.content === null) {
 		result.errors.push(
 			"project-flows.json no existe en .idu/config/ ni en config/",
 		);
 		return result;
 	}
-	const configPath = join(projectPath, ".idu", "config", "project-flows.json");
+	const configPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	let current: ProjectFlows;
 	try {
 		current = readProjectFlowsFileFromString(migrated.content);
@@ -441,9 +449,9 @@ export function applyProjectFlowsDraft(
 	ensureScratchDir(stateRoot);
 	assertAllowedWrite(backupPath, { stateRoot, repoRoot: projectPath });
 	writeFileSync(backupPath, migrated.content, "utf8");
-	// Territory: the actual flows file lives under <repo>/.idu/config/.
+	// Territory: the actual flows file lives under <stateRoot>/.idu/config/.
 	assertAllowedWrite(configPath, { stateRoot, repoRoot: projectPath });
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(
 		configPath,
 		`${JSON.stringify(validation.flows, null, 2)}\n`,
@@ -629,11 +637,12 @@ No modifiqué config/project-flows.json, no escribí archivos, no usé IA, no ej
 
 export function saveProjectFlowsDraft(
 	projectPath: string,
+	stateRoot: string,
 	flows: ProjectFlows,
 	reportsPath: string,
 	now = new Date(),
 ): ProjectFlowDraftResult {
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 	mkdirSync(reportsPath, { recursive: true });
 	const path = uniqueDraftPath(reportsPath, now);
 	writeFileSync(

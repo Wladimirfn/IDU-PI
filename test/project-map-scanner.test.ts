@@ -179,18 +179,20 @@ function infoText(result: ProjectMapScanResult): string {
 
 test("scanProjectMap detects HTML files", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.deepEqual(result.detected.htmlFiles, ["index.html"]);
 });
 
 test("scanProjectMap detects button by id", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.ok(
 		result.detected.uiElements.some(
@@ -201,18 +203,20 @@ test("scanProjectMap detects button by id", () => {
 
 test("scanProjectMap detects onclick", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.equal(result.detected.inlineOnclicks.length, 2);
 });
 
 test("scanProjectMap detects form", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.ok(
 		result.detected.uiElements.some(
@@ -223,9 +227,10 @@ test("scanProjectMap detects form", () => {
 
 test("scanProjectMap detects fetch", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.deepEqual(
 		result.detected.apiEndpoints.map((endpoint) => endpoint.value),
@@ -235,9 +240,10 @@ test("scanProjectMap detects fetch", () => {
 
 test("scanProjectMap detects localStorage", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.ok(
 		result.detected.dataStores.some((store) => store.type === "localStorage"),
@@ -249,13 +255,14 @@ test("scanProjectMap detects localStorage", () => {
 
 test("scanProjectMap warns for unmapped button", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.uiElements = flows.uiElements.filter(
 		(element) => element.id !== "create-machine",
 	);
 
-	const result = scanProjectMap(projectPath, flows);
+	const result = scanProjectMap(projectPath, stateRoot, flows);
 
 	assert.match(
 		warningText(result),
@@ -265,9 +272,10 @@ test("scanProjectMap warns for unmapped button", () => {
 
 test("scanProjectMap warns for missing flow selector", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.match(
 		warningText(result),
@@ -277,6 +285,7 @@ test("scanProjectMap warns for missing flow selector", () => {
 
 test("scanProjectMap warns for undeclared real screen", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	writeFileSync(
 		join(projectPath, "reports.html"),
@@ -284,7 +293,7 @@ test("scanProjectMap warns for undeclared real screen", () => {
 		"utf8",
 	);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.match(
 		warningText(result),
@@ -294,18 +303,20 @@ test("scanProjectMap warns for undeclared real screen", () => {
 
 test("scanProjectMap detects duplicate button", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.match(warningText(result), /Botón duplicado.*create-machine/u);
 });
 
 test("scanProjectMap reports unmapped functions as info", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.match(
 		infoText(result),
@@ -315,9 +326,10 @@ test("scanProjectMap reports unmapped functions as info", () => {
 
 test("scanProjectMap warns for unmapped dataStore", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.match(
 		warningText(result),
@@ -327,10 +339,11 @@ test("scanProjectMap warns for unmapped dataStore", () => {
 
 test("scanProjectMap does not write files", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const before = readFileSync(join(projectPath, "index.html"), "utf8");
 
-	scanProjectMap(projectPath, mappedFlows());
+	scanProjectMap(projectPath, stateRoot, mappedFlows());
 
 	assert.equal(readFileSync(join(projectPath, "index.html"), "utf8"), before);
 	assert.equal(
@@ -341,9 +354,10 @@ test("scanProjectMap does not write files", () => {
 
 test("formatProjectMapScan includes grouped summary", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 	const text = formatProjectMapScan(result);
 
 	assert.match(text, /Resumen/u);
@@ -358,8 +372,9 @@ test("formatProjectMapScan includes grouped summary", () => {
 
 test("formatProjectMapScan limits top 10 findings", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
-	const result = scanProjectMap(projectPath, mappedFlows());
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
 	result.findings = Array.from({ length: 12 }, (_, index) => ({
 		severity: "warning" as const,
 		message: `warning ${index + 1}`,
@@ -375,9 +390,10 @@ test("formatProjectMapScan limits top 10 findings", () => {
 
 test("formatProjectMapScan warns when default flows are used", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const text = formatProjectMapScan(scanProjectMap(projectPath, mappedFlows()));
+	const text = formatProjectMapScan(scanProjectMap(projectPath, stateRoot, mappedFlows()));
 
 	assert.match(text, /Estás usando default-flows/u);
 	assert.match(text, /\/config init_project_config/u);
@@ -385,6 +401,7 @@ test("formatProjectMapScan warns when default flows are used", () => {
 
 test("formatProjectMapScan reports healthy map when no warnings", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFileSync(
 		join(projectPath, "index.html"),
 		'<button id="create-machine">Create machine</button>',
@@ -406,16 +423,17 @@ test("formatProjectMapScan reports healthy map when no warnings", () => {
 		},
 	];
 
-	const text = formatProjectMapScan(scanProjectMap(projectPath, flows));
+	const text = formatProjectMapScan(scanProjectMap(projectPath, stateRoot, flows));
 
 	assert.match(text, /Mapa funcional consistente con el escaneo básico/u);
 });
 
 test("formatProjectMapScan keeps main warning categories", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const text = formatProjectMapScan(scanProjectMap(projectPath, mappedFlows()));
+	const text = formatProjectMapScan(scanProjectMap(projectPath, stateRoot, mappedFlows()));
 
 	assert.match(text, /Riesgos principales/u);
 	assert.match(text, /pantallas no declaradas/u);
@@ -434,10 +452,11 @@ test("formatProjectMapScan keeps main warning categories", () => {
 
 test("suggestProjectFlowsFromScan suggests missing screen", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	writeFileSync(join(projectPath, "reports.html"), "<h1>Reports</h1>", "utf8");
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, mappedFlows());
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, mappedFlows());
 
 	assert.ok(
 		suggestions.screens.some((screen) => screen.path === "reports.html"),
@@ -446,13 +465,14 @@ test("suggestProjectFlowsFromScan suggests missing screen", () => {
 
 test("suggestProjectFlowsFromScan suggests missing uiElement", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.uiElements = flows.uiElements.filter(
 		(element) => element.id !== "create-machine",
 	);
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.ok(
 		suggestions.uiElements.some((element) => element.id === "create-machine"),
@@ -461,11 +481,12 @@ test("suggestProjectFlowsFromScan suggests missing uiElement", () => {
 
 test("suggestProjectFlowsFromScan suggests missing dataStore", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.dataStores = [];
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.ok(
 		suggestions.dataStores.some((store) => store.type === "localStorage"),
@@ -474,6 +495,7 @@ test("suggestProjectFlowsFromScan suggests missing dataStore", () => {
 
 test("scanner does not suggest supabase from textual mention only", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFileSync(
 		join(projectPath, "notes.js"),
 		`// TODO: maybe use supabase later\nconst text = "supabase integration planned";`,
@@ -482,8 +504,8 @@ test("scanner does not suggest supabase from textual mention only", () => {
 	const flows = mappedFlows();
 	flows.dataStores = [];
 
-	const scan = scanProjectMap(projectPath, flows);
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const scan = scanProjectMap(projectPath, stateRoot, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.equal(
 		scan.detected.dataStores.some((store) => store.type === "supabase"),
@@ -498,6 +520,7 @@ test("scanner does not suggest supabase from textual mention only", () => {
 
 test("scanner ignores storage mentions in docs and fixtures", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	mkdirSync(join(projectPath, "docs"));
 	mkdirSync(join(projectPath, "fixtures"));
 	writeFileSync(
@@ -513,8 +536,8 @@ test("scanner ignores storage mentions in docs and fixtures", () => {
 	const flows = mappedFlows();
 	flows.dataStores = [];
 
-	const scan = scanProjectMap(projectPath, flows);
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const scan = scanProjectMap(projectPath, stateRoot, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.equal(scan.detected.dataStores.length, 0);
 	assert.equal(suggestions.dataStores.length, 0);
@@ -523,6 +546,7 @@ test("scanner ignores storage mentions in docs and fixtures", () => {
 
 test("scanner ignores API examples and defaults as functional dataStores", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	mkdirSync(join(projectPath, "examples"));
 	mkdirSync(join(projectPath, "config"));
 	mkdirSync(join(projectPath, "defaults"));
@@ -549,7 +573,7 @@ test("scanner ignores API examples and defaults as functional dataStores", () =>
 	const flows = mappedFlows();
 	flows.dataStores = [];
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 	const ids = suggestions.dataStores.map((store) => store.id);
 
 	assert.equal(ids.includes("api-machines"), false);
@@ -562,6 +586,7 @@ test("scanner ignores API examples and defaults as functional dataStores", () =>
 
 test("scanner keeps real runtime API and storage evidence", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFileSync(
 		join(projectPath, "app.js"),
 		`fetch('/api/machines');\nlocalStorage.setItem('machines', '[]');`,
@@ -570,7 +595,7 @@ test("scanner keeps real runtime API and storage evidence", () => {
 	const flows = mappedFlows();
 	flows.dataStores = [];
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.ok(
 		suggestions.dataStores.some((store) => store.id === "api-machines"),
@@ -582,11 +607,12 @@ test("scanner keeps real runtime API and storage evidence", () => {
 
 test("suggestProjectFlowsFromScan suggests simple flow from onclick", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.flows = [];
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.ok(
 		suggestions.flows.some(
@@ -599,9 +625,10 @@ test("suggestProjectFlowsFromScan suggests simple flow from onclick", () => {
 
 test("suggestProjectFlowsFromScan does not suggest duplicates already mapped", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, mappedFlows());
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, mappedFlows());
 
 	assert.equal(
 		suggestions.uiElements.some((element) => element.id === "create-machine"),
@@ -611,6 +638,7 @@ test("suggestProjectFlowsFromScan does not suggest duplicates already mapped", (
 
 test("suggestProjectFlowsFromScan does not suggest element when selector is mapped", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFileSync(
 		join(projectPath, "index.html"),
 		'<button id="different-id">Create machine</button>',
@@ -626,7 +654,7 @@ test("suggestProjectFlowsFromScan does not suggest element when selector is mapp
 		},
 	];
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.equal(
 		suggestions.uiElements.some(
@@ -638,6 +666,7 @@ test("suggestProjectFlowsFromScan does not suggest element when selector is mapp
 
 test("suggestProjectFlowsFromScan deduplicates candidate uiElements and flows", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.uiElements = flows.uiElements.filter(
@@ -645,7 +674,7 @@ test("suggestProjectFlowsFromScan deduplicates candidate uiElements and flows", 
 	);
 	flows.flows = [];
 
-	const suggestions = suggestProjectFlowsFromScan(projectPath, flows);
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, flows);
 
 	assert.equal(
 		suggestions.uiElements.filter((element) => element.id === "create-machine")
@@ -660,8 +689,9 @@ test("suggestProjectFlowsFromScan deduplicates candidate uiElements and flows", 
 
 test("formatProjectFlowSuggestions limits output", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
-	const suggestions = suggestProjectFlowsFromScan(projectPath, mappedFlows());
+	const suggestions = suggestProjectFlowsFromScan(projectPath, stateRoot, mappedFlows());
 	suggestions.uiElements = Array.from({ length: 12 }, (_, index) => ({
 		id: `button-${index + 1}`,
 		type: "button" as const,
@@ -680,10 +710,11 @@ test("formatProjectFlowSuggestions limits output", () => {
 
 test("suggestProjectFlowsFromScan does not write files", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 	const before = readFileSync(join(projectPath, "index.html"), "utf8");
 
-	suggestProjectFlowsFromScan(projectPath, mappedFlows());
+	suggestProjectFlowsFromScan(projectPath, stateRoot, mappedFlows());
 
 	assert.equal(readFileSync(join(projectPath, "index.html"), "utf8"), before);
 	assert.equal(
@@ -694,10 +725,11 @@ test("suggestProjectFlowsFromScan does not write files", () => {
 
 test("formatProjectFlowSuggestions includes human review warning", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	writeFixture(projectPath);
 
 	const text = formatProjectFlowSuggestions(
-		suggestProjectFlowsFromScan(projectPath, mappedFlows()),
+		suggestProjectFlowsFromScan(projectPath, stateRoot, mappedFlows()),
 	);
 
 	assert.match(text, /Esto es un borrador sugerido/u);
@@ -711,10 +743,11 @@ test("formatProjectFlowSuggestions includes human review warning", () => {
 
 test("saveProjectFlowsDraft creates draft in injected reports directory", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 
-	const result = saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath);
+	const result = saveProjectFlowsDraft(projectPath, stateRoot, mappedFlows(), reportsPath);
 
 	assert.match(result.path, /project-flows-draft-\d{8}-\d{6}\.json$/u);
 	assert.equal(existsSync(result.path), true);
@@ -722,10 +755,11 @@ test("saveProjectFlowsDraft creates draft in injected reports directory", () => 
 
 test("saveProjectFlowsDraft does not write config project-flows", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 
-	saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath);
+	saveProjectFlowsDraft(projectPath, stateRoot, mappedFlows(), reportsPath);
 
 	assert.equal(
 		existsSync(join(projectPath, "config", "project-flows.json")),
@@ -735,6 +769,7 @@ test("saveProjectFlowsDraft does not write config project-flows", () => {
 
 test("saveProjectFlowsDraft does not overwrite existing draft", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	writeFixture(projectPath);
@@ -746,6 +781,7 @@ test("saveProjectFlowsDraft does not overwrite existing draft", () => {
 
 	const result = saveProjectFlowsDraft(
 		projectPath,
+		stateRoot,
 		mappedFlows(),
 		reportsPath,
 		new Date("2026-01-02T03:04:05Z"),
@@ -757,6 +793,7 @@ test("saveProjectFlowsDraft does not overwrite existing draft", () => {
 
 test("saveProjectFlowsDraft includes draft warning and suggestions", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	const flows = mappedFlows();
@@ -766,7 +803,7 @@ test("saveProjectFlowsDraft includes draft warning and suggestions", () => {
 	flows.dataStores = [];
 	flows.flows = [];
 
-	const result = saveProjectFlowsDraft(projectPath, flows, reportsPath);
+	const result = saveProjectFlowsDraft(projectPath, stateRoot, flows, reportsPath);
 	const draft = JSON.parse(readFileSync(result.path, "utf8")) as {
 		warning: string;
 		suggestedScreens: unknown[];
@@ -784,11 +821,12 @@ test("saveProjectFlowsDraft includes draft warning and suggestions", () => {
 
 test("formatProjectFlowDraftResult shows draft path and review warning", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 
 	const text = formatProjectFlowDraftResult(
-		saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath),
+		saveProjectFlowsDraft(projectPath, stateRoot, mappedFlows(), reportsPath),
 	);
 
 	assert.match(text, /Borrador project-flows guardado/u);
@@ -799,11 +837,12 @@ test("formatProjectFlowDraftResult shows draft path and review warning", () => {
 
 test("reviewProjectFlowsDraft reviews valid draft", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.uiElements = [];
-	const draft = saveProjectFlowsDraft(projectPath, flows, reportsPath);
+	const draft = saveProjectFlowsDraft(projectPath, stateRoot, flows, reportsPath);
 
 	const review = reviewProjectFlowsDraft(
 		draft.path,
@@ -817,16 +856,19 @@ test("reviewProjectFlowsDraft reviews valid draft", () => {
 
 test("reviewProjectFlowsDraft latest takes newest draft", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	const oldDraft = saveProjectFlowsDraft(
 		projectPath,
+		stateRoot,
 		mappedFlows(),
 		reportsPath,
 		new Date("2026-01-02T03:04:05Z"),
 	);
 	const latestDraft = saveProjectFlowsDraft(
 		projectPath,
+		stateRoot,
 		mappedFlows(),
 		reportsPath,
 		new Date("2026-01-02T03:04:06Z"),
@@ -898,10 +940,11 @@ test("reviewProjectFlowsDraft latest returns invalid review when no draft exists
 
 test("reviewProjectFlowsDraft detects new screens", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	writeFileSync(join(projectPath, "reports.html"), "<h1>Reports</h1>", "utf8");
-	const draft = saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath);
+	const draft = saveProjectFlowsDraft(projectPath, stateRoot, mappedFlows(), reportsPath);
 
 	const review = reviewProjectFlowsDraft(
 		draft.path,
@@ -914,11 +957,12 @@ test("reviewProjectFlowsDraft detects new screens", () => {
 
 test("reviewProjectFlowsDraft detects new uiElements", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.uiElements = [];
-	const draft = saveProjectFlowsDraft(projectPath, flows, reportsPath);
+	const draft = saveProjectFlowsDraft(projectPath, stateRoot, flows, reportsPath);
 
 	const review = reviewProjectFlowsDraft(draft.path, flows, reportsPath);
 
@@ -929,11 +973,12 @@ test("reviewProjectFlowsDraft detects new uiElements", () => {
 
 test("reviewProjectFlowsDraft detects new dataStores", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.dataStores = [];
-	const draft = saveProjectFlowsDraft(projectPath, flows, reportsPath);
+	const draft = saveProjectFlowsDraft(projectPath, stateRoot, flows, reportsPath);
 
 	const review = reviewProjectFlowsDraft(draft.path, flows, reportsPath);
 
@@ -944,11 +989,12 @@ test("reviewProjectFlowsDraft detects new dataStores", () => {
 
 test("reviewProjectFlowsDraft detects new flows", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
 	const flows = mappedFlows();
 	flows.flows = [];
-	const draft = saveProjectFlowsDraft(projectPath, flows, reportsPath);
+	const draft = saveProjectFlowsDraft(projectPath, stateRoot, flows, reportsPath);
 
 	const review = reviewProjectFlowsDraft(draft.path, flows, reportsPath);
 
@@ -985,9 +1031,10 @@ test("reviewProjectFlowsDraft detects duplicates with current flows", () => {
 
 test("reviewProjectFlowsDraft does not write files", () => {
 	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
 	const reportsPath = join(tempProject(), "reports");
 	writeFixture(projectPath);
-	const draft = saveProjectFlowsDraft(projectPath, mappedFlows(), reportsPath);
+	const draft = saveProjectFlowsDraft(projectPath, stateRoot, mappedFlows(), reportsPath);
 	const before = readFileSync(draft.path, "utf8");
 
 	reviewProjectFlowsDraft(draft.path, mappedFlows(), reportsPath);
@@ -999,8 +1046,12 @@ test("reviewProjectFlowsDraft does not write files", () => {
 	);
 });
 
-function writeProjectFlows(projectPath: string, flows: ProjectFlows): string {
-	const configPath = join(projectPath, "config");
+function writeProjectFlows(
+	stateRoot: string,
+	flows: ProjectFlows,
+): string {
+	// Slice 4/5: flows now live under stateRoot/.idu/config/ (Layout A).
+	const configPath = join(stateRoot, ".idu", "config");
 	mkdirSync(configPath, { recursive: true });
 	const flowsPath = join(configPath, "project-flows.json");
 	const validFlows: ProjectFlows = {
@@ -1072,7 +1123,7 @@ function writeDraft(
 test("applyProjectFlowsDraft rejects missing explicit path", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 
 	const result = applyProjectFlowsDraft(projectPath, stateRoot, "");
 
@@ -1083,7 +1134,7 @@ test("applyProjectFlowsDraft rejects missing explicit path", () => {
 test("applyProjectFlowsDraft rejects latest", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 
 	const result = applyProjectFlowsDraft(projectPath, stateRoot, "latest");
 
@@ -1094,7 +1145,7 @@ test("applyProjectFlowsDraft rejects latest", () => {
 test("applyProjectFlowsDraft rejects invalid draft", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 	const draftPath = writeDraft(projectPath, { warning: "bad" });
 
 	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
@@ -1106,7 +1157,7 @@ test("applyProjectFlowsDraft rejects invalid draft", () => {
 test("applyProjectFlowsDraft rejects different projectPath", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
 		projectPath: "other-project",
@@ -1126,7 +1177,7 @@ test("applyProjectFlowsDraft rejects different projectPath", () => {
 test("applyProjectFlowsDraft creates backup before writing", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
 		projectPath,
@@ -1163,7 +1214,7 @@ test("applyProjectFlowsDraft creates backup before writing", () => {
 test("applyProjectFlowsDraft merges new screens and uiElements", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
 		projectPath,
@@ -1190,7 +1241,7 @@ test("applyProjectFlowsDraft merges new screens and uiElements", () => {
 	});
 
 	applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
-	const flows = loadProjectFlows(projectPath);
+	const flows = loadProjectFlows(stateRoot);
 
 	assert.ok(flows.screens.some((screen) => screen.id === "reports"));
 	assert.ok(flows.uiElements.some((element) => element.id === "report-button"));
@@ -1199,7 +1250,7 @@ test("applyProjectFlowsDraft merges new screens and uiElements", () => {
 test("applyProjectFlowsDraft does not duplicate existing ids", () => {
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
-	writeProjectFlows(projectPath, mappedFlows());
+	writeProjectFlows(stateRoot, mappedFlows());
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
 		projectPath,
@@ -1221,7 +1272,7 @@ test("applyProjectFlowsDraft does not duplicate existing ids", () => {
 	});
 
 	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
-	const flows = loadProjectFlows(projectPath);
+	const flows = loadProjectFlows(stateRoot);
 
 	assert.equal(
 		flows.screens.filter((screen) => screen.id === "machines").length,
@@ -1240,7 +1291,7 @@ test("applyProjectFlowsDraft does not delete existing content and validates fina
 	const projectPath = tempProject();
 	const stateRoot = tempStateRoot();
 	const original = mappedFlows();
-	writeProjectFlows(projectPath, original);
+	writeProjectFlows(stateRoot, original);
 	const draftPath = writeDraft(projectPath, {
 		generatedAt: "2026-01-02T03:04:05.000Z",
 		projectPath,
@@ -1277,7 +1328,7 @@ test("applyProjectFlowsDraft does not delete existing content and validates fina
 	});
 
 	const result = applyProjectFlowsDraft(projectPath, stateRoot, draftPath);
-	const flows = loadProjectFlows(projectPath);
+	const flows = loadProjectFlows(stateRoot);
 
 	assert.equal(result.applied, true);
 	assert.ok(result.finalValidationOk);
@@ -1286,4 +1337,31 @@ test("applyProjectFlowsDraft does not delete existing content and validates fina
 	);
 	assert.ok(flows.dataStores.some((store) => store.id === "reports-api"));
 	assert.ok(flows.flows.some((flow) => flow.id === "report-flow"));
+});
+
+// MANDATORY TEST #2 (Slice 4/5): scanProjectMap mapSource → "project-local"
+// when flows written to stateRoot (with projectPath != stateRoot). Defends
+// the ROOT flip at project-map-scanner.ts:156-158. Without this test, the
+// mapSource regression could slip back silently.
+test("scanProjectMap mapSource follows stateRoot, not projectPath (path != stateRoot)", () => {
+	const projectPath = tempProject();
+	const stateRoot = tempStateRoot();
+	writeFixture(projectPath);
+	writeProjectFlows(stateRoot, mappedFlows());
+
+	const result = scanProjectMap(projectPath, stateRoot, mappedFlows());
+
+	assert.equal(
+		result.mapSource,
+		"project-local",
+		"mapSource must follow stateRoot (Slice 4 ROOT flip)",
+	);
+
+	// Negative control: when neither stateRoot nor projectPath has flows,
+	// mapSource must be "default". Proves the resolver follows stateRoot,
+	// not the legacy projectPath path.
+	const emptyProject = tempProject();
+	const emptyStateRoot = tempStateRoot();
+	const defaultResult = scanProjectMap(emptyProject, emptyStateRoot, mappedFlows());
+	assert.equal(defaultResult.mapSource, "default");
 });

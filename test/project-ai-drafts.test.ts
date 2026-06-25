@@ -27,11 +27,9 @@ function tempProject(): {
 	reportsDir: string;
 } {
 	const projectPath = mkdtempSync(join(tmpdir(), "pi-ai-draft-"));
-	// Slice 2/5: blueprint now lives under stateRoot. Use a separate temp
-	// dir for stateRoot so tests reflect the post-slice territory model.
-	// NOTE: flows remains under projectPath for now — Slice 4 moves flows
-	// to stateRoot, so we keep flows accessible to loadProjectFlows via
-	// its current projectPath-based migration.
+	// Slice 4/5: blueprint AND flows now live under stateRoot. Use a
+	// separate temp dir for stateRoot so tests reflect the post-slice
+	// territory model.
 	const stateRoot = mkdtempSync(join(tmpdir(), "pi-ai-draft-state-"));
 	tempDirs.push(projectPath, stateRoot);
 	const reportsDir = join(projectPath, "reports-out");
@@ -57,15 +55,15 @@ function tempProject(): {
 		"SECRET_TOKEN=super-secret-value\n",
 		"utf8",
 	);
-	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(stateRoot, "config", "project-blueprint.json"),
+		join(stateRoot, ".idu", "config", "project-blueprint.json"),
 		JSON.stringify(validBlueprint("current"), null, 2),
 		"utf8",
 	);
-	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, ".idu", "config", "project-flows.json"),
+		join(stateRoot, ".idu", "config", "project-flows.json"),
 		JSON.stringify(validFlows(), null, 2),
 		"utf8",
 	);
@@ -288,7 +286,7 @@ test("reviewAiProjectFlowsDraft reviews a valid draft", async () => {
 	});
 	assert.equal(draft.ok, true);
 
-	const review = reviewAiProjectFlowsDraft(draft.path, projectPath, reportsDir);
+	const review = reviewAiProjectFlowsDraft(draft.path, projectPath, reportsDir, stateRoot);
 
 	assert.equal(review.validDraft, true);
 	assert.equal(review.validJson, true);
@@ -341,7 +339,7 @@ test("review AI latest works for blueprint and flows", async () => {
 		reportsDir,
 		stateRoot,
 	);
-	const flows = reviewAiProjectFlowsDraft("latest", projectPath, reportsDir);
+	const flows = reviewAiProjectFlowsDraft("latest", projectPath, reportsDir, stateRoot);
 
 	assert.ok(
 		blueprint.path.endsWith("project-blueprint-ai-draft-20260520-110000.json"),
@@ -360,7 +358,7 @@ test("review AI latest without drafts does not throw", () => {
 		reportsDir,
 		stateRoot,
 	);
-	const flows = reviewAiProjectFlowsDraft("latest", projectPath, reportsDir);
+	const flows = reviewAiProjectFlowsDraft("latest", projectPath, reportsDir, stateRoot);
 
 	assert.equal(blueprint.validDraft, false);
 	assert.match(blueprint.errors.join("\n"), /No encontré borrador IA/u);
@@ -413,14 +411,13 @@ test("review reports invalid warning and rawOutput without throwing", async () =
 
 test("reviewAiProjectFlowsDraft detects ID conflicts and does not write config", async () => {
 	const { projectPath, stateRoot, reportsDir } = tempProject();
-	// Slice 2/5: blueprint lives under stateRoot; flows stays under
-	// projectPath/.idu/config until Slice 4 moves it to stateRoot.
+	// Slice 4/5: blueprint AND flows now live under stateRoot.
 	const beforeBlueprint = readFileSync(
-		join(stateRoot, "config", "project-blueprint.json"),
+		join(stateRoot, ".idu", "config", "project-blueprint.json"),
 		"utf8",
 	);
 	const beforeFlows = readFileSync(
-		join(projectPath, ".idu", "config", "project-flows.json"),
+		join(stateRoot, ".idu", "config", "project-flows.json"),
 		"utf8",
 	);
 	const draft = await createAiProjectFlowsDraft({
@@ -431,21 +428,23 @@ test("reviewAiProjectFlowsDraft detects ID conflicts and does not write config",
 	});
 	assert.equal(draft.ok, true);
 
-	const review = reviewAiProjectFlowsDraft(draft.path, projectPath, reportsDir);
+	const review = reviewAiProjectFlowsDraft(draft.path, projectPath, reportsDir, stateRoot);
 
 	assert.ok(review.idConflicts.includes("module:core"));
 	assert.ok(review.idConflicts.includes("screen:home"));
 	assert.ok(review.possibleDuplicates.length > 0);
 	// Territory model: reviewAiProjectFlowsDraft only reads project-flows
-	// (via loadProjectFlows), so blueprint stays in place. The flows file
-	// stays at Layout A in projectPath until Slice 4.
+	// (via loadProjectFlows), so blueprint and flows stay in place.
 	assert.equal(
-		readFileSync(join(stateRoot, "config", "project-blueprint.json"), "utf8"),
+		readFileSync(
+			join(stateRoot, ".idu", "config", "project-blueprint.json"),
+			"utf8",
+		),
 		beforeBlueprint,
 	);
 	assert.equal(
 		readFileSync(
-			join(projectPath, ".idu", "config", "project-flows.json"),
+			join(stateRoot, ".idu", "config", "project-flows.json"),
 			"utf8",
 		),
 		beforeFlows,

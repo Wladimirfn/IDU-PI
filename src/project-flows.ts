@@ -149,15 +149,16 @@ const STEP_TYPES = new Set<FlowStepType>([
 	"validation",
 ]);
 
-export function loadProjectFlows(projectPath: string): ProjectFlows {
-	// Territory: prefer <repo>/.idu/config/project-flows.json, with one-time
-	// migration from <repo>/config/project-flows.json.
-	const migrated = readIdPathWithMigration(projectPath, "project-flows.json");
+export function loadProjectFlows(stateRoot: string): ProjectFlows {
+	// Territory: prefer <stateRoot>/.idu/config/project-flows.json, with
+	// one-time migration from <stateRoot>/config/project-flows.json.
+	// Slice 4/5: flows now reads from stateRoot (same as blueprint/core).
+	const migrated = readIdPathWithMigration(stateRoot, "project-flows.json");
 	let flowsPath: string;
 	let raw: string;
 	if (migrated.content !== null) {
 		raw = migrated.content;
-		flowsPath = join(projectPath, ".idu", "config", "project-flows.json");
+		flowsPath = join(stateRoot, ".idu", "config", "project-flows.json");
 	} else {
 		flowsPath = defaultFlowsPath();
 		raw = readFileSync(flowsPath, "utf8");

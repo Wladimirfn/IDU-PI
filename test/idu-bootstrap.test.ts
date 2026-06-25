@@ -72,8 +72,7 @@ test("idu bootstrap enrolls project and creates state, core, constitution, bluep
 			),
 			true,
 		);
-		// Slice 2/5: blueprint now lives under stateRoot. flows stays at
-		// projectPath/.idu/config until Slice 4 moves it.
+		// Slice 4/5: blueprint AND flows now live under stateRoot.
 		assert.equal(
 			existsSync(
 				join(result.statePaths.stateRoot, ".idu", "config", "project-blueprint.json"),
@@ -81,7 +80,9 @@ test("idu bootstrap enrolls project and creates state, core, constitution, bluep
 			true,
 		);
 		assert.equal(
-			existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+			existsSync(
+				join(result.statePaths.stateRoot, ".idu", "config", "project-flows.json"),
+			),
 			true,
 		);
 		const core = JSON.parse(
