@@ -763,10 +763,7 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection.flows.valid
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
-	const constitution = loadConfirmedProjectConstitution(
-		connection.projectPath,
-		activeProjectStateRoot(),
-	);
+	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
 	return analyzeProjectPreflight(request, {
 		connection,
 		blueprint,
@@ -874,10 +871,7 @@ function buildPostflightReport(): ProjectPostflightReport {
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
-	const constitution = loadConfirmedProjectConstitution(
-		connection.projectPath,
-		activeProjectStateRoot(),
-	);
+	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
 	const report = analyzeProjectPostflight({
 		projectPath,
 		connectionReport: connection,
@@ -900,28 +894,31 @@ function buildPostflightReport(): ProjectPostflightReport {
 	};
 }
 
-function loadConfirmedProjectConstitution(
-	projectPath: string | undefined,
-	stateRoot: string | undefined,
-) {
-	if (!projectPath) return undefined;
-	// F-Item3a: route through the canonical loader (Layout A via
-	// readIdPathWithMigration). The pre-fix version hardcoded
-	// Layout B (`<projectPath>/config/project-core.json`) which fails
-	// when the canonical Layout A file exists — the pre-check returned
-	// false and the function bailed before `loadProjectCore` could find
-	// the file at Layout A.
-	// Slice 3/5: loader reads from stateRoot, not projectPath.
+// Issue #172: stateRoot is the sole base path for core + constitution. The
+// pre-fix signature took (projectPath, stateRoot) as optional and used
+// `stateRoot ?? projectPath` everywhere, which silently fed projectPath to
+// the loaders when stateRoot was undefined — a latent split-brain trap.
+// F-Item3a: route through the canonical loader (Layout A via
+// readIdPathWithMigration). The pre-fix version hardcoded Layout B which
+// failed when the canonical Layout A file existed — the pre-check returned
+// false and the function bailed before `loadProjectCore` could find the
+// file at Layout A.
+// TODO(issue-172-followup): this helper is byte-identical to the one in
+// src/cli/setup/helpers.ts. Extract to src/project-constitution.ts next
+// (Slice 3-style corePath pattern) — separate commit keeps the cleanup
+// diff readable for the auditor.
+function loadConfirmedProjectConstitution(stateRoot: string) {
+	if (!stateRoot) return undefined;
 	try {
-		const core = loadProjectCore(stateRoot ?? projectPath);
+		const core = loadProjectCore(stateRoot);
 		if (core.status !== "confirmed") return undefined;
 		const constitutionPath = join(
-			stateRoot ?? projectPath,
+			stateRoot,
 			"config",
 			"project-constitution.json",
 		);
 		return existsSync(constitutionPath)
-			? loadProjectConstitution(stateRoot ?? projectPath)
+			? loadProjectConstitution(stateRoot)
 			: deriveConstitutionFromProjectCore(core);
 	} catch {
 		return undefined;
