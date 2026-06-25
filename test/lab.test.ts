@@ -110,7 +110,8 @@ test("loadLabProjectContext returns undefined when blueprint or flows fail", () 
 		"{ invalid",
 	);
 
-	assert.equal(loadLabProjectContext(projectPath), undefined);
+	// Slice 2/5: stateRoot === projectPath preserves the no-op behavior.
+	assert.equal(loadLabProjectContext(projectPath, projectPath), undefined);
 });
 
 test("loadLabProjectContext includes scan summary when scanner works", () => {
@@ -120,7 +121,7 @@ test("loadLabProjectContext includes scan summary when scanner works", () => {
 		`<button id="unmapped" onclick="runSecret()">token=secret-value</button><button id="unmapped">Duplicate</button>`,
 	);
 
-	const context = loadLabProjectContext(projectPath);
+	const context = loadLabProjectContext(projectPath, projectPath);
 
 	assert.ok(context);
 	assert.equal(context.contextBudget.profile, "agentlab_project_context");
@@ -136,7 +137,7 @@ test("loadLabProjectContext includes scan summary when scanner works", () => {
 test("loadLabProjectContext works without scan when scanner throws", () => {
 	const projectPath = join(tempDir(), "missing-project-dir");
 
-	const context = loadLabProjectContext(projectPath);
+	const context = loadLabProjectContext(projectPath, projectPath);
 
 	assert.ok(context);
 	assert.match(context.text, /Blueprint/u);

@@ -37,11 +37,13 @@ const REQUIRED_STRING_ARRAY_FIELDS = [
 	"requiredValidation",
 ] as const;
 
-export function loadProjectBlueprint(projectPath: string): ProjectBlueprint {
-	// Territory: prefer <repo>/.idu/config/project-blueprint.json, with one-time
-	// migration from <repo>/config/project-blueprint.json.
+export function loadProjectBlueprint(stateRoot: string): ProjectBlueprint {
+	// Territory: prefer <stateRoot>/.idu/config/project-blueprint.json, with
+	// one-time migration from <stateRoot>/config/project-blueprint.json.
+	// Slice 2/5: blueprint reads from stateRoot, not projectPath. When
+	// stateRoot === projectPath (hermetic/test paths) behavior is preserved.
 	const migrated = readIdPathWithMigration(
-		projectPath,
+		stateRoot,
 		"project-blueprint.json",
 	);
 	let blueprintPath: string;
@@ -49,7 +51,7 @@ export function loadProjectBlueprint(projectPath: string): ProjectBlueprint {
 	if (migrated.content !== null) {
 		raw = migrated.content;
 		blueprintPath = join(
-			projectPath,
+			stateRoot,
 			".idu",
 			"config",
 			"project-blueprint.json",

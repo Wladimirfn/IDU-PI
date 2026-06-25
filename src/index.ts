@@ -755,7 +755,7 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection.projectPath &&
 		connection.blueprint?.source === "project-local" &&
 		connection.blueprint.valid
-			? loadProjectBlueprint(connection.projectPath)
+			? loadProjectBlueprint(activeProjectStateRoot())
 			: undefined;
 	const flows =
 		connection.projectPath &&
@@ -1002,6 +1002,7 @@ async function runLabForProfiles(
 		duration,
 		projectId: currentProjectId(),
 		projectPath: currentCwd,
+		stateRoot: activeProjectStateRoot(),
 		store: labReportStore,
 		labRunRecorder: labDbRepository,
 	});
@@ -1681,6 +1682,7 @@ function currentConfigReport() {
 	return inspectProjectConfig({
 		projectId: currentProjectId(),
 		projectPath: currentCwd,
+		stateRoot: activeProjectStateRoot(),
 		allowedRoots: config.allowedRoots,
 		agentProfiles: agentRouter.profiles,
 		activeProfileId: agentRouter.activeProfile().id,
@@ -2395,12 +2397,17 @@ bot.command("idu_prepare", async (ctx) => {
 				allowedRoots: config.allowedRoots,
 				workspaceRoot: config.agentWorkspaceRoot,
 			}),
-		initProjectConfig: () => initProjectConfig(projectPath, projectId),
+		initProjectConfig: () =>
+			initProjectConfig(projectPath, activeProjectStateRoot(), projectId),
 		inspectProjectMap: () =>
-			inspectProjectMap(projectPath, {
-				activeProjectId: projectId,
-				activeProjectName: activeProject?.name,
-			}),
+			inspectProjectMap(
+				projectPath,
+				activeProjectStateRoot(),
+				{
+					activeProjectId: projectId,
+					activeProjectName: activeProject?.name,
+				},
+			),
 		loadProjectFlows: () => loadProjectFlows(projectPath),
 		scanProjectMap: (flows) => scanProjectMap(projectPath, flows),
 		suggestProjectFlows: (flows) =>
@@ -2456,6 +2463,7 @@ bot.command("idu_research_core", async (ctx) => {
 		formatProjectCoreResearchDraft(
 			await saveProjectCoreResearchDraft({
 				projectPath: currentCwd,
+				stateRoot: activeProjectStateRoot(),
 				reportsDir: join(config.agentWorkspaceRoot, "reports"),
 				generate: generateAiProjectDraft,
 			}),
@@ -2786,7 +2794,11 @@ bot.command("config", async (ctx) => {
 		await replyLong(
 			ctx,
 			formatInitProjectConfigResult(
-				initProjectConfig(currentCwd, currentProjectId()),
+				initProjectConfig(
+					currentCwd,
+					activeProjectStateRoot(),
+					currentProjectId(),
+				),
 			),
 		);
 		return;
@@ -2802,10 +2814,14 @@ bot.command("config", async (ctx) => {
 		await replyLong(
 			ctx,
 			formatProjectMapInspection(
-				inspectProjectMap(currentCwd, {
-					activeProjectId: activeProject?.id ?? currentProjectId(),
-					activeProjectName: activeProject?.name,
-				}),
+				inspectProjectMap(
+					currentCwd,
+					activeProjectStateRoot(),
+					{
+						activeProjectId: activeProject?.id ?? currentProjectId(),
+						activeProjectName: activeProject?.name,
+					},
+				),
 			),
 		);
 		return;
@@ -2909,6 +2925,7 @@ bot.command("config", async (ctx) => {
 			formatAiProjectDraftResult(
 				await createAiProjectBlueprintDraft({
 					projectPath: currentCwd,
+					stateRoot: activeProjectStateRoot(),
 					reportsDir: join(config.agentWorkspaceRoot, "reports"),
 					generate: generateAiProjectDraft,
 				}),
@@ -2928,6 +2945,7 @@ bot.command("config", async (ctx) => {
 			formatAiProjectDraftResult(
 				await createAiProjectFlowsDraft({
 					projectPath: currentCwd,
+					stateRoot: activeProjectStateRoot(),
 					reportsDir: join(config.agentWorkspaceRoot, "reports"),
 					generate: generateAiProjectDraft,
 				}),
@@ -2949,6 +2967,7 @@ bot.command("config", async (ctx) => {
 					restArgs.join(" ") || "latest",
 					currentCwd,
 					join(config.agentWorkspaceRoot, "reports"),
+					activeProjectStateRoot(),
 				),
 			),
 		);

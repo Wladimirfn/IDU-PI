@@ -256,7 +256,9 @@ export function buildPreflightReport(
 		connection.projectPath &&
 		connection.blueprint?.source === "project-local" &&
 		connection.blueprint.valid
-			? loadProjectBlueprint(connection.projectPath)
+			? loadProjectBlueprint(
+					context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				)
 			: undefined;
 	const flows =
 		connection.projectPath &&
@@ -325,12 +327,21 @@ export function runPrepare(context: RuntimeContext): IduPrepareResult {
 		projectPath,
 		reportsPath,
 		inspectConnection: () => inspectConnection(context),
-		initProjectConfig: () => initProjectConfig(projectPath, projectId),
+		initProjectConfig: () =>
+			initProjectConfig(
+				projectPath,
+				context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				projectId,
+			),
 		inspectProjectMap: () =>
-			inspectProjectMap(projectPath, {
-				activeProjectId: projectId,
-				activeProjectName: context.activeProject.name,
-			}),
+			inspectProjectMap(
+				projectPath,
+				context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
+				{
+					activeProjectId: projectId,
+					activeProjectName: context.activeProject.name,
+				},
+			),
 		loadProjectFlows: () => loadProjectFlows(projectPath),
 		scanProjectMap: (flows) => scanProjectMap(projectPath, flows),
 		suggestProjectFlows: (flows) =>

@@ -67,6 +67,7 @@ export type ConfigWizardReport = {
 export type InspectProjectConfigOptions = {
 	projectId: string;
 	projectPath: string;
+	stateRoot?: string;
 	allowedRoots: string[];
 	agentProfiles: AgentProfile[];
 	activeProfileId: string;
@@ -224,13 +225,20 @@ function createProjectConfigFileIfMissing(
 	content: () => string,
 	result: InitProjectConfigResult,
 ): void {
-	const path = join(projectPath, relativePath);
+	// Slice 2/5: blueprint lives under stateRoot; flows stays under projectPath
+	// until Slice 4. Heuristic: project-blueprint.json -> stateRoot,
+	// everything else -> projectPath. When stateRoot === projectPath both
+	// branches collapse to the same path and behavior is preserved (no-op).
+	const base = relativePath.endsWith("project-blueprint.json")
+		? stateRoot
+		: projectPath;
+	const path = join(base, relativePath);
 	mkdirSync(dirname(path), { recursive: true });
 	if (existsSync(path)) {
 		result.existing.push(relativePath);
 		return;
 	}
-	// Territory: governance files always live under <repo>/.idu/config/.
+	// Territory: governance files always live under <stateRoot>/.idu/config/.
 	assertAllowedWrite(path, { stateRoot, repoRoot: projectPath });
 	writeFileSync(path, content(), "utf8");
 	result.created.push(relativePath);
@@ -310,14 +318,17 @@ function projectConfigStatus(
 export function inspectProjectConfig(
 	options: InspectProjectConfigOptions,
 ): ConfigWizardReport {
+	const stateRoot = options.stateRoot ?? options.projectPath;
 	const assets = {
 		skills: asset(options.projectPath, "Skills", SKILLS_DIR),
 		registry: asset(options.projectPath, "Skill registry", REGISTRY_FILE),
 		mcp: asset(options.projectPath, "MCP config", MCP_CONFIG),
 	};
+	// Slice 2/5: blueprint now lives under stateRoot; flows stays under
+	// projectPath until Slice 4 moves it.
 	const projectConfig = {
 		blueprint: projectConfigStatus(
-			options.projectPath,
+			stateRoot,
 			"Project blueprint",
 			PROJECT_BLUEPRINT,
 			validateProjectBlueprint,
@@ -558,11 +569,30 @@ function flowsContent(): string {
 
 export function inspectProjectMap(
 	projectPath: string,
-	activeProject?: { activeProjectId?: string; activeProjectName?: string },
+	stateRootOrActiveProject?:
+		| string
+		| { activeProjectId?: string; activeProjectName?: string },
+	activeProject?:
+		| { activeProjectId?: string; activeProjectName?: string }
+		| undefined,
 ): ProjectMapInspection {
-	const usesLocalBlueprint = existsSync(join(projectPath, PROJECT_BLUEPRINT));
+	// Slice 2/5: blueprint now lives under stateRoot; flows stays under
+	// projectPath until Slice 4. Back-compat: when the 2nd arg looks like
+	// an activeProject object (legacy shape) we fall back to projectPath
+	// as stateRoot — that preserves behavior for callers that haven't been
+	// threaded yet, and keeps the path === stateRoot no-op for hermetic test
+	// paths.
+	const stateRoot =
+		typeof stateRootOrActiveProject === "string"
+			? stateRootOrActiveProject
+			: projectPath;
+	const resolvedActiveProject =
+		typeof stateRootOrActiveProject === "string"
+			? activeProject
+			: stateRootOrActiveProject;
+	const usesLocalBlueprint = existsSync(join(stateRoot, PROJECT_BLUEPRINT));
 	const usesLocalFlows = existsSync(join(projectPath, PROJECT_FLOWS));
-	const blueprint = loadProjectBlueprint(projectPath);
+	const blueprint = loadProjectBlueprint(stateRoot);
 	const flows = readLooseProjectFlows(projectPath, usesLocalFlows);
 	const source =
 		usesLocalBlueprint && usesLocalFlows ? "project-local" : "default";
@@ -570,8 +600,8 @@ export function inspectProjectMap(
 	const recommendations = projectMapRecommendations(source, flows, issues);
 	return {
 		projectPath,
-		activeProjectId: activeProject?.activeProjectId,
-		activeProjectName: activeProject?.activeProjectName,
+		activeProjectId: resolvedActiveProject?.activeProjectId,
+		activeProjectName: resolvedActiveProject?.activeProjectName,
 		source,
 		projectName: blueprint.projectName,
 		counts: {

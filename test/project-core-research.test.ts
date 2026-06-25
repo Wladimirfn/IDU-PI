@@ -21,13 +21,24 @@ import {
 
 const tempDirs: string[] = [];
 
-function tempProject(): { projectPath: string; reportsDir: string } {
+function tempProject(): {
+	projectPath: string;
+	stateRoot: string;
+	reportsDir: string;
+} {
 	const projectPath = mkdtempSync(join(tmpdir(), "pi-core-research-"));
-	tempDirs.push(projectPath);
+	// Slice 2/5: blueprint now lives under stateRoot. Use a separate temp
+	// dir for stateRoot so tests reflect the post-slice territory model.
+	// NOTE: flows remains under projectPath for now — Slice 4 moves flows
+	// to stateRoot, so we keep flows accessible to loadProjectFlows via
+	// its current projectPath-based migration.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-core-research-state-"));
+	tempDirs.push(projectPath, stateRoot);
 	const reportsDir = join(projectPath, "reports-out");
 	mkdirSync(join(projectPath, "config"), { recursive: true });
 	mkdirSync(join(projectPath, "docs"), { recursive: true });
 	mkdirSync(reportsDir, { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
 	const core = createDefaultProjectCore("Demo Core");
 	writeFileSync(
 		join(projectPath, "config", "project-core.json"),
@@ -64,16 +75,17 @@ function tempProject(): { projectPath: string; reportsDir: string } {
 		"utf8",
 	);
 	writeFileSync(
-		join(projectPath, "config", "project-blueprint.json"),
+		join(stateRoot, "config", "project-blueprint.json"),
 		'{"projectName":"Blueprint"}\n',
 		"utf8",
 	);
+	mkdirSync(join(projectPath, ".idu", "config"), { recursive: true });
 	writeFileSync(
-		join(projectPath, "config", "project-flows.json"),
+		join(projectPath, ".idu", "config", "project-flows.json"),
 		'{"modules":[]}\n',
 		"utf8",
 	);
-	return { projectPath, reportsDir };
+	return { projectPath, stateRoot, reportsDir };
 }
 
 after(() => {
@@ -81,8 +93,8 @@ after(() => {
 });
 
 test("buildProjectCoreResearchPrompt includes projectGoal", () => {
-	const { projectPath } = tempProject();
-	const prompt = buildProjectCoreResearchPrompt(projectPath);
+	const { projectPath, stateRoot } = tempProject();
+	const prompt = buildProjectCoreResearchPrompt(projectPath, "", stateRoot);
 
 	assert.match(prompt, /Gestionar órdenes de trabajo/u);
 	assert.match(prompt, /Responder en JSON/u);
@@ -90,8 +102,8 @@ test("buildProjectCoreResearchPrompt includes projectGoal", () => {
 });
 
 test("buildProjectCoreResearchPrompt does not include simulated secrets", () => {
-	const { projectPath } = tempProject();
-	const prompt = buildProjectCoreResearchPrompt(projectPath);
+	const { projectPath, stateRoot } = tempProject();
+	const prompt = buildProjectCoreResearchPrompt(projectPath, "", stateRoot);
 
 	assert.doesNotMatch(prompt, /super-secret-value/u);
 	assert.doesNotMatch(prompt, /SECRET_TOKEN/u);
@@ -99,9 +111,10 @@ test("buildProjectCoreResearchPrompt does not include simulated secrets", () => 
 });
 
 test("saveProjectCoreResearchDraft creates file in reports", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await saveProjectCoreResearchDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-22T10:11:12Z"),
 		generate: async () => JSON.stringify(validRecommendations()),
@@ -116,12 +129,13 @@ test("saveProjectCoreResearchDraft creates file in reports", async () => {
 });
 
 test("saveProjectCoreResearchDraft does not write config/project-core.json", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const corePath = join(projectPath, "config", "project-core.json");
 	const before = readFileSync(corePath, "utf8");
 
 	await saveProjectCoreResearchDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => JSON.stringify(validRecommendations()),
 	});
@@ -135,9 +149,10 @@ test("saveProjectCoreResearchDraft does not write config/project-core.json", asy
 });
 
 test("saved ProjectCore research draft includes warning", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await saveProjectCoreResearchDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => JSON.stringify(validRecommendations()),
 	});
@@ -154,9 +169,10 @@ test("saved ProjectCore research draft includes warning", async () => {
 });
 
 test("reviewProjectCoreResearchDraft latest works", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	await saveProjectCoreResearchDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		now: () => new Date("2026-05-22T10:11:12Z"),
 		generate: async () => JSON.stringify(validRecommendations()),
@@ -177,9 +193,10 @@ test("reviewProjectCoreResearchDraft latest works", async () => {
 });
 
 test("reviewProjectCoreResearchDraft accepts explicit path", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await saveProjectCoreResearchDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => JSON.stringify(validRecommendations()),
 	});
@@ -206,9 +223,10 @@ test("reviewProjectCoreResearchDraft rejects explicit paths outside reports", ()
 });
 
 test("reviewProjectCoreResearchDraft handles invalid rawOutput", async () => {
-	const { projectPath, reportsDir } = tempProject();
+	const { projectPath, stateRoot, reportsDir } = tempProject();
 	const result = await saveProjectCoreResearchDraft({
 		projectPath,
+		stateRoot,
 		reportsDir,
 		generate: async () => "not json",
 	});

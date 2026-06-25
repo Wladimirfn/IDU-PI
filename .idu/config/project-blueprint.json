@@ -1,0 +1,36 @@
+{
+  "projectName": "idu-pi",
+  "projectGoal": "El objetivo de Idu-pi es actuar como supervisor/orquestador privado vía Telegram para coordinar agentes IA sobre proyectos locales, usando laboratorios aislados, reportes, validaciones y aprobación humana antes de cambios riesgosos.",
+  "projectType": "private-ai-orchestrator",
+  "version": "1.0.0",
+  "agentHierarchy": [
+    "Humano = gerente, decide cambios críticos.",
+    "Orquestador = coordina, no programa directo.",
+    "AgentLabs = auditan y validan.",
+    "Subagentes = ejecutan tareas específicas."
+  ],
+  "architectureRules": [
+    "JSONL sigue siendo la fuente principal de reportes.",
+    "SQLite sigue siendo una copia estructurada complementaria.",
+    "Los laboratorios deben ejecutarse en workspaces aislados.",
+    "Los cambios riesgosos requieren aprobación humana."
+  ],
+  "forbiddenActions": [
+    "Labs no pueden hacer commit.",
+    "Labs no pueden hacer push.",
+    "Labs no deben modificar repo real.",
+    "No se deben ejecutar cambios críticos sin aprobación humana."
+  ],
+  "qualityRules": [
+    "Toda propuesta debe tener evidencia.",
+    "No inventar bugs ni findings sin evidencia.",
+    "Cambios deben preservar build/test.",
+    "Mejor devolver cero findings que registrar basura."
+  ],
+  "requiredValidation": [
+    "corepack pnpm build",
+    "corepack pnpm test"
+  ],
+  "createdAt": "2026-05-20T00:00:00.000Z",
+  "updatedAt": "2026-05-20T00:00:00.000Z"
+}

@@ -123,6 +123,7 @@ test("runTestLab persists completed report and prompt constraints", async () => 
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 	});
 
@@ -145,6 +146,7 @@ test("runTestLab records secondary SQLite copy after JSONL", async () => {
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 	});
@@ -188,6 +190,7 @@ test("runTestLab records parsed finding after secondary lab run copy", async () 
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 	});
@@ -237,6 +240,7 @@ test("runTestLab allows valid finding registration after rule validation", async
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 	});
@@ -284,6 +288,7 @@ test("runTestLab allows finding registration when rule validation warns", async 
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 	});
@@ -328,6 +333,7 @@ test("runTestLab blocks dangerous proposal when rule validation fails critically
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 	});
@@ -369,6 +375,11 @@ test("runTestLab keeps registering findings when blueprint or flows fail to load
 			duration: quickDepth,
 			projectId: "p",
 			projectPath,
+			// Slice 2/5: blueprint + flows read from stateRoot. For this
+			// test the broken JSON must live at stateRoot so the loader
+			// actually sees it and fails — stateRoot === projectPath
+			// preserves the no-op behavior.
+			stateRoot: projectPath,
 			store,
 			labRunRecorder,
 		});
@@ -410,6 +421,7 @@ test("runTestLab keeps registering findings when rule validation throws", async 
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 		ruleValidator: () => {
@@ -439,6 +451,7 @@ test("runTestLab writes JSONL before secondary rule validation and SQLite", asyn
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder,
 	});
@@ -459,6 +472,7 @@ test("runTestLab ignores SQLite failure and preserves JSONL and visible result",
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 		labRunRecorder: new FailingLabRunRecorder(),
 	});
@@ -487,6 +501,7 @@ test("runTestLab skips busy agent and persists skipped report", async () => {
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 	});
 
@@ -506,6 +521,7 @@ test("runTestLab skips direct workspace", async () => {
 		duration: quickDepth,
 		projectId: "p",
 		projectPath: "C:/p",
+		stateRoot: "C:/p",
 		store,
 	});
 

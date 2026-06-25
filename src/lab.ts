@@ -135,6 +135,7 @@ function persistLabRun(options: {
 	labRunRecorder?: LabRunRecorder;
 	record: LabRunRecord;
 	projectPath: string;
+	stateRoot: string;
 	ruleValidator?: LabFindingRuleValidator;
 }): void {
 	options.store.append(options.record);
@@ -166,11 +167,12 @@ function persistLabRun(options: {
 
 function resolveRuleValidator(options: {
 	projectPath: string;
+	stateRoot: string;
 	ruleValidator?: LabFindingRuleValidator;
 }): LabFindingRuleValidator | undefined {
 	if (options.ruleValidator) return options.ruleValidator;
 	try {
-		return createLabFindingRuleValidator(options.projectPath);
+		return createLabFindingRuleValidator(options.projectPath, options.stateRoot);
 	} catch {
 		return undefined;
 	}
@@ -193,6 +195,7 @@ export async function runTestLab(options: {
 	duration: LabDuration;
 	projectId: string;
 	projectPath: string;
+	stateRoot: string;
 	store: LabReportStore;
 	labRunRecorder?: LabRunRecorder;
 	ruleValidator?: LabFindingRuleValidator;
@@ -224,6 +227,7 @@ export async function runTestLab(options: {
 			labRunRecorder: options.labRunRecorder,
 			record,
 			projectPath: options.projectPath,
+			stateRoot: options.stateRoot,
 			ruleValidator: options.ruleValidator,
 		});
 		return record;
@@ -252,13 +256,17 @@ export async function runTestLab(options: {
 			labRunRecorder: options.labRunRecorder,
 			record,
 			projectPath: options.projectPath,
+			stateRoot: options.stateRoot,
 			ruleValidator: options.ruleValidator,
 		});
 		return record;
 	}
 
 	try {
-		const projectContext = loadLabProjectContext(options.projectPath);
+		const projectContext = loadLabProjectContext(
+			options.projectPath,
+			options.stateRoot,
+		);
 		const result = await Promise.race([
 			runtime.session.prompt(
 				labPrompt(options.duration, options.profile, projectContext),
@@ -293,6 +301,7 @@ export async function runTestLab(options: {
 			labRunRecorder: options.labRunRecorder,
 			record,
 			projectPath: options.projectPath,
+			stateRoot: options.stateRoot,
 			ruleValidator: options.ruleValidator,
 		});
 		return record;
@@ -324,6 +333,7 @@ export async function runTestLab(options: {
 			labRunRecorder: options.labRunRecorder,
 			record,
 			projectPath: options.projectPath,
+			stateRoot: options.stateRoot,
 			ruleValidator: options.ruleValidator,
 		});
 		return record;

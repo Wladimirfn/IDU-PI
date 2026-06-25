@@ -280,7 +280,12 @@ export async function runAgentLabReviewRequest(
 	const timeoutMs = Math.max(1, input.request.maxMinutes) * 60_000;
 	let run: AgentLabReviewRunSummary;
 	try {
-		const prompt = buildReviewPrompt(input.request, profile, input.projectPath);
+		const prompt = buildReviewPrompt(
+			input.request,
+			profile,
+			input.projectPath,
+			input.stateRoot ?? input.projectPath,
+		);
 		// B5 PR2 wiring: when the caller passes stateRoot + invocationSink,
 		// honor request.model by routing through router.promptForRole. This
 		// spawns a session with --provider/--model and feeds the invocation
@@ -855,8 +860,9 @@ function buildReviewPrompt(
 	request: AgentLabReviewRequest,
 	profile: AgentProfile,
 	projectPath: string,
+	stateRoot: string,
 ): string {
-	const context = loadLabProjectContext(projectPath);
+	const context = loadLabProjectContext(projectPath, stateRoot);
 	return [
 		`Modo AgentLab review-only para ${profile.label}.`,
 		"",

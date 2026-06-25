@@ -29,6 +29,7 @@ type GenerateAiDraft = (prompt: string) => Promise<string>;
 
 export type AiProjectDraftOptions = {
 	projectPath: string;
+	stateRoot: string;
 	reportsDir: string;
 	generate: GenerateAiDraft;
 	now?: () => Date;
@@ -90,7 +91,7 @@ export async function createAiProjectBlueprintDraft(
 		return await createAiProjectDraft({
 			...options,
 			kind: "project-blueprint",
-			prompt: buildBlueprintPrompt(options.projectPath),
+			prompt: buildBlueprintPrompt(options.projectPath, options.stateRoot),
 		});
 	} catch (error) {
 		return draftError("project-blueprint", error);
@@ -115,6 +116,7 @@ export function reviewAiProjectBlueprintDraft(
 	pathOrLatest: string,
 	projectPath: string,
 	reportsDir: string,
+	stateRoot: string,
 ): AiProjectDraftReview {
 	const review = emptyReview("project-blueprint", pathOrLatest);
 	const path = resolveDraftPath(
@@ -143,7 +145,7 @@ export function reviewAiProjectBlueprintDraft(
 	} else {
 		compareBlueprint(
 			validation.blueprint,
-			loadProjectBlueprint(projectPath),
+			loadProjectBlueprint(stateRoot),
 			review,
 		);
 	}
@@ -280,7 +282,7 @@ function draftError(kind: AiDraftKind, error: unknown): AiProjectDraftResult {
 	};
 }
 
-function buildBlueprintPrompt(projectPath: string): string {
+function buildBlueprintPrompt(projectPath: string, stateRoot: string): string {
 	return [
 		"Generá una propuesta JSON para project-blueprint.",
 		`Warning obligatorio: ${AI_PROJECT_DRAFT_WARNING}`,
@@ -288,7 +290,7 @@ function buildBlueprintPrompt(projectPath: string): string {
 		"Contexto seguro del proyecto:",
 		collectSafeProjectSummary(projectPath),
 		"Blueprint actual:",
-		safeCurrentBlueprint(projectPath),
+		safeCurrentBlueprint(stateRoot),
 	].join("\n\n");
 }
 
@@ -500,9 +502,9 @@ function collectSafeProjectSummary(projectPath: string): string {
 	return clamp(parts.join("\n\n"), MAX_CONTEXT_CHARS);
 }
 
-function safeCurrentBlueprint(projectPath: string): string {
+function safeCurrentBlueprint(stateRoot: string): string {
 	try {
-		return formatBlueprintForPrompt(loadProjectBlueprint(projectPath));
+		return formatBlueprintForPrompt(loadProjectBlueprint(stateRoot));
 	} catch (error) {
 		return `No pude leer blueprint actual: ${error instanceof Error ? error.message : String(error)}`;
 	}

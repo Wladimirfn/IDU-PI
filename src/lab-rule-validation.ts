@@ -20,8 +20,9 @@ export type LabRuleValidationDecision = {
 
 export function createLabFindingRuleValidator(
 	projectPath: string,
+	stateRoot: string,
 ): LabFindingRuleValidator {
-	const blueprint = loadProjectBlueprint(projectPath);
+	const blueprint = loadProjectBlueprint(stateRoot);
 	const flows = loadProjectFlows(projectPath);
 	return (finding) =>
 		validateFindingAgainstRules(

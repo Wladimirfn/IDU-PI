@@ -18,6 +18,7 @@ export type RunLabForProfilesOptions = {
 	duration: LabDuration;
 	projectId: string;
 	projectPath: string;
+	stateRoot: string;
 	store: LabReportStore;
 	labRunRecorder?: LabRunRecorder;
 };
@@ -60,6 +61,7 @@ export async function runLabForProfiles(
 				duration: options.duration,
 				projectId: options.projectId,
 				projectPath: options.projectPath,
+				stateRoot: options.stateRoot,
 				store: options.store,
 				labRunRecorder: options.labRunRecorder,
 			}),
