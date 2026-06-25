@@ -30,11 +30,12 @@ export function loadLabProjectContext(
 	stateRoot: string,
 ): LabProjectContext | undefined {
 	try {
-		const flows = loadProjectFlows(projectPath);
+		// Slice 4/5: flows reads from stateRoot (same as blueprint).
+		const flows = loadProjectFlows(stateRoot);
 		return formatLabProjectContext(
 			formatBlueprintForPrompt(loadProjectBlueprint(stateRoot)),
 			formatFlowsForPrompt(flows),
-			safeScanProjectMapForPrompt(projectPath, flows),
+			safeScanProjectMapForPrompt(projectPath, stateRoot, flows),
 		);
 	} catch {
 		return undefined;
@@ -71,10 +72,13 @@ export function formatLabProjectContext(
 
 function safeScanProjectMapForPrompt(
 	projectPath: string,
+	stateRoot: string,
 	flows: ProjectFlows,
 ): string | undefined {
 	try {
-		return formatProjectMapScanForPrompt(scanProjectMap(projectPath, flows));
+		return formatProjectMapScanForPrompt(
+			scanProjectMap(projectPath, stateRoot, flows),
+		);
 	} catch {
 		return undefined;
 	}

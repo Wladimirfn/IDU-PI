@@ -388,6 +388,7 @@ test("runIduPrepare with suggested dataStores reports needs_review", () => {
 
 test("runIduPrepare ignores scanner dataStore noise when evidence is filtered", () => {
 	const projectPath = mkdtempSync(join(tmpdir(), "idu-prepare-noise-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "idu-prepare-noise-state-"));
 	const reportsPath = mkdtempSync(join(tmpdir(), "idu-prepare-reports-"));
 	mkdirSync(join(projectPath, "docs"));
 	mkdirSync(join(projectPath, "examples"));
@@ -417,11 +418,11 @@ test("runIduPrepare ignores scanner dataStore noise when evidence is filtered", 
 		},
 		inspectProjectMap: () => ({ issues: [] }),
 		loadProjectFlows: () => flows(),
-		scanProjectMap: (loadedFlows) => scanProjectMap(projectPath, loadedFlows),
+		scanProjectMap: (loadedFlows) => scanProjectMap(projectPath, stateRoot, loadedFlows),
 		suggestProjectFlows: (loadedFlows) =>
-			suggestProjectFlowsFromScan(projectPath, loadedFlows),
+			suggestProjectFlowsFromScan(projectPath, stateRoot, loadedFlows),
 		draftProjectFlows: (suggestions) =>
-			saveProjectFlowsDraft(projectPath, suggestions, reportsPath),
+			saveProjectFlowsDraft(projectPath, stateRoot, suggestions, reportsPath),
 		reviewProjectFlowsDraft: () => ({ valid: true, errors: [] }),
 		postflight: () => postflight("low"),
 		createStructuredTask: () => ({ id: "task-1" }),

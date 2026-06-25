@@ -278,7 +278,7 @@ function collectSafeProjectCoreResearchContext(
 		}
 	}
 	parts.push("## project-blueprint\n" + safeBlueprint(stateRoot));
-	parts.push("## project-flows\n" + safeFlows(projectPath));
+	parts.push("## project-flows\n" + safeFlows(stateRoot));
 	return clamp(parts.join("\n\n"), MAX_CONTEXT_CHARS);
 }
 
@@ -290,9 +290,10 @@ function safeBlueprint(stateRoot: string): string {
 	}
 }
 
-function safeFlows(projectPath: string): string {
+function safeFlows(stateRoot: string): string {
+	// Slice 4/5: flows now reads from stateRoot (same as blueprint).
 	try {
-		return formatFlowsForPrompt(loadProjectFlows(projectPath));
+		return formatFlowsForPrompt(loadProjectFlows(stateRoot));
 	} catch (error) {
 		return `No pude leer project-flows: ${error instanceof Error ? error.message : String(error)}`;
 	}

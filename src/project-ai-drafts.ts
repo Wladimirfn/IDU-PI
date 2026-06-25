@@ -105,7 +105,7 @@ export async function createAiProjectFlowsDraft(
 		return await createAiProjectDraft({
 			...options,
 			kind: "project-flows",
-			prompt: buildFlowsPrompt(options.projectPath),
+			prompt: buildFlowsPrompt(options.projectPath, options.stateRoot),
 		});
 	} catch (error) {
 		return draftError("project-flows", error);
@@ -158,6 +158,7 @@ export function reviewAiProjectFlowsDraft(
 	pathOrLatest: string,
 	projectPath: string,
 	reportsDir: string,
+	stateRoot: string,
 ): AiProjectDraftReview {
 	const review = emptyReview("project-flows", pathOrLatest);
 	const path = resolveDraftPath(pathOrLatest, reportsDir, FLOWS_DRAFT_PREFIX);
@@ -172,7 +173,7 @@ export function reviewAiProjectFlowsDraft(
 	inspectCommonDraft(draft, review);
 	if (review.hasRawOutput || !review.validJson) return review;
 	const proposal = draft.proposal;
-	collectFlowIds(proposal, loadProjectFlows(projectPath), review);
+	collectFlowIds(proposal, loadProjectFlows(stateRoot), review);
 	const validation = validateProjectFlows(proposal);
 	review.validFlows = validation.ok;
 	if (!validation.ok) {
@@ -294,9 +295,13 @@ function buildBlueprintPrompt(projectPath: string, stateRoot: string): string {
 	].join("\n\n");
 }
 
-function buildFlowsPrompt(projectPath: string): string {
-	const flows = loadProjectFlows(projectPath);
-	const scan = scanProjectMap(projectPath, flows);
+function buildFlowsPrompt(projectPath: string, stateRoot: string): string {
+	// Slice 4/5: projectPath for scan target (listScannableFiles scans the
+	// repo); stateRoot for flows file location (mirrors the Slice 3
+	// buildProjectCoreResearchPrompt two-params pattern — avoids the
+	// ef42a8d trap of mixing semantics in one string-arg).
+	const flows = loadProjectFlows(stateRoot);
+	const scan = scanProjectMap(projectPath, stateRoot, flows);
 	return [
 		"Generá una propuesta JSON parcial para project-flows.",
 		`Warning obligatorio: ${AI_PROJECT_DRAFT_WARNING}`,

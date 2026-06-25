@@ -762,7 +762,7 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection.projectPath &&
 		connection.flows?.source === "project-local" &&
 		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
+			? loadProjectFlows(activeProjectStateRoot())
 			: undefined;
 	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
 	return analyzeProjectPreflight(request, {
@@ -869,7 +869,7 @@ function buildPostflightReport(): ProjectPostflightReport {
 		connection.projectPath &&
 		connection.flows?.source === "project-local" &&
 		connection.flows.valid
-			? loadProjectFlows(connection.projectPath)
+			? loadProjectFlows(activeProjectStateRoot())
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
 	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
@@ -2377,12 +2377,18 @@ bot.command("idu_prepare", async (ctx) => {
 					activeProjectName: activeProject?.name,
 				},
 			),
-		loadProjectFlows: () => loadProjectFlows(projectPath),
-		scanProjectMap: (flows) => scanProjectMap(projectPath, flows),
+		loadProjectFlows: () => loadProjectFlows(activeProjectStateRoot()),
+		scanProjectMap: (flows) =>
+			scanProjectMap(projectPath, activeProjectStateRoot(), flows),
 		suggestProjectFlows: (flows) =>
-			suggestProjectFlowsFromScan(projectPath, flows),
+			suggestProjectFlowsFromScan(projectPath, activeProjectStateRoot(), flows),
 		draftProjectFlows: (flows) =>
-			saveProjectFlowsDraft(projectPath, flows, reportsPath),
+			saveProjectFlowsDraft(
+				projectPath,
+				activeProjectStateRoot(),
+				flows,
+				reportsPath,
+			),
 		reviewProjectFlowsDraft: (draftPathOrLatest, flows) =>
 			reviewProjectFlowsDraft(draftPathOrLatest, flows, reportsPath),
 		postflight: () => buildPostflightReport(),
@@ -2805,7 +2811,11 @@ bot.command("config", async (ctx) => {
 		await replyLong(
 			ctx,
 			formatProjectMapScan(
-				scanProjectMap(currentCwd, loadProjectFlows(currentCwd)),
+				scanProjectMap(
+					currentCwd,
+					activeProjectStateRoot(),
+					loadProjectFlows(activeProjectStateRoot()),
+				),
 			),
 		);
 		return;
@@ -2820,7 +2830,11 @@ bot.command("config", async (ctx) => {
 		await replyLong(
 			ctx,
 			formatProjectFlowSuggestions(
-				suggestProjectFlowsFromScan(currentCwd, loadProjectFlows(currentCwd)),
+				suggestProjectFlowsFromScan(
+					currentCwd,
+					activeProjectStateRoot(),
+					loadProjectFlows(activeProjectStateRoot()),
+				),
 			),
 		);
 		return;
@@ -2837,7 +2851,8 @@ bot.command("config", async (ctx) => {
 			formatProjectFlowDraftResult(
 				saveProjectFlowsDraft(
 					currentCwd,
-					loadProjectFlows(currentCwd),
+					activeProjectStateRoot(),
+					loadProjectFlows(activeProjectStateRoot()),
 					join(config.agentWorkspaceRoot, "reports"),
 				),
 			),
@@ -2856,7 +2871,7 @@ bot.command("config", async (ctx) => {
 			formatProjectFlowDraftReview(
 				reviewProjectFlowsDraft(
 					restArgs.join(" ") || "latest",
-					loadProjectFlows(currentCwd),
+					loadProjectFlows(activeProjectStateRoot()),
 					join(config.agentWorkspaceRoot, "reports"),
 				),
 			),
@@ -2956,6 +2971,7 @@ bot.command("config", async (ctx) => {
 					restArgs.join(" ") || "latest",
 					currentCwd,
 					join(config.agentWorkspaceRoot, "reports"),
+					activeProjectStateRoot(),
 				),
 			),
 		);

@@ -230,14 +230,11 @@ function createProjectConfigFileIfMissing(
 	content: () => string,
 	result: InitProjectConfigResult,
 ): void {
-	// Slice 2/5: blueprint lives under stateRoot; flows stays under projectPath
-	// until Slice 4. Heuristic: project-blueprint.json -> stateRoot,
-	// everything else -> projectPath. When stateRoot === projectPath both
-	// branches collapse to the same path and behavior is preserved (no-op).
-	const base = relativePath.endsWith("project-blueprint.json")
-		? stateRoot
-		: projectPath;
-	const path = join(base, relativePath);
+	// Slice 4/5 (Commit B): heuristic collapsed. After Slice 4 both
+	// blueprint AND flows route to stateRoot, so the conditional is dead
+	// code. assertAllowedWrite retains repoRoot: projectPath for path-
+	// allowlist validations (independent of write base).
+	const path = join(stateRoot, relativePath);
 	mkdirSync(dirname(path), { recursive: true });
 	if (existsSync(path)) {
 		result.existing.push(relativePath);
@@ -333,8 +330,7 @@ export function inspectProjectConfig(
 		registry: asset(options.projectPath, "Skill registry", REGISTRY_FILE),
 		mcp: asset(options.projectPath, "MCP config", MCP_CONFIG),
 	};
-	// Slice 2/5: blueprint now lives under stateRoot; flows stays under
-	// projectPath until Slice 4 moves it.
+	// Slice 4/5: flows now lives under stateRoot (same as blueprint).
 	const projectConfig = {
 		blueprint: projectConfigStatus(
 			stateRoot,
@@ -343,7 +339,7 @@ export function inspectProjectConfig(
 			validateProjectBlueprint,
 		),
 		flows: projectConfigStatus(
-			options.projectPath,
+			stateRoot,
 			"Project flows",
 			PROJECT_FLOWS,
 			validateProjectFlows,
@@ -581,12 +577,13 @@ export function inspectProjectMap(
 	stateRoot: string,
 	activeProject?: { activeProjectId?: string; activeProjectName?: string },
 ): ProjectMapInspection {
-	// Slice 2/5: blueprint now lives under stateRoot; flows stays under
-	// projectPath until Slice 4. stateRoot is required — no fallback.
+	// Slice 4/5: blueprint AND flows now live under stateRoot. stateRoot is
+	// required — no fallback. LAYOUT FROZEN for readLooseProjectFlows: stays
+	// Layout A only (no B-fallback added).
 	const usesLocalBlueprint = existsSync(join(stateRoot, PROJECT_BLUEPRINT));
-	const usesLocalFlows = existsSync(join(projectPath, PROJECT_FLOWS));
+	const usesLocalFlows = existsSync(join(stateRoot, PROJECT_FLOWS));
 	const blueprint = loadProjectBlueprint(stateRoot);
-	const flows = readLooseProjectFlows(projectPath, usesLocalFlows);
+	const flows = readLooseProjectFlows(stateRoot, usesLocalFlows);
 	const source =
 		usesLocalBlueprint && usesLocalFlows ? "project-local" : "default";
 	const issues = projectMapIssues(flows);
@@ -611,11 +608,14 @@ export function inspectProjectMap(
 }
 
 function readLooseProjectFlows(
-	projectPath: string,
+	stateRoot: string,
 	usesLocalFlows: boolean,
 ): LooseProjectFlows {
+	// Slice 4/5: first arg is now stateRoot (was projectPath). LAYOUT FROZEN:
+	// stays Layout A only (no B-fallback added). Pre-existing layout
+	// characteristic for future cleanup.
 	const path = usesLocalFlows
-		? join(projectPath, PROJECT_FLOWS)
+		? join(stateRoot, PROJECT_FLOWS)
 		: join(process.cwd(), DEFAULT_FLOWS);
 	const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<
 		string,

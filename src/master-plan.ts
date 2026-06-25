@@ -4035,12 +4035,13 @@ function readSourceStatuses(
 		),
 		flowsStatus: safeStatus(() => {
 			// F-Item3a: project-flows.json lives at Layout A (`.idu/config/`).
-			// The previous version checked Layout B (`config/`), which is
-			// empty after the migration performed by `loadProjectFlows`
-			// above. Use Layout A — that matches where the canonical
-			// file lives and where the loader writes.
-			loadProjectFlows(projectPath);
-			return existsSync(join(projectPath, ".idu", "config", "project-flows.json"))
+			// Slice 4/5: flows file lives under stateRoot (mirrors the
+			// blueprint/core move). The previous version checked Layout B
+			// (`config/`), which is empty after the migration performed by
+			// `loadProjectFlows` above. Use Layout A — that matches where
+			// the canonical file lives and where the loader writes.
+			loadProjectFlows(stateRoot);
+			return existsSync(join(stateRoot, ".idu", "config", "project-flows.json"))
 				? "project-local"
 				: "default";
 		}),
