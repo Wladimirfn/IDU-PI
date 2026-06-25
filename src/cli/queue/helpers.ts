@@ -121,7 +121,8 @@ export function semanticCompactionProjectContext(
 	constitution?: string;
 } {
 	try {
-		const core = loadProjectCore(projectPath);
+		// Slice 3/5: loader reads from stateRoot, not projectPath.
+		const core = loadProjectCore(stateRoot);
 		if (core.status !== "confirmed") return {};
 		const constitution = existsSync(
 			join(stateRoot, "config", "project-constitution.json"),

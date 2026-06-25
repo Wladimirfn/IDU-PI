@@ -551,7 +551,7 @@ function detectHomeProjectStatus(
 			projectId,
 			stateRoot: paths.stateRoot,
 			supervisor: "unknown",
-			projectCore: projectCoreStatus(candidatePath, options.exists),
+			projectCore: projectCoreStatus(paths.stateRoot, options.exists),
 			constitution: constitutionStatus(paths.stateRoot, options.exists),
 			allowedRoot: "unknown",
 			recommendedNext: "enroll",
@@ -578,7 +578,7 @@ function detectHomeProjectStatus(
 				projectId,
 				stateRoot: paths.stateRoot,
 				supervisor: "unknown",
-				projectCore: projectCoreStatus(canonicalCandidate, options.exists),
+				projectCore: projectCoreStatus(paths.stateRoot, options.exists),
 				constitution: constitutionStatus(paths.stateRoot, options.exists),
 				allowedRoot: false,
 				recommendedNext: "enroll",
@@ -598,7 +598,7 @@ function detectHomeProjectStatus(
 			status.stateRoot,
 			options.exists,
 		);
-		const projectCore = projectCoreStatus(canonicalCandidate, options.exists);
+		const projectCore = projectCoreStatus(status.stateRoot, options.exists);
 		return {
 			candidatePath: canonicalCandidate,
 			isGitRepository,
@@ -682,7 +682,7 @@ function detectGitRoot(
 }
 
 function projectCoreStatus(
-	projectPath: string,
+	stateRoot: string,
 	_exists: (path: string) => boolean,
 ): CliHomeProjectStatus["projectCore"] {
 	// F-Item3a: route through the canonical loader (Layout A via
@@ -692,8 +692,10 @@ function projectCoreStatus(
 	// The pre-fix returned "pending" even when the file at Layout A
 	// was `status: "confirmed"`. `loadProjectCore` handles both
 	// layouts + one-time migration internally.
+	// Slice 3/5: stateRoot is the root passed by the caller
+	// (canonicalCanonicalCandidate->status.stateRoot at :601).
 	try {
-		const core = loadProjectCore(projectPath);
+		const core = loadProjectCore(stateRoot);
 		return core.status === "confirmed" ? "confirmed" : "pending";
 	} catch {
 		return "pending";

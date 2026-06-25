@@ -4025,7 +4025,8 @@ function readSourceStatuses(
 	signals: ProjectSignals,
 ): MasterPlanSource {
 	return {
-		projectCoreStatus: safeStatus(() => loadProjectCore(projectPath).status),
+		// Slice 3/5: loadProjectCore reads from stateRoot.
+		projectCoreStatus: safeStatus(() => loadProjectCore(stateRoot).status),
 		constitutionStatus: safeStatus(
 			() => loadProjectConstitution(stateRoot).status,
 		),

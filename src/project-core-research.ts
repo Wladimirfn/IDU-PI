@@ -141,7 +141,8 @@ export async function saveProjectCoreResearchDraft(
 			error: `No pude generar research draft Project Core: ${error instanceof Error ? error.message : String(error)}`,
 		};
 	}
-	const core = loadProjectCore(options.projectPath);
+	// Slice 3/5: loadProjectCore reads from stateRoot, not projectPath.
+	const core = loadProjectCore(options.stateRoot);
 	const parsed = parseJson(rawOutput);
 	const recommendations = parsed.ok
 		? extractRecommendations(parsed.value)

@@ -180,7 +180,11 @@ export function runIduBootstrap(input: IduBootstrapInput): IduBootstrapResult {
 	created.push(...configResult.created);
 	existing.push(...configResult.existing);
 
-	const corePath = join(projectPath, PROJECT_CORE);
+	// Slice 3/5: bootstrap inline writes/reads core from stateRoot, not
+	// projectPath. The loader (loadProjectCore) also reads from stateRoot,
+	// so the first idu-bootstrap post-Slice-3 creates core where the
+	// loader actually reads. Layout A (`<stateRoot>/.idu/config/`).
+	const corePath = join(statePaths.stateRoot, PROJECT_CORE);
 	const coreExisted = existsSync(corePath);
 	let projectCoreStatus = "draft";
 	if (!coreExisted) {
