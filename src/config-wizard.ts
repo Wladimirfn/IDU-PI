@@ -67,7 +67,12 @@ export type ConfigWizardReport = {
 export type InspectProjectConfigOptions = {
 	projectId: string;
 	projectPath: string;
-	stateRoot?: string;
+	// Issue #172: stateRoot is required in the migration path. Slice 2/5
+	// moved blueprint to stateRoot/.idu/config/, so blueprint status must
+	// resolve from stateRoot, not projectPath. The previous `?: string`
+	// signature invited the `options.stateRoot ?? options.projectPath`
+	// fallback in inspectProjectConfig — a latent split-brain trap.
+	stateRoot: string;
 	allowedRoots: string[];
 	agentProfiles: AgentProfile[];
 	activeProfileId: string;
@@ -318,7 +323,11 @@ function projectConfigStatus(
 export function inspectProjectConfig(
 	options: InspectProjectConfigOptions,
 ): ConfigWizardReport {
-	const stateRoot = options.stateRoot ?? options.projectPath;
+	// Issue #172: stateRoot is REQUIRED on InspectProjectConfigOptions (Slice 2
+	// moved blueprint under stateRoot). The previous `?? options.projectPath`
+	// fallback was a latent split-brain trap: a caller passing undefined would
+	// silently feed projectPath into projectConfigStatus, reverting Slice 2.
+	const stateRoot = options.stateRoot;
 	const assets = {
 		skills: asset(options.projectPath, "Skills", SKILLS_DIR),
 		registry: asset(options.projectPath, "Skill registry", REGISTRY_FILE),
