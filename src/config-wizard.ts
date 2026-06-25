@@ -230,13 +230,11 @@ function createProjectConfigFileIfMissing(
 	content: () => string,
 	result: InitProjectConfigResult,
 ): void {
-	// Slice 4/5 (Commit A): heuristic still routes blueprint→stateRoot,
-	// and flows now also routes to stateRoot (was projectPath pre-Slice-4).
-	// Commit B will collapse the conditional to a single direct path.
-	const base = relativePath.endsWith("project-blueprint.json")
-		? stateRoot
-		: stateRoot;
-	const path = join(base, relativePath);
+	// Slice 4/5 (Commit B): heuristic collapsed. After Slice 4 both
+	// blueprint AND flows route to stateRoot, so the conditional is dead
+	// code. assertAllowedWrite retains repoRoot: projectPath for path-
+	// allowlist validations (independent of write base).
+	const path = join(stateRoot, relativePath);
 	mkdirSync(dirname(path), { recursive: true });
 	if (existsSync(path)) {
 		result.existing.push(relativePath);

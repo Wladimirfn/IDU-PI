@@ -307,6 +307,56 @@ test("initProjectConfig writes only under stateRoot (split-brain guard)", () => 
 	);
 });
 
+// MANDATORY TEST #4 (Slice 4/5 Commit B): Heuristic collapse. After the
+// Slice 4 collapse, BOTH blueprint AND flows writes (via initProjectConfig)
+// must hit stateRoot/.idu/config/ when projectPath !== stateRoot. This
+// verifies the simplified createProjectConfigFileIfMissing does not
+// accidentally re-introduce the conditional or regress one of the two
+// paths. Mirrors the existing split-brain guard at config-wizard.test.ts:250
+// but explicitly checks both files together post-collapse.
+test("initProjectConfig writes both blueprint and flows under stateRoot (heuristic collapse)", () => {
+	const projectPath = join(tempDir(), "demo-collapse");
+	mkdirSync(projectPath, { recursive: true });
+	const stateRoot = tempStateRoot();
+
+	initProjectConfig(projectPath, stateRoot, "collapse-demo");
+
+	// Both must land under stateRoot/.idu/config/ (Layout A).
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-blueprint.json")),
+		true,
+		"blueprint must land under stateRoot (post-collapse)",
+	);
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-flows.json")),
+		true,
+		"flows must land under stateRoot (post-collapse)",
+	);
+	// Neither may land under projectPath — that would be a regression
+	// of the Slice 4 heuristic collapse.
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+		false,
+		"blueprint must NOT leak to projectPath (post-collapse)",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-flows.json")),
+		false,
+		"flows must NOT leak to projectPath (post-collapse)",
+	);
+	// Negative Layout B — both files must NOT exist in the legacy layout.
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		false,
+		"blueprint must NOT exist in projectPath legacy Layout B",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-flows.json")),
+		false,
+		"flows must NOT exist in projectPath legacy Layout B",
+	);
+});
+
 test("inspectProjectConfig reports missing project config and recommends init", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
