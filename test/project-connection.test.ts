@@ -157,6 +157,9 @@ test("ready if local blueprint and flows are valid", () => {
 		registry: registry(projectPath),
 		allowedRoots: [projectPath],
 		workspaceRoot,
+		// Slice 5: legacy no-op — these tests predate the path!=stateRoot refactor.
+		// stateRoot == projectPath is the explicit "behavior unchanged" case.
+		stateRoot: projectPath,
 	});
 
 	assert.equal(report.status, "ready");
@@ -179,6 +182,8 @@ test("ready uses matching prepare alignment state", () => {
 		defaultCwd,
 		allowedRoots: [projectPath],
 		workspaceRoot,
+		// Slice 5: legacy no-op — see "ready if local blueprint and flows are valid".
+		stateRoot: projectPath,
 		registry: registry(projectPath),
 		alignmentState: {
 			version: 1,
@@ -213,6 +218,8 @@ test("ready with non-aligned prepare state keeps safe next action", () => {
 		defaultCwd,
 		allowedRoots: [projectPath],
 		workspaceRoot,
+		// Slice 5: legacy no-op — see "ready if local blueprint and flows are valid".
+		stateRoot: projectPath,
 		registry: registry(projectPath),
 		alignmentState: {
 			version: 1,
@@ -232,21 +239,25 @@ test("ready with non-aligned prepare state keeps safe next action", () => {
 });
 
 test("warnings if project state directory does not exist", () => {
+	// Slice 5: the inspector reads config from stateRoot AND checks whether
+	// the stateRoot directory exists. When stateRoot is missing, both the
+	// config read AND the workspace check fail simultaneously — there is no
+	// longer a scenario where config is present but the state dir is missing,
+	// because they are now coupled to the same path. The init_workspace
+	// warning therefore fires together with needs_understanding status.
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");
-	writeProjectConfig(projectPath);
+	// No writeProjectConfig — stateRoot (= workspaceRoot/projects/demo) will
+	// not exist, so both the config read and the workspace check fail.
 
-	// stateRoot = workspaceRoot/projects/demo — not created here, so warning should fire
 	const report = inspect({
 		registry: registry(projectPath),
 		allowedRoots: [projectPath],
 		workspaceRoot,
 	});
 
-	assert.equal(report.status, "ready");
-	// Warning should mention the state directory (init_workspace)
+	assert.equal(report.status, "needs_understanding");
 	assert.match(report.warnings.join("\n"), /init_workspace/);
-	assert.equal(report.safeToOperate, true);
 });
 
 test("connected if local configs exist but are invalid", () => {
@@ -259,6 +270,8 @@ test("connected if local configs exist but are invalid", () => {
 	const report = inspect({
 		registry: registry(projectPath),
 		allowedRoots: [projectPath],
+		// Slice 5: legacy no-op — see "ready if local blueprint and flows are valid".
+		stateRoot: projectPath,
 	});
 
 	assert.equal(report.status, "connected");
@@ -438,14 +451,17 @@ test("A2-S1 inverse: labDbExists false when only reports/lab.db exists (path bug
 test("A2-S3: needsUserConfirmation not set to true solely from path bug when canonical lab.db exists", () => {
 	const projectPath = tempDir();
 	const workspaceRoot = tempDir("idu-workspace-");
+	// Slice 5: inspector now reads from stateRoot. Mirror writeProjectConfig at
+	// the canonical stateRoot so the config read succeeds.
 	writeProjectConfig(projectPath);
-
-	// Canonical lab.db exists; no legacy reports/ directory
 	const statePaths = resolveProjectStatePaths({
 		workspaceRoot,
 		projectId: "demo",
 		projectPath,
 	});
+	writeProjectConfig(statePaths.stateRoot);
+
+	// Canonical lab.db exists; no legacy reports/ directory
 	mkdirSync(statePaths.stateRoot, { recursive: true });
 	writeFileSync(statePaths.labDbPath, "");
 	writeFileSync(statePaths.taskQueuePath, "");
@@ -544,6 +560,8 @@ test("inspector finds project-blueprint.json in Layout A (.idu/config) — pre-f
 	const report = inspect({
 		registry: registry(projectPath),
 		allowedRoots: [projectPath],
+		// Slice 5: legacy no-op — see "ready if local blueprint and flows are valid".
+		stateRoot: projectPath,
 	});
 
 	assert.equal(
@@ -572,6 +590,8 @@ test("inspector finds project-flows.json in Layout B (config) — pre-fix RED", 
 	const report = inspect({
 		registry: registry(projectPath),
 		allowedRoots: [projectPath],
+		// Slice 5: legacy no-op — see "ready if local blueprint and flows are valid".
+		stateRoot: projectPath,
 	});
 
 	assert.equal(
@@ -614,4 +634,151 @@ test("inspector does NOT migrate files between Layout A and Layout B", () => {
 		false,
 		"inspector must not create a Layout B copy of blueprint",
 	);
+});
+
+// =========================================================================
+// Slice 5 hermetic guard — path!=stateRoot inspector refactor.
+//
+// Goal: prove `inspectProjectConnection` reads blueprint/flows from
+// stateRoot, NOT from project.path. The recursive self-test
+// `idu-pi-sobre-si-mismo` is the canonical case where path !== stateRoot.
+//
+// Hermeticity lesson (#900-class): NEVER reference the real
+// `bridge-agents/projects/idu-pi` stateRoot. Every temp directory comes
+// from `mkdtempSync(join(tmpdir(), "..."))` and is rmSync'd in after()
+// (the existing teardown already handles it via the tempRoots array).
+// =========================================================================
+
+test("Slice 5: inspectProjectConnection reads config from stateRoot, not project.path", () => {
+	// project.path and stateRoot are TWO DIFFERENT temp directories.
+	// Config lives ONLY under stateRoot — must be found there.
+	const projectPath = tempDir("idu-slice5-project-");
+	const stateRoot = tempDir("idu-slice5-state-");
+	const workspaceRoot = tempDir("idu-slice5-workspace-");
+	const defaultCwd = tempDir("idu-slice5-default-");
+
+	// Write the project-local config ONLY under stateRoot/.idu/config/
+	// (Layout A — the canonical post-refactor location).
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	cpSync(
+		"config/default-blueprint.json",
+		join(stateRoot, ".idu", "config", "project-blueprint.json"),
+	);
+	cpSync(
+		"config/default-flows.json",
+		join(stateRoot, ".idu", "config", "project-flows.json"),
+	);
+
+	const report = inspectProjectConnection({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath, stateRoot],
+		workspaceRoot,
+		stateRoot, // <-- explicit override so reads go to the actual temp stateRoot
+		defaultCwd,
+	});
+
+	// configStatus MUST be project_local_valid — proves config was found AND valid.
+	assert.equal(report.configStatus, "project_local_valid", [
+		`expected configStatus=project_local_valid, got ${report.configStatus}`,
+		`blueprint: ${JSON.stringify(report.blueprint)}`,
+		`flows: ${JSON.stringify(report.flows)}`,
+	].join("\n"));
+
+	// safeToOperate true — the recursive self-test payoff signal.
+	assert.equal(report.safeToOperate, true, [
+		`expected safeToOperate=true, got ${report.safeToOperate}`,
+		`status=${report.status}, problems=${report.problems.join("; ")}`,
+	].join("\n"));
+
+	// Both reads must report exists=true, source=project-local, valid=true.
+	assert.equal(report.blueprint?.exists, true);
+	assert.equal(report.blueprint?.source, "project-local");
+	assert.equal(report.blueprint?.valid, true);
+	assert.equal(report.flows?.exists, true);
+	assert.equal(report.flows?.source, "project-local");
+	assert.equal(report.flows?.valid, true);
+
+	// Crucially, the resolved paths must be UNDER stateRoot, NOT under project.path.
+	assert.ok(
+		report.blueprint?.path.startsWith(stateRoot),
+		`blueprint path must be under stateRoot; got ${report.blueprint?.path}`,
+	);
+	assert.ok(
+		report.flows?.path.startsWith(stateRoot),
+		`flows path must be under stateRoot; got ${report.flows?.path}`,
+	);
+	assert.ok(
+		!report.blueprint?.path.startsWith(projectPath),
+		`blueprint path must NOT be under project.path; got ${report.blueprint?.path}`,
+	);
+	assert.ok(
+		!report.flows?.path.startsWith(projectPath),
+		`flows path must NOT be under project.path; got ${report.flows?.path}`,
+	);
+});
+
+test("Slice 5 negative control: config only at project.path is NOT seen (proves reads come from stateRoot)", () => {
+	// The trap test. Under the OLD code (read from project.path), this would
+	// silently pass with configStatus=project_local_valid. Under the NEW code
+	// (read from stateRoot), this MUST report missing because stateRoot has
+	// no config files. If the inspector accidentally still reads from
+	// project.path, this test catches the regression.
+	const projectPath = tempDir("idu-slice5-neg-project-");
+	const stateRoot = tempDir("idu-slice5-neg-state-");
+	const workspaceRoot = tempDir("idu-slice5-neg-workspace-");
+	const defaultCwd = tempDir("idu-slice5-neg-default-");
+
+	// Write the config ONLY at project.path — NOT at stateRoot.
+	// This simulates the buggy pre-refactor world where the inspector read from path.
+	writeProjectConfig(projectPath);
+
+	const report = inspectProjectConnection({
+		registry: registry(projectPath),
+		allowedRoots: [projectPath, stateRoot],
+		workspaceRoot,
+		stateRoot, // <-- explicit override; stateRoot is empty so reads must fail
+		defaultCwd,
+	});
+
+	// configStatus MUST be missing — the inspector did not find config at stateRoot.
+	assert.equal(
+		report.configStatus,
+		"missing",
+		[
+			`expected configStatus=missing (proves read goes through stateRoot), got ${report.configStatus}`,
+			`blueprint: ${JSON.stringify(report.blueprint)}`,
+			`flows: ${JSON.stringify(report.flows)}`,
+		].join("\n"),
+	);
+
+	// safeToOperate false — the recursion guard caught the misconfiguration.
+	assert.equal(report.safeToOperate, false);
+	assert.equal(report.status, "needs_understanding");
+
+	// blueprint/flows must each report exists=false (no config at stateRoot).
+	assert.equal(report.blueprint?.exists, false);
+	assert.equal(report.flows?.exists, false);
+});
+
+test("Slice 5 no-op: when project.path === stateRoot, valid config still yields project_local_valid", () => {
+	// Legacy case (repo IS the stateRoot) MUST still report valid.
+	// Both stateRoot and projectPath point at the SAME temp dir.
+	const sharedRoot = tempDir("idu-slice5-noop-");
+	const workspaceRoot = tempDir("idu-slice5-noop-workspace-");
+	const defaultCwd = tempDir("idu-slice5-noop-default-");
+
+	writeProjectConfig(sharedRoot);
+
+	const report = inspectProjectConnection({
+		registry: registry(sharedRoot),
+		allowedRoots: [sharedRoot],
+		workspaceRoot,
+		stateRoot: sharedRoot, // <-- simulate legacy "workspaceRoot equals stateRoot" caller
+		defaultCwd,
+	});
+
+	assert.equal(report.configStatus, "project_local_valid");
+	assert.equal(report.safeToOperate, true);
+	assert.equal(report.blueprint?.exists, true);
+	assert.equal(report.flows?.exists, true);
 });

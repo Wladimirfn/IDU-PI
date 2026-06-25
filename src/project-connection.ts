@@ -203,21 +203,27 @@ export function inspectProjectConnection(
 		});
 	}
 
+	// stateRoot follows project-state.ts:56 by default, but enrolled callers may
+	// already run with workspaceRoot equal to the project stateRoot. In that case
+	// the explicit stateRoot prevents stateRoot/projects/<id> double nesting.
+	//
+	// Slice 5 (path!=stateRoot refactor): stateRoot MUST be computed BEFORE the
+	// config reads below. The blueprint/flows live at `<stateRoot>/.idu/config/`,
+	// not at `project.path`. Reading from `project.path` here breaks the
+	// recursive self-test `idu-pi-sobre-sí-mismo` where the project repo IS the
+	// stateRoot but may not contain the project-local config files.
+	const stateRoot =
+		options.stateRoot ?? join(options.workspaceRoot, "projects", project.id);
 	const blueprint = inspectProjectConfigFile(
-		project.path,
+		stateRoot,
 		"project-blueprint.json",
 		validateProjectBlueprint,
 	);
 	const flows = inspectProjectConfigFile(
-		project.path,
+		stateRoot,
 		"project-flows.json",
 		validateProjectFlows,
 	);
-	// stateRoot follows project-state.ts:56 by default, but enrolled callers may
-	// already run with workspaceRoot equal to the project stateRoot. In that case
-	// the explicit stateRoot prevents stateRoot/projects/<id> double nesting.
-	const stateRoot =
-		options.stateRoot ?? join(options.workspaceRoot, "projects", project.id);
 	const workspace = inspectWorkspace(options.workspaceRoot, stateRoot);
 	const problems: string[] = [];
 	const warnings: string[] = [];
