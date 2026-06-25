@@ -569,27 +569,11 @@ function flowsContent(): string {
 
 export function inspectProjectMap(
 	projectPath: string,
-	stateRootOrActiveProject?:
-		| string
-		| { activeProjectId?: string; activeProjectName?: string },
-	activeProject?:
-		| { activeProjectId?: string; activeProjectName?: string }
-		| undefined,
+	stateRoot: string,
+	activeProject?: { activeProjectId?: string; activeProjectName?: string },
 ): ProjectMapInspection {
 	// Slice 2/5: blueprint now lives under stateRoot; flows stays under
-	// projectPath until Slice 4. Back-compat: when the 2nd arg looks like
-	// an activeProject object (legacy shape) we fall back to projectPath
-	// as stateRoot — that preserves behavior for callers that haven't been
-	// threaded yet, and keeps the path === stateRoot no-op for hermetic test
-	// paths.
-	const stateRoot =
-		typeof stateRootOrActiveProject === "string"
-			? stateRootOrActiveProject
-			: projectPath;
-	const resolvedActiveProject =
-		typeof stateRootOrActiveProject === "string"
-			? activeProject
-			: stateRootOrActiveProject;
+	// projectPath until Slice 4. stateRoot is required — no fallback.
 	const usesLocalBlueprint = existsSync(join(stateRoot, PROJECT_BLUEPRINT));
 	const usesLocalFlows = existsSync(join(projectPath, PROJECT_FLOWS));
 	const blueprint = loadProjectBlueprint(stateRoot);
@@ -600,8 +584,8 @@ export function inspectProjectMap(
 	const recommendations = projectMapRecommendations(source, flows, issues);
 	return {
 		projectPath,
-		activeProjectId: resolvedActiveProject?.activeProjectId,
-		activeProjectName: resolvedActiveProject?.activeProjectName,
+		activeProjectId: activeProject?.activeProjectId,
+		activeProjectName: activeProject?.activeProjectName,
 		source,
 		projectName: blueprint.projectName,
 		counts: {

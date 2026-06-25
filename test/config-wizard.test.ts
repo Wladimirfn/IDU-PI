@@ -665,9 +665,10 @@ test("inspectProjectMap resolves blueprint under stateRoot, not projectPath (dyn
 	const resultFromStateRoot = inspectProjectMap(projectPath, stateRoot);
 	assert.equal(resultFromStateRoot.source, "project-local");
 
-	// inspectProjectMap reading from projectPath (legacy shape, stateRoot
-	// defaults to projectPath): no blueprint exists there, so source is
-	// default — proves the resolver follows stateRoot, not projectPath.
-	const resultFromProjectPath = inspectProjectMap(projectPath);
+	// inspectProjectMap reading from projectPath as both projectPath and
+	// stateRoot (mirroring the legacy shape, where stateRoot defaulted to
+	// projectPath): no blueprint exists there, so source is default — proves
+	// the resolver follows stateRoot, not projectPath.
+	const resultFromProjectPath = inspectProjectMap(projectPath, projectPath);
 	assert.equal(resultFromProjectPath.source, "default");
 });
