@@ -672,3 +672,80 @@ test("inspectProjectMap resolves blueprint under stateRoot, not projectPath (dyn
 	const resultFromProjectPath = inspectProjectMap(projectPath, projectPath);
 	assert.equal(resultFromProjectPath.source, "default");
 });
+
+// Issue #172 split-brain guard: config-wizard.ts:321 used to do
+// `const stateRoot = options.stateRoot ?? options.projectPath`, which would
+// silently feed projectPath into projectConfigStatus when stateRoot was
+// undefined — reverting Slice 2's blueprint move. The fix made stateRoot
+// REQUIRED on InspectProjectConfigOptions and removed the `??` fallback.
+// This test proves the inspector follows stateRoot for blueprint status.
+
+test("inspectProjectConfig resolves blueprint status from stateRoot, not projectPath (path != stateRoot)", () => {
+	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	mkdirSync(workspaceRoot, { recursive: true });
+
+	// Seed a valid blueprint ONLY in stateRoot. projectPath is empty.
+	initProjectConfig(projectPath, stateRoot, "blueprint-state-root-only");
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		stateRoot,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "default",
+		workspaceMode: "direct",
+		workspaceRoot,
+		piArgs: ["--no-skill-registry", "--no-lens"],
+		isGitRepo: false,
+	});
+
+	// blueprint.status must reflect stateRoot (project-local, valid).
+	assert.equal(report.projectConfig.blueprint.exists, true);
+	assert.equal(report.projectConfig.blueprint.valid, true);
+	assert.equal(report.projectConfig.blueprint.source, "project-local");
+
+	// Negative: there must be no blueprint under projectPath Layout A or B.
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-blueprint.json")),
+		false,
+		"blueprint must NOT exist under projectPath Layout A",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-blueprint.json")),
+		false,
+		"blueprint must NOT exist under projectPath Layout B",
+	);
+});
+
+test("inspectProjectConfig returns default blueprint when stateRoot has none (path != stateRoot)", () => {
+	// Same setup but with NEITHER stateRoot nor projectPath holding a blueprint.
+	// The inspector must report default, NOT silently read from projectPath.
+	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
+	const workspaceRoot = join(projectPath, ".workspaces");
+	mkdirSync(workspaceRoot, { recursive: true });
+
+	const report = inspectProjectConfig({
+		projectId: "demo",
+		projectPath,
+		stateRoot,
+		allowedRoots: [projectPath],
+		agentProfiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+		],
+		activeProfileId: "default",
+		workspaceMode: "direct",
+		workspaceRoot,
+		piArgs: ["--no-skill-registry", "--no-lens"],
+		isGitRepo: false,
+	});
+
+	assert.equal(report.projectConfig.blueprint.exists, false);
+	assert.equal(report.projectConfig.blueprint.source, "default");
+	assert.equal(report.projectConfig.blueprint.valid, true);
+});

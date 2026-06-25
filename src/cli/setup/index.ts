@@ -6,6 +6,7 @@
  * can keep calling them without rewriting call sites.
  */
 
+export { loadConfirmedProjectConstitution } from "../../project-constitution.js";
 export {
 	handleSetupCommand,
 	parseMcpTarget,
@@ -16,5 +17,4 @@ export {
 	buildPreflightReport,
 	buildPostflightReport,
 	runPrepare,
-	loadConfirmedProjectConstitution,
 } from "./helpers.js";

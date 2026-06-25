@@ -11,6 +11,7 @@ import {
 	deriveConstitutionFromProjectCore,
 	evaluateConstitutionGates,
 	formatConstitutionForPrompt,
+	loadConfirmedProjectConstitution,
 	loadProjectConstitution,
 	validateProjectConstitution,
 } from "../src/project-constitution.js";
@@ -207,4 +208,111 @@ test("loadProjectConstitution reads from stateRoot, not projectPath (path != sta
 		false,
 		"loader must not consult Layout A in projectPath",
 	);
+});
+
+// Issue #172 split-brain guards: loadConfirmedProjectConstitution is the shared
+// helper exported from src/project-constitution.ts and consumed by both
+// src/index.ts and src/cli/setup/helpers.ts. The pre-fix signature accepted
+// (projectPath, stateRoot) as optional and used `stateRoot ?? projectPath`,
+// which silently fed projectPath to loadProjectCore + loadProjectConstitution
+// when stateRoot was undefined. These tests prove the helper reads from
+// stateRoot only.
+
+test("loadConfirmedProjectConstitution reads from stateRoot, not projectPath (path != stateRoot, with constitution)", () => {
+	const projectPath = mkdtempSync(join(tmpdir(), "pi-confirmed-constitution-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-confirmed-state-"));
+	tempDirs.push(projectPath, stateRoot);
+
+	// Seed a confirmed Project Core AND a constitution ONLY under stateRoot.
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+	const core = confirmedCore();
+	writeFileSync(
+		join(stateRoot, ".idu", "config", "project-core.json"),
+		`${JSON.stringify(core, null, 2)}\n`,
+		"utf8",
+	);
+	const constitution = deriveConstitutionFromProjectCore(core);
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		`${JSON.stringify(constitution, null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadConfirmedProjectConstitution(stateRoot);
+	assert.ok(loaded, "helper must return a constitution when core is confirmed");
+	assert.equal(loaded?.projectName, "Idu PI");
+
+	// Anti-split-brain: helper must NOT have consulted or written to projectPath.
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-core.json")),
+		false,
+		"helper must not consult Layout A in projectPath for core",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-constitution.json")),
+		false,
+		"helper must not consult Layout B in projectPath for constitution",
+	);
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-constitution.json")),
+		false,
+		"helper must not consult Layout A in projectPath for constitution",
+	);
+});
+
+test("loadConfirmedProjectConstitution derives from stateRoot core when constitution is missing (path != stateRoot)", () => {
+	// Same as above, but constitution file does NOT exist — the helper must
+	// derive it from the confirmed core at stateRoot (NOT consult projectPath).
+	const projectPath = mkdtempSync(join(tmpdir(), "pi-confirmed-derived-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-confirmed-derived-state-"));
+	tempDirs.push(projectPath, stateRoot);
+
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	const core = confirmedCore();
+	writeFileSync(
+		join(stateRoot, ".idu", "config", "project-core.json"),
+		`${JSON.stringify(core, null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadConfirmedProjectConstitution(stateRoot);
+	assert.ok(loaded, "helper must derive constitution from confirmed core");
+	assert.equal(loaded?.projectName, "Idu PI");
+
+	// Anti-split-brain: helper must NOT have consulted projectPath for either core or constitution.
+	assert.equal(
+		existsSync(join(projectPath, ".idu", "config", "project-core.json")),
+		false,
+		"helper must not consult projectPath core (derivation branch)",
+	);
+	assert.equal(
+		existsSync(join(projectPath, "config", "project-constitution.json")),
+		false,
+		"helper must not consult Layout B in projectPath (derivation branch)",
+	);
+});
+
+test("loadConfirmedProjectConstitution returns undefined when stateRoot is empty string", () => {
+	// Issue #172: stateRoot is required, but the helper guards against empty
+	// input and returns undefined rather than crashing or silently reverting.
+	assert.equal(loadConfirmedProjectConstitution(""), undefined);
+});
+
+test("loadConfirmedProjectConstitution is no-op when path == stateRoot", () => {
+	// Issue #172 acceptance criterion 7: behavior preserved when path === stateRoot.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-confirmed-noop-"));
+	tempDirs.push(stateRoot);
+
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	const core = confirmedCore();
+	writeFileSync(
+		join(stateRoot, ".idu", "config", "project-core.json"),
+		`${JSON.stringify(core, null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadConfirmedProjectConstitution(stateRoot);
+	assert.ok(loaded);
+	assert.equal(loaded?.projectName, "Idu PI");
 });

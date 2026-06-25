@@ -107,6 +107,7 @@ import {
 } from "./project-core-confirmation.js";
 import {
 	deriveConstitutionFromProjectCore,
+	loadConfirmedProjectConstitution,
 	loadProjectConstitution,
 } from "./project-constitution.js";
 import { formatProjectCoreForPrompt, loadProjectCore } from "./project-core.js";
@@ -763,10 +764,7 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection.flows.valid
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
-	const constitution = loadConfirmedProjectConstitution(
-		connection.projectPath,
-		activeProjectStateRoot(),
-	);
+	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
 	return analyzeProjectPreflight(request, {
 		connection,
 		blueprint,
@@ -874,10 +872,7 @@ function buildPostflightReport(): ProjectPostflightReport {
 			? loadProjectFlows(connection.projectPath)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
-	const constitution = loadConfirmedProjectConstitution(
-		connection.projectPath,
-		activeProjectStateRoot(),
-	);
+	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
 	const report = analyzeProjectPostflight({
 		projectPath,
 		connectionReport: connection,
@@ -898,34 +893,6 @@ function buildPostflightReport(): ProjectPostflightReport {
 			report: reportWithWarnings,
 		}),
 	};
-}
-
-function loadConfirmedProjectConstitution(
-	projectPath: string | undefined,
-	stateRoot: string | undefined,
-) {
-	if (!projectPath) return undefined;
-	// F-Item3a: route through the canonical loader (Layout A via
-	// readIdPathWithMigration). The pre-fix version hardcoded
-	// Layout B (`<projectPath>/config/project-core.json`) which fails
-	// when the canonical Layout A file exists — the pre-check returned
-	// false and the function bailed before `loadProjectCore` could find
-	// the file at Layout A.
-	// Slice 3/5: loader reads from stateRoot, not projectPath.
-	try {
-		const core = loadProjectCore(stateRoot ?? projectPath);
-		if (core.status !== "confirmed") return undefined;
-		const constitutionPath = join(
-			stateRoot ?? projectPath,
-			"config",
-			"project-constitution.json",
-		);
-		return existsSync(constitutionPath)
-			? loadProjectConstitution(stateRoot ?? projectPath)
-			: deriveConstitutionFromProjectCore(core);
-	} catch {
-		return undefined;
-	}
 }
 
 function looksLikePath(text: string): boolean {

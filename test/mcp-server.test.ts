@@ -4500,8 +4500,18 @@ test("idu_bootstrap_project creates drafts only when explicitly allowed and acti
 			),
 			true,
 		);
+		// Issue #172: constitution writer swapped from projectPath to stateRoot.
+		// Assertion now looks under stateRoot/.idu/config/ (matching the loader).
 		assert.equal(
-			existsSync(join(draftsPath, ".idu", "config", "project-constitution.json")),
+			existsSync(
+				join(
+					(withDraftsInactive.data as { statePaths: { stateRoot: string } })
+						.statePaths.stateRoot,
+					".idu",
+					"config",
+					"project-constitution.json",
+				),
+			),
 			true,
 		);
 		assert.equal(
