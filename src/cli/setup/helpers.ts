@@ -58,11 +58,7 @@ import {
 } from "../../project-alignment-state.js";
 import { loadProjectBlueprint } from "../../project-blueprint.js";
 import { loadProjectFlows } from "../../project-flows.js";
-import { loadProjectCore } from "../../project-core.js";
-import {
-	loadProjectConstitution,
-	deriveConstitutionFromProjectCore,
-} from "../../project-constitution.js";
+import { loadConfirmedProjectConstitution } from "../../project-constitution.js";
 import {
 	analyzeProjectPreflight,
 	type ProjectPreflightReport,
@@ -361,35 +357,4 @@ export function runPrepare(context: RuntimeContext): IduPrepareResult {
 		differencesDetected: result.differencesDetected,
 	});
 	return result;
-}
-
-// Issue #172: stateRoot is the sole base path for core + constitution. The
-// pre-fix signature took (projectPath, stateRoot) as optional and used
-// `stateRoot ?? projectPath` everywhere, which silently fed projectPath to
-// the loaders when stateRoot was undefined — a latent split-brain trap.
-// F-Item3a: route through the canonical loader (Layout A via
-// readIdPathWithMigration). The pre-fix version hardcoded Layout B which
-// failed when the canonical Layout A file existed — the pre-check returned
-// false and the function bailed before `loadProjectCore` could find the
-// file at Layout A.
-// TODO(issue-172-followup): this helper is byte-identical to the one in
-// src/index.ts. Extract to src/project-constitution.ts next (Slice 3-style
-// corePath pattern) — separate commit keeps the cleanup diff readable for
-// the auditor.
-export function loadConfirmedProjectConstitution(stateRoot: string) {
-	if (!stateRoot) return undefined;
-	try {
-		const core = loadProjectCore(stateRoot);
-		if (core.status !== "confirmed") return undefined;
-		const constitutionPath = join(
-			stateRoot,
-			"config",
-			"project-constitution.json",
-		);
-		return existsSync(constitutionPath)
-			? loadProjectConstitution(stateRoot)
-			: deriveConstitutionFromProjectCore(core);
-	} catch {
-		return undefined;
-	}
 }

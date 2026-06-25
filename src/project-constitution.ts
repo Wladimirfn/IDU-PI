@@ -1,6 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ProjectCore, ProjectCoreStatus } from "./project-core.js";
+import {
+	loadProjectCore,
+	type ProjectCore,
+	type ProjectCoreStatus,
+} from "./project-core.js";
 import type { ProjectPreflightRisk } from "./project-preflight.js";
 
 export type ProjectConstitutionStatus = "draft" | "active" | "stale";
@@ -576,4 +580,35 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 // TODO(hygiene-future-batch): defaultConstitutionPath is cwd-fragile — replace with stateRoot-based fallback or remove
 function defaultConstitutionPath(): string {
 	return join(process.cwd(), "config", "default-constitution.json");
+}
+
+/**
+ * Load the project constitution only when its Project Core is `confirmed`.
+ *
+ * Issue #172: stateRoot is the sole base path. The pre-fix signature took
+ * (projectPath, stateRoot) as optional and used `stateRoot ?? projectPath`
+ * everywhere, which silently fed projectPath to the loaders when stateRoot
+ * was undefined — a latent split-brain trap. After Slice 1/3 + this cleanup,
+ * stateRoot is required and is the only path consulted for both core and
+ * constitution reads. Returns `undefined` when core is not confirmed (no
+ * constitution yet) or when any read throws.
+ */
+export function loadConfirmedProjectConstitution(
+	stateRoot: string,
+): ProjectConstitution | undefined {
+	if (!stateRoot) return undefined;
+	try {
+		const core = loadProjectCore(stateRoot);
+		if (core.status !== "confirmed") return undefined;
+		const constitutionPath = join(
+			stateRoot,
+			"config",
+			"project-constitution.json",
+		);
+		return existsSync(constitutionPath)
+			? loadProjectConstitution(stateRoot)
+			: deriveConstitutionFromProjectCore(core);
+	} catch {
+		return undefined;
+	}
 }
