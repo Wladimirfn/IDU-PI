@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readIdPathWithMigration } from "./hygiene-migrate.js";
 import {
 	loadProjectCore,
 	type ProjectCore,
@@ -125,9 +126,32 @@ export function validateProjectConstitution(
 }
 
 export function loadProjectConstitution(stateRoot: string): ProjectConstitution {
-	const localPath = join(stateRoot, "config", "project-constitution.json");
-	const path = existsSync(localPath) ? localPath : defaultConstitutionPath();
-	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+	// R1/5: align with blueprint/core/flows — use A-pref-B via
+	// readIdPathWithMigration. Constitution was the outlier (Layout B direct
+	// only); this aligns it with the other 3 loaders.
+	// Closes the deferred hygiene-migrate bug: hygiene-migrate has
+	// constitution in LEGACY_CONFIG_FILES (moves B→A), but the old B-only
+	// loader could not read the migrated file. Now reads find A first.
+	const migrated = readIdPathWithMigration(
+		stateRoot,
+		"project-constitution.json",
+	);
+	let path: string;
+	let raw: string;
+	if (migrated.content !== null) {
+		raw = migrated.content;
+		path = join(stateRoot, ".idu", "config", "project-constitution.json");
+	} else if (existsSync(join(stateRoot, "config", "project-constitution.json"))) {
+		// Edge case: file exists at Layout B but readIdPathWithMigration did not
+		// migrate (e.g. partial state or permission issue). Read directly to
+		// preserve the legacy fallback path.
+		path = join(stateRoot, "config", "project-constitution.json");
+		raw = readFileSync(path, "utf8");
+	} else {
+		path = defaultConstitutionPath();
+		raw = readFileSync(path, "utf8");
+	}
+	const parsed = JSON.parse(raw) as unknown;
 	const result = validateProjectConstitution(parsed);
 	if (!result.ok) {
 		throw new Error(

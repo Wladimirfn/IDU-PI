@@ -15,6 +15,7 @@ import {
 	loadProjectConstitution,
 	validateProjectConstitution,
 } from "../src/project-constitution.js";
+import { migrateHygieneLayout } from "../src/hygiene-migrate.js";
 
 const tempDirs: string[] = [];
 
@@ -315,4 +316,166 @@ test("loadConfirmedProjectConstitution is no-op when path == stateRoot", () => {
 	const loaded = loadConfirmedProjectConstitution(stateRoot);
 	assert.ok(loaded);
 	assert.equal(loaded?.projectName, "Idu PI");
+});
+
+// =========================================================================
+// R1/5 — Issue #178: A-pref-B migration for constitution loader
+// =========================================================================
+
+test("loadProjectConstitution: Layout B only → migrates to A and returns content (R1)", () => {
+	// R1 acceptance criterion 2a: constitution at Layout B (legacy) is
+	// migrated to Layout A on first read, and the loader returns the content.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r1-constitution-b-only-"));
+	tempDirs.push(stateRoot);
+	mkdirSync(join(stateRoot, "config"));
+	const constitution = deriveConstitutionFromProjectCore(confirmedCore());
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		`${JSON.stringify(constitution, null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadProjectConstitution(stateRoot);
+	assert.equal(loaded.projectName, "Idu PI");
+
+	// Layout A must now exist; Layout B must be gone (renameSync is atomic).
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-constitution.json")),
+		true,
+		"Layout A file must exist after readIdPathWithMigration migrates",
+	);
+	assert.equal(
+		existsSync(join(stateRoot, "config", "project-constitution.json")),
+		false,
+		"Layout B file must be gone after migration",
+	);
+});
+
+test("loadProjectConstitution: Layout A only → reads directly without side effect (R1)", () => {
+	// R1 acceptance criterion 2b: constitution at Layout A reads directly.
+	// No Layout B file should be created as a side effect.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r1-constitution-a-only-"));
+	tempDirs.push(stateRoot);
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	const constitution = deriveConstitutionFromProjectCore(confirmedCore());
+	writeFileSync(
+		join(stateRoot, ".idu", "config", "project-constitution.json"),
+		`${JSON.stringify(constitution, null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadProjectConstitution(stateRoot);
+	assert.equal(loaded.projectName, "Idu PI");
+
+	// Guard: no Layout B file should appear as a side effect of A-only read.
+	assert.equal(
+		existsSync(join(stateRoot, "config", "project-constitution.json")),
+		false,
+		"Layout B file must not be created by Layout A direct read",
+	);
+});
+
+test("loadProjectConstitution: both A and B → A wins, B is left untouched (R1)", () => {
+	// R1 acceptance criterion 2c: when both files exist, A is preferred
+	// (readIdPathWithMigration short-circuits on A and does not touch B).
+	// B is NOT migrated because A already exists.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r1-constitution-both-"));
+	tempDirs.push(stateRoot);
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+
+	const coreA = confirmedCore({ projectName: "Project-A" });
+	const coreB = confirmedCore({ projectName: "Project-B" });
+	writeFileSync(
+		join(stateRoot, ".idu", "config", "project-constitution.json"),
+		`${JSON.stringify(deriveConstitutionFromProjectCore(coreA), null, 2)}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		`${JSON.stringify(deriveConstitutionFromProjectCore(coreB), null, 2)}\n`,
+		"utf8",
+	);
+
+	const loaded = loadProjectConstitution(stateRoot);
+	assert.equal(loaded.projectName, "Project-A", "Layout A must win over Layout B");
+
+	// Both files remain — readIdPathWithMigration only migrates when A is missing.
+	assert.equal(
+		existsSync(join(stateRoot, ".idu", "config", "project-constitution.json")),
+		true,
+		"Layout A file must remain",
+	);
+	assert.equal(
+		existsSync(join(stateRoot, "config", "project-constitution.json")),
+		true,
+		"Layout B file must remain when A already exists (no migration triggered)",
+	);
+});
+
+test("loadProjectConstitution: neither A nor B → falls back to defaultConstitutionPath (R1)", () => {
+	// R1 acceptance criterion 2d: when neither layout has the file, the loader
+	// falls back to defaultConstitutionPath (the existing default file at
+	// <cwd>/config/default-constitution.json). The fallback is preserved
+	// as-is per the hard-constraints in the task brief — the cwd-fragility
+	// is a known finding logged for R2 (D7 #1).
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r1-constitution-neither-"));
+	tempDirs.push(stateRoot);
+	// Both layout dirs exist but contain no constitution file.
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+
+	const loaded = loadProjectConstitution(stateRoot);
+	// The default fixture (config/default-constitution.json) is part of the
+	// repo and is read via process.cwd() — it always resolves to the real
+	// "Idu-pi" project shipped with the bridge.
+	assert.ok(loaded, "loader must return a default constitution");
+	assert.ok(loaded.projectName.length > 0);
+});
+
+test("hygiene-migrate + loadProjectConstitution: end-to-end (R1 integration)", () => {
+	// R1 acceptance criterion 3: run hygiene-migrate on a Layout-B
+	// constitution, then call loadProjectConstitution. The loader must find
+	// the migrated file at Layout A — without R1, this would have failed
+	// because the old loader looked in B and the file had been moved to A.
+	//
+	// This is the deferred hygiene-migrate bug from Slice 1, now closed.
+	const repoRoot = mkdtempSync(join(tmpdir(), "pi-r1-hygiene-repo-"));
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r1-hygiene-state-"));
+	tempDirs.push(repoRoot, stateRoot);
+
+	// Seed a constitution at Layout B only.
+	mkdirSync(join(repoRoot, "config"), { recursive: true });
+	const core = confirmedCore({ projectName: "Hygiene Migrate Test" });
+	const constitution = deriveConstitutionFromProjectCore(core);
+	writeFileSync(
+		join(repoRoot, "config", "project-constitution.json"),
+		`${JSON.stringify(constitution, null, 2)}\n`,
+		"utf8",
+	);
+
+	// Run hygiene-migrate to move it B → A.
+	const result = migrateHygieneLayout({ repoRoot, stateRoot });
+	const constitutionMoved = result.moved.some((entry) =>
+		entry.to.endsWith("project-constitution.json"),
+	);
+	assert.ok(
+		constitutionMoved,
+		"hygiene-migrate must move project-constitution.json B→A",
+	);
+	assert.equal(
+		existsSync(join(repoRoot, ".idu", "config", "project-constitution.json")),
+		true,
+		"constitution must be at Layout A after migrateHygieneLayout",
+	);
+	assert.equal(
+		existsSync(join(repoRoot, "config", "project-constitution.json")),
+		false,
+		"constitution must NOT remain at Layout B after migrateHygieneLayout",
+	);
+
+	// Now call the loader. Pre-R1, this would have thrown because the loader
+	// looked in <stateRoot>/config/ — but the file is now at Layout A.
+	const loaded = loadProjectConstitution(repoRoot);
+	assert.equal(loaded.projectName, "Hygiene Migrate Test");
 });

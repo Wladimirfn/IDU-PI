@@ -120,10 +120,12 @@ const STATUSES = ["draft", "proposed", "confirmed", "stale"] as const;
  * `readIdPathWithMigration` which still does A-pref-B-fallback, so this
  * helper intentionally covers only Layout A.
  *
- * Out-of-scope for Slice 3: the layout-axis discrepancy between this
- * helper (A-hardcoded) and `loadProjectCore` (A-pref-B via
- * `readIdPathWithMigration`). Logged as a finding for future cleanup —
- * NOT fixed in this PR.
+ * R1/5: constitution loader now also uses readIdPathWithMigration
+ * (A-pref-B), aligning it with blueprint/core/flows. The "constitution is
+ * Layout B only" exception noted here is closed — constitution now reads
+ * A first like the other three configs. The `corePath` helper itself
+ * remains Layout-A-only (writes go to Layout A; the loader covers the
+ * legacy migration on read).
  */
 export function corePath(stateRoot: string): string {
 	return join(stateRoot, ".idu", "config", "project-core.json");
