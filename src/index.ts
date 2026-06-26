@@ -582,8 +582,9 @@ async function runIduRemoteCommand(
 function resolvePackageRootForTelegram(): string {
 	// R2.2: dedup with the shared helper. The function name is preserved
 	// because 4 call sites in this file rely on the Telegram-specific
-	// semantic; the implementation is now the generic package-root resolver
-	// (compiled-context-only — see resolvePackageRoot in package-root.ts).
+	// semantic; the implementation is now the generic package-root resolver,
+	// which walks up to package.json and works in source and compiled contexts
+	// (see resolvePackageRoot in package-root.ts).
 	return resolvePackageRoot();
 }
 
