@@ -446,14 +446,20 @@ test("R2.3 Case 3: stale auto-dedup emits `superseded` lifecycle event for the O
 		);
 
 		// 2. The telemetry log must contain a `superseded` event for the
-		//    OLD injection — NOT for the new one.
+		//    OLD injection. A.1: the new enqueue (Case 4) also writes
+		//    an `emitted` event for the NEW injection (auto-emit), so
+		//    the log has >= 2 events total. We filter to the old
+		//    injection's events.
 		const events = readTelemetryLog(stateRoot);
-		assert.equal(
-			events.length,
-			1,
-			"exactly one lifecycle event must be emitted (for the old injection)",
+		const oldEvents = events.filter(
+			(e) => e.injectionId === "old-injection-1",
 		);
-		const evt = events[0];
+		assert.equal(
+			oldEvents.length,
+			1,
+			"exactly one lifecycle event must be emitted for the OLD injection",
+		);
+		const evt = oldEvents[0];
 		assert.equal(
 			evt.injectionId,
 			"old-injection-1",
@@ -570,10 +576,16 @@ test("R2.3 Case 3 fall-through: stale auto-dedup does NOT block Case 4 fresh enq
 		assert.equal(newEntry.acked, false);
 
 		// And exactly one `superseded` event for the OLD one.
+		// A.1: Case 4's auto-emit also writes an `emitted` event for
+		// the NEW injection, so the log has >= 2 events total. We
+		// filter to the old injection's events to count `superseded`.
 		const events = readTelemetryLog(stateRoot);
-		assert.equal(events.length, 1);
-		assert.equal(events[0].injectionId, "stale-fallthrough-1");
-		assert.equal(events[0].phase, "superseded");
+		const oldEvents = events.filter(
+			(e) => e.injectionId === "stale-fallthrough-1",
+		);
+		assert.equal(oldEvents.length, 1, "exactly 1 event for the OLD injection");
+		assert.equal(oldEvents[0].injectionId, "stale-fallthrough-1");
+		assert.equal(oldEvents[0].phase, "superseded");
 	} finally {
 		cleanup();
 	}

@@ -12,12 +12,9 @@
  *     noted as a text annotation in the last emission's reason
  *     ("+M más — corré sweep"). The annotation is NOT a tracked
  *     injection (otherwise it would never resolve).
- *   - recordInjectionEmitted is called for each emitted injection.
  *   - The "INVARIANT test" (the obligation): for every
  *     `hygiene_junk_file` injection in injections.jsonl, there MUST
- *     be a corresponding `emitted` event. This module guarantees that
- *     invariant by always calling recordInjectionEmitted immediately
- *     after appendInjection.
+ *     be a corresponding `emitted` event.
  *
  * Why the annotation is NOT an injection:
  *   The "+M más" is a count of paths the orchestrator should know
@@ -30,12 +27,16 @@
  *   `reason` field of the LAST emitted event. The orchestrator sees
  *   it when it pulls `idu_pending_injections` and knows the cap
  *   bound. The annotation does not need to be tracked.
+ *
+ * A.1 (write coupling): the invariant is now STRUCTURAL — every
+ * write goes through central `appendInjection`, which auto-emits.
+ * The annotation propagates via `meta.reason` (read inside the
+ * central writer) and `meta.path` (for the path-absent predicate).
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import type { Injection } from "./injection-store.js";
-import { recordInjectionEmitted } from "./cron-preflight.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { appendInjection, type Injection } from "./injection-store.js";
 
 /** Default cap for hygiene advisories alive at any time. */
 export const DEFAULT_HYGIENE_CAP = 20;
@@ -49,13 +50,14 @@ export type EmitHygieneInjectionsResult = {
 };
 
 /**
- * Enqueue a single hygiene injection for a finding. Appends the
- * injection to injections.jsonl and writes the `emitted` lifecycle
- * event with the path context (for the path-absent predicate).
+ * Enqueue a single hygiene injection for a finding. Delegates to the
+ * central `appendInjection` writer, which auto-emits the `emitted`
+ * lifecycle event and reads `meta.path` (path-absent predicate
+ * context) + `meta.reason` (cap annotation, only set on the last
+ * emission) from the envelope.
  *
- * The invariant: every injection written here is immediately followed
- * by its emitted event. If this contract is broken, the obligation
- * test fails.
+ * The invariant (every injection has its `emitted` event) is now
+ * STRUCTURAL — the central writer guarantees it.
  */
 export function enqueueHygieneInjection(input: {
 	stateRoot: string;
@@ -82,20 +84,13 @@ export function enqueueHygieneInjection(input: {
 		meta: {
 			path: input.findingPath,
 			pattern: input.pattern,
+			// Annotation is only set on the last emission (cap exceeded).
+			// The central writer propagates `meta.reason` into the
+			// `emitted` lifecycle event's `reason` field.
+			...(input.annotation ? { reason: input.annotation } : {}),
 		},
 	};
-	appendInjectionToFile(input.stateRoot, injection);
-	// INVARIANT: emitted immediately after the injection is appended.
-	// The path is included so the evaluator can construct the
-	// path-absent predicate from the lifecycle log.
-	recordInjectionEmitted({
-		stateRoot: input.stateRoot,
-		injectionId,
-		kind: "hygiene_junk_file",
-		reason: input.annotation,
-		path: input.findingPath,
-		now,
-	});
+	appendInjection(input.stateRoot, injection);
 	return { injectionId };
 }
 
@@ -199,13 +194,4 @@ function readPendingHygienePaths(stateRoot: string): Set<string> {
 		}
 	}
 	return out;
-}
-
-function appendInjectionToFile(stateRoot: string, injection: Injection): void {
-	const path = join(stateRoot, "injections.jsonl");
-	if (!existsSync(path)) {
-		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, "", "utf8");
-	}
-	appendFileSync(path, `${JSON.stringify(injection)}\n`, "utf8");
 }

@@ -17,8 +17,8 @@ import {
 import {
 	evaluateSatisfactionPredicates,
 	expiredAckPolicy,
-	recordInjectionEmitted,
 } from "../src/cron-preflight.js";
+import { recordInjectionEmitted } from "../src/injection-store.js";
 import { enqueueObjectiveReminder } from "../src/objective-injection.js";
 import {
 	resolveInjectionsPath,
@@ -368,24 +368,25 @@ function readAllInjections(
 test("AUDITOR-CRITICAL: resolved → markInjectionAcked (clears PISO gate)", () => {
 	const { root, cleanup } = makeRoot();
 	try {
-		// First: enqueue an actual injection (so it exists in injections.jsonl)
-
+		// First: enqueue an actual injection (so it exists in injections.jsonl).
+		// A.1: enqueueObjectiveReminder auto-emits via the central
+		// `appendInjection` writer, so the `emitted` lifecycle event
+		// is already on disk after this call. We do NOT need (and
+		// must NOT) write a second `emitted` event manually.
+		// Pass `now` so the auto-emit lands at the test's logical
+		// timestamp (not wall-clock-now), which keeps the
+		// delivered→emitted ordering correct for readPendingAdvisories.
+		const deliveredAt = new Date("2026-06-17T10:00:00Z");
 		const reminderResult = enqueueObjectiveReminder({
 			stateRoot: root,
 			planObjective: "TEST",
+			now: deliveredAt,
 		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
 
-		// Then: write telemetry events (emitted + delivered)
-		const deliveredAt = new Date("2026-06-17T10:00:00Z");
-		recordLifecycleEvent({
-			stateRoot: root,
-			injectionId: reminderResult.injectionId,
-			phase: "emitted",
-			kind: "objective_reminder",
-			now: deliveredAt,
-		});
+		// Then: write the `delivered` event (the auto-emitted one
+		// from the enqueue above is already present).
 		recordLifecycleEvent({
 			stateRoot: root,
 			injectionId: reminderResult.injectionId,
@@ -426,7 +427,8 @@ test("AUDITOR-CRITICAL: resolved → markInjectionAcked (clears PISO gate)", () 
 test("AUDITOR-CRITICAL: expired on objective_reminder does NOT mark acked (let Item 5 escalate)", () => {
 	const { root, cleanup } = makeRoot();
 	try {
-		// First: enqueue an actual injection
+		// First: enqueue an actual injection. A.1: this auto-emits
+		// via the central writer.
 
 		const reminderResult = enqueueObjectiveReminder({
 			stateRoot: root,
@@ -438,13 +440,8 @@ test("AUDITOR-CRITICAL: expired on objective_reminder does NOT mark acked (let I
 		const deliveredAt = new Date("2026-06-17T10:00:00Z");
 		const now = new Date("2026-06-17T12:00:00Z");
 
-		recordLifecycleEvent({
-			stateRoot: root,
-			injectionId: reminderResult.injectionId!,
-			phase: "emitted",
-			kind: "objective_reminder",
-			now: deliveredAt,
-		});
+		// A.1: do NOT write a manual `emitted` event — the enqueue
+		// already wrote it.
 		recordLifecycleEvent({
 			stateRoot: root,
 			injectionId: reminderResult.injectionId!,
@@ -489,22 +486,20 @@ test("AUDITOR-CRITICAL: full happy-path lifecycle [emitted, delivered, resolved]
 	try {
 		const emittedAt = new Date("2026-06-17T10:00:00Z");
 
-		// Step 1: cron emits (via runCronPreflight → enqueueObjectiveReminder → recordLifecycleEvent('emitted'))
-
+		// Step 1: cron emits (via runCronPreflight → enqueueObjectiveReminder
+		// → central appendInjection → auto-emitted). A.1: the
+		// `emitted` event is written automatically inside the
+		// enqueue; we do NOT need (and must NOT) write it again.
+		// Pass `now` so the auto-emit lands at emittedAt (not
+		// wall-clock), which keeps the delivered→emitted ordering
+		// correct for readPendingAdvisories.
 		const reminderResult = enqueueObjectiveReminder({
 			stateRoot: root,
 			planObjective: "TEST",
+			now: emittedAt,
 		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
-		// Simulate the cron-preflight emission step (the real code calls this):
-		recordLifecycleEvent({
-			stateRoot: root,
-			injectionId: reminderResult.injectionId,
-			phase: "emitted",
-			kind: "objective_reminder",
-			now: emittedAt,
-		});
 
 		// Step 2: pull (MCP/CLI writes delivered)
 		const pulledAt = new Date("2026-06-17T10:05:00Z");
@@ -559,21 +554,15 @@ test("AUDITOR-CRITICAL: full happy-path lifecycle [emitted, delivered, resolved]
 test("AUDITOR-FIX-A: routine pull (no ack flag) writes delivered ONLY, does NOT auto-ack", () => {
 	const { root, cleanup } = makeRoot();
 	try {
-		// enqueueObjectiveReminder is imported at top
+		// enqueueObjectiveReminder is imported at top. A.1: the
+		// enqueue auto-emits, so we do NOT write a manual `emitted`
+		// event after this call.
 		const reminderResult = enqueueObjectiveReminder({
 			stateRoot: root,
 			planObjective: "TEST",
 		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
-
-		recordLifecycleEvent({
-			stateRoot: root,
-			injectionId: reminderResult.injectionId,
-			phase: "emitted",
-			kind: "objective_reminder",
-			now: new Date(),
-		});
 
 		const pending = readPendingInjections(root, {});
 		const ack = false; // default after AUDITOR-FIX-A
@@ -618,21 +607,15 @@ test("AUDITOR-FIX-A: routine pull (no ack flag) writes delivered ONLY, does NOT 
 test("AUDITOR-FIX-A: pull with ack:true writes dismissed AND marks acked", () => {
 	const { root, cleanup } = makeRoot();
 	try {
-		// enqueueObjectiveReminder is imported at top
+		// enqueueObjectiveReminder is imported at top. A.1: the
+		// enqueue auto-emits, so we do NOT write a manual `emitted`
+		// event after this call.
 		const reminderResult = enqueueObjectiveReminder({
 			stateRoot: root,
 			planObjective: "TEST",
 		});
 		assert.ok(reminderResult.enqueued);
 		assert.ok(reminderResult.injectionId);
-
-		recordLifecycleEvent({
-			stateRoot: root,
-			injectionId: reminderResult.injectionId,
-			phase: "emitted",
-			kind: "objective_reminder",
-			now: new Date(),
-		});
 
 		const pending = readPendingInjections(root, {});
 		const ack = true;
