@@ -530,3 +530,12 @@ function objectField(source: JsonObject, key: string): JsonObject {
 		? (value as JsonObject)
 		: {};
 }
+
+// Tema B: shared file-classifier primitive (was duplicated between
+// project-postflight.ts and project-constitution.ts). Path-based check so
+// callers cannot bypass it by reword-only mentions of "database" / "schema".
+export function isDbFile(file: string): boolean {
+	return /(prisma|supabase|sqlite|lab-db|migration|migrations|schema)/u.test(
+		file,
+	);
+}

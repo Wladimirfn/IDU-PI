@@ -266,7 +266,13 @@ export async function handleSkillDraftFromLessons(
 		],
 		requiredActions: result.requiredActions.map((action, index) => ({
 			id: `skill-draft-from-lessons-${index + 1}`,
-			owner: "orchestrator",
+			// Tema B: skill-draft-from-lessons pipeline emits human-approval
+			// actions ("Approve an explicit proposal...", "Apply or install
+			// skills only after human approval."). Previously set owner to
+			// "orchestrator" and relied on decision-envelope's regex fallback
+			// to catch "approval"/"human" in the action text. The fallback is
+			// gone; signal structurally.
+			owner: "human",
 			action,
 			reason:
 				"Skill learning artifacts require explicit human/orchestrator approval.",

@@ -16,6 +16,8 @@ import {
 	loadProjectConstitution,
 	validateProjectConstitution,
 } from "../src/project-constitution.js";
+import { hasHumanRequired } from "../src/decision-envelope.js";
+import type { EvidenceRequiredAction } from "../src/evidence-gateways.js";
 import { migrateHygieneLayout } from "../src/hygiene-migrate.js";
 
 const tempDirs: string[] = [];
@@ -103,12 +105,22 @@ test("evaluateConstitutionGates marks auth/login request high", () => {
 });
 
 test("evaluateConstitutionGates marks DB/schema with high data sensitivity high", () => {
+	// Tema B: db_schema_plan + data_security_review now fire when an
+	// actual DB file path appears in changedFiles (was text-regex on
+	// "migration"/"tabla"). The signal is path-based — see Test 1/2 below
+	// for the bypass-closed coverage.
 	const result = evaluateConstitutionGates({
 		request: "crear migration para tabla de usuarios",
+		changedFiles: ["src/lab-db/migrations/001.sql"],
 		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
 	});
 
 	assert.equal(result.risk, "high");
+	assert.ok(
+		result.failures.some(
+			(failure) => failure.gateId === "db_schema_plan",
+		),
+	);
 	assert.ok(
 		result.failures.some(
 			(failure) => failure.gateId === "data_security_review",
@@ -615,4 +627,92 @@ test("R2.2: loadProjectConstitution reads Layout B even when cwd is broken", () 
 	} finally {
 		process.chdir(originalCwd);
 	}
+});
+
+// Tema B — Component 1: db_schema_plan path-based check (bypass closed).
+// The regex on text was replaced with isDbFile(changedFiles). Tests below
+// pin the new behavior so reword-only mentions of "database" no longer
+// trigger the gate.
+
+test("Tema B: db_schema_plan fires when an actual DB file path appears in changedFiles", () => {
+	const result = evaluateConstitutionGates({
+		request: "",
+		changedFiles: ["src/lab-db/migrations/001.sql"],
+		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
+	});
+
+	const dbFailure = result.failures.find(
+		(failure) => failure.gateId === "db_schema_plan",
+	);
+	assert.ok(dbFailure, "expected db_schema_plan failure on DB file path");
+	assert.match(
+		dbFailure!.message,
+		/src\/lab-db\/migrations\/001\.sql/u,
+		"failure message must surface the file path so the orchestrator can locate it",
+	);
+});
+
+test("Tema B: db_schema_plan does NOT fire when request mentions 'database' but no DB files changed", () => {
+	const result = evaluateConstitutionGates({
+		request: "I want to store data in postgres for the user records",
+		changedFiles: ["src/lib/foo.ts"],
+		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
+	});
+
+	const dbFailure = result.failures.find(
+		(failure) => failure.gateId === "db_schema_plan",
+	);
+	assert.equal(
+		dbFailure,
+		undefined,
+		"db_schema_plan must NOT trigger from text mentions alone — bypass closed",
+	);
+	const dataSecurityFailure = result.failures.find(
+		(failure) => failure.gateId === "data_security_review",
+	);
+	assert.equal(
+		dataSecurityFailure,
+		undefined,
+		"data_security_review is downstream of db_schema_plan and must not fire either",
+	);
+});
+
+// Tema B — Component 2: hasHumanRequired uses action.owner === "human"
+// structurally. The regex fallback that matched "human|approval|confirm"
+// in the action text was removed.
+
+test("Tema B: hasHumanRequired returns false when owner is 'orchestrator' even if action text contains approval keywords", () => {
+	const actions: EvidenceRequiredAction[] = [
+		{
+			id: "test-orchestrator-approval-text",
+			owner: "orchestrator",
+			action: "Approve the proposal before continuing",
+			reason: "test",
+			blocking: false,
+		},
+	];
+
+	assert.equal(
+		hasHumanRequired(actions),
+		false,
+		"regex fallback is gone — only structured owner signals require-human",
+	);
+});
+
+test("Tema B: hasHumanRequired returns true when owner is 'human' regardless of action text content", () => {
+	const actions: EvidenceRequiredAction[] = [
+		{
+			id: "test-human-no-keywords",
+			owner: "human",
+			action: "this action text contains no keywords",
+			reason: "test",
+			blocking: false,
+		},
+	];
+
+	assert.equal(
+		hasHumanRequired(actions),
+		true,
+		"structured owner field wins — text content is irrelevant",
+	);
 });

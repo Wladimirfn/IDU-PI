@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { isDbFile } from "./evidence-gateways.js";
 import type { PhysicalGateEvidence } from "./physical-gates.js";
 import type { ProjectConnectionReport } from "./project-connection.js";
 import {
@@ -345,12 +346,6 @@ function isConfigFile(file: string): boolean {
 
 function isSecurityFile(file: string): boolean {
 	return /(^|[/._-])(permissions?|auth|login|token|secret|env)([/._-]|$)|\.env\.example/u.test(
-		file,
-	);
-}
-
-function isDbFile(file: string): boolean {
-	return /(prisma|supabase|sqlite|lab-db|migration|migrations|schema)/u.test(
 		file,
 	);
 }

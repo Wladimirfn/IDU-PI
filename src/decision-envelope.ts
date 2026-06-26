@@ -124,10 +124,12 @@ function evidenceRefsFromGateways(gateways: EvidenceGateway[]): string[] {
 	]);
 }
 
-function hasHumanRequired(actions: EvidenceRequiredAction[]): boolean {
-	return actions.some(
-		(action) => action.owner === "human" || /human|approval|confirm/i.test(action.action),
-	);
+// Tema B: regex fallback removed. Requires-human is now signaled
+// STRUCTURALLY via action.owner === "human". Callers that previously
+// relied on the regex catching "approval"/"confirm" in the action text
+// must set owner: "human" explicitly. (See audit in #188.)
+export function hasHumanRequired(actions: EvidenceRequiredAction[]): boolean {
+	return actions.some((action) => action.owner === "human");
 }
 
 function recommendationFromActions(actions: EvidenceRequiredAction[]): string {
