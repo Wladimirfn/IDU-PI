@@ -15,7 +15,9 @@
  *               the advisory's predicate is satisfied
  * - "dismissed": written when `idu_ack_advisory` is invoked explicitly
  * - "expired": reserved for past-window-and-stale
- * - "superseded": reserved for replaced by a newer injection
+ * - "superseded": the injection was replaced by a newer one (e.g. auto-dedup
+ *   in objective reminder Case 3, where Case 4 enqueues a new reminder that
+ *   supersedes the old)
  *
  * The file is append-only JSONL at `<stateRoot>/injection-telemetry.jsonl`.
  * Rollover at 1k events (keep last 1k) to bound storage.

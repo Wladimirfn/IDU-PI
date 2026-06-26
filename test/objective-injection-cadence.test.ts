@@ -383,3 +383,198 @@ test("writeTurnCount helper: persists turn count", () => {
 		cleanup();
 	}
 });
+
+// =========================================================================
+// R2.3: `superseded` lifecycle event emitted by Case 3 auto-dedup
+//
+// These tests pin the D4 G1 (telemetry leak: acked without terminal event)
+// + D4 G2 (superseded reserved as dead code) closure. Case 3 in
+// enqueueObjectiveReminder is the single site that auto-acks a stale
+// un-acked objective reminder and falls through to Case 4 to enqueue a
+// fresh one. That semantic — "the old injection was replaced by a newer
+// one" — is exactly the `superseded` lifecycle phase. The OLD injection
+// ends up with BOTH `acked=true` (functional ack) AND a `superseded`
+// terminal lifecycle event. These are complementary, not redundant.
+// =========================================================================
+
+/** Read the lifecycle telemetry log as parsed JSONL rows. */
+function readTelemetryLog(stateRoot: string): Record<string, unknown>[] {
+	const path = join(stateRoot, "injection-telemetry.jsonl");
+	if (!existsSync(path)) return [];
+	const raw = readFileSync(path, "utf8");
+	const out: Record<string, unknown>[] = [];
+	for (const line of raw.split("\n")) {
+		if (!line.trim()) continue;
+		try {
+			out.push(JSON.parse(line) as Record<string, unknown>);
+		} catch {
+			// skip malformed (best-effort, mirrors the reader's contract)
+		}
+	}
+	return out;
+}
+
+test("R2.3 Case 3: stale auto-dedup emits `superseded` lifecycle event for the OLD injection", () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		// Setup: real un-acked reminder 5h ago — past DEDUP_WINDOW (4h).
+		// Case 3 should fire: auto-ack the old one AND emit a `superseded`
+		// lifecycle event for it.
+		const fiveHoursAgo = new Date(
+			Date.now() - 5 * 60 * 60 * 1000,
+		).toISOString();
+		writeUnackedInjection(stateRoot, "old-injection-1", fiveHoursAgo);
+		writeReminderState(stateRoot, {
+			lastReminderAt: fiveHoursAgo,
+			lastInjectionId: "old-injection-1",
+		});
+
+		const result = enqueueObjectiveReminder({
+			stateRoot,
+			planObjective: "Test",
+		});
+		assert.equal(result.enqueued, true);
+		assert.equal(result.reason, "fresh");
+
+		// 1. The old injection must be auto-acked (acked=true).
+		const oldEntry = readInjectionById(stateRoot, "old-injection-1");
+		assert.ok(oldEntry, "old injection must still exist in injections.jsonl");
+		assert.equal(
+			oldEntry.acked,
+			true,
+			"Case 3 must auto-ack the stale injection",
+		);
+
+		// 2. The telemetry log must contain a `superseded` event for the
+		//    OLD injection — NOT for the new one.
+		const events = readTelemetryLog(stateRoot);
+		assert.equal(
+			events.length,
+			1,
+			"exactly one lifecycle event must be emitted (for the old injection)",
+		);
+		const evt = events[0];
+		assert.equal(
+			evt.injectionId,
+			"old-injection-1",
+			"superseded event must target the OLD injection",
+		);
+		assert.equal(evt.phase, "superseded");
+		assert.equal(evt.kind, "objective_reminder");
+		assert.ok(
+			typeof evt.reason === "string" &&
+				(evt.reason as string).includes("auto-dedup") &&
+				(evt.reason as string).includes("Case 4"),
+			`reason must mention auto-dedup and Case 4; got: ${String(evt.reason)}`,
+		);
+		// Sanity: event must have a ts.
+		assert.ok(typeof evt.ts === "string" && evt.ts.length > 0);
+	} finally {
+		cleanup();
+	}
+});
+
+test("R2.3 negative control: recent un-acked reminder does NOT trigger `superseded` (Case 1/2 path, not Case 3)", () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		// Setup: real un-acked reminder 30min ago — well under
+		// ESCALATE_AFTER (1h) and DEDUP_WINDOW (4h). Case 1 (dedup) fires,
+		// Case 3 does NOT. Therefore no `superseded` event must be written.
+		const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+		writeUnackedInjection(stateRoot, "recent-1", thirtyMinAgo);
+		writeReminderState(stateRoot, {
+			lastReminderAt: thirtyMinAgo,
+			lastInjectionId: "recent-1",
+		});
+
+		const result = enqueueObjectiveReminder({
+			stateRoot,
+			planObjective: "Test",
+		});
+		assert.equal(
+			result.enqueued,
+			false,
+			"Case 1 dedup: nothing should be enqueued",
+		);
+		assert.equal(result.reason, "dedup");
+
+		// Telemetry log must be empty (no `superseded`, nothing else).
+		const events = readTelemetryLog(stateRoot);
+		assert.equal(
+			events.length,
+			0,
+			`no lifecycle events must be emitted on the dedup path; got: ${JSON.stringify(events)}`,
+		);
+		// Sanity: the un-acked injection is still un-acked (Case 1 doesn't
+		// touch the ledger).
+		const entry = readInjectionById(stateRoot, "recent-1");
+		assert.ok(entry);
+		assert.equal(entry.acked, false);
+	} finally {
+		cleanup();
+	}
+});
+
+test("R2.3 Case 3 fall-through: stale auto-dedup does NOT block Case 4 fresh enqueue", () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		// Setup: stale un-acked reminder 5h ago. Case 3 must auto-ack
+		// the old one AND fall through to Case 4 (fresh enqueue). Both
+		// must happen: the JSONL must contain BOTH the auto-acked old
+		// entry AND a new entry with a different injectionId.
+		const fiveHoursAgo = new Date(
+			Date.now() - 5 * 60 * 60 * 1000,
+		).toISOString();
+		writeUnackedInjection(stateRoot, "stale-fallthrough-1", fiveHoursAgo);
+		writeReminderState(stateRoot, {
+			lastReminderAt: fiveHoursAgo,
+			lastInjectionId: "stale-fallthrough-1",
+		});
+
+		const result = enqueueObjectiveReminder({
+			stateRoot,
+			planObjective: "Test",
+		});
+		assert.equal(
+			result.enqueued,
+			true,
+			"Case 4 must enqueue a fresh reminder after Case 3 auto-acks",
+		);
+		assert.equal(result.reason, "fresh");
+		assert.ok(result.injectionId, "fresh enqueue must yield an injectionId");
+		assert.notEqual(
+			result.injectionId,
+			"stale-fallthrough-1",
+			"new injectionId must differ from the auto-acked old one",
+		);
+
+		// injections.jsonl must contain BOTH:
+		// 1. The old injection, acked=true.
+		const oldEntry = readInjectionById(
+			stateRoot,
+			"stale-fallthrough-1",
+		);
+		assert.ok(oldEntry, "old injection must still be in injections.jsonl");
+		assert.equal(
+			oldEntry.acked,
+			true,
+			"old injection must be auto-acked by Case 3",
+		);
+		// 2. The new injection, acked=false, kind=objective_reminder.
+		const newEntry = readInjectionById(stateRoot, result.injectionId);
+		assert.ok(
+			newEntry,
+			"Case 4 must append a new objective_reminder injection",
+		);
+		assert.equal(newEntry.kind, "objective_reminder");
+		assert.equal(newEntry.acked, false);
+
+		// And exactly one `superseded` event for the OLD one.
+		const events = readTelemetryLog(stateRoot);
+		assert.equal(events.length, 1);
+		assert.equal(events[0].injectionId, "stale-fallthrough-1");
+		assert.equal(events[0].phase, "superseded");
+	} finally {
+		cleanup();
+	}
+});

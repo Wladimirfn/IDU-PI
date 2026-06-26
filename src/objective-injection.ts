@@ -23,6 +23,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 
 export type ObjectiveReminderKind = "objective_reminder";
 
@@ -289,6 +290,23 @@ export function enqueueObjectiveReminder(input: {
 		ageMs >= OBJECTIVE_REMINDER_DEDUP_WINDOW_MS
 	) {
 		markInjectionAckedInFile(input.stateRoot, lastInjectionId);
+		// R2.3: emit a `superseded` lifecycle event for the OLD injection.
+		// Case 4 below will enqueue a NEW reminder that replaces this one,
+		// which is precisely what `superseded` means in the lifecycle
+		// vocabulary (telemetry-lifecycle.ts: "the injection was replaced
+		// by a newer one"). Emitting AFTER markInjectionAckedInFile keeps
+		// the `acked=true` flag and the terminal lifecycle phase
+		// chronologically consistent (functional ack first, then
+		// terminal-state telemetry). Closes D4 G1 (acked without
+		// terminal event) and activates D4 G2 (superseded finally has
+		// its first caller).
+		recordLifecycleEvent({
+			stateRoot: input.stateRoot,
+			injectionId: lastInjectionId,
+			phase: "superseded",
+			kind: "objective_reminder",
+			reason: "auto-dedup; replaced by newer reminder (Case 4)",
+		});
 	}
 
 	// Case 4: fresh — no un-acked reminder (acked, or no state). Enqueue
