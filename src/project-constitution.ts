@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDbFile } from "./evidence-gateways.js";
 import { readIdPathWithMigration } from "./hygiene-migrate.js";
 import { resolvePackageRoot } from "./package-root.js";
 import {
@@ -245,6 +246,18 @@ export function evaluateConstitutionGates(
 			),
 		);
 	}
+	// Tema B (skip_tests_blocker gate — ADVISORY (B)):
+	//   idu-pi does NOT execute build/test automatically.
+	//   `src/physical-gates.ts:148-168` explicitly records `buildNotRunGate` /
+	//   `testNotRunGate` with `status: "not_run"`. There is no record in
+	//   stateRoot of "build ran at timestamp X with exit code 0" or
+	//   "tests passed".
+	//
+	//   To become deterministic: idu-pi must actually run `pnpm build` /
+	//   `pnpm test` and record evidence in stateRoot (positive evidence) —
+	//   OR a negative-evidence check ("code changed AND no build/test
+	//   evidence exists") must be added.
+	//   Tracked in Tier 3 contract restructuring + infrastructure work.
 	if (hasSkipValidation(text)) {
 		failures.push(
 			issue(
@@ -254,6 +267,16 @@ export function evaluateConstitutionGates(
 			),
 		);
 	}
+	// Tema B (rejected_stack gate — ADVISORY (B)):
+	//   rejectedStack in `project-constitution.json` is policy prose
+	//   ("Unbounded autonomous daemons", "MCP tools that implement code"),
+	//   not structured detection rules. There is no evidence gateway that
+	//   produces "daemon detected" or "MCP code auth" signals.
+	//
+	//   To become deterministic: rejectedStack must be restructured as
+	//   structured detection rules (file patterns: `daemon*.ts` + `setInterval`;
+	//   code patterns: process spawn; etc.) paired with `changedFiles` analysis.
+	//   Tracked in Tier 3 contract restructuring.
 	for (const rejected of input.constitution.technologyRules.rejectedStack) {
 		if (includesTerm(text, rejected)) {
 			failures.push(
@@ -265,6 +288,23 @@ export function evaluateConstitutionGates(
 			);
 		}
 	}
+	// Tema B (forbidden_practice + auth_security_review gates — ADVISORY (B)):
+	//   these are content-policy checks against free-text user requests.
+	//   The "security" intent and the "forbidden practice" intent are
+	//   themselves expressed as text — there is no structured field that
+	//   captures them.
+	//
+	//   These gates are LLM-discretion advisory: they hint to the
+	//   orchestrator that the request looks security-sensitive or matches
+	//   a forbidden pattern. The orchestrator decides whether to follow
+	//   the hint.
+	//
+	//   To become deterministic: forbidden practices must be restructured
+	//   as machine-checkable predicates (e.g. "no shell exec of external
+	//   commands" = detect `child_process.exec` calls; "auth changes
+	//   require review" = require `auth_review_required: true` flag in
+	//   the request payload).
+	//   Tracked in Tier 3 contract restructuring.
 	for (const forbidden of input.constitution.forbiddenPractices) {
 		if (matchesForbiddenPractice(text, forbidden)) {
 			failures.push(
@@ -298,12 +338,16 @@ export function evaluateConstitutionGates(
 			),
 		);
 	}
-	if (hasDataChange(text)) {
+	// Tema B: db_schema_plan is path-based on changedFiles (was regex on text).
+	// Reword-only mentions of "database" no longer trigger — only actual DB
+	// file paths (prisma|supabase|sqlite|lab-db|migration|migrations|schema).
+	const dbChangedFiles = (input.changedFiles ?? []).filter(isDbFile);
+	if (dbChangedFiles.length > 0) {
 		failures.push(
 			issue(
 				"db_schema_plan",
 				"high",
-				"DB/schema requiere regla, plan o migración explícita.",
+				`DB/schema detectado en: ${dbChangedFiles.join(", ")}. Requiere regla, plan o migración explícita.`,
 			),
 		);
 		if (
@@ -334,6 +378,21 @@ export function evaluateConstitutionGates(
 			),
 		);
 	}
+	// Tema B (non_preferred_stack gate — ADVISORY (B)):
+	//   the regex checks for LIBRARY names (react, vue, supabase, postgres)
+	//   but `preferredStack` in `project-constitution.json` declares
+	//   ARCHITECTURAL PATTERNS (TypeScript, Node.js ESM, pnpm). These are
+	//   orthogonal — a project using Supabase would trigger a false warning.
+	//
+	//   Additionally, `package.json` is NOT in
+	//   `ConstitutionGateInput.changedFiles` — the gate input has no way to
+	//   know actual dependencies.
+	//
+	//   To become deterministic: (1) pass `package.json` deps into the gate
+	//   input, (2) restructure `preferredStack` to list approved LIBRARY
+	//   names (not architectural descriptors), (3) compare actual deps
+	//   against approved list.
+	//   Tracked in Tier 3 contract restructuring.
 	if (hasArchitectureChange(text)) {
 		const preferredHit = input.constitution.technologyRules.preferredStack.some(
 			(tech) => includesTerm(text, tech),
@@ -424,6 +483,17 @@ function defaultValidationGates(): ConstitutionValidationGate[] {
 	];
 }
 
+// Tema B (scope_excluded / scope_included gates — ADVISORY (B)):
+//   scope values in `project-constitution.json` are stored as text fragments
+//   (e.g. `"src"` from "Alcance excluido: src | config"), not path globs.
+//   `changedFiles` is a list of paths available in the gate input, but
+//   matching it against text fragments produces false positives
+//   ("src" matches "script", "source", "oscar/src", etc.).
+//
+//   To become deterministic: excludedScope/includedScope must be
+//   restructured as path globs (e.g. `["src/**", "config/**"]`) and matched
+//   against `changedFiles` paths via a real glob matcher.
+//   Tracked in Tier 3 contract restructuring.
 function extractScope(
 	constitution: ProjectConstitution,
 	kind: "included" | "excluded",
@@ -530,12 +600,6 @@ function issue(
 
 function hasAuthSecurity(text: string): boolean {
 	return /(auth|login|security|seguridad|token|secret|permiso|permission)/u.test(
-		text,
-	);
-}
-
-function hasDataChange(text: string): boolean {
-	return /(db|database|base de datos|schema|migration|migraci[oó]n|tabla|table|datos|data)/u.test(
 		text,
 	);
 }
