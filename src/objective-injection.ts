@@ -16,13 +16,13 @@
  */
 
 import {
-	appendFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { appendInjection, type Injection } from "./injection-store.js";
 import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 
 export type ObjectiveReminderKind = "objective_reminder";
@@ -313,7 +313,9 @@ export function enqueueObjectiveReminder(input: {
 	// a new reminder, severity=info, decisionRequired=false (informative,
 	// not blocking). The cron preflight is the canonical caller.
 	const injectionId = `obj-rem-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`;
-	const injection: InjectionRecord = {
+	// A.1: write through the central `appendInjection` so the
+	// `emitted` lifecycle event is auto-emitted in one atomic call.
+	const injection: Injection = {
 		injectionId,
 		kind: "objective_reminder",
 		triggerId: "objective_reminder",
@@ -327,7 +329,7 @@ export function enqueueObjectiveReminder(input: {
 		},
 		acked: false,
 	};
-	appendInjectionToFile(input.stateRoot, injection);
+	appendInjection(input.stateRoot, injection);
 	const newState: ObjectiveReminderState = {
 		lastReminderAt: now.toISOString(),
 		lastEscalationAt: null,
@@ -443,18 +445,6 @@ function readInjectionsByKind(
 	kind: string,
 ): InjectionRecord[] {
 	return readAllInjections(stateRoot).filter((i) => i.kind === kind);
-}
-
-function appendInjectionToFile(
-	stateRoot: string,
-	injection: InjectionRecord,
-): void {
-	const path = join(stateRoot, "injections.jsonl");
-	if (!existsSync(path)) {
-		mkdirSync(dirname(path), { recursive: true });
-		writeFileSync(path, "", "utf8");
-	}
-	appendFileSync(path, `${JSON.stringify(injection)}\n`, "utf8");
 }
 
 function markInjectionAckedInFile(

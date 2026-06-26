@@ -126,18 +126,11 @@ export async function runCronPreflight(
 		planObjective: readPlanObjective(input.stateRoot),
 		now: input.now,
 	});
-	// Wire telemetry: write `emitted` for the just-created/escalated
-	// injection (#2467). AUDITOR-FIX-B: the hygiene sensor's emission
-	// path MUST use the same helper when sub-PR B merges — see
-	// `recordInjectionEmitted` below.
-	if (reminderResult.enqueued && reminderResult.injectionId) {
-		recordInjectionEmitted({
-			stateRoot: input.stateRoot,
-			injectionId: reminderResult.injectionId,
-			kind: "objective_reminder",
-			now: input.now ?? new Date(),
-		});
-	}
+	// A.1: telemetry is wired automatically inside the central
+	// `appendInjection` writer — every injection creation emits
+	// `emitted` structurally, so this cron preflight does NOT need
+	// (and MUST NOT) call `recordInjectionEmitted` manually.
+	void reminderResult;
 
 	// STEP 3a: hygiene emission (forward obligation #1 from PR #153 audit).
 	// Run the hygiene sensor against the project's repo and emit
@@ -183,34 +176,6 @@ export async function runCronPreflight(
 		supervisorAdvisory,
 		changedFiles: input.changedFiles,
 	};
-}
-
-/**
- * Write the `emitted` lifecycle event for a freshly-created injection.
- * Both the reminder path (this cron tick) and the future hygiene
- * sensor emission path MUST call this helper to keep the lifecycle
- * consistent. Without it, the cron evaluator has nothing to evaluate
- * (the evaluator only looks at advisories whose latest phase is
- * `delivered`, but if `emitted` was never written, `delivered` was
- * never written either, and the evaluator iterates empty).
- */
-export function recordInjectionEmitted(input: {
-	stateRoot: string;
-	injectionId: string;
-	kind: string;
-	reason?: string;
-	path?: string;
-	now?: Date;
-}): void {
-	recordLifecycleEvent({
-		stateRoot: input.stateRoot,
-		injectionId: input.injectionId,
-		phase: "emitted",
-		kind: input.kind,
-		reason: input.reason,
-		path: input.path,
-		now: input.now ?? new Date(),
-	});
 }
 
 /**

@@ -13,18 +13,16 @@
  *
  *   1. runSensorImpulses (PR-102) →  findings[]
  *   2. categorizeFindings (here) →  supervisor categorizes
- *   3. writeSupervisorAdvisory  →  injection to disk
- *   4. idu_pending_injections   →  orchestrator sees the report
+ *   3. appendInjection (central)  →  injection + auto-emitted
+ *   4. idu_pending_injections    →  orchestrator sees the report
  *
  * The supervisor's response is parsed for counts via regex
  * (e.g. "4 critical, 2 medium, 1 low"). If the response is
  * malformed, the function returns zeros (defensive).
  */
 
-import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { consultSupervisor, type ConsultResult } from "./supervisor-consult.js";
-import { recordInjectionEmitted } from "./cron-preflight.js";
+import { appendInjection, type Injection } from "./injection-store.js";
 import type { SensorMatch } from "./sensors.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { IduModelRoleId } from "./model-assignments.js";
@@ -217,41 +215,30 @@ export function writeSupervisorAdvisory(
 	stateRoot: string,
 	advisory: SupervisorAdvisory,
 ): void {
-	const path = join(stateRoot, "injections.jsonl");
-	mkdirSync(dirname(path), { recursive: true });
-	appendFileSync(
-		path,
-		`${JSON.stringify({
-			...advisory,
-			acked: false,
-			injectionId: advisory.advisoryId,
-			triggerId: "supervisor_categorize",
-			decisionEnvelope: {
-				severity:
-					advisory.counts.critical > 0
-						? "critical"
-						: advisory.counts.medium > 0
-							? "warning"
-							: "info",
-				summary: advisory.summary,
-				options: ["review_critical", "review_medium", "acknowledge"],
-				evidenceRefs: ["sensor:agentlab_finding", "supervisor:advisory"],
-				orchestratorDecisionRequired: true,
-			},
-		})}\n`,
-		"utf8",
-	);
-	// F-W2-1: pair the injection with its `emitted` lifecycle event so
-	// the cron evaluator (and the invariant `every injection has an
-	// emitted event`) holds for supervisor_advisory too. Without this
-	// hook, supervisor_advisory stays invisible to the lifecycle log
-	// and the only thing observable is the delivered event written
-	// later when the orchestrator pulls via idu_pending_injections —
-	// which the live-verify flagged as 5 delivered / 0 emitted.
-	recordInjectionEmitted({
-		stateRoot,
+	// A.1: write through the central `appendInjection` so the
+	// injection is paired with its `emitted` lifecycle event in one
+	// atomic call. Previously this function wrote the JSONL line
+	// directly + called `recordInjectionEmitted` manually (F-W2-1).
+	// The structural coupling closes that leak class: a forgotten
+	// manual emit is no longer possible.
+	const envelope: Injection = {
+		ts: advisory.ts,
+		triggerId: "supervisor_categorize",
+		decisionEnvelope: {
+			severity:
+				advisory.counts.critical > 0
+					? "critical"
+					: advisory.counts.medium > 0
+						? "warning"
+						: "info",
+			summary: advisory.summary,
+			options: ["review_critical", "review_medium", "acknowledge"],
+			evidenceRefs: ["sensor:agentlab_finding", "supervisor:advisory"],
+			orchestratorDecisionRequired: true,
+		},
 		injectionId: advisory.advisoryId,
 		kind: advisory.kind,
-		now: advisory.ts ? new Date(advisory.ts) : new Date(),
-	});
+		acked: false,
+	};
+	appendInjection(stateRoot, envelope);
 }
