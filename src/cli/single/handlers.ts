@@ -354,27 +354,24 @@ export function handleIduPendingInjections(
 				now: new Date(),
 			});
 			if (ack) {
-				// ack:true on the pull = deliberate dismissal (escape
-				// hatch). Same guard as idu_ack_advisory: only
-				// write the `dismissed` event on a real
-				// transition. The #156 audit caught the
-				// phantom-dismissal bug; the MCP server
-				// twin and this CLI mirror were both fixed
-				// in the same commit.
+				// A.2: ack-side coupling. Pass `phase: "dismissed"`
+				// so the central markInjectionAcked auto-emits the
+				// terminal event in the same atomic call. The
+				// phantom-dismissal guard from the #156 audit is
+				// preserved INSIDE markInjectionAcked (auto-emit only
+				// on `outcome === "acked"`). The `outcome` variable
+				// is kept for parity with the gemelo MCP path; the
+				// `kind` field on the auto-emit comes from the
+				// injection itself when the central writer reads it.
 				const outcome = markInjectionAcked(
 					runtime.workspaceRoot,
 					inj.injectionId,
-				);
-				if (outcome === "acked") {
-					recordLifecycleEvent({
-						stateRoot: runtime.workspaceRoot,
-						injectionId: inj.injectionId,
+					{
 						phase: "dismissed",
-						kind: inj.kind,
 						reason: "idu-pending-injections ack:true",
-						now: new Date(),
-					});
-				}
+					},
+				);
+				void outcome;
 			}
 		}
 	}

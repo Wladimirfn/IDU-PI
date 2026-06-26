@@ -78,25 +78,24 @@ export async function handlePendingInjections(
 				now: new Date(),
 			});
 			if (ack) {
-				// ack:true on the pull = deliberate dismissal (escape hatch).
-				// Same guard as idu_ack_advisory: only write the
-				// `dismissed` event on a real transition. The
-				// prior implementation always wrote the event
-				// regardless of markInjectionAcked's outcome,
-				// which produced phantom dismissals on no-op
-				// calls (already-acked, not-found). The #156
-				// audit caught this. Same fix here.
-				const outcome = markInjectionAcked(stateRoot, inj.injectionId);
-				if (outcome === "acked") {
-					recordLifecycleEvent({
-						stateRoot,
-						injectionId: inj.injectionId,
+				// A.2: ack-side coupling. Pass `phase: "dismissed"`
+				// so the central markInjectionAcked auto-emits the
+				// terminal event in the same atomic call. The
+				// phantom-dismissal guard from the #156 audit is
+				// preserved INSIDE markInjectionAcked (auto-emit only
+				// on `outcome === "acked"`). The `outcome` variable
+				// is kept for parity with the idu_ack_advisory twin;
+				// the `kind` field on the auto-emit comes from the
+				// injection itself when the central writer reads it.
+				const outcome = markInjectionAcked(
+					stateRoot,
+					inj.injectionId,
+					{
 						phase: "dismissed",
-						kind: inj.kind,
 						reason: "idu_pending_injections ack:true",
-						now: new Date(),
-					});
-				}
+					},
+				);
+				void outcome;
 			}
 		}
 	}
