@@ -22,7 +22,11 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { appendInjection, type Injection } from "./injection-store.js";
+import {
+	appendInjection,
+	markInjectionAcked,
+	type Injection,
+} from "./injection-store.js";
 import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 
 export type ObjectiveReminderKind = "objective_reminder";
@@ -289,22 +293,16 @@ export function enqueueObjectiveReminder(input: {
 		lastInjectionId &&
 		ageMs >= OBJECTIVE_REMINDER_DEDUP_WINDOW_MS
 	) {
-		markInjectionAckedInFile(input.stateRoot, lastInjectionId);
-		// R2.3: emit a `superseded` lifecycle event for the OLD injection.
-		// Case 4 below will enqueue a NEW reminder that replaces this one,
-		// which is precisely what `superseded` means in the lifecycle
-		// vocabulary (telemetry-lifecycle.ts: "the injection was replaced
-		// by a newer one"). Emitting AFTER markInjectionAckedInFile keeps
-		// the `acked=true` flag and the terminal lifecycle phase
-		// chronologically consistent (functional ack first, then
-		// terminal-state telemetry). Closes D4 G1 (acked without
-		// terminal event) and activates D4 G2 (superseded finally has
-		// its first caller).
-		recordLifecycleEvent({
-			stateRoot: input.stateRoot,
-			injectionId: lastInjectionId,
+		// A.2: ack-side coupling. Pass `phase: "superseded"` so the
+		// central markInjectionAcked auto-emits the terminal event in
+		// the same atomic call. The previous manual emit + duplicate
+		// ack helper were both removed because the coupling is now
+		// structural: it's impossible to ack a real transition without
+		// the corresponding `superseded` lifecycle event. Closes D4
+		// G1 (acked without terminal event) and keeps D4 G2
+		// (superseded has a real caller) active.
+		markInjectionAcked(input.stateRoot, lastInjectionId, {
 			phase: "superseded",
-			kind: "objective_reminder",
 			reason: "auto-dedup; replaced by newer reminder (Case 4)",
 		});
 	}
@@ -445,17 +443,6 @@ function readInjectionsByKind(
 	kind: string,
 ): InjectionRecord[] {
 	return readAllInjections(stateRoot).filter((i) => i.kind === kind);
-}
-
-function markInjectionAckedInFile(
-	stateRoot: string,
-	injectionId: string,
-): void {
-	const injections = readAllInjections(stateRoot);
-	const idx = injections.findIndex((i) => i.injectionId === injectionId);
-	if (idx < 0) return;
-	injections[idx] = { ...injections[idx], acked: true };
-	writeAllInjections(stateRoot, injections);
 }
 
 /** Read-only helper for tests: returns the most recent un-acked

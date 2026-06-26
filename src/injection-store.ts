@@ -8,7 +8,10 @@ import {
 import { dirname, join } from "node:path";
 import { assertSafeArtifactName } from "./birth-artifacts.js";
 import { recordDecision } from "./decision-ledger.js";
-import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
+import {
+	recordLifecycleEvent,
+	type LifecyclePhase,
+} from "./telemetry-lifecycle.js";
 
 export type InjectionSeverity = "info" | "warning" | "critical";
 
@@ -185,9 +188,35 @@ export function readPendingInjections(
  */
 export type AckOutcome = "acked" | "not-found" | "already-acked";
 
+/**
+ * Mark an injection as acked and (when the call is a real transition)
+ * emit the corresponding terminal lifecycle event.
+ *
+ * INVARIANT (A.2): when called with `options.phase` set, the terminal
+ * event is emitted CONDITIONALLY on `outcome === "acked"`. For
+ * `already-acked` and `not-found`, NO event is emitted — this prevents
+ * phantom dismissals on no-op calls (the bug the #156 audit caught:
+ * a routine `idu-ack-advisory` against a ghost-id or an already-acked
+ * injection would otherwise still emit a `dismissed` event for an
+ * injection that never transitioned).
+ *
+ * The cron exception: callers that emit their terminal event PRE-ACK
+ * based on their own predicate evaluation (e.g. `cron-preflight.ts`
+ * emits `expired` / `resolved` BEFORE the ack) MUST call WITHOUT
+ * `options.phase` to avoid double-emit. The coupling is for
+ * transition-driven terminals (user dismiss, supersede) where the
+ * terminal IS the ack outcome. See cron-preflight.ts:260,288,319
+ * (manual emits) and :271,299,332 (ack callsites that stay without
+ * the third argument).
+ */
 export function markInjectionAcked(
 	stateRoot: string,
 	injectionId: string,
+	options?: {
+		phase?: LifecyclePhase;
+		reason?: string;
+		now?: Date;
+	},
 ): AckOutcome {
 	const filePath = resolveInjectionsPath(stateRoot);
 	if (!existsSync(filePath)) return "not-found";
@@ -240,5 +269,31 @@ export function markInjectionAcked(
 		}
 	});
 	writeFileSync(filePath, `${updated.join("\n")}\n`, "utf8");
+
+	// CRITICAL (A.2): conditional auto-emit on real transition.
+	// outcome === "acked" is the ONLY branch where a terminal event
+	// is written — "already-acked" and "not-found" produce NO event
+	// (phantom-dismissal guard from the #156 audit). The `phase`
+	// check distinguishes transition-driven callers (idu_ack_advisory,
+	// inline ack:true, Case 3 superseded) from the cron exception
+	// (which emits its terminal event BEFORE the ack and MUST NOT
+	// double-emit; those callsites omit `options.phase`).
+	//
+	// `kind` is read from the injection itself (same source-of-truth
+	// the A.1 auto-emit uses via `envelope.kind ?? "unknown"`) so
+	// the terminal event carries the same discriminator as the
+	// injection. Without this, the test contract
+	// `assert.equal(evt.kind, "objective_reminder")` would fail.
+	if (options?.phase) {
+		recordLifecycleEvent({
+			stateRoot,
+			injectionId,
+			phase: options.phase,
+			kind: injection.kind,
+			reason: options.reason,
+			now: options.now,
+		});
+	}
+
 	return "acked";
 }
