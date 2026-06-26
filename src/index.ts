@@ -2,8 +2,8 @@ import { Bot, type Context } from "grammy";
 import { existsSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { resolvePackageRoot } from "./package-root.js";
 import {
 	AgentRouter,
 	formatAgentProfiles,
@@ -580,10 +580,12 @@ async function runIduRemoteCommand(
 }
 
 function resolvePackageRootForTelegram(): string {
-	return dirname(fileURLToPath(import.meta.url)).replace(
-		/[\\/]dist[\\/]src$/u,
-		"",
-	);
+	// R2.2: dedup with the shared helper. The function name is preserved
+	// because 4 call sites in this file rely on the Telegram-specific
+	// semantic; the implementation is now the generic package-root resolver,
+	// which walks up to package.json and works in source and compiled contexts
+	// (see resolvePackageRoot in package-root.ts).
+	return resolvePackageRoot();
 }
 
 function currentProjectId(): string {

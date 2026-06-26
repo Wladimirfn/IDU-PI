@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { resolvePackageRoot } from "../src/package-root.js";
 import {
 	createDefaultProjectCore,
 	type ProjectCore,
@@ -478,4 +479,140 @@ test("hygiene-migrate + loadProjectConstitution: end-to-end (R1 integration)", (
 	// looked in <stateRoot>/config/ — but the file is now at Layout A.
 	const loaded = loadProjectConstitution(repoRoot);
 	assert.equal(loaded.projectName, "Hygiene Migrate Test");
+});
+
+// =========================================================================
+// R2.2 — Issue #180: defaultConstitutionPath resolves from packageRoot, not cwd
+// =========================================================================
+//
+// R2.2 acceptance criteria (Hermetic tests):
+//   1. defaultConstitutionPath resolves from packageRoot, NOT process.cwd().
+//   2. loadProjectConstitution with no stateRoot files falls back to the
+//      bundled template at packageRoot/config/default-constitution.json.
+//   3. loadProjectConstitution with a Layout B constitution present still
+//      reads it correctly when cwd is broken (simulates cwd-fragility trap).
+//
+// All tests run against compiled `dist/` output (see package.json `test`
+// script), which is required for resolvePackageRoot() to work — see the
+// SOURCE-CONTEXT LIMITATION note in src/package-root.ts.
+
+test("R2.2: defaultConstitutionPath resolves from packageRoot, not cwd", () => {
+	// Use the SHARED helper (the same one defaultConstitutionPath uses) to
+	// compute the expected path. This avoids duplicating the regex and keeps
+	// the test in sync with the helper's exact behavior. Since the helper
+	// itself is defined in `src/package-root.ts` and runs in compiled
+	// context (`dist/src/package-root.js`), the regex correctly strips
+	// `dist/src` and yields the package root regardless of cwd.
+	const packageRoot = resolvePackageRoot();
+	const expected = join(packageRoot, "config", "default-constitution.json");
+
+	// Confirm the bundled template exists at the expected location.
+	assert.equal(
+		existsSync(expected),
+		true,
+		`bundled template must exist at ${expected}`,
+	);
+
+	// Save cwd, chdir to a temp dir that DOES NOT have a config/ subdir,
+	// then load the loader. If the loader still used process.cwd() it
+	// would fail to read a default — but since it now resolves from
+	// packageRoot, it succeeds regardless of cwd.
+	const originalCwd = process.cwd();
+	const fakeCwd = mkdtempSync(join(tmpdir(), "pi-r2-2-fake-cwd-"));
+	tempDirs.push(fakeCwd);
+	try {
+		process.chdir(fakeCwd);
+
+		const loaded = loadProjectConstitution(fakeCwd);
+		// fakeCwd is empty: layout A and B both absent → fallback to packageRoot.
+		assert.ok(loaded, "loader must return a default constitution");
+		assert.equal(
+			loaded.projectName,
+			JSON.parse(readFileSync(expected, "utf8")).projectName,
+			"loaded projectName must match the bundled template, not anything cwd-derived",
+		);
+	} finally {
+		process.chdir(originalCwd);
+	}
+
+	// Sanity: the helper's expected path is NOT the (post-chdir) cwd.
+	assert.notEqual(expected, join(fakeCwd, "config", "default-constitution.json"));
+});
+
+test("R2.2: loadProjectConstitution with no stateRoot files falls back to bundled template (cwd-different)", () => {
+	// stateRoot has Layout A and Layout B directories but no constitution
+	// file in either. The loader must fall back to packageRoot/config/default-constitution.json
+	// (the bundled template), NOT to <stateRoot>/config/default-constitution.json
+	// and NOT to <cwd>/config/default-constitution.json.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r2-2-state-empty-"));
+	tempDirs.push(stateRoot);
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+
+	// Build expected payload by reading the bundled template directly.
+	const bundledPath = join(
+		resolvePackageRoot(),
+		"config",
+		"default-constitution.json",
+	);
+	const bundled = JSON.parse(readFileSync(bundledPath, "utf8")) as {
+		projectName: string;
+	};
+
+	const originalCwd = process.cwd();
+	const fakeCwd = mkdtempSync(join(tmpdir(), "pi-r2-2-state-empty-cwd-"));
+	tempDirs.push(fakeCwd);
+	try {
+		// chdir somewhere with NO config/default-constitution.json. If the
+		// loader were still cwd-fragile, readFileSync(defaultConstitutionPath())
+		// would throw ENOENT and this test would fail.
+		process.chdir(fakeCwd);
+
+		const loaded = loadProjectConstitution(stateRoot);
+		assert.equal(
+			loaded.projectName,
+			bundled.projectName,
+			"loader must fall back to bundled template when stateRoot has no constitution file",
+		);
+	} finally {
+		process.chdir(originalCwd);
+	}
+});
+
+test("R2.2: loadProjectConstitution reads Layout B even when cwd is broken", () => {
+	// Regression guard: even with a cwd that has NO config/default-constitution.json,
+	// the loader must NOT accidentally take the cwd-fragile fallback when the
+	// stateRoot has a valid Layout B constitution.
+	const stateRoot = mkdtempSync(join(tmpdir(), "pi-r2-2-layout-b-cwd-broken-"));
+	tempDirs.push(stateRoot);
+	mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
+	mkdirSync(join(stateRoot, "config"), { recursive: true });
+
+	// Seed a sentinel constitution at Layout B with a known projectName.
+	const sentinel = deriveConstitutionFromProjectCore(
+		confirmedCore({ projectName: "Layout-B-Sentinel" }),
+	);
+	writeFileSync(
+		join(stateRoot, "config", "project-constitution.json"),
+		`${JSON.stringify(sentinel, null, 2)}\n`,
+		"utf8",
+	);
+
+	const originalCwd = process.cwd();
+	const fakeCwd = mkdtempSync(join(tmpdir(), "pi-r2-2-broken-cwd-"));
+	tempDirs.push(fakeCwd);
+	// Deliberately do NOT create fakeCwd/config/default-constitution.json so
+	// any cwd-based read would throw ENOENT and fail this test.
+	try {
+		process.chdir(fakeCwd);
+
+		const loaded = loadProjectConstitution(stateRoot);
+		assert.equal(
+			loaded.projectName,
+			"Layout-B-Sentinel",
+			"loader must read Layout B from stateRoot, not fall back to packageRoot",
+		);
+	} finally {
+		process.chdir(originalCwd);
+	}
 });

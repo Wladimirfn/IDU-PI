@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readIdPathWithMigration } from "./hygiene-migrate.js";
+import { resolvePackageRoot } from "./package-root.js";
 import {
 	loadProjectCore,
 	type ProjectCore,
@@ -601,9 +602,11 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 		: undefined;
 }
 
-// TODO(hygiene-future-batch): defaultConstitutionPath is cwd-fragile — replace with stateRoot-based fallback or remove
+// R2.2: resolve from packageRoot (template is bundled with idu-pi package,
+// not with project state). Replaces the cwd-fragile implementation that
+// broke when called from non-project dirs.
 function defaultConstitutionPath(): string {
-	return join(process.cwd(), "config", "default-constitution.json");
+	return join(resolvePackageRoot(), "config", "default-constitution.json");
 }
 
 /**
