@@ -1,0 +1,348 @@
+{
+  "version": "1.0.0",
+  "projectName": "idu-pi",
+  "sourceCoreStatus": "confirmed",
+  "principles": [
+    "The human and Pi orchestrator own final decisions; Idu-pi is an advisory supervisor and execution director.",
+    "MCP tools inform, audit, recommend, and block unsafe continuation; they do not authorize implementation.",
+    "Only a confirmed Project Core and active Constitution can be treated as governance truth.",
+    "Evidence beats assertion: plans, tasks, reviews, postflight, and Bibliotecario outputs must expose evidence refs and limitations.",
+    "Unknown, missing, stale, or inconsistent context is a blocker for autonomous continuation, not a neutral condition.",
+    "Autonomy is bounded and session-directed: automaticov1 proposes, audits, blocks, or creates systemic recommendations; it is not an infinite daemon.",
+    "AgentLabs are explicit, sandboxed, audit-only reviewers; they never implement, edit the real repo, commit, push, or promote contracts.",
+    "Bibliotecario evidence is a source-intelligence layer, not uncontrolled truth or free web crawling."
+  ],
+  "forbiddenPractices": [
+    "Skipping required build, tests, diff check, review, or postflight evidence",
+    "Using MCP tools to implement code changes or claim implementation authority",
+    "Running automaticov1 as an unbounded daemon",
+    "Creating tasks or continuing autonomous execution when readiness is unknown, stale, missing, or blocked",
+    "Letting AgentLabs edit the real repository, create commits, push, or implement features",
+    "Treating Bibliotecario, community, web, or AI-generated evidence as canonical without corroboration",
+    "Promoting contracts, learning rules, or skills without explicit human/orchestrator approval",
+    "Installing dependencies, enabling postinstall scripts, publishing, merging, or pushing without explicit approval",
+    "Writing runtime state outside configured stateRoot",
+    "Hiding failed, irrelevant, missing, or inconsistent evidence instead of surfacing it as a limitation or failure"
+  ],
+  "requiredPractices": [
+    "Confirm Project Core before activating Constitution gates.",
+    "Keep changes inside includedScope and outside excludedScope.",
+    "Refresh idu_supervisor_context_pack before delegation or autonomous continuation when context is stale/missing.",
+    "Require automaticov1 readiness: confirmed Core, active Constitution, ready task tree, fresh MCP context pack, and no unresolved systemic block.",
+    "Use Master Plan → hitos → tasks → subtasks as the execution tree for autonomous proposals.",
+    "Record systemic actions when repeated failures, supervisor friction, evidence gaps, security gaps, or DB/schema risks recur.",
+    "Use Bibliotecario as bounded evidence: cite source/chunk refs, confidence, limitations, and missing knowledge.",
+    "Mark Bibliotecario output as failed or limited when evidence is irrelevant, stale, missing, unsafe, or inconsistent.",
+    "Keep MCP outputs advisory-only with explicit decision envelopes and orchestratorDecisionRequired for action.",
+    "Run build/tests/diff-check and fresh review for non-trivial changes before commit.",
+    "Ask human approval before push, merge, release, dependency changes, contract promotion, skill installation, or AgentLab execution."
+  ],
+  "technologyRules": {
+    "preferredStack": [
+      "TypeScript",
+      "Node.js ESM",
+      "pnpm with exact dependency versions",
+      "MCP stdio adapter",
+      "CLI adapter",
+      "stateRoot-isolated JSON/JSONL reports",
+      "SQLite local lab database",
+      "Telegram as optional remote interface only"
+    ],
+    "rejectedStack": [
+      {
+        "id": "unbounded-daemon-long-running",
+        "summary": "Unbounded autonomous daemons — long-running processes without shutdown wiring",
+        "category": "stack",
+        "detection": {
+          "behaviorPattern": "long-running"
+        },
+        "severity": "high",
+        "rationale": "Catches setInterval/setTimeout/cron/while(true) patterns WITHOUT a SIGTERM/SIGINT/process.exit/clearInterval cleanup handler. LLM-discretion clause: orchestrator may flag additional patterns as 'unbounded' (e.g. while-true loops without a stop condition, dynamic tick schedulers). behaviorPattern is advisory-grade — false negatives possible if cleanup logic lives in a comment or string literal.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 1): proceso long-running sin manejo de shutdown. Detalle en rationale.",
+          "warning": "Posible rechazo (advisory, item 1, long-running): proceso sin SIGTERM/SIGINT/clearInterval visible."
+        }
+      },
+      {
+        "id": "unbounded-daemon-periodic",
+        "summary": "Unbounded autonomous daemons — periodic setInterval schedulers",
+        "category": "stack",
+        "detection": {
+          "behaviorPattern": "periodic"
+        },
+        "severity": "high",
+        "rationale": "Catches setInterval( calls regardless of shutdown wiring. LLM-discretion clause: orchestrator may flag additional patterns as 'unbounded' (e.g. while-true loops without a stop condition, dynamic tick schedulers). behaviorPattern is advisory-grade — false negatives possible if cleanup logic lives in a comment or string literal.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 1): setInterval detectado sin evidencia de cleanup.",
+          "warning": "Posible rechazo (advisory, item 1, periodic): setInterval visible — verificar shutdown wiring."
+        }
+      },
+      {
+        "id": "mcp-write-entrypoint",
+        "summary": "MCP tools that implement code or authorize changes — MCP server entrypoint",
+        "category": "security",
+        "detection": {
+          "filePattern": "src/mcp-server.ts"
+        },
+        "severity": "high",
+        "rationale": "Targets the MCP server entrypoint src/mcp-server.ts (verified on disk: 120,526 bytes). This file registers all MCP tools via the server.tool(...) calls; any change here can implement new code-authoring tools or authorize new authority surfaces. LLM-discretion clause: orchestrator may whitelist legitimate uses of writeFile/execSync/spawnSync inside the MCP write surface (e.g. lab artifact paths, migration runners), flag additional entrypoint changes beyond src/mcp-server.ts / src/cli.ts, or flag handler changes outside src/mcp/** that add non-advisory tools.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 2): cambio en src/mcp-server.ts requiere human confirmation.",
+          "warning": "Posible rechazo (advisory, item 2): src/mcp-server.ts modificado."
+        }
+      },
+      {
+        "id": "mcp-write-cli-entrypoint",
+        "summary": "MCP tools that implement code or authorize changes — CLI entrypoint",
+        "category": "security",
+        "detection": {
+          "filePattern": "src/cli.ts"
+        },
+        "severity": "high",
+        "rationale": "Targets the CLI entrypoint src/cli.ts (verified on disk: 80,394 bytes), which can be invoked to write files, run migrations, or trigger side-effects. LLM-discretion clause: orchestrator may whitelist legitimate uses of writeFile/execSync/spawnSync inside the MCP write surface (e.g. lab artifact paths, migration runners), flag additional entrypoint changes beyond src/mcp-server.ts / src/cli.ts, or flag handler changes outside src/mcp/** that add non-advisory tools.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 2): cambio en src/cli.ts requiere human confirmation.",
+          "warning": "Posible rechazo (advisory, item 2): src/cli.ts modificado."
+        }
+      },
+      {
+        "id": "mcp-write-handlers",
+        "summary": "MCP tools that implement code or authorize changes — MCP handler tree",
+        "category": "security",
+        "detection": {
+          "filePattern": "src/mcp/**"
+        },
+        "severity": "high",
+        "rationale": "Targets the MCP handler tree under src/mcp/** (verified on disk: 19 subdirectories — _shared, agentlab, bibliotecario, birth, external, genesis, injections, lifecycle, master-plan, objective, preflight, pruning, role, semantic, session, source, supervisor-context, supervisor-tick, supervisor-trigger, task-queue). Any change here mutates the authority surface that the brain's postflight gate validates against. LLM-discretion clause: orchestrator may whitelist legitimate uses of writeFile/execSync/spawnSync inside the MCP write surface (e.g. lab artifact paths, migration runners), flag additional entrypoint changes beyond src/mcp-server.ts / src/cli.ts, or flag handler changes outside src/mcp/** that add non-advisory tools.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 2): cambio bajo src/mcp/** requiere human confirmation.",
+          "warning": "Posible rechazo (advisory, item 2): src/mcp/** modificado."
+        }
+      },
+      {
+        "id": "mcp-write-shell-exec",
+        "summary": "MCP tools that implement code or authorize changes — shell-exec / file-write imports",
+        "category": "security",
+        "detection": {
+          "importPattern": "writeFile|execSync|spawnSync"
+        },
+        "severity": "high",
+        "rationale": "Catches shell-exec / file-write imports anywhere in changedFiles. LLM-discretion clause: orchestrator may whitelist legitimate uses of writeFile/execSync/spawnSync inside the MCP write surface (e.g. lab artifact paths, migration runners), flag additional entrypoint changes beyond src/mcp-server.ts / src/cli.ts, or flag handler changes outside src/mcp/** that add non-advisory tools.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 2): shell-exec o file-write import detectado en changedFiles.",
+          "warning": "Posible rechazo (advisory, item 2): writeFile/execSync/spawnSync visible en contenido."
+        }
+      },
+      {
+        "id": "agentlabs-edit-files",
+        "summary": "AgentLabs that edit the real repository — src/agentlab-*.ts file surface",
+        "category": "security",
+        "detection": {
+          "filePattern": "src/agentlab-*.ts"
+        },
+        "severity": "blocker",
+        "rationale": "All AgentLabs code lives at src/agentlab-*.ts (6 files: agentlab-contract.ts, agentlab-effectiveness-events.ts, agentlab-report-consolidation.ts, agentlab-review-requests.ts, agentlab-review-runner.ts, agentlab-supervisor-contract.ts). The agentlabs/** path does NOT exist in this repo — this glob is the actual file surface. Every change to these files is a deterministic write to the real repository.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 3): cambios a src/agentlab-*.ts están prohibidos — AgentLabs son audit-only.",
+          "warning": "Posible rechazo (advisory, item 3): src/agentlab-*.ts modificado."
+        }
+      },
+      {
+        "id": "agentlabs-edit-shell-exec",
+        "summary": "AgentLabs that edit the real repository — shell-exec / file-write imports",
+        "category": "security",
+        "detection": {
+          "importPattern": "execSync|spawnSync|writeFile"
+        },
+        "severity": "blocker",
+        "rationale": "Catches execSync/spawnSync/writeFile imports inside any agentlabs file. Fully deterministic — these primitives are the write surface of AgentLabs and cannot be allowed in audit-only contexts.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 3): execSync/spawnSync/writeFile visible bajo src/agentlab-*.ts.",
+          "warning": "Posible rechazo (advisory, item 3): execSync/spawnSync/writeFile visible."
+        }
+      },
+      {
+        "id": "agentlabs-edit-commit-push",
+        "summary": "AgentLabs that edit the real repository — git commit/push commands",
+        "category": "security",
+        "detection": {
+          "commandPattern": "\\bgit\\s+(commit|push)\\b"
+        },
+        "severity": "blocker",
+        "rationale": "Catches `git commit` or `git push` lines inside any diff body. Word boundaries prevent substring false positives. Fully deterministic — these commands are the irreversible surface of AgentLabs and cannot be allowed.",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 3): git commit/push detectado en diff.",
+          "warning": "Posible rechazo (advisory, item 3): git commit/push visible."
+        }
+      },
+      {
+        "id": "uncontrolled-search-cmd",
+        "summary": "Uncontrolled web/news search for Bibliotecario evidence — fetch on news/rss/blog",
+        "category": "process",
+        "detection": {
+          "commandPattern": "(curl|wget|http\\.get|fetch).*?(news|rss|blog|medium|reddit)"
+        },
+        "severity": "high",
+        "rationale": "Catches curl/wget/http.get/fetch invocations that hit news/rss/blog/medium/reddit endpoints — the common shape of uncontrolled web search. LLM-discretion clause: orchestrator may whitelist legitimate use of cheerio/puppeteer/playwright (e.g. consented tests, agentlab review sandboxes) or flag additional fetch patterns not covered by the commandPattern (e.g. axios.get, undici).",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 4): fetch no controlado a news/rss/blog/medium/reddit.",
+          "warning": "Posible rechazo (advisory, item 4): fetch a endpoints de news visible."
+        }
+      },
+      {
+        "id": "uncontrolled-search-imports",
+        "summary": "Uncontrolled web/news search — cheerio/puppeteer/playwright imports",
+        "category": "process",
+        "detection": {
+          "importPattern": "cheerio|puppeteer|playwright"
+        },
+        "severity": "high",
+        "rationale": "Catches scraping imports (cheerio/puppeteer/playwright) anywhere in changedFiles. LLM-discretion clause: orchestrator may whitelist legitimate use of cheerio/puppeteer/playwright (e.g. consented tests, agentlab review sandboxes) or flag additional fetch patterns not covered by the commandPattern (e.g. axios.get, undici).",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 4): import de cheerio/puppeteer/playwright detectado.",
+          "warning": "Posible rechazo (advisory, item 4): cheerio/puppeteer/playwright visible."
+        }
+      },
+      {
+        "id": "implicit-deps-postinstall",
+        "summary": "Implicit dependency installation — postinstall/preinstall hooks",
+        "category": "security",
+        "detection": {
+          "commandPattern": "\\bpostinstall\\b|\\bpreinstall\\b"
+        },
+        "severity": "high",
+        "rationale": "Catches postinstall / preinstall hooks in diff content. These are reserved npm lifecycle scripts that execute at install time. Advisory-grade (text-fragility clause): commandPattern matches against git diff body; false positives possible if a comment or string literal mentions postinstall/preinstall. The repo's REAL protection is repo-level config — pnpm-workspace.yaml has ignoreScripts: true and .npmrc has ignore-scripts=true — so this rule is a residual textual signal, not the authoritative check. Orchestrator clause: orchestrator may whitelist legitimate uses (e.g. a documented opt-in for a specific dev dependency) and may flag additional hook names (e.g. preprepare).",
+        "messages": {
+          "blocked": "Rechazado por Project Core (item 5): hook postinstall/preinstall detectado.",
+          "warning": "Posible rechazo (advisory, item 5): hook postinstall visible."
+        }
+      },
+      "Repo writes outside explicit worker/orchestrator flows"
+    ]
+  },
+  "securityRules": [
+    "Security level: high.",
+    "Auth, secrets, permissions, MCP authority, dependency changes, and external-source handling require explicit review.",
+    "Prompt-injection, RAG/source poisoning, provenance, ACL-before-retrieval, and least-privilege risks must be surfaced for Bibliotecario/RAG-like flows.",
+    "MCP runtime freshness must be checked after src/mcp-server.ts or build changes; reload is explicit and user/orchestrator controlled.",
+    "Do not enable dependency scripts globally; dependency/build exceptions must be explicit and reviewable."
+  ],
+  "dataRules": [
+    "Data sensitivity: medium.",
+    "Runtime reports, usage events, source indexes, lab DB, and project state must stay under stateRoot for enrolled projects.",
+    "Do not store raw prompts, full docs, secrets, tokens, or unnecessary sensitive data in context-quality or usage telemetry.",
+    "DB/schema/storage changes require a plan, rollback/migration reasoning, tests, and security review.",
+    "Source Library/Bibliotecario may expose bounded source refs and chunks, not promote raw source content into contracts automatically."
+  ],
+  "approvalRules": [
+    "Project Core must be confirmed before this Constitution can become active.",
+    "automaticov1 may not proceed unless execution readiness is satisfied and systemic maintenance is clear.",
+    "High/blocker requests require human/orchestrator confirmation before implementation.",
+    "Push, merge, release, dependency updates, contract promotion, skill installation, and AgentLab execution require explicit approval.",
+    "Changes outside preferredStack or inside excludedScope require human decision and may be blocked.",
+    "Fresh reviewer is required before commit/push for non-trivial code changes."
+  ],
+  "validationGates": [
+    {
+      "id": "project_core_not_confirmed",
+      "severity": "blocker",
+      "description": "Project Core must be confirmed before governance gates are active."
+    },
+    {
+      "id": "constitution_not_active",
+      "severity": "blocker",
+      "description": "Constitution must be active before autonomous continuation."
+    },
+    {
+      "id": "execution_readiness_missing",
+      "severity": "blocker",
+      "description": "automaticov1 must block on missing/unknown/stale readiness."
+    },
+    {
+      "id": "stale_supervisor_context",
+      "severity": "blocker",
+      "description": "Stale or missing MCP supervisor context pack blocks autonomous continuation."
+    },
+    {
+      "id": "task_tree_not_ready",
+      "severity": "blocker",
+      "description": "Master Plan task tree must be ready before automatic execution proposals."
+    },
+    {
+      "id": "systemic_maintenance_block",
+      "severity": "blocker",
+      "description": "Repeated failures, supervisor friction, or evidence/security gaps require systemic action before continuing."
+    },
+    {
+      "id": "mcp_authority_boundary",
+      "severity": "blocker",
+      "description": "MCP must remain advisory-only and must not implement or authorize work."
+    },
+    {
+      "id": "agentlabs_audit_only",
+      "severity": "blocker",
+      "description": "AgentLabs must remain explicit, sandboxed, audit-only, and non-implementing."
+    },
+    {
+      "id": "bibliotecario_evidence_gap",
+      "severity": "high",
+      "description": "Missing, irrelevant, inconsistent, unsafe, or uncorroborated evidence must be surfaced as limitation/failure."
+    },
+    {
+      "id": "db_schema_plan",
+      "severity": "high",
+      "description": "DB/schema/storage changes require plan, rollback/migration reasoning, tests, and security review."
+    },
+    {
+      "id": "auth_security_review",
+      "severity": "high",
+      "description": "Auth/login/security/secret changes require confirmation and security review."
+    },
+    {
+      "id": "scope_included",
+      "severity": "medium",
+      "description": "Changes must stay within includedScope."
+    },
+    {
+      "id": "scope_excluded",
+      "severity": "blocker",
+      "description": "Excluded scope must not be implemented."
+    },
+    {
+      "id": "rejected_stack",
+      "severity": "blocker",
+      "description": "Rejected stack or rejected architecture patterns are blocked."
+    },
+    {
+      "id": "non_preferred_stack",
+      "severity": "high",
+      "description": "Non-preferred stack or architecture changes require confirmation."
+    },
+    {
+      "id": "data_security_review",
+      "severity": "high",
+      "description": "Medium/high/critical data handling changes require security/data review."
+    },
+    {
+      "id": "skip_tests_blocker",
+      "severity": "blocker",
+      "description": "Skipping required build/tests/diff-check/review is blocked."
+    },
+    {
+      "id": "forbidden_practice",
+      "severity": "blocker",
+      "description": "Forbidden practices are blocked."
+    }
+  ],
+  "specialistRoles": [
+    "security",
+    "database",
+    "architecture",
+    "mcp-governance",
+    "bibliotecario-evidence",
+    "autonomy-safety"
+  ],
+  "createdAt": "2026-05-29T19:49:14.590Z",
+  "updatedAt": "2026-06-06T19:04:30.000Z",
+  "status": "active"
+}
