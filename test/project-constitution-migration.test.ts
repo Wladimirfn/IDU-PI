@@ -13,6 +13,7 @@ import {
 	layoutPaths,
 	processLayout,
 	replaceRejectedStack,
+	writeAtomic,
 } from "../scripts/migrate-rejected-stack.js";
 import { validateProjectConstitution } from "../src/project-constitution.js";
 
@@ -703,5 +704,177 @@ describe("R3.4 CLI binary smoke test (compiled script)", () => {
 		assert.match(result.stdout, /verify mode: all layouts byte-equal/u);
 
 		rmSync(migratedPath);
+	});
+});
+
+// =========================================================================
+// 8. --apply flag (R3.4 second commit) — atomic write path.
+// =========================================================================
+
+describe("R3.4 --apply flag (write path)", () => {
+	const SCRIPTS_DIR = join(process.cwd(), "dist", "scripts");
+
+	before(() => {
+		if (!existsSync(join(SCRIPTS_DIR, "migrate-rejected-stack.js"))) {
+			throw new Error(
+				`migrate-rejected-stack.js not compiled at ${SCRIPTS_DIR}. Run \`npx tsc -p tsconfig.json\` first.`,
+			);
+		}
+	});
+
+	test("--apply on a fixture writes the proposed array (12 rules + 1 string) and preserves non-target bytes", () => {
+		const root = makeStateRoot();
+		const { path } = fixtureBrain("A", root);
+		const beforeRaw = readFileSync(path, "utf8");
+
+		const result = spawnSync(
+			"node",
+			[
+				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
+				"--apply",
+				`--state-root=${root}`,
+			],
+			{
+				encoding: "utf8",
+				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
+			},
+		);
+		assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+
+		// The warning text must be printed (the human-safety net).
+		assert.match(
+			result.stdout,
+			/WARNING: --apply will modify the brain's constitution file/u,
+			"--apply must print a warning before writing",
+		);
+		assert.match(
+			result.stdout,
+			/Press Ctrl-C to abort/u,
+			"--apply must tell the user how to abort",
+		);
+
+		// The file must now be the migrated shape.
+		const afterRaw = readFileSync(path, "utf8");
+		assert.notEqual(afterRaw, beforeRaw, "file content must change after --apply");
+
+		const afterParsed = JSON.parse(afterRaw) as Record<string, unknown>;
+		const stack = (afterParsed as { technologyRules: { rejectedStack: unknown[] } })
+			.technologyRules.rejectedStack;
+		assert.equal(stack.length, 13, "12 rules + 1 string");
+		assert.equal(stack[stack.length - 1], ITEM_6_STRING, "item 6 is a trailing string");
+		assert.equal(typeof stack[stack.length - 2], "object", "entry 11 must be an object");
+
+		// Non-target bytes must be preserved (deep-equal with sentinel trick).
+		const before = JSON.parse(beforeRaw) as Record<string, unknown>;
+		const beforeClone = JSON.parse(JSON.stringify(before)) as {
+			technologyRules: { rejectedStack: unknown[] };
+		};
+		const afterClone = JSON.parse(JSON.stringify(afterParsed)) as {
+			technologyRules: { rejectedStack: unknown[] };
+		};
+		beforeClone.technologyRules.rejectedStack = ["__SENTINEL__"];
+		afterClone.technologyRules.rejectedStack = ["__SENTINEL__"];
+		assert.deepEqual(
+			beforeClone,
+			afterClone,
+			"non-rejectedStack fields must be byte-equal post-apply",
+		);
+	});
+
+	test("--apply on an already-migrated file is a no-op (idempotency at the write layer)", () => {
+		const root = makeStateRoot();
+		const { path } = fixtureBrain("A", root);
+		// Pre-migrate the file in-memory.
+		const currentRaw = readFileSync(path, "utf8");
+		const proposedRaw = replaceRejectedStack(currentRaw, PROPOSED_REJECTED_STACK);
+		writeFileSync(path, proposedRaw, "utf8");
+
+		const result = spawnSync(
+			"node",
+			[
+				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
+				"--apply",
+				`--state-root=${root}`,
+			],
+			{
+				encoding: "utf8",
+				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
+			},
+		);
+		assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+		assert.match(
+			result.stdout,
+			/already migrated — skipping/u,
+			"--apply on a migrated file must report a no-op",
+		);
+		// File content unchanged.
+		const reread = readFileSync(path, "utf8");
+		assert.equal(reread, proposedRaw, "--apply on migrated file must not modify it");
+	});
+
+	test("--apply + --dry-run combined is rejected (modes are mutually exclusive)", () => {
+		const root = makeStateRoot();
+		fixtureBrain("A", root);
+		const result = spawnSync(
+			"node",
+			[
+				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
+				"--apply",
+				"--dry-run",
+				`--state-root=${root}`,
+			],
+			{ encoding: "utf8" },
+		);
+		assert.notEqual(result.status, 0, "mutually-exclusive flags must error");
+		assert.match(
+			result.stderr,
+			/mutually exclusive/u,
+			"stderr must explain the conflict",
+		);
+	});
+
+	test("--apply writes to a temp file and renames atomically (writeAtomic unit test)", () => {
+		const root = makeStateRoot();
+		const { path } = fixtureBrain("A", root);
+		const currentRaw = readFileSync(path, "utf8");
+		const proposedRaw = replaceRejectedStack(currentRaw, PROPOSED_REJECTED_STACK);
+
+		// writeAtomic is imported at the top of this file (added in the
+		// second-commit change).
+		writeAtomic(path, proposedRaw);
+
+		const reread = readFileSync(path, "utf8");
+		assert.equal(reread, proposedRaw, "writeAtomic must produce the proposed bytes");
+		// Temp file must be gone after the rename.
+		assert.equal(
+			existsSync(`${path}.migrate-tmp`),
+			false,
+			"temp file must be cleaned up after rename",
+		);
+	});
+
+	test("MIGRATE_APPLY_DELAY_MS=0 skips the warning sleep (test fast-path)", () => {
+		const root = makeStateRoot();
+		fixtureBrain("A", root);
+		const start = Date.now();
+		const result = spawnSync(
+			"node",
+			[
+				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
+				"--apply",
+				`--state-root=${root}`,
+			],
+			{
+				encoding: "utf8",
+				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
+			},
+		);
+		const elapsed = Date.now() - start;
+		assert.equal(result.status, 0, `stderr: ${result.stderr}`);
+		// With delay=0, total wall-clock must be well under 1s. (Default 5s would blow this.)
+		assert.ok(
+			elapsed < 1500,
+			`MIGRATE_APPLY_DELAY_MS=0 must skip the 5s sleep, got ${elapsed}ms`,
+		);
 	});
 });

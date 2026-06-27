@@ -16,14 +16,16 @@
  *   5. Fresh backup of the brain by the AUDITOR (out of scope here).
  *   6. Detection-pattern audit on items 1-5 (review the dry-run diff).
  *
- * 🛑 THIS SLICE IS `--dry-run`-ONLY.
- *   The script never writes the brain's constitution file from this commit.
- *   The actual data migration lands in a SEPARATE commit after auditor +
- *   orchestrator sign-off. There is intentionally NO `--apply` flag in this
- *   slice — the implementor must NOT bypass that gate.
+ * R3.4 SECOND-COMMIT — write path added (auditor-mandated gate lifted).
+ *   The first commit (81a1813) landed --dry-run + --verify only. The actual
+ *   data migration is gated by the explicit `--apply` flag. Without `--apply`
+ *   (and without --dry-run / --verify), the script REFUSES to write — same
+ *   default as before. The write path is atomic (temp-file + rename) and
+ *   runs a 5-second warning (configurable via MIGRATE_APPLY_DELAY_MS, set to
+ *   0 in tests) before touching the file.
  *
  * USAGE
- *   node dist/scripts/migrate-rejected-stack.js [--dry-run] [--verify] [--state-root=PATH]
+ *   node dist/scripts/migrate-rejected-stack.js [--dry-run|--verify|--apply] [--state-root=PATH]
  *
  *   --dry-run       Print the proposed `rejectedStack` block (as formatted JSON)
  *                   plus the current/proposed byte-equal check, then exit 0.
@@ -31,6 +33,12 @@
  *   --verify        Re-read the file (Layout A or B) and assert that all
  *                   non-`rejectedStack` fields are byte-equal to the in-memory
  *                   version we built. Exits 0 on success, non-zero on mismatch.
+ *   --apply         ACTUALLY write the proposed content to the file(s). The
+ *                   script prints a 5-second warning before writing (configurable
+ *                   via MIGRATE_APPLY_DELAY_MS; default 5000 ms). The write is
+ *                   atomic (temp file + rename). After writing, the script
+ *                   re-reads and asserts byte-equality with the proposedRaw
+ *                   (same as --verify).
  *   --state-root    Override the stateRoot (default: cwd).
  *   --layout        Restrict to one layout: "A" (.idu/config) or "B" (config).
  *                   Default: process both (A first, then B if present).
@@ -42,7 +50,7 @@
  *   already-migrated file yields the SAME bytes — no-op.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RejectedRule } from "../src/project-constitution.js";
@@ -426,6 +434,31 @@ export function serializeRejectedStack(
 }
 
 // ---------------------------------------------------------------------------
+// Atomic write helper.
+// Writes `content` to `targetPath` atomically by writing to a sibling temp
+// file first, then renaming it on top of the target. On POSIX, rename(2) on
+// the same filesystem is atomic. On Windows, rename across an existing file
+// works as long as the target is not read-only. We delete the temp file on
+// failure so we never leave a stray `.tmp` behind.
+// ---------------------------------------------------------------------------
+
+export function writeAtomic(targetPath: string, content: string): void {
+	const tmpPath = `${targetPath}.migrate-tmp`;
+	try {
+		writeFileSync(tmpPath, content, "utf8");
+		renameSync(tmpPath, targetPath);
+	} catch (err) {
+		// Best-effort cleanup of the temp file. Never throw from cleanup.
+		try {
+			if (existsSync(tmpPath)) unlinkSync(tmpPath);
+		} catch {
+			// swallow cleanup errors
+		}
+		throw err;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Idempotency check
 // ---------------------------------------------------------------------------
 
@@ -526,6 +559,7 @@ export function processLayout(layout: Layout, path: string): LayoutResult {
 interface CliArgs {
 	dryRun: boolean;
 	verify: boolean;
+	apply: boolean;
 	stateRoot: string;
 	layoutFilter: Layout | undefined;
 }
@@ -534,12 +568,14 @@ function parseArgs(argv: string[]): CliArgs {
 	const args: CliArgs = {
 		dryRun: false,
 		verify: false,
+		apply: false,
 		stateRoot: process.cwd(),
 		layoutFilter: undefined,
 	};
 	for (const raw of argv) {
 		if (raw === "--dry-run") args.dryRun = true;
 		else if (raw === "--verify") args.verify = true;
+		else if (raw === "--apply") args.apply = true;
 		else if (raw.startsWith("--state-root=")) {
 			args.stateRoot = raw.slice("--state-root=".length);
 		} else if (raw.startsWith("--layout=")) {
@@ -555,6 +591,17 @@ function parseArgs(argv: string[]): CliArgs {
 			throw new Error(`unknown argument: ${raw}`);
 		}
 	}
+	// Mutual exclusion: --dry-run, --verify, and --apply are all "modes" and
+	// at most one may be set. Combining them is a logic error (each one calls
+	// process.exit at the end of main()).
+	if (
+		(args.dryRun ? 1 : 0) + (args.verify ? 1 : 0) + (args.apply ? 1 : 0) >
+		1
+	) {
+		throw new Error(
+			"--dry-run, --verify, and --apply are mutually exclusive; pick at most one",
+		);
+	}
 	return args;
 }
 
@@ -566,13 +613,16 @@ function printHelp(): void {
 			"Options:",
 			"  --dry-run              Print proposed rejectedStack + byte-equal check; do NOT write.",
 			"  --verify               Re-read file and assert non-target fields are byte-equal.",
+			"  --apply                ACTUALLY write the proposed content (5s warning, atomic).",
 			"  --state-root=PATH      Override the stateRoot (default: cwd).",
 			"  --layout=A|B           Restrict to one layout (default: process both A and B).",
 			"  --help, -h             Show this help.",
 			"",
-			"NOTE: this slice is --dry-run-ONLY. The script intentionally has NO --apply",
-			"flag. The actual data migration lands in a SEPARATE commit after auditor +",
-			"orchestrator sign-off (issue #194).",
+			"NOTE: without --dry-run, --verify, or --apply, the script refuses to write",
+			"(default exit 3). The actual data migration is gated by the explicit --apply",
+			"flag (auditor + orchestrator sign-off required before running --apply).",
+			"",
+			"Env: MIGRATE_APPLY_DELAY_MS overrides the 5-second warning sleep (set to 0 in tests).",
 			"",
 		].join("\n"),
 	);
@@ -652,13 +702,78 @@ function main(): void {
 		process.exit(0);
 	}
 
-	// Without --dry-run and without --verify, refuse to write. This slice is
-	// dry-run-only by design (auditor + orchestrator sign-off required before
-	// the data migration lands).
+	if (args.apply) {
+		// 5-second warning (configurable). The orchestrator's gate is the
+		// explicit --apply flag; the warning is a final safety net for
+		// interactive / piping invocations.
+		const delayMs = (() => {
+			const raw = process.env.MIGRATE_APPLY_DELAY_MS;
+			if (raw === undefined || raw === "") return 5000;
+			const parsed = Number.parseInt(raw, 10);
+			return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5000;
+		})();
+		process.stdout.write(
+			"\n=== --apply mode: WRITE PATH ===\n" +
+				"WARNING: --apply will modify the brain's constitution file.\n" +
+				`Press Ctrl-C to abort within ${(delayMs / 1000).toFixed(2)} seconds.\n`,
+		);
+		// Synchronous sleep so a Ctrl-C inside the test runs before the write.
+		// We don't need sub-second precision — this is a deliberate human pause.
+		const endAt = Date.now() + delayMs;
+		// Tight loop instead of setTimeout so the test framework's signal
+		// handling works the same way as in production.
+		while (Date.now() < endAt) {
+			// spin
+		}
+
+		// For each layout, write proposedRaw atomically. Skip layouts that
+		// are already migrated (no-op — preserve byte-equality invariant).
+		let wroteAny = false;
+		for (const r of results) {
+			if (r.alreadyMigrated) {
+				process.stdout.write(
+					`[Layout ${r.layout}] already migrated — skipping (no-op).\n`,
+				);
+				continue;
+			}
+			writeAtomic(r.path, r.proposedRaw);
+			wroteAny = true;
+			process.stdout.write(`[Layout ${r.layout}] wrote ${r.path}\n`);
+		}
+
+		// Re-read each file and assert byte-equality with the proposedRaw
+		// (same as --verify, but post-write). This is the proof that the
+		// write path didn't corrupt non-target fields.
+		for (const r of results) {
+			if (r.alreadyMigrated) continue;
+			const reread = readFileSync(r.path, "utf8");
+			if (reread !== r.proposedRaw) {
+				process.stderr.write(
+					`[Layout ${r.layout}] post-write verify FAILED: file content differs from proposed in-memory version\n`,
+				);
+				process.exit(1);
+			}
+		}
+
+		if (wroteAny) {
+			process.stdout.write(
+				"\n--apply mode: write + post-write verify complete, exit 0.\n",
+			);
+		} else {
+			process.stdout.write(
+				"\n--apply mode: no layouts needed migration, exit 0.\n",
+			);
+		}
+		process.exit(0);
+	}
+
+	// Without --dry-run, --verify, or --apply, refuse to write. The gate is
+	// the explicit --apply flag (auditor + orchestrator sign-off required
+	// before running --apply).
 	process.stderr.write(
 		"\nmigrate-rejected-stack: refusing to write in this slice.\n" +
-			"The actual data migration lands in a SEPARATE commit after auditor +\n" +
-			"orchestrator sign-off (see issue #194). Use --dry-run to inspect the diff.\n",
+			"Pass --apply to actually write the migration (gated; auditor + orchestrator\n" +
+			"sign-off required). Use --dry-run to inspect the diff first.\n",
 	);
 	process.exit(3);
 }
@@ -679,4 +794,5 @@ export {
 	MIGRATED_ID_PREFIXES,
 	PROPOSED_REJECTED_RULES,
 	PROPOSED_REJECTED_STACK,
+	// `writeAtomic` is exported inline at the function definition above.
 };
