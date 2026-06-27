@@ -377,6 +377,46 @@ export function evaluateConstitutionGates(
 	//   prose entries (and rules marked `advisoryOnly: true`) still prose-match,
 	//   but as WARNINGS (`rejected_stack_advisory`) — never as failures. See
 	//   design obs-2688 §3 and §4 for the full phase-separation contract.
+	//
+	// R3.5 (post-R3.4 — per-item verdict breakdown, refs #195):
+	//   After R3.4 data migration (commits 81a1813 + 4462171 + 980c401),
+	//   `technologyRules.rejectedStack` is no longer 6 prose strings. Items 1-5
+	//   are now `RejectedRule[]` (structured predicates); item 6 remains a
+	//   prose string (advisory-only). The per-item verdict the original Tema B
+	//   JSDoc labelled "ADVISORY (B) for all 5" no longer applies uniformly.
+	//
+	//   Per-item post-R3.4 classification (R3.5 closure in content; R5.3 will
+	//   re-verify at runtime after R5.1 loader fix + build + restart):
+	//
+	//     item 1 (unbounded-daemon-*): PARTIAL — `behaviorPattern` is
+	//       text-fragile; LLM-discretion clause embedded in `rationale`
+	//       ("orchestrator may flag additional patterns as 'unbounded'").
+	//       Stays a warning-grade gate in practice.
+	//     item 2 (mcp-write-*): PARTIAL — `filePattern`/`importPattern` cover
+	//       the MCP write surface; LLM-discretion clause handles whitelists
+	//       (lab artifact paths, migration runners) and entrypoint changes
+	//       beyond `src/mcp-server.ts` / `src/cli.ts`.
+	//     item 3 (agentlabs-edit-*): DETERMINISTIC (blocker) — `filePattern:
+	//       "src/agentlab-*.ts"` matches 6 real files; `importPattern` and
+	//       `commandPattern` are mechanical. No LLM clause needed.
+	//     item 4 (uncontrolled-search-*): PARTIAL — `commandPattern` and
+	//       `importPattern` cover the common shape; LLM-discretion clause
+	//       whitelists consented tests / agentlab sandboxes and flags
+	//       additional fetch patterns (axios, undici).
+	//     item 5 (implicit-deps-postinstall): DETERMINISTIC (blocker) —
+	//       `commandPattern: "\bpostinstall\b|\bpreinstall\b"` matches
+	//       artifact text deterministically. No LLM clause needed.
+	//     item 6 ("Repo writes outside explicit worker/orchestrator flows"):
+	//       ADVISORY-ONLY — runtime intent, not static artifact. Stays as a
+	//       prose string in the array; `normalizeRejectedRules` wraps it as
+	//       an `advisoryOnly` rule with `detection: null`. The prose
+	//       fallback (Pass 2) is its only emission path.
+	//
+	//   NOTE: R3.5 is DOCS-ONLY. The seed wording above describes the rules
+	//   and their classification, NOT the gate's runtime failure/warning
+	//   behavior. Fail-loud semantics on a deterministic `rejected_stack`
+	//   hit are deferred to R5.2 (separate gated slice). R5.1 owns the
+	//   loader fix; R5.3 owns the runtime acceptance run.
 	const rejectedRules = normalizeRejectedRules(
 		input.constitution.technologyRules.rejectedStack,
 	);
