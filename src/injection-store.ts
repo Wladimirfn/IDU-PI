@@ -119,6 +119,11 @@ export function appendInjection(stateRoot: string, envelope: Injection): void {
 		writeFileSync(filePath, "", "utf8");
 	}
 	appendFileSync(filePath, `${JSON.stringify(envelope)}\n`, "utf8");
+	// INVARIANT: callers must pass a current-or-future `ts`. A past timestamp
+	// would break the latest-by-ts phase resolution in readPendingAdvisories
+	// (the advisory could get stuck "pending"). No live bug today — all 6
+	// callers pass `now`; this documents the contract for future callers.
+
 	// Auto-emit: structurally impossible to write an injection without
 	// its `emitted` event. Kind defaults to "unknown" for envelopes
 	// that omit it (legacy callers). We honor the envelope's `ts`
