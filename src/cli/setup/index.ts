@@ -6,7 +6,10 @@
  * can keep calling them without rewriting call sites.
  */
 
-export { loadConfirmedProjectConstitution } from "../../project-constitution.js";
+export {
+	loadConfirmedProjectConstitution,
+	getActiveConstitution,
+} from "../../project-constitution.js";
 export {
 	handleSetupCommand,
 	parseMcpTarget,
