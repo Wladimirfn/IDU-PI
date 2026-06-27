@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,8 @@ import {
 	deriveConstitutionFromProjectCore,
 	evaluateConstitutionGates,
 	formatConstitutionForPrompt,
+	hasRejection,
+	type BehaviorKind,
 	loadConfirmedProjectConstitution,
 	loadProjectConstitution,
 	normalizeRejectedRules,
@@ -155,15 +158,35 @@ test("evaluateConstitutionGates blocks excludedScope request", () => {
 	);
 });
 
-test("evaluateConstitutionGates blocks rejected stack", () => {
+test("evaluateConstitutionGates: legacy rejectedStack prose surfaces as advisory warning in preflight (R3.3 phase-separation)", () => {
+	// R3.3 phase-separation contract (design §4.2): preflight has no
+	// `changedFiles` / `deps`, so the predicate path is inconclusive.
+	// Legacy prose entries (the current brain's 6-string array) are
+	// normalized to `advisoryOnly: true` rules and surface ONLY as
+	// `rejected_stack_advisory` WARNINGS — never as `rejected_stack`
+	// failures. The bypass-closed guarantee belongs to the predicate
+	// path in postflight (see the T5/T8 R3.3 tests for the artifact-based
+	// match that DOES produce a failure).
 	const result = evaluateConstitutionGates({
 		request: "usar Firebase para auth",
 		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
 	});
 
-	assert.equal(result.risk, "blocker");
+	assert.equal(
+		result.risk,
+		"high",
+		"preflight prose match is advisory (high), not a blocker failure",
+	);
 	assert.ok(
-		result.failures.some((failure) => failure.gateId === "rejected_stack"),
+		result.warnings.some(
+			(warning) => warning.gateId === "rejected_stack_advisory",
+		),
+		"legacy prose must surface as rejected_stack_advisory warning",
+	);
+	assert.equal(
+		result.failures.find((failure) => failure.gateId === "rejected_stack"),
+		undefined,
+		"preflight prose-only MUST NOT emit a rejected_stack failure — predicate inconclusive",
 	);
 });
 
@@ -985,12 +1008,13 @@ describe("R3.1 RejectedRule schema backward-compat", () => {
 		assert.equal(out[0].advisoryOnly, true);
 	});
 
-	it("existing test suite still passes (backward-compat proof)", () => {
+it("existing test suite still passes (backward-compat proof)", () => {
 		// This test exists explicitly to document the R3.1 contract: the
 		// union-typed validator preserves byte-identity for the legacy 6-string
 		// brain state. The actual proof is that all prior `test(...)` cases in
-		// this file (including "evaluateConstitutionGates blocks rejected stack")
-		// still pass — see `npm test` output for the canonical evidence.
+		// this file (including the R3.3-phase-separation rewrite of the
+		// former "blocks rejected stack" test) still pass — see `npm test`
+		// output for the canonical evidence.
 		//
 		// Inline re-assertion of the core property: a derived constitution from
 		// a ProjectCore whose `rejectedStack` is `string[]` produces a
@@ -1004,3 +1028,420 @@ describe("R3.1 RejectedRule schema backward-compat", () => {
 		);
 	});
 });
+
+// ============================================================================
+// R3.3 — Tier 3 pilot: predicate-driven `rejectedStack` gate (consumption)
+// ----------------------------------------------------------------------------
+// Source: design obs-2688 §3 + task obs-2689 Phase A / Slice R3.3.
+// Slice goal: REPLACE the R3.1 `typeof entry === "string"` shim at the old
+// line 346 with a predicate-driven gate (`hasRejection`) plus a prose
+// fallback for `advisoryOnly` rules. The shim MUST be dead — see the
+// acceptance criterion check at the top of the slice's PR description.
+// All tests in this block drive the gate via `evaluateConstitutionGates`
+// (the public API) plus the exported `hasRejection` helper for fine-grained
+// detection-branch coverage.
+// ============================================================================
+
+// Build a ProjectConstitution whose `rejectedStack` is whatever the test
+// needs (predicate rules, advisory-only rules, or legacy strings). We start
+// from `deriveConstitutionFromProjectCore` to keep the rest of the schema
+// valid, then swap `rejectedStack` for the test's controlled shape.
+function buildConstitutionWithRules(
+	rules: RejectedStackEntry[],
+): import("../src/project-constitution.js").ProjectConstitution {
+	const core = confirmedCore();
+	const base = deriveConstitutionFromProjectCore(core);
+	return {
+		...base,
+		technologyRules: {
+			preferredStack: base.technologyRules.preferredStack,
+			rejectedStack: rules,
+		},
+	};
+}
+
+// Map of file → content, used as the DI `readContent` hook in tests below.
+type ContentMap = Record<string, string>;
+// Map of file → diff body.
+type DiffMap = Record<string, string>;
+
+describe("R3.3 predicate-driven rejectedStack gate", () => {
+	// -----------------------------------------------------------------------
+	// T1 — filePattern predicate (unit)
+	// -----------------------------------------------------------------------
+	it("T1: filePattern matches src/daemons/heartbeat.ts against src/daemons/**/*.ts", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "daemon-path",
+			summary: "Daemon files are rejected",
+			detection: { filePattern: "src/daemons/**/*.ts" },
+			severity: "blocker",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const result = evaluateConstitutionGates({
+			changedFiles: ["src/daemons/heartbeat.ts"],
+			constitution,
+		});
+		const hit = result.failures.find(
+			(failure) => failure.gateId === "rejected_stack",
+		);
+		assert.ok(hit, "expected rejected_stack failure on filePattern hit");
+		assert.equal(hit!.severity, "blocker");
+	});
+
+	// -----------------------------------------------------------------------
+	// T2 — depPattern predicate (unit + absence guard)
+	// -----------------------------------------------------------------------
+	it("T2a: depPattern matches 'puppeteer' when present in deps.dependencies", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "puppeteer-dep",
+			summary: "puppeteer is rejected",
+			detection: { depPattern: "puppeteer" },
+			severity: "blocker",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const result = evaluateConstitutionGates({
+			changedFiles: [],
+			deps: {
+				dependencies: { puppeteer: "^1.0.0", react: "^18.0.0" },
+				devDependencies: {},
+			},
+			constitution,
+		});
+		const hit = result.failures.find(
+			(failure) => failure.gateId === "rejected_stack",
+		);
+		assert.ok(
+			hit,
+			"expected rejected_stack failure on depPattern hit (puppeteer present)",
+		);
+	});
+
+	it("T2b: depPattern is INCONCLUSIVE when 'deps' field is absent (no false failure)", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "puppeteer-dep",
+			summary: "puppeteer is rejected",
+			detection: { depPattern: "puppeteer" },
+			severity: "blocker",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const result = evaluateConstitutionGates({
+			changedFiles: [],
+			constitution,
+			// NO `deps` field — postflight hasn't populated it yet.
+		});
+		assert.equal(
+			result.failures.find(
+				(failure) => failure.gateId === "rejected_stack",
+			),
+			undefined,
+			"missing deps MUST yield predicate-inconclusive (no failure)",
+		);
+	});
+
+	// -----------------------------------------------------------------------
+	// T3 — importPattern predicate (unit, via DI readContent)
+	// -----------------------------------------------------------------------
+	it("T3: importPattern matches writeFileSync( in mocked file content", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "fs-write",
+			summary: "Direct filesystem writes are rejected",
+			detection: { importPattern: "writeFileSync\\(" },
+			severity: "high",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const readContent = (() => {
+			const map: ContentMap = {
+				"src/mcp-server.ts":
+					'import { writeFileSync } from "node:fs";\nwriteFileSync("/tmp/x", "data");\n',
+			};
+			return (file: string): string | undefined => map[file];
+		})();
+		const result = evaluateConstitutionGates({
+			changedFiles: ["src/mcp-server.ts"],
+			constitution,
+		});
+		// We exercise `hasRejection` directly so we can inject the DI hook
+		// without exposing options on the public `evaluateConstitutionGates`.
+		const hits = hasRejection(
+			{
+				changedFiles: ["src/mcp-server.ts"],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		assert.equal(hits.length, 1, "importPattern hit expected");
+		assert.equal(hits[0].rule.id, "fs-write");
+		assert.equal(hits[0].matchedFile, "src/mcp-server.ts");
+		// Sanity: the public API without DI cannot fire importPattern (would
+		// need a real git repo).
+		assert.equal(
+			result.failures.find(
+				(failure) => failure.gateId === "rejected_stack",
+			),
+			undefined,
+			"without DI, importPattern cannot fire on missing file content",
+		);
+	});
+
+	// -----------------------------------------------------------------------
+	// T4 — commandPattern predicate (unit, via DI readDiff)
+	// -----------------------------------------------------------------------
+	it("T4: commandPattern matches 'git push origin main' in mocked diff", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "git-push-block",
+			summary: "AgentLabs must not push",
+			detection: { commandPattern: "git\\s+push\\s+origin\\s+main" },
+			severity: "blocker",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const diffBody =
+			"diff --git a/agentlabs/run.sh b/agentlabs/run.sh\n" +
+			"+git push origin main\n";
+		const readDiff = (() => {
+			const map: DiffMap = { "agentlabs/run.sh": diffBody };
+			return (file: string): string | undefined => map[file];
+		})();
+		const hits = hasRejection(
+			{ changedFiles: ["agentlabs/run.sh"], constitution },
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readDiff },
+		);
+		assert.equal(hits.length, 1);
+		assert.equal(hits[0].matchedFile, "agentlabs/run.sh");
+	});
+
+	// -----------------------------------------------------------------------
+	// T5 — behaviorPattern: long-running predicate (unit)
+	// -----------------------------------------------------------------------
+	it("T5: behaviorPattern 'long-running' fires on setInterval without SIGTERM handler", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "long-running-block",
+			summary: "Unbounded long-running daemons are rejected",
+			detection: { behaviorPattern: "long-running" },
+			severity: "blocker",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const content =
+			"// daemon: no shutdown handling\n" +
+			"setInterval(() => console.log('tick'), 1000);\n";
+		const readContent = (() => {
+			const map: ContentMap = { "src/daemons/heartbeat.ts": content };
+			return (file: string): string | undefined => map[file];
+		})();
+		const hits = hasRejection(
+			{ changedFiles: ["src/daemons/heartbeat.ts"], constitution },
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		assert.equal(hits.length, 1, "long-running hit expected");
+		assert.equal(hits[0].rule.id, "long-running-block");
+	});
+
+	it("T5b: behaviorPattern 'long-running' does NOT fire when SIGTERM handler is present", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "long-running-block",
+			detection: { behaviorPattern: "long-running" },
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const content =
+			"setInterval(() => console.log('tick'), 1000);\n" +
+			"process.on('SIGTERM', () => { clearInterval(handle); process.exit(0); });\n";
+		const readContent = (() => {
+			const map: ContentMap = { "src/daemons/graceful.ts": content };
+			return (file: string): string | undefined => map[file];
+		})();
+		const hits = hasRejection(
+			{ changedFiles: ["src/daemons/graceful.ts"], constitution },
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		assert.equal(
+			hits.length,
+			0,
+			"long-running predicate must NOT fire when SIGTERM handler is present",
+		);
+	});
+
+	// -----------------------------------------------------------------------
+	// T6 — backward-compat: legacy 6 strings → advisory warning only
+	// -----------------------------------------------------------------------
+	it("T6: legacy 6-string rejectedStack surfaces ONLY as advisory warning (not failure)", () => {
+		const legacy = [
+			"Unbounded autonomous daemons",
+			"MCP tools that implement code or authorize changes",
+			"AgentLabs that edit the real repository or commit/push",
+			"Uncontrolled web/news search for Bibliotecario evidence",
+			"Implicit dependency installation or postinstall script execution",
+			"Repo writes outside explicit worker/orchestrator flows",
+		];
+		const constitution = buildConstitutionWithRules(legacy);
+		const result = evaluateConstitutionGates({
+			request: "unbounded autonomous daemons",
+			constitution,
+		});
+		assert.equal(
+			result.failures.find(
+				(failure) => failure.gateId === "rejected_stack",
+			),
+			undefined,
+			"legacy strings MUST NOT emit rejected_stack failure (predicate inconclusive for prose-only)",
+		);
+		assert.ok(
+			result.warnings.some(
+				(warning) => warning.gateId === "rejected_stack_advisory",
+			),
+			"legacy strings MUST emit rejected_stack_advisory warning",
+		);
+	});
+
+	// -----------------------------------------------------------------------
+	// T7 — phase-separation: preflight (no changedFiles) → predicate does NOT fire
+	// -----------------------------------------------------------------------
+	it("T7: preflight (request only, no changedFiles) — predicate does NOT fire, prose fallback DOES", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "daemon-predicate",
+			summary: "Daemon predicate rule",
+			detection: { behaviorPattern: "long-running" },
+			severity: "blocker",
+		});
+		const advisoryLegacy: RejectedStackEntry = "Unbounded autonomous daemons";
+		const constitution = buildConstitutionWithRules([rule, advisoryLegacy]);
+		const result = evaluateConstitutionGates({
+			request: "unbounded autonomous daemons",
+			constitution,
+			// NO changedFiles — this is the preflight shape.
+		});
+		// Predicate did NOT fire (no changedFiles → predicate inconclusive).
+		assert.equal(
+			result.failures.find(
+				(failure) => failure.gateId === "rejected_stack",
+			),
+			undefined,
+			"predicate MUST NOT fire without changedFiles (preflight is text-only)",
+		);
+		// Prose fallback DID fire for the advisory legacy string.
+		assert.ok(
+			result.warnings.some(
+				(warning) => warning.gateId === "rejected_stack_advisory",
+			),
+			"prose fallback MUST fire for advisory legacy strings in preflight",
+		);
+		// Predicate rule (object entry without advisoryOnly) MUST NOT prose-match
+		// — only `advisoryOnly` rules participate in the prose fallback.
+		assert.equal(
+			result.warnings.find(
+				(warning) =>
+					warning.gateId === "rejected_stack_advisory" &&
+					warning.message.includes("Daemon predicate rule"),
+			),
+			undefined,
+			"non-advisory predicate rules MUST NOT prose-match",
+		);
+	});
+
+	// -----------------------------------------------------------------------
+	// T8 — determinism regression: postflight on a temp git repo
+	//   Bypass-closed proof: the pre-R3.3 gate prose-matched "long-running
+	//   background service" against the literal "Unbounded autonomous daemons"
+	//   substring. After rewording ("set up a long-running background service"),
+	//   the substring match evaded the gate. R3.3 closes this bypass: the
+	//   predicate fires on the ARTIFACT (setInterval in the committed file),
+	//   not on the prose. Realistic postflight context: a commit has landed
+	//   on a branch and we run the gate BEFORE merge.
+	// -----------------------------------------------------------------------
+	it("T8: postflight on temp repo with setInterval + bypass-reword request → rejected_stack blocker", () => {
+		const repoDir = mkdtempSync(join(tmpdir(), "pi-r3-3-t8-repo-"));
+		tempDirs.push(repoDir);
+		// Bootstrap a real git repo so `git show HEAD:<file>` works.
+		runGitIn(repoDir, ["init", "--quiet", "--initial-branch=main"]);
+		runGitIn(repoDir, ["config", "user.email", "test@example.com"]);
+		runGitIn(repoDir, ["config", "user.name", "Test"]);
+		runGitIn(repoDir, ["config", "commit.gpgsign", "false"]);
+		mkdirSync(join(repoDir, "src", "daemons"), { recursive: true });
+		const heartbeatPath = join(repoDir, "src", "daemons", "heartbeat.ts");
+		// Single commit that lands the unbounded daemon file — `git show HEAD:<f>`
+		// will return this exact content. No SIGTERM handler → predicate fires.
+		writeFileSync(
+			heartbeatPath,
+			"// unbounded daemon — no shutdown wiring at all\n" +
+				"setInterval(() => console.log('tick'), 1000);\n",
+			"utf8",
+		);
+		runGitIn(repoDir, ["add", "."]);
+		runGitIn(repoDir, ["commit", "--quiet", "-m", "introduce heartbeat"]);
+
+		// Build a constitution with the long-running predicate rule.
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "long-running-block",
+			summary: "Unbounded long-running daemons are rejected",
+			detection: { behaviorPattern: "long-running" },
+			severity: "blocker",
+		});
+		const constitution = buildConstitutionWithRules([rule]);
+		const changedFiles = ["src/daemons/heartbeat.ts"];
+
+		const originalCwd = process.cwd();
+		try {
+			process.chdir(repoDir);
+			const result = evaluateConstitutionGates({
+				request:
+					"set up a long-running background service that ticks every second",
+				changedFiles,
+				constitution,
+			});
+			const hit = result.failures.find(
+				(failure) => failure.gateId === "rejected_stack",
+			);
+			assert.ok(
+				hit,
+				"bypass-closed proof: postflight MUST fire rejected_stack on setInterval artifact even when request uses bypass reword",
+			);
+			assert.equal(hit!.severity, "blocker");
+		} finally {
+			process.chdir(originalCwd);
+		}
+	});
+
+	// -----------------------------------------------------------------------
+	// Bonus: formatConstitutionForPrompt audit-aware rendering
+	// -----------------------------------------------------------------------
+	it("R3.3: formatConstitutionForPrompt renders objects as '<summary> (<severity>, <detection-keys>)'", () => {
+		const rule: RejectedRule = makeValidRejectedRule({
+			id: "daemon-predicate",
+			summary: "Daemon predicate rule",
+			detection: { behaviorPattern: "long-running" },
+			severity: "blocker",
+		});
+		const core = confirmedCore();
+		const base = deriveConstitutionFromProjectCore(core);
+		const constitution = {
+			...base,
+			technologyRules: {
+				...base.technologyRules,
+				rejectedStack: [rule],
+			},
+		};
+		const rendered = formatConstitutionForPrompt(constitution);
+		assert.match(
+			rendered,
+			/Daemon predicate rule \(blocker, behaviorPattern\)/u,
+			"audit-aware format must include severity and detection key",
+		);
+	});
+
+	it("R3.3: formatConstitutionForPrompt renders legacy strings verbatim (backward-compat)", () => {
+		const core = confirmedCore({ rejectedStack: ["Firebase"] });
+		const constitution = deriveConstitutionFromProjectCore(core);
+		const rendered = formatConstitutionForPrompt(constitution);
+		assert.match(rendered, /Rejected stack:.*Firebase/u);
+	});
+});
+
+function runGitIn(cwd: string, args: string[]): string {
+	return execFileSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	}).trim();
+}

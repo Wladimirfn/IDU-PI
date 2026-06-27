@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isDbFile } from "./evidence-gateways.js";
 import type { PhysicalGateEvidence } from "./physical-gates.js";
 import type { ProjectConnectionReport } from "./project-connection.js";
@@ -123,6 +125,12 @@ export function analyzeProjectPostflight(
 	const constitutionGate = context.constitution
 		? evaluateConstitutionGates({
 				changedFiles: functionalChangedFiles,
+				// R3.2: feed `package.json` deps into the gate so depPattern rules
+				// in `rejectedStack` can fire on real dependency artifacts. The
+				// helper never throws on a missing file (returns `undefined`);
+				// the `?? undefined` keeps the field absent (NOT `null`) so the
+				// depPattern branch in `hasRejection` short-circuits cleanly.
+				deps: readPackageJsonDeps(context.projectPath) ?? undefined,
 				constitution: context.constitution,
 			})
 		: undefined;
@@ -207,6 +215,46 @@ function defaultGitRunner(projectPath: string): PostflightGitRunner {
 			encoding: "utf8",
 			stdio: ["ignore", "pipe", "pipe"],
 		}).trim();
+}
+
+// R3.2: lazy `package.json` reader for `ConstitutionGateInput.deps`. Only
+// postflight populates the gate's `deps` field; preflight does not (non-
+// breaking). The helper NEVER throws on a missing or malformed file — it
+// returns `undefined` and the gate's depPattern predicate short-circuits.
+// A present but malformed `package.json` (no `dependencies`/`devDependencies`
+// keys) returns an empty shape so the gate sees "no matching deps" cleanly.
+export function readPackageJsonDeps(
+	workspaceRoot: string,
+):
+	| { dependencies: Record<string, string>; devDependencies: Record<string, string> }
+	| undefined {
+	if (!workspaceRoot) return undefined;
+	const pkgPath = join(workspaceRoot, "package.json");
+	if (!existsSync(pkgPath)) return undefined;
+	try {
+		const raw = readFileSync(pkgPath, "utf8");
+		const parsed = JSON.parse(raw) as Record<string, unknown>;
+		const dependencies = isStringRecord(parsed.dependencies)
+			? parsed.dependencies
+			: {};
+		const devDependencies = isStringRecord(parsed.devDependencies)
+			? parsed.devDependencies
+			: {};
+		return { dependencies, devDependencies };
+	} catch {
+		return undefined;
+	}
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+	return (
+		value !== null &&
+		typeof value === "object" &&
+		!Array.isArray(value) &&
+		Object.values(value as Record<string, unknown>).every(
+			(v) => typeof v === "string",
+		)
+	);
 }
 
 function runGit(

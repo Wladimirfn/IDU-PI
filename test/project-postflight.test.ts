@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -245,6 +245,105 @@ test("analyzeProjectPostflight does not write files", () => {
 			changedFiles: ["README.md"],
 		});
 		assert.deepEqual(readdirSync(dir), before);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ============================================================================
+// R3.2 — Tier 3 pilot: `ConstitutionGateInput.deps` pass-through
+// ----------------------------------------------------------------------------
+// Source: design obs-2688 §3.2 + task obs-2689 Phase A / Slice R3.2.
+// Slice goal: postflight populates `deps` from a present `package.json` so
+// depPattern predicates in `rejectedStack` can fire on real dependency
+// artifacts. The helper (`readPackageJsonDeps`) must:
+//   - Return `{ dependencies, devDependencies }` when `package.json` exists.
+//   - Return `undefined` (NOT `null`) when `package.json` is missing — the
+//     gate treats `undefined` as "predicate inconclusive" for depPattern.
+//   - Never throw on a missing or malformed file.
+//
+// These tests pin all three behaviors. Predicate wiring is R3.3's job;
+// here we only assert that the `deps` field reaches the gate correctly.
+// ============================================================================
+
+import { readPackageJsonDeps } from "../src/project-postflight.js";
+
+test("R3.2: readPackageJsonDeps returns deps when package.json exists", () => {
+	const dir = mkdtempSync(join(tmpdir(), "idu-r3-2-deps-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				dependencies: { puppeteer: "^1.0.0", react: "^18.0.0" },
+				devDependencies: { typescript: "^5.0.0" },
+			}),
+			"utf8",
+		);
+		const out = readPackageJsonDeps(dir);
+		assert.ok(out, "must return deps when package.json exists");
+		assert.equal(out!.dependencies.puppeteer, "^1.0.0");
+		assert.equal(out!.devDependencies.typescript, "^5.0.0");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("R3.2: readPackageJsonDeps returns undefined (not null) when package.json missing", () => {
+	const dir = mkdtempSync(join(tmpdir(), "idu-r3-2-no-pkg-"));
+	try {
+		const out = readPackageJsonDeps(dir);
+		assert.equal(
+			out,
+			undefined,
+			"missing package.json must yield undefined (NOT null) so the gate's `?? undefined` keeps the field absent",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("R3.2: readPackageJsonDeps returns undefined for empty workspaceRoot", () => {
+	const out = readPackageJsonDeps("");
+	assert.equal(out, undefined);
+});
+
+test("R3.2: readPackageJsonDeps swallows malformed package.json", () => {
+	const dir = mkdtempSync(join(tmpdir(), "idu-r3-2-bad-pkg-"));
+	try {
+		writeFileSync(join(dir, "package.json"), "{not valid json", "utf8");
+		const out = readPackageJsonDeps(dir);
+		assert.equal(
+			out,
+			undefined,
+			"malformed package.json must not throw — return undefined",
+		);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("R3.2: analyzeProjectPostflight populates `deps` from workspaceRoot's package.json", () => {
+	const dir = mkdtempSync(join(tmpdir(), "idu-r3-2-postflight-"));
+	try {
+		writeFileSync(
+			join(dir, "package.json"),
+			JSON.stringify({
+				dependencies: { puppeteer: "^1.0.0" },
+			}),
+			"utf8",
+		);
+		const report = analyzeProjectPostflight({
+			projectPath: dir,
+			connectionReport: connection({ projectPath: dir }),
+			changedFiles: ["src/daemons/heartbeat.ts"],
+			constitution: deriveConstitutionFromProjectCore(confirmedCore()),
+		});
+		// We can't directly observe the `deps` field from the public report,
+		// but the gate's branch for depPattern short-circuits cleanly when
+		// `deps` is present. The canonical proof that deps reached the gate
+		// is the smoke-test below: a `rejectedStack` rule with a depPattern
+		// against `puppeteer` must fire.
+		assert.ok(report.constitutionGate, "gate must run when constitution is provided");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}

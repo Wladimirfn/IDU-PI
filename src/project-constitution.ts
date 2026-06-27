@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isDbFile } from "./evidence-gateways.js";
@@ -99,7 +100,48 @@ export type RejectedStackEntry = string | RejectedRule;
 export type ConstitutionGateInput = {
 	request?: string;
 	changedFiles?: string[];
+	// R3.2: optional `deps` field — only populated by postflight (via
+	// `readPackageJsonDeps` in project-postflight.ts). When absent, depPattern
+	// rules in `hasRejection` are silently skipped (predicate inconclusive —
+	// there is no package.json to inspect). Preflight callers do NOT pass
+	// `deps`; this is non-breaking by design.
+	deps?: {
+		dependencies: Record<string, string>;
+		devDependencies: Record<string, string>;
+	};
 	constitution: ProjectConstitution;
+};
+
+// ============================================================================
+// R3.3: Tier 3 pilot — predicate-driven `rejectedStack` gate (consumption)
+// ----------------------------------------------------------------------------
+// Source: design obs-2688 (architecture/tier-3-rejectedstack-design) §3 +
+// task obs-2689 (architecture/tier-3-rejectedstack-tasks) Phase A / Slice R3.3.
+// Slicing principle: this slice REPLACES the R3.1 shim (the inline string-or-
+// summary coercion at the old line 346) with a predicate-driven gate. Two
+// passes:
+//   Pass 1: `hasRejection(input, rules)` evaluates the 5 detection branches
+//           (filePattern / depPattern / importPattern / commandPattern /
+//           behaviorPattern). Each hit emits `rejected_stack` with the rule's
+//           severity. Missing inputs → predicate inconclusive (silently skipped).
+//   Pass 2: prose-fallback for `advisoryOnly` rules (legacy strings + rules
+//           marked `advisoryOnly: true`). Each prose hit emits
+//           `rejected_stack_advisory` warning. This preserves the pre-R3.3
+//           behavior for items 1/2/4 (LLM-discretion clauses) and item 6
+//           (ADVISORY ONLY — never has a predicate) without ever prose-matching
+//           against a non-advisory rule.
+// ============================================================================
+
+export type RejectionHit = {
+	rule: RejectedRule;
+	matchedFile?: string;
+	matchedDep?: string;
+};
+
+export type HasRejectionOptions = {
+	// DI hooks — tests inject deterministic content. Defaults use git CLI.
+	readContent?: (file: string) => string | undefined;
+	readDiff?: (file: string) => string | undefined;
 };
 
 export type ProjectConstitutionValidationResult =
@@ -265,23 +307,25 @@ export function formatConstitutionForPrompt(
 		`Prácticas prohibidas: ${formatInline(constitution.forbiddenPractices)}`,
 		`Prácticas requeridas: ${formatInline(constitution.requiredPractices)}`,
 		`Preferred stack: ${formatInline(constitution.technologyRules.preferredStack)}`,
-		// R3.1 NOTE: rejectedStack is now a union (string | RejectedRule).
-		// For backward-compat with the prompt format (which is being updated
-		// in R3.3 to handle object entries), coerce entries to display strings:
-		// legacy strings pass through verbatim; object entries render as
-		// "(advisory) summary" when advisoryOnly else "summary". Runtime
-		// behavior is identical for all current callers (which only produce
-		// string entries via deriveConstitutionFromProjectCore, since
-		// ProjectCore.rejectedStack is still `string[]` per the design's
-		// convert-at-boundary decision).
+		// R3.3 NOTE: rejectedStack accepts the union form (string | RejectedRule).
+		// Audit-aware formatting:
+		//   - Legacy strings pass through verbatim (byte-identical to pre-R3.3
+		//     output, so existing prompt-format tests stay green).
+		//   - Object entries render as "<summary> (<severity>, <detection-shape>)"
+		//     so an orchestrator reading the prompt can see the predicate key
+		//     driving each rule. `detection: null` (advisory-only) renders as
+		//     "advisory". This replaces the R3.1 coercion shim that pre-rendered
+		//     objects as "(advisory) summary" — the new format is honest about
+		//     severity and detection shape.
 		`Rejected stack: ${formatInline(
-			constitution.technologyRules.rejectedStack.map((entry) =>
-				typeof entry === "string"
-					? entry
-					: entry.advisoryOnly
-						? `(advisory) ${entry.summary}`
-						: entry.summary,
-			),
+			constitution.technologyRules.rejectedStack.map((entry) => {
+				if (!entry || typeof entry !== "object") return entry;
+				const det =
+					entry.detection === null
+						? "advisory"
+						: Object.keys(entry.detection).join("+");
+				return `${entry.summary} (${entry.severity}, ${det})`;
+			}),
 		)}`,
 		`Gates: ${formatInline(constitution.validationGates.map((gate) => gate.id))}`,
 	].join("\n");
@@ -325,32 +369,41 @@ export function evaluateConstitutionGates(
 			),
 		);
 	}
-	// Tema B (rejected_stack gate — ADVISORY (B)):
-	//   rejectedStack in `project-constitution.json` is policy prose
-	//   ("Unbounded autonomous daemons", "MCP tools that implement code"),
-	//   not structured detection rules. There is no evidence gateway that
-	//   produces "daemon detected" or "MCP code auth" signals.
-	//
-	//   To become deterministic: rejectedStack must be restructured as
-	//   structured detection rules (file patterns: `daemon*.ts` + `setInterval`;
-	//   code patterns: process spawn; etc.) paired with `changedFiles` analysis.
-	//   Tracked in Tier 3 contract restructuring.
-	// R3.1 NOTE: rejectedStack is now a union (string | RejectedRule). For
-	// backward-compat with the current gate (which is being rewritten in R3.3
-	// as a predicate-driven gate), this loop coerces each entry to the string
-	// the gate would match against: legacy strings pass through verbatim;
-	// object entries match against `summary`. Runtime behavior is preserved
-	// for all current callers (which only produce string entries via
-	// deriveConstitutionFromProjectCore, since ProjectCore.rejectedStack is
-	// still `string[]` per the design's convert-at-boundary decision).
-	for (const entry of input.constitution.technologyRules.rejectedStack) {
-		const rejected = typeof entry === "string" ? entry : entry.summary;
-		if (includesTerm(text, rejected)) {
-			failures.push(
+	// Tema B / R3.3 (rejected_stack gate — predicate-driven):
+	//   This block REPLACES the R3.1 shim. The pre-R3.3 implementation prose-matched
+	//   `entry.summary` against the union text, which was bypassable by rewording.
+	//   R3.3 closes that bypass: structured rules fire only when their detection
+	//   predicate matches an artifact (changed file content, diff, or dep). Legacy
+	//   prose entries (and rules marked `advisoryOnly: true`) still prose-match,
+	//   but as WARNINGS (`rejected_stack_advisory`) — never as failures. See
+	//   design obs-2688 §3 and §4 for the full phase-separation contract.
+	const rejectedRules = normalizeRejectedRules(
+		input.constitution.technologyRules.rejectedStack,
+	);
+	// Pass 1 — predicate failures. Empty when `changedFiles` / `deps` are absent
+	// (preflight) or when no rule's detection matches.
+	for (const hit of hasRejection(input, rejectedRules)) {
+		const sev = normalizeRuleSeverity(hit.rule.severity);
+		failures.push(
+			issue(
+				"rejected_stack",
+				sev,
+				hit.rule.messages.blocked,
+			),
+		);
+	}
+	// Pass 2 — prose fallback for `advisoryOnly` rules (legacy strings + rules
+	// explicitly marked). advisoryOnly rules have NO predicate (`detection: null`)
+	// so the prose match is the only signal they ever emit.
+	for (const rule of rejectedRules) {
+		if (!rule.advisoryOnly) continue;
+		if (includesTerm(text, rule.summary)) {
+			const sev = normalizeRuleSeverity(rule.severity);
+			warnings.push(
 				issue(
-					"rejected_stack",
-					"blocker",
-					`Tecnología rechazada por Project Core: ${rejected}`,
+					"rejected_stack_advisory",
+					sev,
+					rule.messages.warning,
 				),
 			);
 		}
@@ -833,7 +886,7 @@ export function normalizeRejectedRules(
 	entries: RejectedStackEntry[],
 ): RejectedRule[] {
 	return entries.map((entry, i) => {
-		if (typeof entry === "string") {
+		if (!entry || typeof entry !== "object") {
 			return {
 				id: `legacy-string-${i}`,
 				summary: entry,
@@ -851,6 +904,212 @@ export function normalizeRejectedRules(
 		// Object entry — pass through unchanged.
 		return entry;
 	});
+}
+
+// R3.3: predicate-driven evaluation of `rejectedStack`. Each rule's
+// `detection` field drives one of five branches. Missing inputs
+// (`changedFiles` empty, `deps` absent, no git history) cause the predicate
+// to skip silently — we DO NOT synthesize signals from prose. This function
+// is pure (given deterministic read hooks); the DI options let tests inject
+// fixture content/diff without touching the filesystem.
+//
+// Important: this function NEVER matches `advisoryOnly` rules against their
+// `summary` prose. The prose fallback path lives in `evaluateConstitutionGates`
+// (Pass 2). Splitting the two passes keeps the predicate bypass-closed.
+export function hasRejection(
+	input: ConstitutionGateInput,
+	rules: RejectedRule[],
+	options: HasRejectionOptions = {},
+): RejectionHit[] {
+	const hits: RejectionHit[] = [];
+	const readContent = options.readContent ?? defaultReadChangedFileContent;
+	const readDiff = options.readDiff ?? defaultReadChangedFileDiff;
+	const files = input.changedFiles ?? [];
+	const deps = input.deps;
+
+	for (const rule of rules) {
+		// Predicate rules MUST have a detection object; advisoryOnly rules
+		// have `detection: null` and are handled by Pass 2 in the gate.
+		const det = rule.detection;
+		if (!det) continue;
+
+		if ("filePattern" in det) {
+			if (files.length === 0) continue;
+			const matched = files.filter((f) => matchesGlob(f, det.filePattern));
+			for (const m of matched) hits.push({ rule, matchedFile: m });
+			continue;
+		}
+
+		if ("depPattern" in det) {
+			if (!deps) continue;
+			const depName = det.depPattern;
+			const inDeps = Object.prototype.hasOwnProperty.call(
+				deps.dependencies,
+				depName,
+			);
+			const inDevDeps = Object.prototype.hasOwnProperty.call(
+				deps.devDependencies,
+				depName,
+			);
+			if (inDeps || inDevDeps) {
+				hits.push({ rule, matchedDep: depName });
+			}
+			continue;
+		}
+
+		if ("importPattern" in det) {
+			if (files.length === 0) continue;
+			const regex = safeRegExp(det.importPattern);
+			if (!regex) continue;
+			for (const f of files) {
+				const content = readContent(f);
+				if (content && regex.test(content)) hits.push({ rule, matchedFile: f });
+			}
+			continue;
+		}
+
+		if ("commandPattern" in det) {
+			if (files.length === 0) continue;
+			const regex = safeRegExp(det.commandPattern);
+			if (!regex) continue;
+			for (const f of files) {
+				const diff = readDiff(f);
+				if (diff && regex.test(diff)) hits.push({ rule, matchedFile: f });
+			}
+			continue;
+		}
+
+		if ("behaviorPattern" in det) {
+			if (files.length === 0) continue;
+			for (const f of files) {
+				const content = readContent(f);
+				if (content && detectBehavior(content, det.behaviorPattern)) {
+					hits.push({ rule, matchedFile: f });
+				}
+			}
+			continue;
+		}
+	}
+	return hits;
+}
+
+// R3.3: read a changed file's CURRENT CONTENT as-of HEAD. Postflight-only:
+// when `changedFiles` is absent (preflight path), or git is not available
+// (e.g. tests), returns `undefined`. Wrapped in try/catch so a broken repo
+// never crashes the gate.
+function defaultReadChangedFileContent(file: string): string | undefined {
+	try {
+		const out = execFileSync("git", ["show", `HEAD:${file}`], {
+			cwd: process.cwd(),
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		return out;
+	} catch {
+		return undefined;
+	}
+}
+
+// R3.3: read a changed file's DIFF against HEAD. Postflight-only; same
+// fallback contract as `defaultReadChangedFileContent`.
+function defaultReadChangedFileDiff(file: string): string | undefined {
+	try {
+		const out = execFileSync("git", ["diff", "HEAD", "--", file], {
+			cwd: process.cwd(),
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		return out;
+	} catch {
+		return undefined;
+	}
+}
+
+// R3.3: glob matcher supporting `*` and `**` segments and `?` single-char.
+// Converted to a regex per-call (rules are evaluated at most once per gate
+// run; no hot path). Patterns are anchored at start and end so `src/**/*.ts`
+// does NOT accidentally match `prefix-src/foo.ts`.
+//
+// `**` semantics follow micromatch: a `**` segment matches zero or more
+// path segments INCLUDING the surrounding slashes — i.e. `a/**/b` matches
+// both `a/b` and `a/x/y/b`, and `src/**/*.ts` matches both
+// `src/foo.ts` and `src/dir/foo.ts`. We model this by collapsing
+// `<seg>/**/<rest>` (and the boundary forms `**/<rest>` and `<seg>/**`)
+// into a single regex group `(?:.*/)?` before segment-by-segment expansion.
+function matchesGlob(file: string, pattern: string): boolean {
+	const normalized = file.replace(/\\/gu, "/");
+	// Use a placeholder for `**` so the downstream regex-escape step doesn't
+	// rewrite its dots. The placeholder is a token that has no regex meaning
+	// (alphanumeric, not in the escape set) and survives escaping unchanged.
+	const STAR_STAR = "\u0000DSTAR\u0000";
+	const STAR = "\u0000SSTAR\u0000";
+	const QMARK = "\u0000QMARK\u0000";
+	const collapsed = pattern
+		.replace(/\*\*\//gu, STAR_STAR)
+		.replace(/\/\*\*/gu, STAR_STAR)
+		.replace(/\*\*/gu, STAR_STAR);
+	const escaped = collapsed
+		.replace(/[.+^${}()|[\]\\]/gu, "\\$&")
+		.replace(/\*/gu, STAR)
+		.replace(/\?/gu, QMARK);
+	const regexStr = escaped
+		.replace(new RegExp(STAR_STAR, "gu"), ".*")
+		.replace(new RegExp(STAR, "gu"), "[^/]*")
+		.replace(new RegExp(QMARK, "gu"), "[^/]");
+	const regex = new RegExp(`^${regexStr}$`, "u");
+	return regex.test(normalized);
+}
+
+// R3.3: compile a user-supplied detection regex safely. Invalid patterns
+// are SKIPPED silently (predicate inconclusive) rather than throwing — the
+// gate must never crash on a malformed rule.
+function safeRegExp(pattern: string): RegExp | undefined {
+	try {
+		return new RegExp(pattern, "u");
+	} catch {
+		return undefined;
+	}
+}
+
+// R3.3: behavior detector. Each `BehaviorKind` maps to a regex shape:
+//   - `long-running`: timer / loop tokens AND NOT a shutdown handler
+//                     (rough heuristic; see design §2.2 item 1).
+//   - `periodic`: `setInterval(`.
+//   - `network-bound`: outbound HTTP(S) / fetch primitives.
+//   - `external-write`: filesystem write primitives.
+// `long-running` is intentionally narrow: "unbounded" is a runtime property
+// that cannot be proven statically; the predicate catches the common shape
+// (timers + no SIGTERM handler) and the orchestrator/LLM fills the rest.
+function detectBehavior(content: string, kind: BehaviorKind): boolean {
+	switch (kind) {
+		case "long-running": {
+			const hasTimer =
+				/(setInterval|setTimeout|cron|while\s*\(\s*true\s*\))/u.test(content);
+			if (!hasTimer) return false;
+			const hasShutdown =
+				/(SIGTERM|SIGINT|process\.exit|clearInterval)/u.test(content);
+			return !hasShutdown;
+		}
+		case "periodic":
+			return /setInterval\s*\(/u.test(content);
+		case "network-bound":
+			return /(http\.get|https\.get|fetch\s*\()/u.test(content);
+		case "external-write":
+			return /(writeFileSync|appendFileSync|fs\.writeFile)/u.test(content);
+	}
+}
+
+// R3.3: rule severity → gate severity. Rules may declare any of the 4
+// fine-grained levels; the gate's `ConstitutionGateSeverity` accepts 3
+// (`medium`/`high`/`blocker`) plus the implicit `low`. We map `low` to
+// `medium` so a low-severity rule still surfaces in the report — a `low`
+// severity that disappears entirely would defeat the audit trail.
+function normalizeRuleSeverity(
+	sev: RejectedRule["severity"],
+): ConstitutionGateSeverity {
+	if (sev === "low") return "medium";
+	if (sev === "medium" || sev === "high" || sev === "blocker") return sev;
+	return "high";
 }
 
 function readEnum<T extends readonly string[]>(
