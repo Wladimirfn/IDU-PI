@@ -28,7 +28,10 @@ export type ProjectConstitution = {
 	requiredPractices: string[];
 	technologyRules: {
 		preferredStack: string[];
-		rejectedStack: string[];
+		// R3.1: widens from `string[]` to the union form. The legacy 6-string
+		// array (current brain state) is still accepted — the validator
+		// (`readRejectedStack`) emits strings as-is and only validates objects.
+		rejectedStack: RejectedStackEntry[];
 	};
 	securityRules: string[];
 	dataRules: string[];
@@ -54,6 +57,44 @@ export type ConstitutionGateResult = {
 	warnings: ConstitutionGateIssue[];
 	affectedRules: string[];
 };
+
+// ============================================================================
+// R3.1: Tier 3 pilot — rejectedStack schema (prose → predicate)
+// ----------------------------------------------------------------------------
+// Source: design obs-2688 (architecture/tier-3-rejectedstack-design) §2.1 and
+// task obs-2689 (architecture/tier-3-rejectedstack-tasks) Phase A / Slice R3.1.
+// Slicing principle: CODE slices land non-breaking. R3.1 widens the
+// `technologyRules.rejectedStack` type from `string[]` to a union
+// `RejectedStackEntry[]` that still accepts the legacy 6-string array
+// (current brain state) AND the structured `RejectedRule[]` form.
+// The gate consumption / predicate logic ships in R3.3 — NOT here.
+// ============================================================================
+
+export type BehaviorKind =
+	| "long-running"
+	| "periodic"
+	| "network-bound"
+	| "external-write";
+
+export type RejectionDetection =
+	| { filePattern: string }
+	| { depPattern: string }
+	| { importPattern: string }
+	| { commandPattern: string }
+	| { behaviorPattern: BehaviorKind };
+
+export type RejectedRule = {
+	id: string;
+	summary: string;
+	category: "stack" | "process" | "data" | "security";
+	detection: RejectionDetection | null;
+	severity: "blocker" | "high" | "medium" | "low";
+	rationale: string;
+	messages: { blocked: string; warning: string };
+	advisoryOnly?: boolean;
+};
+
+export type RejectedStackEntry = string | RejectedRule;
 
 export type ConstitutionGateInput = {
 	request?: string;
@@ -224,7 +265,24 @@ export function formatConstitutionForPrompt(
 		`Prácticas prohibidas: ${formatInline(constitution.forbiddenPractices)}`,
 		`Prácticas requeridas: ${formatInline(constitution.requiredPractices)}`,
 		`Preferred stack: ${formatInline(constitution.technologyRules.preferredStack)}`,
-		`Rejected stack: ${formatInline(constitution.technologyRules.rejectedStack)}`,
+		// R3.1 NOTE: rejectedStack is now a union (string | RejectedRule).
+		// For backward-compat with the prompt format (which is being updated
+		// in R3.3 to handle object entries), coerce entries to display strings:
+		// legacy strings pass through verbatim; object entries render as
+		// "(advisory) summary" when advisoryOnly else "summary". Runtime
+		// behavior is identical for all current callers (which only produce
+		// string entries via deriveConstitutionFromProjectCore, since
+		// ProjectCore.rejectedStack is still `string[]` per the design's
+		// convert-at-boundary decision).
+		`Rejected stack: ${formatInline(
+			constitution.technologyRules.rejectedStack.map((entry) =>
+				typeof entry === "string"
+					? entry
+					: entry.advisoryOnly
+						? `(advisory) ${entry.summary}`
+						: entry.summary,
+			),
+		)}`,
 		`Gates: ${formatInline(constitution.validationGates.map((gate) => gate.id))}`,
 	].join("\n");
 }
@@ -277,7 +335,16 @@ export function evaluateConstitutionGates(
 	//   structured detection rules (file patterns: `daemon*.ts` + `setInterval`;
 	//   code patterns: process spawn; etc.) paired with `changedFiles` analysis.
 	//   Tracked in Tier 3 contract restructuring.
-	for (const rejected of input.constitution.technologyRules.rejectedStack) {
+	// R3.1 NOTE: rejectedStack is now a union (string | RejectedRule). For
+	// backward-compat with the current gate (which is being rewritten in R3.3
+	// as a predicate-driven gate), this loop coerces each entry to the string
+	// the gate would match against: legacy strings pass through verbatim;
+	// object entries match against `summary`. Runtime behavior is preserved
+	// for all current callers (which only produce string entries via
+	// deriveConstitutionFromProjectCore, since ProjectCore.rejectedStack is
+	// still `string[]` per the design's convert-at-boundary decision).
+	for (const entry of input.constitution.technologyRules.rejectedStack) {
+		const rejected = typeof entry === "string" ? entry : entry.summary;
 		if (includesTerm(text, rejected)) {
 			failures.push(
 				issue(
@@ -523,7 +590,8 @@ function readTechnologyRules(
 	}
 	return {
 		preferredStack: readStringArray(record, "preferredStack", errors) ?? [],
-		rejectedStack: readStringArray(record, "rejectedStack", errors) ?? [],
+		rejectedStack:
+			readRejectedStack(record, "rejectedStack", errors) ?? [],
 	};
 }
 
@@ -576,6 +644,213 @@ function readStringArray(
 		return undefined;
 	}
 	return value.map((item) => item.trim());
+}
+
+// R3.1: accept either legacy string entries or structured RejectedRule objects
+// during the Tier 3 transition. Strings pass through verbatim (backward-compat
+// with the current brain's 6-string array). Objects are validated against the
+// 7 required fields per design §5.3 plus the closed BehaviorKind enum.
+// On validation failure this reader pushes stable, test-matchable error
+// prefixes of the form "rejectedStack[N]: missing field 'X'" /
+// "rejectedStack[N]: invalid category 'X'" etc. (see test/project-constitution.test.ts).
+// This reader NEVER throws — it pushes to `errors` and returns whatever entries
+// parsed successfully (matching the `readStringArray` convention).
+function readRejectedStack(
+	record: Record<string, unknown>,
+	field: string,
+	errors: string[],
+): RejectedStackEntry[] | undefined {
+	const value = record[field];
+	if (!Array.isArray(value)) {
+		errors.push(`${field} must be an array`);
+		return undefined;
+	}
+	const out: RejectedStackEntry[] = [];
+	const allowedSeverities = ["blocker", "high", "medium", "low"] as const;
+	const allowedCategories = ["stack", "process", "data", "security"] as const;
+	const allowedBehaviors = [
+		"long-running",
+		"periodic",
+		"network-bound",
+		"external-write",
+	] as const;
+	const detectionKeys = [
+		"filePattern",
+		"depPattern",
+		"importPattern",
+		"commandPattern",
+		"behaviorPattern",
+	] as const;
+	for (let i = 0; i < value.length; i++) {
+		const item = value[i];
+		const prefix = `${field}[${i}]`;
+		if (typeof item === "string") {
+			const trimmed = item.trim();
+			if (!trimmed) {
+				errors.push(`${prefix}: must be a non-empty string`);
+				continue;
+			}
+			out.push(trimmed);
+			continue;
+		}
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
+			errors.push(`${prefix}: must be a string or an object`);
+			continue;
+		}
+		const rec = item as Record<string, unknown>;
+		const id = rec.id;
+		if (typeof id !== "string" || !id.trim()) {
+			errors.push(`${prefix}: missing field 'id'`);
+			continue;
+		}
+		const summary = rec.summary;
+		if (typeof summary !== "string" || !summary.trim()) {
+			errors.push(`${prefix}: missing field 'summary'`);
+			continue;
+		}
+		const category = rec.category;
+		if (
+			typeof category !== "string" ||
+			!(allowedCategories as readonly string[]).includes(category)
+		) {
+			errors.push(
+				`${prefix}: invalid category '${String(category)}' (must be one of: ${allowedCategories.join(", ")})`,
+			);
+			continue;
+		}
+		const detection = rec.detection;
+		// detection may be null (advisory-only legacy object form) OR an object
+		// with EXACTLY ONE detection key. Capture the validated detection shape
+		// in `validatedDetection` so it is visible at the rule-construction site
+		// below (TS narrowing does not survive across block boundaries inside
+		// the for-loop body).
+		let validatedDetection: RejectionDetection | null = null;
+		if (detection === null) {
+			// allowed: null = advisory-only
+			validatedDetection = null;
+		} else if (
+			detection === undefined ||
+			typeof detection !== "object" ||
+			Array.isArray(detection)
+		) {
+			errors.push(`${prefix}: missing field 'detection' (or null)`);
+			continue;
+		} else {
+			const dRec = detection as Record<string, unknown>;
+			const presentKeys = detectionKeys.filter((k) => k in dRec);
+			if (presentKeys.length === 0) {
+				errors.push(
+					`${prefix}: detection must have exactly one of: ${detectionKeys.join(", ")}`,
+				);
+				continue;
+			}
+			if (presentKeys.length > 1) {
+				errors.push(
+					`${prefix}: detection must have exactly one key, got ${presentKeys.length} (${presentKeys.join(", ")})`,
+				);
+				continue;
+			}
+			const key = presentKeys[0];
+			const inner = dRec[key];
+			if (key === "behaviorPattern") {
+				if (
+					typeof inner !== "string" ||
+					!(allowedBehaviors as readonly string[]).includes(inner)
+				) {
+					errors.push(
+						`${prefix}: invalid behaviorPattern '${String(inner)}' (must be one of: ${allowedBehaviors.join(", ")})`,
+					);
+					continue;
+				}
+				validatedDetection = { behaviorPattern: inner as BehaviorKind };
+			} else {
+				if (typeof inner !== "string" || !inner.trim()) {
+					errors.push(
+						`${prefix}: detection.${key} must be a non-empty string`,
+					);
+					continue;
+				}
+				if (key === "filePattern") validatedDetection = { filePattern: inner };
+				else if (key === "depPattern") validatedDetection = { depPattern: inner };
+				else if (key === "importPattern") validatedDetection = { importPattern: inner };
+				else if (key === "commandPattern") validatedDetection = { commandPattern: inner };
+			}
+		}
+		const severity = rec.severity;
+		if (
+			typeof severity !== "string" ||
+			!(allowedSeverities as readonly string[]).includes(severity)
+		) {
+			errors.push(
+				`${prefix}: invalid severity '${String(severity)}' (must be one of: ${allowedSeverities.join(", ")})`,
+			);
+			continue;
+		}
+		const rationale = rec.rationale;
+		if (typeof rationale !== "string" || !rationale.trim()) {
+			errors.push(`${prefix}: missing field 'rationale'`);
+			continue;
+		}
+		const messages = rec.messages;
+		if (!messages || typeof messages !== "object" || Array.isArray(messages)) {
+			errors.push(`${prefix}: missing field 'messages'`);
+			continue;
+		}
+		const mRec = messages as Record<string, unknown>;
+		const blocked = mRec.blocked;
+		if (typeof blocked !== "string" || !blocked.trim()) {
+			errors.push(`${prefix}: missing field 'messages.blocked'`);
+			continue;
+		}
+		const warning = mRec.warning;
+		if (typeof warning !== "string" || !warning.trim()) {
+			errors.push(`${prefix}: missing field 'messages.warning'`);
+			continue;
+		}
+		const rule: RejectedRule = {
+			id: id.trim(),
+			summary: summary.trim(),
+			category: category as RejectedRule["category"],
+			detection: validatedDetection,
+			severity: severity as RejectedRule["severity"],
+			rationale: rationale.trim(),
+			messages: { blocked: blocked.trim(), warning: warning.trim() },
+		};
+		if (rec.advisoryOnly === true) rule.advisoryOnly = true;
+		out.push(rule);
+	}
+	return out;
+}
+
+// R3.1: convert the union form (RejectedStackEntry[]) into a uniform
+// RejectedRule[] so the gate in R3.3 can iterate one shape. Legacy string
+// entries are normalized into advisory-only rules with `detection: null` and
+// `advisoryOnly: true` — preserving the gate's current prose-fallback
+// behavior exactly. Object entries pass through unchanged (their optional
+// `advisoryOnly` field is preserved if set, and left absent otherwise).
+// This function is PURE: no I/O, no state.
+export function normalizeRejectedRules(
+	entries: RejectedStackEntry[],
+): RejectedRule[] {
+	return entries.map((entry, i) => {
+		if (typeof entry === "string") {
+			return {
+				id: `legacy-string-${i}`,
+				summary: entry,
+				category: "stack",
+				detection: null,
+				severity: "high",
+				rationale: "Legacy prose entry — no predicate available.",
+				messages: {
+					blocked: entry,
+					warning: `Posible rechazo (advisory): ${entry}`,
+				},
+				advisoryOnly: true,
+			};
+		}
+		// Object entry — pass through unchanged.
+		return entry;
+	});
 }
 
 function readEnum<T extends readonly string[]>(

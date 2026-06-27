@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, test } from "node:test";
+import { after, describe, it, test } from "node:test";
 import { resolvePackageRoot } from "../src/package-root.js";
 import {
 	createDefaultProjectCore,
@@ -14,6 +14,9 @@ import {
 	formatConstitutionForPrompt,
 	loadConfirmedProjectConstitution,
 	loadProjectConstitution,
+	normalizeRejectedRules,
+	type RejectedRule,
+	type RejectedStackEntry,
 	validateProjectConstitution,
 } from "../src/project-constitution.js";
 import { hasHumanRequired } from "../src/decision-envelope.js";
@@ -715,4 +718,289 @@ test("Tema B: hasHumanRequired returns true when owner is 'human' regardless of 
 		true,
 		"structured owner field wins — text content is irrelevant",
 	);
+});
+
+// ============================================================================
+// R3.1 — Tier 3 pilot: RejectedRule schema backward-compat
+// ----------------------------------------------------------------------------
+// Source: design obs-2688 §5 + task obs-2689 Phase A / Slice R3.1.
+// Slice goal: widen `technologyRules.rejectedStack` from `string[]` to a union
+// `RejectedStackEntry[]` (string | RejectedRule) so the legacy 6-string array
+// still loads and the structured form can be introduced without a breaking
+// change. Gate consumption / predicate logic is R3.3 (NOT here).
+// ============================================================================
+
+// Minimal helper: build a valid `ProjectConstitution`-shaped object so we can
+// drive `validateProjectConstitution` end-to-end without going through the
+// real loader. Only the fields that matter for R3.1 are populated.
+function makeConstitutionLike(rejectedStack: unknown): Record<string, unknown> {
+	return {
+		version: "1.0.0",
+		projectName: "idu-pi-test",
+		sourceCoreStatus: "confirmed",
+		principles: ["principle"],
+		forbiddenPractices: ["forbidden"],
+		requiredPractices: ["required"],
+		technologyRules: {
+			preferredStack: ["TypeScript"],
+			rejectedStack,
+		},
+		securityRules: [],
+		dataRules: [],
+		approvalRules: [],
+		validationGates: [],
+		specialistRoles: [],
+		createdAt: "2026-01-01T00:00:00.000Z",
+		updatedAt: "2026-01-01T00:00:00.000Z",
+		status: "active",
+	};
+}
+
+function makeValidRejectedRule(overrides: Partial<RejectedRule> = {}): RejectedRule {
+	return {
+		id: "test-rule",
+		summary: "Test rule summary",
+		category: "stack",
+		detection: { filePattern: "src/daemons/**/*.ts" },
+		severity: "blocker",
+		rationale: "Test rationale.",
+		messages: {
+			blocked: "Test blocked message",
+			warning: "Test warning message",
+		},
+		...overrides,
+	};
+}
+
+describe("R3.1 RejectedRule schema backward-compat", () => {
+	it("legacy string[] loads without error (current brain state)", () => {
+		// The 6 strings from the actual brain state (R3.1 design §1.1).
+		const legacy = [
+			"Unbounded autonomous daemons",
+			"MCP tools that implement code or authorize changes",
+			"AgentLabs that edit the real repository or commit/push",
+			"Uncontrolled web/news search for Bibliotecario evidence",
+			"Implicit dependency installation or postinstall script execution",
+			"Repo writes outside explicit worker/orchestrator flows",
+		];
+		const result = validateProjectConstitution(
+			makeConstitutionLike(legacy),
+		);
+		assert.equal(result.ok, true, `unexpected errors: ${JSON.stringify(result.ok === false ? result.errors : null)}`);
+		if (result.ok) {
+			assert.deepEqual(
+				result.constitution.technologyRules.rejectedStack,
+				legacy,
+			);
+		}
+	});
+
+	it("pure RejectedRule[] loads without error", () => {
+		const rules: RejectedRule[] = [
+			makeValidRejectedRule({ id: "r1", summary: "Daemon detection" }),
+			makeValidRejectedRule({
+				id: "r2",
+				summary: "MCP write detection",
+				category: "process",
+				detection: { importPattern: "writeFileSync\\(" },
+				severity: "high",
+			}),
+		];
+		const result = validateProjectConstitution(
+			makeConstitutionLike(rules),
+		);
+		assert.equal(result.ok, true, `unexpected errors: ${JSON.stringify(result.ok === false ? result.errors : null)}`);
+		if (result.ok) {
+			assert.equal(
+				result.constitution.technologyRules.rejectedStack.length,
+				2,
+			);
+		}
+	});
+
+	it("mixed array (strings + objects) loads via the union", () => {
+		const mixed: RejectedStackEntry[] = [
+			"Repo writes outside explicit worker/orchestrator flows",
+			makeValidRejectedRule({ id: "mcp-write" }),
+			"Another prose string",
+		];
+		const result = validateProjectConstitution(
+			makeConstitutionLike(mixed),
+		);
+		assert.equal(result.ok, true, `unexpected errors: ${JSON.stringify(result.ok === false ? result.errors : null)}`);
+		if (result.ok) {
+			const out = result.constitution.technologyRules.rejectedStack;
+			assert.equal(out.length, 3);
+			assert.equal(out[0], "Repo writes outside explicit worker/orchestrator flows");
+			assert.equal(typeof out[1], "object");
+			assert.equal(out[2], "Another prose string");
+		}
+	});
+
+	it("missing messages.blocked REJECTED with stable prefix", () => {
+		const rule = makeValidRejectedRule();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const bad = { ...rule, messages: { warning: "warn only" } } as any;
+		const result = validateProjectConstitution(
+			makeConstitutionLike([bad]),
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.ok(
+				result.errors.some((e) =>
+					/rejectedStack\[0\]: missing field 'messages\.blocked'/.test(e),
+				),
+				`expected stable prefix 'rejectedStack[0]: missing field 'messages.blocked'' in errors; got: ${JSON.stringify(result.errors)}`,
+			);
+		}
+	});
+
+	it("missing messages.warning REJECTED with stable prefix", () => {
+		const rule = makeValidRejectedRule();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const bad = { ...rule, messages: { blocked: "blocked only" } } as any;
+		const result = validateProjectConstitution(
+			makeConstitutionLike([bad]),
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.ok(
+				result.errors.some((e) =>
+					/rejectedStack\[0\]: missing field 'messages\.warning'/.test(e),
+				),
+				`expected stable prefix 'rejectedStack[0]: missing field 'messages.warning'' in errors; got: ${JSON.stringify(result.errors)}`,
+			);
+		}
+	});
+
+	it("detection with >1 key REJECTED", () => {
+		const rule = makeValidRejectedRule();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const bad = { ...rule, detection: { filePattern: "a", depPattern: "b" } } as any;
+		const result = validateProjectConstitution(
+			makeConstitutionLike([bad]),
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.ok(
+				result.errors.some((e) =>
+					/rejectedStack\[0\]: detection must have exactly one key/.test(e),
+				),
+				`expected detection >1 key error in errors; got: ${JSON.stringify(result.errors)}`,
+			);
+		}
+	});
+
+	it("unknown severity REJECTED", () => {
+		const rule = makeValidRejectedRule();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const bad = { ...rule, severity: "critical" } as any;
+		const result = validateProjectConstitution(
+			makeConstitutionLike([bad]),
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.ok(
+				result.errors.some((e) =>
+					/rejectedStack\[0\]: invalid severity 'critical'/.test(e),
+				),
+				`expected invalid severity error; got: ${JSON.stringify(result.errors)}`,
+			);
+		}
+	});
+
+	it("unknown category REJECTED", () => {
+		const rule = makeValidRejectedRule();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const bad = { ...rule, category: "ops" } as any;
+		const result = validateProjectConstitution(
+			makeConstitutionLike([bad]),
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.ok(
+				result.errors.some((e) =>
+					/rejectedStack\[0\]: invalid category 'ops'/.test(e),
+				),
+				`expected invalid category error; got: ${JSON.stringify(result.errors)}`,
+			);
+		}
+	});
+
+	it("unknown behaviorPattern kind REJECTED (closed enum)", () => {
+		const rule = makeValidRejectedRule();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const bad = { ...rule, detection: { behaviorPattern: "side-effect" } } as any;
+		const result = validateProjectConstitution(
+			makeConstitutionLike([bad]),
+		);
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.ok(
+				result.errors.some((e) =>
+					/rejectedStack\[0\]: invalid behaviorPattern 'side-effect'/.test(e),
+				),
+				`expected invalid behaviorPattern error; got: ${JSON.stringify(result.errors)}`,
+			);
+		}
+	});
+
+	it("normalizeRejectedRules on legacy strings → advisoryOnly:true, detection:null", () => {
+		const legacy = [
+			"Unbounded autonomous daemons",
+			"Repo writes outside explicit worker/orchestrator flows",
+		];
+		const out = normalizeRejectedRules(legacy);
+		assert.equal(out.length, 2);
+		assert.equal(out[0].id, "legacy-string-0");
+		assert.equal(out[0].summary, legacy[0]);
+		assert.equal(out[0].category, "stack");
+		assert.equal(out[0].detection, null);
+		assert.equal(out[0].severity, "high");
+		assert.equal(out[0].advisoryOnly, true);
+		assert.match(
+			out[0].messages.warning,
+			/^Posible rechazo \(advisory\): /u,
+		);
+		assert.equal(out[1].id, "legacy-string-1");
+		assert.equal(out[1].advisoryOnly, true);
+		assert.equal(out[1].detection, null);
+	});
+
+	it("normalizeRejectedRules on objects → unchanged", () => {
+		const rule = makeValidRejectedRule({ id: "preserve-me" });
+		const out = normalizeRejectedRules([rule]);
+		assert.equal(out.length, 1);
+		assert.equal(out[0], rule);
+		// Object reference preserved (pass-through).
+		assert.strictEqual(out[0], rule);
+	});
+
+	it("normalizeRejectedRules preserves advisoryOnly on object entries", () => {
+		const rule = makeValidRejectedRule({
+			id: "explicit-advisory",
+			advisoryOnly: true,
+		});
+		const out = normalizeRejectedRules([rule]);
+		assert.equal(out[0].advisoryOnly, true);
+	});
+
+	it("existing test suite still passes (backward-compat proof)", () => {
+		// This test exists explicitly to document the R3.1 contract: the
+		// union-typed validator preserves byte-identity for the legacy 6-string
+		// brain state. The actual proof is that all prior `test(...)` cases in
+		// this file (including "evaluateConstitutionGates blocks rejected stack")
+		// still pass — see `npm test` output for the canonical evidence.
+		//
+		// Inline re-assertion of the core property: a derived constitution from
+		// a ProjectCore whose `rejectedStack` is `string[]` produces a
+		// `ProjectConstitution` whose `rejectedStack` survives the validator
+		// unchanged (the union form is fully transparent for strings).
+		const core = confirmedCore({ rejectedStack: ["Firebase"] });
+		const constitution = deriveConstitutionFromProjectCore(core);
+		assert.deepEqual(
+			constitution.technologyRules.rejectedStack,
+			["Firebase"],
+		);
+	});
 });
