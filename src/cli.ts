@@ -946,6 +946,24 @@ export function createCliRuntime(
 			"No hay proyecto activo. Usá /addproject <id> <ruta> en Telegram o configurá DEFAULT_CWD.",
 		);
 	}
+	// R5.3.2.1 fix: ensure context.activeProject.stateRoot is populated
+	// before the RuntimeContext is built. buildPostflightReport
+	// (src/cli/setup/helpers.ts:280) reads context.activeProject.stateRoot
+	// and falls back to runtimeWorkspaceRoot when it is null. That fallback
+	// is the agent workspace root, not the per-project stateRoot, so a
+	// null activeProject.stateRoot makes the postflight gate read the
+	// wrong constitution/flows files and silently skip with a false-positive
+	// ok=true. The registry entry for a freshly enrolled project is
+	// populated by projectEnroll (src/idu-installer.ts:567), but the
+	// self-project may be loaded from a registry written before that
+	// guarantee, so we compute the canonical stateRoot here when missing.
+	if (!activeProject.stateRoot) {
+		activeProject.stateRoot = resolveProjectStatePaths({
+			workspaceRoot: config.agentWorkspaceRoot,
+			projectId: activeProject.id,
+			projectPath: activeProject.path,
+		}).stateRoot;
+	}
 	const projectStatePaths = activeProject.stateRoot
 		? resolveProjectStatePaths({
 				workspaceRoot: config.agentWorkspaceRoot,
