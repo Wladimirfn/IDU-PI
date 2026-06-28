@@ -27,8 +27,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { rm } from "node:fs/promises";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -47,21 +46,38 @@ import {
 // ---------------------------------------------------------------------------
 // Test fixtures — hermetic environment so each test owns its own
 // registry, workspace root, and project path.
+//
+// Each test MUST clean up the directories it creates in a `finally`
+// block. Originally this file relied on a single shared `after()` hook
+// to clean `tempRoots`, but that leaked state between tests when the
+// test order in CI differed from local. Now each test snapshots the
+// temp dirs it created, runs its body inside `try { ... } finally
+// { cleanupTempDirs(scratch) }`, and the trailing `after()` only
+// removes the shared HERMETIC_ROOT as a backstop.
 // ---------------------------------------------------------------------------
 
 const HERMETIC_ROOT = mkdtempSync(join(tmpdir(), "r5-3-2-1-stateroot-env-"));
-const tempRoots: string[] = [];
 
 function tempDir(): string {
-	const dir = mkdtempSync(join(HERMETIC_ROOT, "scratch-"));
-	tempRoots.push(dir);
-	return dir;
+	return mkdtempSync(join(HERMETIC_ROOT, "scratch-"));
 }
 
-after(async () => {
-	await Promise.all(
-		tempRoots.map((dir) => rm(dir, { recursive: true, force: true })),
-	);
+function cleanupTempDirs(dirs: readonly string[]): void {
+	for (const dir of dirs) {
+		try {
+			rmSync(dir, { recursive: true, force: true });
+		} catch {
+			// Best-effort cleanup; never mask the test's real error.
+		}
+	}
+}
+
+after(() => {
+	try {
+		rmSync(HERMETIC_ROOT, { recursive: true, force: true });
+	} catch {
+		// Backstop cleanup; never mask a failing test.
+	}
 });
 
 type SeedInput = {
@@ -166,25 +182,30 @@ test("R5.3.2.1: loadRegistry preserves the stateRoot from disk", () => {
 	const projectPath = join(tempDir(), "project");
 	const projectId = "r5-3-2-1-state-on-disk";
 	const expectedStateRoot = join(workspaceRoot, "projects", projectId);
-	const { registryPath } = seedRegistryAndStateRoot({
-		workspaceRoot,
-		projectId,
-		projectPath,
-		explicitStateRoot: expectedStateRoot,
-	});
-	const registry = loadRegistry(projectPath, [HERMETIC_ROOT], {
-		registryPath,
-		createIfMissing: false,
-	});
-	const entry: ProjectEntry | undefined = registry.projects.find(
-		(p) => p.id === projectId,
-	);
-	assert.ok(entry, "registry should contain the seeded project");
-	assert.equal(
-		entry.stateRoot,
-		expectedStateRoot,
-		"loadRegistry must preserve the stateRoot written to disk",
-	);
+	const scratch = [workspaceRoot, projectPath];
+	try {
+		const { registryPath } = seedRegistryAndStateRoot({
+			workspaceRoot,
+			projectId,
+			projectPath,
+			explicitStateRoot: expectedStateRoot,
+		});
+		const registry = loadRegistry(projectPath, [HERMETIC_ROOT], {
+			registryPath,
+			createIfMissing: false,
+		});
+		const entry: ProjectEntry | undefined = registry.projects.find(
+			(p) => p.id === projectId,
+		);
+		assert.ok(entry, "registry should contain the seeded project");
+		assert.equal(
+			entry.stateRoot,
+			expectedStateRoot,
+			"loadRegistry must preserve the stateRoot written to disk",
+		);
+	} finally {
+		cleanupTempDirs(scratch);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -200,6 +221,7 @@ test(
 		const projectPath = join(tempDir(), "project");
 		const projectId = "r5-3-2-1-with-stateroot";
 		const expectedStateRoot = join(workspaceRoot, "projects", projectId);
+		const scratch = [workspaceRoot, projectPath];
 		const { registryPath } = seedRegistryAndStateRoot({
 			workspaceRoot,
 			projectId,
@@ -239,6 +261,7 @@ test(
 			assert.equal(runtime.projectPath, projectPath);
 		} finally {
 			restoreEnv();
+			cleanupTempDirs(scratch);
 		}
 	},
 );
@@ -259,6 +282,7 @@ test(
 		const projectPath = join(tempDir(), "project");
 		const projectId = "r5-3-2-1-postflight-path";
 		const expectedStateRoot = join(workspaceRoot, "projects", projectId);
+		const scratch = [workspaceRoot, projectPath];
 		const { registryPath } = seedRegistryAndStateRoot({
 			workspaceRoot,
 			projectId,
@@ -319,6 +343,7 @@ test(
 			assert.equal(runtime.projectPath, projectPath);
 		} finally {
 			restoreEnv();
+			cleanupTempDirs(scratch);
 		}
 	},
 );
@@ -341,6 +366,7 @@ test(
 			projectId,
 			projectPath,
 		}).stateRoot;
+		const scratch = [workspaceRoot, projectPath];
 		// Seed with explicitStateRoot: null to simulate the bug condition
 		// (registry entry written before projectEnroll populated it).
 		const { registryPath } = seedRegistryAndStateRoot({
@@ -409,6 +435,7 @@ test(
 			);
 		} finally {
 			restoreEnv();
+			cleanupTempDirs(scratch);
 		}
 	},
 );
@@ -424,6 +451,7 @@ test(
 		const workspaceRoot = tempDir();
 		const projectPath = join(tempDir(), "project");
 		const projectId = "r5-3-2-1-no-disk-write";
+		const scratch = [workspaceRoot, projectPath];
 		const { registryPath } = seedRegistryAndStateRoot({
 			workspaceRoot,
 			projectId,
@@ -455,6 +483,7 @@ test(
 			);
 		} finally {
 			restoreEnv();
+			cleanupTempDirs(scratch);
 		}
 	},
 );
@@ -469,37 +498,42 @@ test(
 	() => {
 		const workspaceRoot = tempDir();
 		const projectPath = join(tempDir(), "project");
-		const registryPath = join(workspaceRoot, "registry.json");
-		mkdirSync(projectPath, { recursive: true });
-		const registry: ProjectRegistry = {
-			activeProjectId: null,
-			projects: [],
-		};
-		saveRegistry(registry, registryPath);
-		const loaded = loadRegistry(projectPath, [HERMETIC_ROOT], {
-			registryPath,
-			createIfMissing: false,
-		});
-		const expectedStateRoot = join(workspaceRoot, "projects", "r5-3-2-1-addproject");
-		addProject(loaded, "r5-3-2-1-addproject", projectPath, [HERMETIC_ROOT]);
-		// Mirror projectEnroll's behavior: write stateRoot then save.
-		const entry = loaded.projects.find((p) => p.id === "r5-3-2-1-addproject");
-		assert.ok(entry);
-		entry.stateRoot = expectedStateRoot;
-		loaded.activeProjectId = "r5-3-2-1-addproject";
-		saveRegistry(loaded, registryPath);
-		const reloaded = loadRegistry(projectPath, [HERMETIC_ROOT], {
-			registryPath,
-			createIfMissing: false,
-		});
-		const reloadedEntry = reloaded.projects.find(
-			(p) => p.id === "r5-3-2-1-addproject",
-		);
-		assert.ok(reloadedEntry);
-		assert.equal(
-			reloadedEntry.stateRoot,
-			expectedStateRoot,
-			"addProject + saveRegistry round-trip must preserve stateRoot",
-		);
+		const scratch = [workspaceRoot, projectPath];
+		try {
+			const registryPath = join(workspaceRoot, "registry.json");
+			mkdirSync(projectPath, { recursive: true });
+			const registry: ProjectRegistry = {
+				activeProjectId: null,
+				projects: [],
+			};
+			saveRegistry(registry, registryPath);
+			const loaded = loadRegistry(projectPath, [HERMETIC_ROOT], {
+				registryPath,
+				createIfMissing: false,
+			});
+			const expectedStateRoot = join(workspaceRoot, "projects", "r5-3-2-1-addproject");
+			addProject(loaded, "r5-3-2-1-addproject", projectPath, [HERMETIC_ROOT]);
+			// Mirror projectEnroll's behavior: write stateRoot then save.
+			const entry = loaded.projects.find((p) => p.id === "r5-3-2-1-addproject");
+			assert.ok(entry);
+			entry.stateRoot = expectedStateRoot;
+			loaded.activeProjectId = "r5-3-2-1-addproject";
+			saveRegistry(loaded, registryPath);
+			const reloaded = loadRegistry(projectPath, [HERMETIC_ROOT], {
+				registryPath,
+				createIfMissing: false,
+			});
+			const reloadedEntry = reloaded.projects.find(
+				(p) => p.id === "r5-3-2-1-addproject",
+			);
+			assert.ok(reloadedEntry);
+			assert.equal(
+				reloadedEntry.stateRoot,
+				expectedStateRoot,
+				"addProject + saveRegistry round-trip must preserve stateRoot",
+			);
+		} finally {
+			cleanupTempDirs(scratch);
+		}
 	},
 );
