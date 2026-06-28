@@ -66,9 +66,13 @@ export function buildPreflightOrchestratorAdvisory(
 			`risk:${report.risk}`,
 			`connection:${report.connectionStatus}`,
 			...report.affectedAreas.map((area) => `area:${area}`),
-			...(report.constitutionGate?.affectedRules ?? []).map(
-				(rule) => `rule:${rule}`,
-			),
+			...(report.constitutionGate?.kind === "ran"
+				? report.constitutionGate.result.affectedRules
+				: []
+			).map((rule) => `rule:${rule}`),
+			...(report.constitutionGate?.kind === "skipped"
+				? [`gate-skipped:${report.constitutionGate.reason}`]
+				: []),
 		]),
 		contractsAffected: contractAreasFromImpact(report.affectedAreas),
 		requiredReads: requiredReadsFromImpact(report.affectedAreas),
@@ -105,9 +109,13 @@ export function buildProjectAdvisoryForOrchestrator(
 		evidenceRefs: compactActions([
 			`level:${advisory.level}`,
 			...advisory.affectedAreas.map((area) => `area:${area}`),
-			...(advisory.constitutionGate?.affectedRules ?? []).map(
-				(rule) => `rule:${rule}`,
-			),
+			...(advisory.constitutionGate?.kind === "ran"
+				? advisory.constitutionGate.result.affectedRules
+				: []
+			).map((rule) => `rule:${rule}`),
+			...(advisory.constitutionGate?.kind === "skipped"
+				? [`gate-skipped:${advisory.constitutionGate.reason}`]
+				: []),
 		]),
 		contractsAffected: contractAreasFromImpact(advisory.affectedAreas),
 		requiredReads: requiredReadsFromImpact(advisory.affectedAreas),

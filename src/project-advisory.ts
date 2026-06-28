@@ -1,8 +1,8 @@
-import type { ConstitutionGateResult } from "./project-constitution.js";
 import type {
 	ProjectPreflightReport,
 	ProjectPreflightRisk,
 } from "./project-preflight.js";
+import type { GateExecutionStatus } from "./project-postflight.js";
 
 export type ProjectAdvisoryLevel = "info" | "warning" | "risk" | "blocker";
 
@@ -18,7 +18,10 @@ export type ProjectAdvisory = {
 	actions: string[];
 	requiresHumanConfirmation: boolean;
 	okToProceed: boolean;
-	constitutionGate?: ConstitutionGateResult;
+	// R5.2: when present, the discriminated union. The `format` helper reads
+	// `affectedRules` from `.result` when `kind === "ran"`, else renders the
+	// skip message so the advisory never lies about enforcement status.
+	constitutionGate?: GateExecutionStatus;
 };
 
 export function buildProjectAdvisory(
@@ -62,8 +65,12 @@ export function formatProjectAdvisory(advisory: ProjectAdvisory): string {
 		"",
 		...(advisory.constitutionGate
 			? [
-					"Reglas afectadas:",
-					formatLimitedList(advisory.constitutionGate.affectedRules),
+					advisory.constitutionGate.kind === "ran"
+						? "Reglas afectadas:"
+						: "Constitution gate execution:",
+					advisory.constitutionGate.kind === "ran"
+						? formatLimitedList(advisory.constitutionGate.result.affectedRules)
+						: advisory.constitutionGate.skippedReason,
 					"",
 				]
 			: []),

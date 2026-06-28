@@ -379,7 +379,11 @@ test("Idu-pi supervisor cycle is accepted end-to-end without unsafe apply", asyn
 		});
 		assert.equal(guarded?.intentKind, "bug_report");
 		assert.equal(guarded?.category, "bug");
-		assert.equal(preflight.risk, "high");
+		// R5.2 fail-loud: with no constitutionStatus, a request containing
+		// "loggin" (auth/login) now escalates to blocker. Pre-R5.2 this was
+		// `high` (silently skipped gate). The supervisor still pauses — the
+		// guard escalation is at least as strong as before.
+		assert.equal(preflight.risk, "blocker");
 		assert.equal(guarded?.guardStatus, "needs_confirmation");
 		assert.equal(queue.listTasks().length, 1);
 

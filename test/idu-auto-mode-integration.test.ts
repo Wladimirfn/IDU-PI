@@ -270,12 +270,16 @@ test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and gua
 			connection: connection(projectPath),
 			blueprint,
 			flows,
-			constitution,
+			constitutionStatus: { kind: "ok", constitution },
 		});
 		assert.equal(preflight.risk, "blocker");
 		assert.equal(preflight.requiresHumanConfirmation, true);
+		assert.equal(preflight.constitutionGate?.kind, "ran");
+		if (preflight.constitutionGate?.kind !== "ran") return; // narrow
 		assert.ok(
-			preflight.constitutionGate?.affectedRules.includes("scope_excluded"),
+			preflight.constitutionGate.result.affectedRules.includes(
+				"scope_excluded",
+			),
 		);
 		assert.match(formatProjectPreflightReport(preflight), /scope_excluded/u);
 
@@ -284,7 +288,7 @@ test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and gua
 				connection: connection(projectPath),
 				blueprint,
 				flows,
-				constitution,
+				constitutionStatus: { kind: "ok", constitution },
 			}),
 		);
 		const advisoryText = formatProjectAdvisory(advisory);
@@ -297,16 +301,20 @@ test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and gua
 			projectPath,
 			connectionReport: connection(projectPath),
 			changedFiles: ["src/auth/login.ts", "src/lab-db.ts"],
-			constitution,
+			constitutionStatus: { kind: "ok", constitution },
 		});
 		assert.equal(postflight.risk, "high");
+		assert.equal(postflight.constitutionGate?.kind, "ran");
+		if (postflight.constitutionGate?.kind !== "ran") return; // narrow
 		assert.ok(
-			postflight.constitutionGate?.affectedRules.includes(
+			postflight.constitutionGate.result.affectedRules.includes(
 				"auth_security_review",
 			),
 		);
 		assert.ok(
-			postflight.constitutionGate?.affectedRules.includes("db_schema_plan"),
+			postflight.constitutionGate.result.affectedRules.includes(
+				"db_schema_plan",
+			),
 		);
 		assert.match(
 			formatProjectPostflightReport(postflight),
@@ -338,7 +346,7 @@ test("Idu-pi auto mode ties confirmed Project Core to Constitution gates and gua
 				connection: connection(projectPath),
 				blueprint,
 				flows,
-				constitution,
+				constitutionStatus: { kind: "ok", constitution },
 			},
 		);
 		assert.equal(guardedPreflight.risk, "high");

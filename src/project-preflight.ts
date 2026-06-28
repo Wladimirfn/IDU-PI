@@ -7,9 +7,9 @@ import type { ProjectConnectionReport } from "./project-connection.js";
 import type { ProjectFlows } from "./project-flows.js";
 import {
 	evaluateConstitutionGates,
-	type ConstitutionGateResult,
-	type ProjectConstitution,
+	type LoadConfirmedConstitutionResult,
 } from "./project-constitution.js";
+import type { GateExecutionStatus } from "./project-postflight.js";
 
 export type ProjectPreflightRisk = "low" | "medium" | "high" | "blocker";
 
@@ -17,7 +17,12 @@ export type ProjectPreflightContext = {
 	connection: ProjectConnectionReport;
 	blueprint?: ProjectBlueprint;
 	flows?: ProjectFlows;
-	constitution?: ProjectConstitution;
+	// R5.2: callers pass the discriminated union from `loadConfirmedProjectConstitution`
+	// (or `undefined` if they did not load). The preflight builder always produces a
+	// `GateExecutionStatus` — `kind: "ran"` (constitution loaded) or `kind: "skipped"`
+	// (loader skipped with blocker severity). This closes the original R5 silent
+	// skip in the preflight report too.
+	constitutionStatus?: LoadConfirmedConstitutionResult;
 	projectId?: string;
 	projectPath?: string;
 };
@@ -36,7 +41,11 @@ export type ProjectPreflightReport = {
 	requiresHumanConfirmation: boolean;
 	shouldRunAgentLab: boolean;
 	availableContext?: string[];
-	constitutionGate?: ConstitutionGateResult;
+	// R5.2: the discriminated union (kind: "ran" | kind: "skipped"). When present
+	// it is always the union — never the legacy `ConstitutionGateResult` shape.
+	// A skipped gate is `severity: "blocker"` so the report risk escalates and a
+	// consumer can distinguish "ran and passed" from "never ran".
+	constitutionGate?: GateExecutionStatus;
 	humanIntent?: HumanIntentClassification;
 };
 
@@ -283,28 +292,34 @@ export function analyzeProjectPreflight(
 		risk = maxRisk(risk, "high");
 	}
 
-	const constitutionGate = context.constitution
-		? evaluateConstitutionGates({
-				request: normalizedRequest,
-				constitution: context.constitution,
-			})
-		: undefined;
-	if (constitutionGate) {
-		risk = maxRisk(risk, constitutionGate.risk);
+	const constitutionGate = buildPreflightGateExecutionStatus({
+		constitutionStatus: context.constitutionStatus,
+		request: normalizedRequest,
+	});
+	if (constitutionGate.kind === "ran") {
+		risk = maxRisk(risk, constitutionGate.result.risk);
 		warnings.push(
-			...constitutionGate.failures.map(
+			...constitutionGate.result.failures.map(
 				(failure) => `${failure.gateId}: ${failure.message}`,
 			),
-			...constitutionGate.warnings.map(
+			...constitutionGate.result.warnings.map(
 				(warning) => `${warning.gateId}: ${warning.message}`,
 			),
+			constitutionGate.result.message,
+		);
+	} else {
+		// R5.2 fail-loud: a skipped gate is a hard-stop in preflight too.
+		risk = maxRisk(risk, "blocker");
+		warnings.push(
+			`constitution_skipped: SKIPPED — not ran — reason: ${constitutionGate.reason}. Enforcement could not verify. Human review required.`,
 		);
 	}
 
 	const requiresHumanConfirmation =
 		risk === "high" ||
 		risk === "blocker" ||
-		Boolean(constitutionGate?.requiresHumanConfirmation);
+		constitutionGate.kind === "skipped" ||
+		Boolean(constitutionGate.result?.requiresHumanConfirmation);
 	const shouldRunAgentLab =
 		risk === "high" &&
 		(intents.architecture || intents.newModule || intents.moduleConnection);
@@ -360,8 +375,17 @@ export function formatProjectPreflightReport(
 		"",
 		...(report.constitutionGate
 			? [
+					"Constitution gate execution:",
+					report.constitutionGate.kind === "ran"
+						? report.constitutionGate.result.message
+						: report.constitutionGate.skippedReason,
+					"",
 					"Reglas determinísticas:",
-					formatList(report.constitutionGate.affectedRules),
+					formatList(
+						report.constitutionGate.kind === "ran"
+							? report.constitutionGate.result.affectedRules
+							: [],
+					),
 					"",
 				]
 			: []),
@@ -452,6 +476,53 @@ function missingLocalConfigMessage(
 	return `${path} project-local no confirmado.`;
 }
 
+/**
+ * R5.2: builds the discriminated `GateExecutionStatus` for preflight from the
+ * loader's `constitutionStatus`. Mirrors `buildGateExecutionStatus` in
+ * `project-postflight.ts` — same skip reasons, same blocker severity, same
+ * "SKIPPED — not ran —" message so the orchestrator can distinguish ran vs
+ * skipped without reading the discriminator.
+ */
+function buildPreflightGateExecutionStatus(input: {
+	constitutionStatus: ProjectPreflightContext["constitutionStatus"];
+	request: string;
+}): GateExecutionStatus {
+	if (!input.constitutionStatus) {
+		return {
+			kind: "skipped",
+			reason: "no-constitution-provided",
+			severity: "blocker",
+			ran: false,
+			skippedReason:
+				"Constitution gate SKIPPED — not ran — reason: no-constitution-provided. Caller did not load a constitution. Enforcement could not verify. Human review required.",
+		};
+	}
+	if (input.constitutionStatus.kind === "skipped") {
+		const { reason, detail } = input.constitutionStatus;
+		return {
+			kind: "skipped",
+			reason,
+			severity: "blocker",
+			ran: false,
+			detail,
+			skippedReason: `Constitution gate SKIPPED — not ran — reason: ${reason}${
+				detail ? `. detail: ${detail}` : ""
+			}. Enforcement could not verify. Human review required.`,
+		};
+	}
+	const result = evaluateConstitutionGates({
+		request: input.request,
+		constitution: input.constitutionStatus.constitution,
+	});
+	const failureCount = result.failures.length;
+	const warningCount = result.warnings.length;
+	const message = `Constitution gate RAN — ${failureCount} failure(s), ${warningCount} warning(s).`;
+	return {
+		kind: "ran",
+		result: { ...result, message },
+	};
+}
+
 function buildReport(options: {
 	request: string;
 	context: ProjectPreflightContext;
@@ -463,7 +534,7 @@ function buildReport(options: {
 	requiresHumanConfirmation: boolean;
 	shouldRunAgentLab: boolean;
 	availableContext?: string[];
-	constitutionGate?: ConstitutionGateResult;
+	constitutionGate?: GateExecutionStatus;
 	humanIntent?: HumanIntentClassification;
 }): ProjectPreflightReport {
 	return {

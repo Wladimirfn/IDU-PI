@@ -107,7 +107,10 @@ export async function handlePreflight(
 			evidenceGateways,
 			risk: report.risk,
 			detectedImpact: report.affectedAreas,
-			rulesAffected: report.constitutionGate?.affectedRules ?? [],
+			rulesAffected:
+				report.constitutionGate?.kind === "ran"
+					? report.constitutionGate.result.affectedRules
+					: [],
 			recommendedAction: report.recommendedNext,
 			requiresHumanConfirmation: report.requiresHumanConfirmation,
 			report,
@@ -305,6 +308,11 @@ export async function handlePostflight(
 			ignoredFiles: report.ignoredFiles ?? [],
 			observedChangeMode: report.observedChangeMode ?? "code",
 			risk: report.risk,
+			// R5.2 fail-loud: always emit the discriminated `constitutionGate`
+			// when present. The previous `?? null` shape silently swallowed the
+			// skip reason — a consumer reading `gates?.ok !== false` would read
+			// `gates: null` as "passed". Now the field carries either a ran
+			// result or a skipped reason (with severity blocker).
 			gates: report.constitutionGate ?? null,
 			physicalGates: report.physicalGates ?? [],
 			physicalGateways,

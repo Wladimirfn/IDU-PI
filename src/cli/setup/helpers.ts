@@ -271,7 +271,7 @@ export function buildPreflightReport(
 		connection,
 		blueprint,
 		flows,
-		constitution: constitution.kind === "ok" ? constitution.constitution : undefined,
+		constitutionStatus: constitution,
 		projectId: connection.projectId,
 		projectPath: connection.projectPath,
 	});
@@ -298,7 +298,7 @@ export function buildPostflightReport(
 		projectPath,
 		connectionReport: connection,
 		projectFlows: flows,
-		constitution: constitution.kind === "ok" ? constitution.constitution : undefined,
+		constitutionStatus: constitution,
 		changedFiles: gitState.changedFiles,
 		diffSummary: gitState.diffSummary,
 	});

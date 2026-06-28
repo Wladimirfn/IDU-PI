@@ -7,18 +7,70 @@ import type { ProjectConnectionReport } from "./project-connection.js";
 import {
 	evaluateConstitutionGates,
 	type ConstitutionGateResult,
-	type ProjectConstitution,
+	type LoadConfirmedConstitutionResult,
 } from "./project-constitution.js";
 import type { ProjectFlows } from "./project-flows.js";
 
 export type ProjectPostflightRisk = "low" | "medium" | "high" | "blocker";
 export type ProjectChangeMode = "no-op" | "docs" | "tests" | "code" | "stateRoot";
 
+// ============================================================================
+// R5.2 — fail-loud discriminated union for the constitution gate execution
+// ----------------------------------------------------------------------------
+// Source: design obs-2704 (architecture/r5-runtime-enforcement-design) §R5.2.
+// The original R5 bug was a silent `ok: true` skip when the constitution gate
+// could not run (the postflight report set `constitutionGate: undefined`, and a
+// consumer checking `gates?.ok !== false` read it as "passed"). R5.1 fixed
+// the loader to surface skip reasons; R5.2 ensures the report never lies.
+//
+// Two branches:
+//   - kind: "ran"     — gate executed and produced a result. `result` carries
+//                       the existing ConstitutionGateResult shape, plus a
+//                       `message` summary suitable for human display.
+//   - kind: "skipped" — gate could NOT run (loader skipped for some reason).
+//                       `severity` is ALWAYS "blocker" on skip because a silent
+//                       skip is itself a hard-stop: we cannot trust any other
+//                       signal in the report without enforcement verification.
+//                       `skippedReason` is the human-readable explanation.
+//
+// Distinguishability (Caveat 1 in the audit): the `message` on a skipped run
+// explicitly says "SKIPPED — not ran —" so the human does not confuse a
+// skip-blocker with a real `rejected_stack` rejection. Both reach
+// `risk: blocker` and `requiresHumanConfirmation: true`, but the message
+// wording is the diagnostic.
+// ============================================================================
+
+export type GateExecutionStatus =
+	| {
+			kind: "ran";
+			result: ConstitutionGateResult & {
+				message: string;
+			};
+	  }
+	| {
+			kind: "skipped";
+			reason:
+				| "no-constitution-provided"
+				| "no-stateRoot"
+				| "core-not-confirmed"
+				| "core-loaded-default"
+				| "read-failed"
+				| string;
+			severity: "blocker";
+			ran: false;
+			detail?: string;
+			skippedReason: string;
+		};
+
 export type ProjectPostflightContext = {
 	projectPath: string;
 	connectionReport: ProjectConnectionReport;
 	projectFlows?: ProjectFlows;
-	constitution?: ProjectConstitution;
+	// R5.2: callers pass the discriminated union from `loadConfirmedProjectConstitution`
+	// (or `undefined` if they did not load at all — e.g. early-fail paths). The postflight
+	// builder always produces a `GateExecutionStatus` — either `kind: "ran"` (constitution
+	// loaded, gate executed) or `kind: "skipped"` (loader skipped, gate did not run).
+	constitutionStatus?: LoadConfirmedConstitutionResult;
 	changedFiles: string[];
 	diffSummary?: string;
 };
@@ -35,7 +87,11 @@ export type ProjectPostflightReport = {
 	suggestedAgentLabs: string[];
 	requiresHumanConfirmation: boolean;
 	diffSummary?: string;
-	constitutionGate?: ConstitutionGateResult;
+	// R5.2: always present on a postflight run that reached the gate builder.
+	// `kind: "ran"` when enforcement ran, `kind: "skipped"` when it could not
+	// run (with severity blocker). Never undefined when analyzeProjectPostflight
+	// ran end-to-end — that was the original R5 bug (silent ok:true skip).
+	constitutionGate?: GateExecutionStatus;
 	physicalGates?: PhysicalGateEvidence[];
 };
 
@@ -122,26 +178,30 @@ export function analyzeProjectPostflight(
 		suggestedAgentLabs.push("project-understanding");
 	}
 
-	const constitutionGate = context.constitution
-		? evaluateConstitutionGates({
-				changedFiles: functionalChangedFiles,
-				// R3.2: feed `package.json` deps into the gate so depPattern rules
-				// in `rejectedStack` can fire on real dependency artifacts. The
-				// helper never throws on a missing file (returns `undefined`);
-				// the `?? undefined` keeps the field absent (NOT `null`) so the
-				// depPattern branch in `hasRejection` short-circuits cleanly.
-				deps: readPackageJsonDeps(context.projectPath) ?? undefined,
-				constitution: context.constitution,
-			})
-		: undefined;
-	if (constitutionGate) {
-		risk = maxRisk(risk, constitutionGate.risk);
-		for (const failure of constitutionGate.failures) {
+	const constitutionGate = buildGateExecutionStatus({
+		constitutionStatus: context.constitutionStatus,
+		changedFiles: functionalChangedFiles,
+		projectPath: context.projectPath,
+	});
+	if (constitutionGate.kind === "ran") {
+		risk = maxRisk(risk, constitutionGate.result.risk);
+		for (const failure of constitutionGate.result.failures) {
 			warnings.push(`${failure.gateId}: ${failure.message}`);
 		}
-		for (const warning of constitutionGate.warnings) {
+		for (const warning of constitutionGate.result.warnings) {
 			warnings.push(`${warning.gateId}: ${warning.message}`);
 		}
+		warnings.push(constitutionGate.result.message);
+	} else {
+		// R5.2 fail-loud: a skipped gate is a hard-stop. The original R5 bug was
+		// the gate silently skipping and the report reading as "passed" because
+		// `constitutionGate` was `undefined`. Now we always emit a status, and on
+		// skip the report risk escalates to blocker, requires human confirmation,
+		// and surfaces the skip reason in the warnings list.
+		risk = maxRisk(risk, "blocker");
+		warnings.push(
+			`constitution_skipped: SKIPPED — not ran — reason: ${constitutionGate.reason}. Enforcement could not verify. Human review required.`,
+		);
 	}
 
 	return {
@@ -157,9 +217,71 @@ export function analyzeProjectPostflight(
 		requiresHumanConfirmation:
 			risk === "high" ||
 			risk === "blocker" ||
-			Boolean(constitutionGate?.requiresHumanConfirmation),
+			constitutionGate.kind === "skipped" ||
+			Boolean(constitutionGate.result?.requiresHumanConfirmation),
 		diffSummary: context.diffSummary,
 		constitutionGate,
+	};
+}
+
+/**
+ * R5.2: builds the discriminated `GateExecutionStatus` from the loader's
+ * `constitutionStatus` (a `LoadConfirmedConstitutionResult` or undefined).
+ *
+ *  - constitutionStatus === undefined → caller did not load. We treat this as a
+ *    skip with `reason: "no-constitution-provided"` so the field is never
+ *    undefined on a postflight run that reached the gate builder.
+ *  - kind: "ok" → run the gate and wrap the result in a `kind: "ran"` branch.
+ *  - kind: "skipped" → preserve the loader's reason and surface a blocker.
+ *
+ * The skip branch is the architectural fix for the original R5 bug: previously
+ * a skipped loader meant `constitutionGate === undefined`, and a consumer
+ * reading `gates?.ok !== false` saw "passed". Now a skip is loud.
+ */
+function buildGateExecutionStatus(input: {
+	constitutionStatus: ProjectPostflightContext["constitutionStatus"];
+	changedFiles: string[];
+	projectPath: string;
+}): GateExecutionStatus {
+	if (!input.constitutionStatus) {
+		return {
+			kind: "skipped",
+			reason: "no-constitution-provided",
+			severity: "blocker",
+			ran: false,
+			skippedReason:
+				"Constitution gate SKIPPED — not ran — reason: no-constitution-provided. Caller did not load a constitution. Enforcement could not verify. Human review required.",
+		};
+	}
+	if (input.constitutionStatus.kind === "skipped") {
+		const { reason, detail } = input.constitutionStatus;
+		return {
+			kind: "skipped",
+			reason,
+			severity: "blocker",
+			ran: false,
+			detail,
+			skippedReason: `Constitution gate SKIPPED — not ran — reason: ${reason}${
+				detail ? `. detail: ${detail}` : ""
+			}. Enforcement could not verify. Human review required.`,
+		};
+	}
+	const result = evaluateConstitutionGates({
+		changedFiles: input.changedFiles,
+		// R3.2: feed `package.json` deps into the gate so depPattern rules
+		// in `rejectedStack` can fire on real dependency artifacts. The
+		// helper never throws on a missing file (returns `undefined`);
+		// the `?? undefined` keeps the field absent (NOT `null`) so the
+		// depPattern branch in `hasRejection` short-circuits cleanly.
+		deps: readPackageJsonDeps(input.projectPath) ?? undefined,
+		constitution: input.constitutionStatus.constitution,
+	});
+	const failureCount = result.failures.length;
+	const warningCount = result.warnings.length;
+	const message = `Constitution gate RAN — ${failureCount} failure(s), ${warningCount} warning(s).`;
+	return {
+		kind: "ran",
+		result: { ...result, message },
 	};
 }
 
@@ -189,8 +311,17 @@ export function formatProjectPostflightReport(
 		"",
 		...(report.constitutionGate
 			? [
+					"Constitution gate execution:",
+					report.constitutionGate.kind === "ran"
+						? report.constitutionGate.result.message
+						: report.constitutionGate.skippedReason,
+					"",
 					"Reglas determinísticas:",
-					formatList(report.constitutionGate.affectedRules),
+					formatList(
+						report.constitutionGate.kind === "ran"
+							? report.constitutionGate.result.affectedRules
+							: [],
+					),
 					"",
 				]
 			: []),

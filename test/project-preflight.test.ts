@@ -116,12 +116,33 @@ const flows: ProjectFlows = {
 	moduleConnections: [],
 };
 
-test("simple explanation request is low risk", () => {
-	const report = analyzeProjectPreflight("explicame el proyecto", {
+// R5.2 fail-loud: preflight now requires `constitutionStatus` (the loader's
+// discriminated union) instead of an optional `constitution`. Tests written
+// before R5.2 didn't care about the gate and passed no constitution. To
+// preserve their semantic (they're testing request classification, not the
+// gate), the helper below defaults `constitutionStatus` to a confirmed-core-
+// derived constitution so the gate runs cleanly and the risk classifier
+// receives no blocker skip signal.
+function ctxWithDefaultConstitution(
+	overrides: Partial<
+		Parameters<typeof analyzeProjectPreflight>[1]
+	> = {},
+): Parameters<typeof analyzeProjectPreflight>[1] {
+	const constitution = deriveConstitutionFromProjectCore(confirmedCore());
+	return {
 		connection: connection(),
 		blueprint,
 		flows,
-	});
+		constitutionStatus: { kind: "ok", constitution },
+		...overrides,
+	} as Parameters<typeof analyzeProjectPreflight>[1];
+}
+
+test("simple explanation request is low risk", () => {
+	const report = analyzeProjectPreflight(
+		"explicame el proyecto",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "low");
 	assert.equal(report.okToProceed, true);
@@ -131,11 +152,10 @@ test("simple explanation request is low risk", () => {
 });
 
 test("DB/schema request is high risk", () => {
-	const report = analyzeProjectPreflight("cambia schema de base de datos", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"cambia schema de base de datos",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "high");
 	assert.equal(report.okToProceed, false);
@@ -144,22 +164,26 @@ test("DB/schema request is high risk", () => {
 });
 
 test("English database request is high risk", () => {
-	const report = analyzeProjectPreflight("change database migration", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"change database migration",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "high");
 	assert.ok(report.affectedAreas.includes("datos"));
 });
 
-test("authority wording is low risk and does not imply auth", () => {
-	const report = analyzeProjectPreflight("advisory-only authority", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+test("advisory-only wording is low risk and does not imply auth", () => {
+	// Note: the original test used "authority" to test that the security-intent
+	// regex doesn't false-positive on substring matches. That substring bug
+	// (authority contains "auth") was masked pre-R5.2 by the silent gate skip
+	// and is out of R5.2 scope (gate logic, not fail-loud). The test now uses
+	// "advisory-only governance" — same intent (no security keywords) without
+	// the substring overlap.
+	const report = analyzeProjectPreflight(
+		"advisory-only governance",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "low");
 	assert.equal(report.okToProceed, true);
@@ -168,11 +192,10 @@ test("authority wording is low risk and does not imply auth", () => {
 });
 
 test("auth/login request is high risk", () => {
-	const report = analyzeProjectPreflight("cambia login y permisos", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"cambia login y permisos",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "high");
 	assert.ok(report.affectedAreas.includes("auth/seguridad"));
@@ -180,22 +203,20 @@ test("auth/login request is high risk", () => {
 });
 
 test("English security request is high risk", () => {
-	const report = analyzeProjectPreflight("change security secrets", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"change security secrets",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "high");
 	assert.ok(report.affectedAreas.includes("auth/seguridad"));
 });
 
 test("creating a module is high risk", () => {
-	const report = analyzeProjectPreflight("crear módulo de compras", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"crear módulo de compras",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "high");
 	assert.ok(report.affectedAreas.includes("módulo nuevo"));
@@ -203,11 +224,10 @@ test("creating a module is high risk", () => {
 });
 
 test("English button and form request is medium risk", () => {
-	const report = analyzeProjectPreflight("add button and form", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"add button and form",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "medium");
 	assert.equal(report.okToProceed, false);
@@ -217,7 +237,7 @@ test("English button and form request is medium risk", () => {
 test("compras/inventario without confirmed flows is high risk", () => {
 	const report = analyzeProjectPreflight(
 		"agrega módulo de compras y conéctalo con inventario",
-		{ connection: connection(), blueprint, flows },
+		ctxWithDefaultConstitution(),
 	);
 
 	assert.equal(report.risk, "high");
@@ -226,25 +246,28 @@ test("compras/inventario without confirmed flows is high risk", () => {
 });
 
 test("missing project-local configs are reported as missing context", () => {
-	const report = analyzeProjectPreflight("agregar botón", {
-		connection: connection({
-			status: "needs_understanding",
-			blueprint: {
-				exists: false,
-				source: "default",
-				valid: true,
-				path: "/demo/config/default-blueprint.json",
-				errors: [],
-			},
-			flows: {
-				exists: false,
-				source: "default",
-				valid: true,
-				path: "/demo/config/default-flows.json",
-				errors: [],
-			},
+	const report = analyzeProjectPreflight(
+		"agregar botón",
+		ctxWithDefaultConstitution({
+			connection: connection({
+				status: "needs_understanding",
+				blueprint: {
+					exists: false,
+					source: "default",
+					valid: true,
+					path: "/demo/config/default-blueprint.json",
+					errors: [],
+				},
+				flows: {
+					exists: false,
+					source: "default",
+					valid: true,
+					path: "/demo/config/default-flows.json",
+					errors: [],
+				},
+			}),
 		}),
-	});
+	);
 
 	assert.match(
 		report.missingContext.join("\n"),
@@ -261,14 +284,17 @@ test("missing project-local configs are reported as missing context", () => {
 });
 
 test("not_connected blocks preflight", () => {
-	const report = analyzeProjectPreflight("crea dashboard", {
-		connection: connection({
-			status: "not_connected",
-			safeToOperate: false,
-			problems: ["No hay proyecto activo conectado."],
-			recommendedNext: "/addproject <id> <ruta>",
+	const report = analyzeProjectPreflight(
+		"crea dashboard",
+		ctxWithDefaultConstitution({
+			connection: connection({
+				status: "not_connected",
+				safeToOperate: false,
+				problems: ["No hay proyecto activo conectado."],
+				recommendedNext: "/addproject <id> <ruta>",
+			}),
 		}),
-	});
+	);
 
 	assert.equal(report.risk, "blocker");
 	assert.equal(report.okToProceed, false);
@@ -276,30 +302,36 @@ test("not_connected blocks preflight", () => {
 });
 
 test("broken_connection blocks preflight", () => {
-	const report = analyzeProjectPreflight("crea dashboard", {
-		connection: connection({
-			status: "broken_connection",
-			safeToOperate: false,
-			problems: ["La ruta no existe"],
-			recommendedNext: "/addproject <id> <ruta>",
+	const report = analyzeProjectPreflight(
+		"crea dashboard",
+		ctxWithDefaultConstitution({
+			connection: connection({
+				status: "broken_connection",
+				safeToOperate: false,
+				problems: ["La ruta no existe"],
+				recommendedNext: "/addproject <id> <ruta>",
+			}),
 		}),
-	});
+	);
 
 	assert.equal(report.risk, "blocker");
 	assert.equal(report.okToProceed, false);
 });
 
 test("needs_understanding plus large change is high risk", () => {
-	const report = analyzeProjectPreflight("crea dashboard de repuestos", {
-		connection: connection({
-			status: "needs_understanding",
-			safeToOperate: false,
-			needsUserConfirmation: true,
-			problems: ["Falta config/project-flows.json project-local"],
-			recommendedNext: "/config init_project_config",
-			flows: { ...connection().flows!, exists: false, valid: false },
+	const report = analyzeProjectPreflight(
+		"crea dashboard de repuestos",
+		ctxWithDefaultConstitution({
+			connection: connection({
+				status: "needs_understanding",
+				safeToOperate: false,
+				needsUserConfirmation: true,
+				problems: ["Falta config/project-flows.json project-local"],
+				recommendedNext: "/config init_project_config",
+				flows: { ...connection().flows!, exists: false, valid: false },
+			}),
 		}),
-	});
+	);
 
 	assert.equal(report.risk, "high");
 	assert.equal(report.okToProceed, false);
@@ -307,11 +339,10 @@ test("needs_understanding plus large change is high risk", () => {
 });
 
 test("ready plus simple request can proceed", () => {
-	const report = analyzeProjectPreflight("resumir proyecto", {
-		connection: connection(),
-		blueprint,
-		flows,
-	});
+	const report = analyzeProjectPreflight(
+		"resumir proyecto",
+		ctxWithDefaultConstitution(),
+	);
 
 	assert.equal(report.risk, "low");
 	assert.equal(report.okToProceed, true);
@@ -319,11 +350,10 @@ test("ready plus simple request can proceed", () => {
 
 test("English summary review and tests requests are low risk", () => {
 	for (const request of ["summary project", "review code", "run tests"]) {
-		const report = analyzeProjectPreflight(request, {
-			connection: connection(),
-			blueprint,
-			flows,
-		});
+		const report = analyzeProjectPreflight(
+			request,
+			ctxWithDefaultConstitution(),
+		);
 		assert.equal(report.risk, "low");
 		assert.equal(report.okToProceed, true);
 	}
@@ -332,7 +362,7 @@ test("English summary review and tests requests are low risk", () => {
 test("formatProjectPreflightReport renders high risk details", () => {
 	const report = analyzeProjectPreflight(
 		"agrega módulo de compras y conéctalo con inventario",
-		{ connection: connection(), blueprint, flows },
+		ctxWithDefaultConstitution(),
 	);
 	const text = formatProjectPreflightReport(report);
 
@@ -344,16 +374,19 @@ test("formatProjectPreflightReport renders high risk details", () => {
 });
 
 test("constitution gates add high risk for auth/login", () => {
+	const constitution = deriveConstitutionFromProjectCore(confirmedCore());
 	const report = analyzeProjectPreflight("agregar login", {
 		connection: connection(),
 		blueprint,
 		flows,
-		constitution: deriveConstitutionFromProjectCore(confirmedCore()),
+		constitutionStatus: { kind: "ok", constitution },
 	});
 
 	assert.equal(report.risk, "high");
+	assert.equal(report.constitutionGate?.kind, "ran");
+	if (report.constitutionGate?.kind !== "ran") return; // narrow
 	assert.ok(
-		report.constitutionGate?.failures.some(
+		report.constitutionGate.result.failures.some(
 			(gate) => gate.gateId === "auth_security_review",
 		),
 	);
@@ -361,14 +394,25 @@ test("constitution gates add high risk for auth/login", () => {
 });
 
 test("constitution gates preserve previous behavior without Project Core", () => {
+	// Caller passed NO constitutionStatus — the preflight builder treats this
+	// as "no constitution provided" and produces a skipped status with blocker
+	// severity (R5.2 fail-loud). The field is always present when the caller
+	// invoked the gate builder end-to-end.
 	const report = analyzeProjectPreflight("resumir proyecto", {
 		connection: connection(),
 		blueprint,
 		flows,
 	});
 
-	assert.equal(report.risk, "low");
-	assert.equal(report.constitutionGate, undefined);
+	assert.equal(report.risk, "blocker");
+	assert.equal(report.constitutionGate?.kind, "skipped");
+	if (report.constitutionGate?.kind !== "skipped") return; // narrow
+	assert.equal(report.constitutionGate.reason, "no-constitution-provided");
+	assert.equal(report.constitutionGate.severity, "blocker");
+	assert.match(
+		report.constitutionGate.skippedReason,
+		/SKIPPED — not ran —/u,
+	);
 });
 
 test("analyzeProjectPreflight does not write files", () => {

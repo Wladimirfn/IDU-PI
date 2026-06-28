@@ -97,18 +97,22 @@ test("formatProjectAdvisory shows affected constitution rules", () => {
 		preflight({
 			risk: "high",
 			constitutionGate: {
-				risk: "high",
-				ok: false,
-				requiresHumanConfirmation: true,
-				failures: [
-					{
-						gateId: "auth_security_review",
-						severity: "high",
-						message: "Auth/security requiere confirmación humana.",
-					},
-				],
-				warnings: [],
-				affectedRules: ["auth_security_review"],
+				kind: "ran",
+				result: {
+					risk: "high",
+					ok: false,
+					requiresHumanConfirmation: true,
+					failures: [
+						{
+							gateId: "auth_security_review",
+							severity: "high",
+							message: "Auth/security requiere confirmación humana.",
+						},
+					],
+					warnings: [],
+					affectedRules: ["auth_security_review"],
+					message: "Constitution gate RAN — 1 failure(s), 0 warning(s).",
+				},
 			},
 		}),
 	);

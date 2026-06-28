@@ -375,7 +375,10 @@ function requestsFromPostflight(
 		affectedAreas: report.impactedAreas,
 		changedFiles: report.changedFiles,
 		warnings: report.warnings,
-		rules: report.constitutionGate?.affectedRules,
+		rules:
+			report.constitutionGate?.kind === "ran"
+				? report.constitutionGate.result.affectedRules
+				: [],
 	});
 	return specialties.map((specialty, index) =>
 		buildAgentLabReviewRequest({
@@ -398,7 +401,10 @@ function requestsFromPostflight(
 			flowsToCheck: report.impactedAreas.filter((area) =>
 				/flow|flujo|mapa/u.test(area),
 			),
-			rulesToCheck: report.constitutionGate?.affectedRules ?? [],
+			rulesToCheck:
+				report.constitutionGate?.kind === "ran"
+					? report.constitutionGate.result.affectedRules
+					: [],
 			constraints: ["Revisar sin modificar el repo real."],
 			maxCommands: 5,
 			maxMinutes: 15,
