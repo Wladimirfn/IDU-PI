@@ -152,7 +152,12 @@ test("script proceeds past skip checks when no interactive CLI is open and trigg
 		// The fake root has no tsconfig.json, so tsc will fail and the
 		// script will exit 1 — but it must have PROCEEDED past the skip
 		// checks (no "skipped:" reason in stdout).
-		const result = await runScript(fakeScript, {});
+		// IDU_PI_TICK_FORCE=1 bypasses the CLI-active check so the test
+		// is environment-independent (does not depend on whether a pi/opencode
+		// CLI is open in the CI runner's environment).
+		const result = await runScript(fakeScript, {
+			IDU_PI_TICK_FORCE: "1",
+		});
 		assert.match(
 			result.stdout,
 			/tsc falló/u,
@@ -183,8 +188,12 @@ test("script proceeds past skip checks when trigger file exists with enabled: tr
 			`${JSON.stringify({ version: 1, enabled: true, updatedAt: "2026-06-10T10:00:00.000Z" }, null, 2)}\n`,
 			"utf8",
 		);
+		// IDU_PI_TICK_FORCE=1 bypasses the CLI-active check so the test
+		// is environment-independent (does not depend on whether a pi/opencode
+		// CLI is open in the CI runner's environment).
 		const result = await runScript(fakeScript, {
 			IDU_PI_TICK_STATE_ROOT: fakeStateRoot,
+			IDU_PI_TICK_FORCE: "1",
 		});
 		assert.match(
 			result.stdout,
