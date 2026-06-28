@@ -859,7 +859,7 @@ function prepareAlignmentReason(result: IduPrepareResult): string[] {
 	return reasons.length ? reasons : ["último prepare no dejó motivo detallado"];
 }
 
-function buildPostflightReport(): ProjectPostflightReport {
+function buildPostflightReport(stateRoot: string): ProjectPostflightReport {
 	const connection = inspectProjectConnection({
 		registry,
 		defaultCwd: config.defaultCwd,
@@ -871,10 +871,10 @@ function buildPostflightReport(): ProjectPostflightReport {
 		connection.projectPath &&
 		connection.flows?.source === "project-local" &&
 		connection.flows.valid
-			? loadProjectFlows(activeProjectStateRoot())
+			? loadProjectFlows(stateRoot)
 			: undefined;
 	const gitState = readProjectPostflightGitState(projectPath);
-	const constitution = loadConfirmedProjectConstitution(activeProjectStateRoot());
+	const constitution = loadConfirmedProjectConstitution(stateRoot);
 	const report = analyzeProjectPostflight({
 		projectPath,
 		connectionReport: connection,
@@ -1935,7 +1935,7 @@ bot.command("agentlab_request_create", async (ctx) => {
 				projectId: currentProjectId(),
 				projectPath: activeProjectPath(),
 				postflightReport:
-					source === "postflight" ? buildPostflightReport() : undefined,
+					source === "postflight" ? buildPostflightReport(activeProjectStateRoot()) : undefined,
 				skillDraftPathOrLatest:
 					source === "skill-draft"
 						? args.slice(1).join(" ").trim() || "latest"
@@ -2393,7 +2393,7 @@ bot.command("idu_prepare", async (ctx) => {
 			),
 		reviewProjectFlowsDraft: (draftPathOrLatest, flows) =>
 			reviewProjectFlowsDraft(draftPathOrLatest, flows, reportsPath),
-		postflight: () => buildPostflightReport(),
+		postflight: () => buildPostflightReport(activeProjectStateRoot()),
 		createStructuredTask: (input) => structuredTaskQueue.enqueueTask(input),
 	});
 	lastIduPrepareByProject.set(projectId, result);
@@ -2524,7 +2524,7 @@ bot.command("advisory", async (ctx) => {
 
 bot.command("postflight", async (ctx) => {
 	if (!(await guard(ctx))) return;
-	const report = buildPostflightReport();
+	const report = buildPostflightReport(activeProjectStateRoot());
 	maybeRunSupervisorAfterPostflight({
 		projectId: currentProjectId(),
 		projectPath: activeProjectPath(),
@@ -2548,7 +2548,7 @@ bot.command("lab_review_plan", async (ctx) => {
 				projectId: currentProjectId(),
 			}
 		: {
-				postflightReport: buildPostflightReport(),
+				postflightReport: buildPostflightReport(activeProjectStateRoot()),
 				projectId: currentProjectId(),
 			};
 	const plan = buildLabReviewPlan(input);
