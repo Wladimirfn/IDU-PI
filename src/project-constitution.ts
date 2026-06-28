@@ -1248,32 +1248,150 @@ function defaultConstitutionPath(): string {
 }
 
 /**
+ * R5.1: discriminated-union return. NEVER returns `undefined` — every exit is
+ * typed so callers can pattern-match on `kind`. This is loader clarity only;
+ * it does NOT introduce fail-loud semantics (R5.2's job). Callers can keep
+ * treating "skipped" as "no constitution" via the `getActiveConstitution`
+ * shim below.
+ */
+export type LoadConfirmedConstitutionSkipReason =
+	| "no-stateRoot"
+	| "core-not-confirmed"
+	| "core-loaded-default"
+	| "read-failed";
+
+export type LoadConfirmedConstitutionResult =
+	| { kind: "ok"; constitution: ProjectConstitution }
+	| {
+			kind: "skipped";
+			reason: LoadConfirmedConstitutionSkipReason;
+			detail?: string;
+	  };
+
+/**
+ * Detects whether the project core was loaded from a real file at the
+ * project's Layout A/B paths, or fell through to the package-bundled
+ * default. This matters because the cwd-fallback trap (R5.1 fix in
+ * `defaultCorePath`) used to silently succeed with the package default
+ * — a confirmed core that does NOT actually belong to the project.
+ *
+ * Returns:
+ *   - `"layout-a"` — found at `<stateRoot>/.idu/config/project-core.json`
+ *   - `"layout-b"` — found at `<stateRoot>/config/project-core.json` (would
+ *     be migrated to A on next readIdPathWithMigration call)
+ *   - `"default"`  — neither path has the file; loadProjectCore fell through
+ *     to `defaultCorePath()` (the package-bundled default)
+ */
+function detectCoreSource(
+	stateRoot: string,
+): "layout-a" | "layout-b" | "default" {
+	const layoutA = join(stateRoot, ".idu", "config", "project-core.json");
+	if (existsSync(layoutA)) return "layout-a";
+	const layoutB = join(stateRoot, "config", "project-core.json");
+	if (existsSync(layoutB)) return "layout-b";
+	return "default";
+}
+
+/**
  * Load the project constitution only when its Project Core is `confirmed`.
  *
- * Issue #172: stateRoot is the sole base path. The pre-fix signature took
- * (projectPath, stateRoot) as optional and used `stateRoot ?? projectPath`
- * everywhere, which silently fed projectPath to the loaders when stateRoot
- * was undefined — a latent split-brain trap. After Slice 1/3 + this cleanup,
- * stateRoot is required and is the only path consulted for both core and
- * constitution reads. Returns `undefined` when core is not confirmed (no
- * constitution yet) or when any read throws.
+ * R5.1 changes vs prior shape:
+ *  - Returns a discriminated union `{ kind: "ok" | "skipped", ... }` instead
+ *    of `ProjectConstitution | undefined`. This makes "skipped" explicit at
+ *    the type level so callers can no longer accidentally treat it as a
+ *    legitimate constitution.
+ *  - Adds `"core-loaded-default"` skip reason: the loader previously could
+ *    silently return a derived constitution built from the package-bundled
+ *    default core, masking the cwd-fallback trap.
+ *  - Reads the constitution via A-pref-B (`readIdPathWithMigration`) like
+ *    `loadProjectConstitution` does at L220, instead of Layout B only. This
+ *    closes the deferred hygiene-migrate bug for this code path: previously
+ *    a confirmed core + Layout A constitution would skip the read because
+ *    the helper checked Layout B first.
+ *  - Read failures now surface `detail` (the underlying error message) so
+ *    triage is possible without re-running the loader.
+ *
+ * R5.2 (fail-loud, blocker-on-skip) deploys AFTER acceptance — this function
+ * still returns ok-vs-skipped as a value. Severity escalation is the caller's
+ * job via the `getActiveConstitution` shim or direct handling.
  */
 export function loadConfirmedProjectConstitution(
 	stateRoot: string,
-): ProjectConstitution | undefined {
-	if (!stateRoot) return undefined;
+): LoadConfirmedConstitutionResult {
+	if (!stateRoot) return { kind: "skipped", reason: "no-stateRoot" };
+
+	let core: ProjectCore;
 	try {
-		const core = loadProjectCore(stateRoot);
-		if (core.status !== "confirmed") return undefined;
-		const constitutionPath = join(
+		core = loadProjectCore(stateRoot);
+	} catch (err) {
+		return {
+			kind: "skipped",
+			reason: "read-failed",
+			detail: err instanceof Error ? err.message : String(err),
+		};
+	}
+
+	// R5.1: detect if the core was actually loaded from the project, or fell
+	// through to the package default. Order matters: the package default has
+	// status="draft", so checking status first would mask the cwd-fallback
+	// trap as a generic "core-not-confirmed". Source detection must come
+	// first so the root cause is visible in the typed skip reason.
+	const coreSource = detectCoreSource(stateRoot);
+	if (coreSource === "default") {
+		return { kind: "skipped", reason: "core-loaded-default" };
+	}
+	if (core.status !== "confirmed") {
+		return { kind: "skipped", reason: "core-not-confirmed" };
+	}
+
+	// R5.1: A-pref-B (mirror loadProjectConstitution at L220). Previously this
+	// helper checked Layout B only, which caused silent skips for projects
+	// that had migrated to Layout A.
+	try {
+		const migrated = readIdPathWithMigration(
 			stateRoot,
-			"config",
 			"project-constitution.json",
 		);
-		return existsSync(constitutionPath)
-			? loadProjectConstitution(stateRoot)
-			: deriveConstitutionFromProjectCore(core);
-	} catch {
-		return undefined;
+		if (migrated.content !== null) {
+			const raw = migrated.content;
+			const parsed = JSON.parse(raw) as unknown;
+			const result = validateProjectConstitution(parsed);
+			if (!result.ok) {
+				return {
+					kind: "skipped",
+					reason: "read-failed",
+					detail: `Invalid constitution: ${result.errors.join("; ")}`,
+				};
+			}
+			return { kind: "ok", constitution: result.constitution };
+		}
+		// Neither Layout A nor B exists — derive from the confirmed core.
+		return {
+			kind: "ok",
+			constitution: deriveConstitutionFromProjectCore(core),
+		};
+	} catch (err) {
+		return {
+			kind: "skipped",
+			reason: "read-failed",
+			detail: err instanceof Error ? err.message : String(err),
+		};
 	}
+}
+
+/**
+ * R5.1 caller shim. Converts the discriminated union back to the legacy
+ * `ProjectConstitution | null` shape plus an optional `skipReason` so
+ * existing callers (preflight / postflight builders) can keep their
+ * truthiness checks until they're updated to handle the union directly.
+ *
+ * This shim does NOT escalate severity — it only translates types. The
+ * gate keeps returning `ok: true` on skip, exactly as before.
+ */
+export function getActiveConstitution(
+	stateRoot: string,
+): { constitution: ProjectConstitution | null; skipReason?: LoadConfirmedConstitutionSkipReason } {
+	const result = loadConfirmedProjectConstitution(stateRoot);
+	if (result.kind === "ok") return { constitution: result.constitution };
+	return { constitution: null, skipReason: result.reason };
 }

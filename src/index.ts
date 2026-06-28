@@ -771,7 +771,7 @@ function buildPreflightReport(request: string): ProjectPreflightReport {
 		connection,
 		blueprint,
 		flows,
-		constitution,
+		constitution: constitution.kind === "ok" ? constitution.constitution : undefined,
 		projectId: connection.projectId,
 		projectPath: connection.projectPath,
 	});
@@ -879,7 +879,7 @@ function buildPostflightReport(): ProjectPostflightReport {
 		projectPath,
 		connectionReport: connection,
 		projectFlows: flows,
-		constitution,
+		constitution: constitution.kind === "ok" ? constitution.constitution : undefined,
 		changedFiles: gitState.changedFiles,
 		diffSummary: gitState.diffSummary,
 	});

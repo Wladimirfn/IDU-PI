@@ -280,8 +280,9 @@ test("loadConfirmedProjectConstitution reads from stateRoot, not projectPath (pa
 	);
 
 	const loaded = loadConfirmedProjectConstitution(stateRoot);
-	assert.ok(loaded, "helper must return a constitution when core is confirmed");
-	assert.equal(loaded?.projectName, "Idu PI");
+	assert.equal(loaded.kind, "ok", "helper must return a constitution when core is confirmed");
+	if (loaded.kind !== "ok") return; // narrow for TS
+	assert.equal(loaded.constitution.projectName, "Idu PI");
 
 	// Anti-split-brain: helper must NOT have consulted or written to projectPath.
 	assert.equal(
@@ -317,8 +318,9 @@ test("loadConfirmedProjectConstitution derives from stateRoot core when constitu
 	);
 
 	const loaded = loadConfirmedProjectConstitution(stateRoot);
-	assert.ok(loaded, "helper must derive constitution from confirmed core");
-	assert.equal(loaded?.projectName, "Idu PI");
+	assert.equal(loaded.kind, "ok", "helper must derive constitution from confirmed core");
+	if (loaded.kind !== "ok") return; // narrow for TS
+	assert.equal(loaded.constitution.projectName, "Idu PI");
 
 	// Anti-split-brain: helper must NOT have consulted projectPath for either core or constitution.
 	assert.equal(
@@ -333,10 +335,13 @@ test("loadConfirmedProjectConstitution derives from stateRoot core when constitu
 	);
 });
 
-test("loadConfirmedProjectConstitution returns undefined when stateRoot is empty string", () => {
+test("loadConfirmedProjectConstitution returns { kind: 'skipped', reason: 'no-stateRoot' } when stateRoot is empty string", () => {
 	// Issue #172: stateRoot is required, but the helper guards against empty
-	// input and returns undefined rather than crashing or silently reverting.
-	assert.equal(loadConfirmedProjectConstitution(""), undefined);
+	// input and returns a typed skip rather than crashing or silently reverting.
+	// R5.1: NEVER returns undefined — the skip reason is now part of the type.
+	const result = loadConfirmedProjectConstitution("");
+	assert.equal(result.kind, "skipped");
+	assert.equal(result.reason, "no-stateRoot");
 });
 
 test("loadConfirmedProjectConstitution is no-op when path == stateRoot", () => {
@@ -353,8 +358,9 @@ test("loadConfirmedProjectConstitution is no-op when path == stateRoot", () => {
 	);
 
 	const loaded = loadConfirmedProjectConstitution(stateRoot);
-	assert.ok(loaded);
-	assert.equal(loaded?.projectName, "Idu PI");
+	assert.equal(loaded.kind, "ok");
+	if (loaded.kind !== "ok") return; // narrow for TS
+	assert.equal(loaded.constitution.projectName, "Idu PI");
 });
 
 // =========================================================================

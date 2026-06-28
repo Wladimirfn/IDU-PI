@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { readIdPathWithMigration } from "./hygiene-migrate.js";
+import { resolvePackageRoot } from "./package-root.js";
 
 export type ProjectCoreComplexityLevel =
 	| "simple"
@@ -445,5 +446,8 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function defaultCorePath(): string {
-	return join(process.cwd(), "config", "default-core.json");
+	// R5.1: mirror defaultConstitutionPath (R2.2 / PR #181). The bundled
+	// default lives in the idu-pi package, not the cwd of whoever called us.
+	// Previously cwd-fragile — broke when invoked from a non-project dir.
+	return join(resolvePackageRoot(), "config", "default-core.json");
 }
