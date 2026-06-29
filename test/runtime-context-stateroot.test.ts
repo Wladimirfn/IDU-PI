@@ -27,7 +27,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -61,7 +61,17 @@ import {
 // ---------------------------------------------------------------------------
 
 function normalizePathForTest(p: string): string {
-	return resolve(p).toLowerCase();
+	// realpathSync.native queries the filesystem, so it expands an 8.3 short
+	// name (RUNNER~1) to its canonical long form (runneradmin) — exactly what
+	// the production path does via canonicalDirectory. path.resolve() is a pure
+	// string operation and cannot do this. Fall back to the resolved string if
+	// the path does not exist on disk (defensive).
+	const resolved = resolve(p);
+	try {
+		return realpathSync.native(resolved).toLowerCase();
+	} catch {
+		return resolved.toLowerCase();
+	}
 }
 
 // ---------------------------------------------------------------------------
