@@ -27,10 +27,10 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import { createCliRuntime } from "../src/cli.js";
 import { loadConfirmedProjectConstitution } from "../src/project-constitution.js";
@@ -43,6 +43,36 @@ import {
 	loadRegistry,
 	saveRegistry,
 } from "../src/projects.js";
+
+// ---------------------------------------------------------------------------
+// Path normalization for environment-independent assertions.
+//
+// On Windows CI runners, the same filesystem path can be returned in
+// two forms: the 8.3 short name (e.g. `RUNNER~1`) and the canonical
+// long name (e.g. `runneradmin`). `mkdtempSync` and `path.resolve` may
+// disagree about which form to return depending on how the path was
+// constructed (e.g. TMP/TEMP short-name env, repeated joins, etc.).
+// The production code path (createCliRuntime → canonicalDirectory →
+// realpathSync.native) always returns the canonical long form, so an
+// assertion that compares a test-local path against the runtime's
+// returned path can flake on Windows when one side is short and the
+// other is long. We canonicalize both sides before comparing so the
+// test is environment-independent and works identically on POSIX.
+// ---------------------------------------------------------------------------
+
+function normalizePathForTest(p: string): string {
+	// realpathSync.native queries the filesystem, so it expands an 8.3 short
+	// name (RUNNER~1) to its canonical long form (runneradmin) — exactly what
+	// the production path does via canonicalDirectory. path.resolve() is a pure
+	// string operation and cannot do this. Fall back to the resolved string if
+	// the path does not exist on disk (defensive).
+	const resolved = resolve(p);
+	try {
+		return realpathSync.native(resolved).toLowerCase();
+	} catch {
+		return resolved.toLowerCase();
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Test fixtures — hermetic environment so each test owns its own
@@ -236,7 +266,10 @@ test(
 				`expected constitution to load from ${expectedStateRoot}, got ${constitution.kind}`,
 			);
 			assert.equal(runtime.projectId, projectId);
-			assert.equal(runtime.projectPath, projectPath);
+			assert.equal(
+				normalizePathForTest(runtime.projectPath),
+				normalizePathForTest(projectPath),
+			);
 		} finally {
 			restoreEnv();
 		}
@@ -316,7 +349,10 @@ test(
 				`workspace root must NOT have a loadable constitution; got ${skippedConstitution.kind}`,
 			);
 			assert.equal(runtime.projectId, projectId);
-			assert.equal(runtime.projectPath, projectPath);
+			assert.equal(
+				normalizePathForTest(runtime.projectPath),
+				normalizePathForTest(projectPath),
+			);
 		} finally {
 			restoreEnv();
 		}
