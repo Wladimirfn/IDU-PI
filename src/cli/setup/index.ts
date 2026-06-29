@@ -8,7 +8,6 @@
 
 export {
 	loadConfirmedProjectConstitution,
-	getActiveConstitution,
 } from "../../project-constitution.js";
 export {
 	handleSetupCommand,

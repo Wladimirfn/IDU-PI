@@ -101,21 +101,40 @@ export function buildPreflightEvidenceGateways(
 	];
 
 	if (report.constitutionGate) {
-		evidence.push({
-			id: "preflight-constitution-gate",
-			type: "rule",
-			source: "constitution",
-			summary: `Constitution gate risk: ${report.constitutionGate.risk}`,
-			status: statusFromRisk(
-				report.constitutionGate.risk,
-				report.constitutionGate.requiresHumanConfirmation,
-			),
-			data: {
-				affectedRules: report.constitutionGate.affectedRules,
-				failures: report.constitutionGate.failures,
-				warnings: report.constitutionGate.warnings,
-			},
-		});
+		if (report.constitutionGate.kind === "ran") {
+			evidence.push({
+				id: "preflight-constitution-gate",
+				type: "rule",
+				source: "constitution",
+				summary: `Constitution gate risk: ${report.constitutionGate.result.risk}`,
+				status: statusFromRisk(
+					report.constitutionGate.result.risk,
+					report.constitutionGate.result.requiresHumanConfirmation,
+				),
+				data: {
+					affectedRules: report.constitutionGate.result.affectedRules,
+					failures: report.constitutionGate.result.failures,
+					warnings: report.constitutionGate.result.warnings,
+				},
+			});
+		} else {
+			// R5.2 fail-loud: a skipped gate must still surface as evidence so
+			// the orchestrator sees "enforcement could not run" with reason.
+			evidence.push({
+				id: "preflight-constitution-gate",
+				type: "rule",
+				source: "constitution",
+				summary: `Constitution gate SKIPPED — not ran — reason: ${report.constitutionGate.reason}.`,
+				status: "block",
+				data: {
+					executionStatus: "skipped",
+					reason: report.constitutionGate.reason,
+					severity: report.constitutionGate.severity,
+					detail: report.constitutionGate.detail,
+					skippedReason: report.constitutionGate.skippedReason,
+				},
+			});
+		}
 	}
 
 	const requiredActions: EvidenceRequiredAction[] = [];
@@ -221,21 +240,40 @@ export function buildPostflightEvidenceGateways(input: {
 		});
 	}
 	if (report.constitutionGate) {
-		evidence.push({
-			id: "postflight-constitution-gate",
-			type: "rule",
-			source: "constitution",
-			summary: `Constitution gate risk: ${report.constitutionGate.risk}`,
-			status: statusFromRisk(
-				report.constitutionGate.risk,
-				report.constitutionGate.requiresHumanConfirmation,
-			),
-			data: {
-				affectedRules: report.constitutionGate.affectedRules,
-				failures: report.constitutionGate.failures,
-				warnings: report.constitutionGate.warnings,
-			},
-		});
+		if (report.constitutionGate.kind === "ran") {
+			evidence.push({
+				id: "postflight-constitution-gate",
+				type: "rule",
+				source: "constitution",
+				summary: `Constitution gate risk: ${report.constitutionGate.result.risk}`,
+				status: statusFromRisk(
+					report.constitutionGate.result.risk,
+					report.constitutionGate.result.requiresHumanConfirmation,
+				),
+				data: {
+					affectedRules: report.constitutionGate.result.affectedRules,
+					failures: report.constitutionGate.result.failures,
+					warnings: report.constitutionGate.result.warnings,
+				},
+			});
+		} else {
+			// R5.2 fail-loud: a skipped gate must still surface as evidence so
+			// the orchestrator sees "enforcement could not run" with reason.
+			evidence.push({
+				id: "postflight-constitution-gate",
+				type: "rule",
+				source: "constitution",
+				summary: `Constitution gate SKIPPED — not ran — reason: ${report.constitutionGate.reason}.`,
+				status: "block",
+				data: {
+					executionStatus: "skipped",
+					reason: report.constitutionGate.reason,
+					severity: report.constitutionGate.severity,
+					detail: report.constitutionGate.detail,
+					skippedReason: report.constitutionGate.skippedReason,
+				},
+			});
+		}
 	}
 
 	const requiredActions: EvidenceRequiredAction[] = [];

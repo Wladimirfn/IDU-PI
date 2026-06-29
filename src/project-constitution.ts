@@ -1249,10 +1249,9 @@ function defaultConstitutionPath(): string {
 
 /**
  * R5.1: discriminated-union return. NEVER returns `undefined` — every exit is
- * typed so callers can pattern-match on `kind`. This is loader clarity only;
- * it does NOT introduce fail-loud semantics (R5.2's job). Callers can keep
- * treating "skipped" as "no constitution" via the `getActiveConstitution`
- * shim below.
+ * typed so callers can pattern-match on `kind`. Callers MUST handle the
+ * discriminated union directly (R5.2 fail-loud): a "skipped" return must
+ * surface as a blocker severity in any downstream gate execution.
  */
 export type LoadConfirmedConstitutionSkipReason =
 	| "no-stateRoot"
@@ -1311,9 +1310,11 @@ function detectCoreSource(
  *  - Read failures now surface `detail` (the underlying error message) so
  *    triage is possible without re-running the loader.
  *
- * R5.2 (fail-loud, blocker-on-skip) deploys AFTER acceptance — this function
- * still returns ok-vs-skipped as a value. Severity escalation is the caller's
- * job via the `getActiveConstitution` shim or direct handling.
+ * R5.2 (fail-loud, blocker-on-skip) deploys AFTER acceptance — callers now
+ * handle the discriminated union directly via `constitutionStatus` in
+ * `analyzeProjectPostflight` / `analyzeProjectPreflight`. The R5.1 caller
+ * shim `getActiveConstitution` is GONE — it silently absorbed `skipped` to
+ * `null`, which masked the original R5 bug at the type level.
  */
 export function loadConfirmedProjectConstitution(
 	stateRoot: string,
@@ -1377,21 +1378,4 @@ export function loadConfirmedProjectConstitution(
 			detail: err instanceof Error ? err.message : String(err),
 		};
 	}
-}
-
-/**
- * R5.1 caller shim. Converts the discriminated union back to the legacy
- * `ProjectConstitution | null` shape plus an optional `skipReason` so
- * existing callers (preflight / postflight builders) can keep their
- * truthiness checks until they're updated to handle the union directly.
- *
- * This shim does NOT escalate severity — it only translates types. The
- * gate keeps returning `ok: true` on skip, exactly as before.
- */
-export function getActiveConstitution(
-	stateRoot: string,
-): { constitution: ProjectConstitution | null; skipReason?: LoadConfirmedConstitutionSkipReason } {
-	const result = loadConfirmedProjectConstitution(stateRoot);
-	if (result.kind === "ok") return { constitution: result.constitution };
-	return { constitution: null, skipReason: result.reason };
 }

@@ -1,6 +1,5 @@
 /**
- * R5.1 — loader hermetic tests for `loadConfirmedProjectConstitution` and
- * the `getActiveConstitution` caller shim.
+ * R5.1 — loader hermetic tests for `loadConfirmedProjectConstitution`.
  *
  * Why a new file: the existing `project-constitution.test.ts` covers
  * pre-R5.1 behavior (returns ProjectConstitution | undefined). R5.1
@@ -14,9 +13,12 @@
  *  3. No core anywhere → default core → { kind: "skipped", reason: "core-loaded-default" }
  *  4. Empty stateRoot → { kind: "skipped", reason: "no-stateRoot" }
  *  5. Invalid constitution JSON → { kind: "skipped", reason: "read-failed" }
- *  6. getActiveConstitution shim returns { constitution: null, skipReason } on skip
- *  7. getActiveConstitution returns { constitution } (no skipReason) on ok
- *  8. NEVER returns undefined — every exit is typed
+ *  6. NEVER returns undefined — every exit is typed
+ *
+ * R5.2: the R5.1 caller shim `getActiveConstitution` is DEAD — it silently
+ * absorbed the discriminated union back to `ProjectConstitution | null`,
+ * which masked the original R5 bug at the type level. Callers now handle
+ * the union directly. The 4 shim tests from R5.1 are removed.
  */
 
 import assert from "node:assert/strict";
@@ -36,7 +38,6 @@ import {
 } from "../src/project-core.js";
 import {
 	deriveConstitutionFromProjectCore,
-	getActiveConstitution,
 	loadConfirmedProjectConstitution,
 } from "../src/project-constitution.js";
 
@@ -198,57 +199,17 @@ test("R5.1 loadConfirmedProjectConstitution: invalid constitution JSON → skipp
 });
 
 // =========================================================================
-// Test 6 — getActiveConstitution shim returns { constitution: null, skipReason } on skip
+// Test 6 — R5.2 fail-loud: discriminated union is the ONLY return shape
 // =========================================================================
+// (R5.1 had a `getActiveConstitution` shim that wrapped the union back to
+//  `ProjectConstitution | null`. That shim is DEAD in R5.2 — see file header.)
 
-test("R5.1 getActiveConstitution shim: on skip → { constitution: null, skipReason }", () => {
-	const shimResult = getActiveConstitution("");
-
-	assert.deepEqual(shimResult, {
-		constitution: null,
-		skipReason: "no-stateRoot",
-	});
-});
-
-// =========================================================================
-// Test 7 — getActiveConstitution returns { constitution } (no skipReason) on ok
-// =========================================================================
-
-test("R5.1 getActiveConstitution shim: on ok → { constitution } with no skipReason", () => {
-	const stateRoot = makeTempDir("pi-r51-shim-ok-");
-	const core = seedConfirmedCore(stateRoot);
-	seedValidConstitution(stateRoot, core);
-
-	const shimResult = getActiveConstitution(stateRoot);
-
-	assert.notEqual(shimResult.constitution, null);
-	assert.equal(shimResult.skipReason, undefined);
-	assert.equal(shimResult.constitution?.projectName, core.projectName);
-});
-
-// =========================================================================
-// Test 8 — extra: core-not-confirmed propagates reason through shim
-// =========================================================================
-
-test("R5.1 getActiveConstitution shim: draft core → { constitution: null, skipReason: core-not-confirmed }", () => {
-	const stateRoot = makeTempDir("pi-r51-shim-draft-");
-	seedConfirmedCore(stateRoot, { status: "draft" });
-
-	const shimResult = getActiveConstitution(stateRoot);
-
-	assert.equal(shimResult.constitution, null);
-	assert.equal(shimResult.skipReason, "core-not-confirmed");
-});
-
-// =========================================================================
-// Test 9 — extra: core-loaded-default propagates reason through shim
-// =========================================================================
-
-test("R5.1 getActiveConstitution shim: no core → { constitution: null, skipReason: core-loaded-default }", () => {
-	const stateRoot = makeTempDir("pi-r51-shim-default-");
-
-	const shimResult = getActiveConstitution(stateRoot);
-
-	assert.equal(shimResult.constitution, null);
-	assert.equal(shimResult.skipReason, "core-loaded-default");
+test("R5.2: loadConfirmedProjectConstitution returns a discriminated union, never undefined", () => {
+	// Empty stateRoot is the simplest path that triggers a skip.
+	const result = loadConfirmedProjectConstitution("");
+	assert.notEqual(result, undefined, "R5.1 acceptance: NEVER returns undefined");
+	assert.ok(
+		result.kind === "ok" || result.kind === "skipped",
+		"R5.2 acceptance: result MUST be the discriminated union",
+	);
 });
