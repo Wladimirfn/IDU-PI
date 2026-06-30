@@ -144,6 +144,7 @@ export const NECESSARY_PROJECT_SKILLS = [
 	"skill-check",
 	"technical-change-tracker",
 	"jq",
+	"idu-pi-parent-protocol",
 ] as const;
 
 const SKILLS_DIR = ".idu/skills";

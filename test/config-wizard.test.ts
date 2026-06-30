@@ -685,6 +685,22 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 		),
 		true,
 	);
+	// Verify the orchestrator-facing communication skill is part of
+	// the deploy set (R5 follow-up: without parent-protocol, the
+	// orchestrator does not know how to call idu-pi consistently).
+	assert.equal(
+		existsSync(
+			join(
+				projectPath,
+				".idu",
+				"skills",
+				"idu-pi-parent-protocol",
+				"SKILL.md",
+			),
+		),
+		true,
+		"idu-pi-parent-protocol must be part of NECESSARY_PROJECT_SKILLS",
+	);
 	assert.equal(
 		existsSync(join(projectPath, ".idu", "skills", "rcm-flujos-operativos")),
 		false,

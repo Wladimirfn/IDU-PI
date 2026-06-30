@@ -1641,12 +1641,12 @@ function semanticCompactionProjectContext(
 }
 
 function sourceSkillsDir(): string | undefined {
-	const sourceProject = registry.projects.find(
-		(project) => project.id === "sistema_de_mantencion",
-	);
-	return sourceProject
-		? join(sourceProject.path, ".agents", "skills")
-		: undefined;
+	// Bundled inside the idu-pi package. Source-of-truth lives at
+	// <packageRoot>/skills-bundle/ (added to package.json "files").
+	// Decoupled from the previously-required "sistema_de_mantencion"
+	// registry entry that was unused in practice.
+	const bundle = join(resolvePackageRoot(), "skills-bundle");
+	return existsSync(bundle) ? bundle : undefined;
 }
 
 function currentConfigReport() {
