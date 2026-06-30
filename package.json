@@ -38,6 +38,7 @@
     "config/default-constitution.json",
     "config/default-blueprint.json",
     "config/default-flows.json",
+    "skills-bundle",
     "docs",
     ".pi/extensions/idu-pi-commands.ts",
     "README.md",

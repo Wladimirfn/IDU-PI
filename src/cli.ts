@@ -553,6 +553,7 @@ import {
 	handleIduHygieneMigrate,
 	handleIduAckAdvisory,
 	handleIduHygieneSweep,
+	handleIduSkillsDeploy,
 	handleIduPreflight,
 	handleIduAdvisory,
 	handleIduPostflight,
@@ -1987,6 +1988,9 @@ export async function runCliCommand(
 			case "idu-hygiene-sweep":
 			case "hygiene-sweep":
 				return handleIduHygieneSweep(activeRuntime);
+			case "idu-skills-deploy":
+			case "skills-deploy":
+				return handleIduSkillsDeploy(activeRuntime, rest);
 			case "idu-source-status":
 			case "source-status":
 				return handleSourceStatus(activeRuntime);
