@@ -35,6 +35,10 @@ import {
 	DEFAULT_HYGIENE_CAP,
 	emitHygieneInjections,
 } from "./hygiene-injection.js";
+import {
+	detectGraphDriftFindings,
+	emitGraphDriftAdvisory,
+} from "./graph-drift-sensor.js";
 import { readPlanObjective } from "./plan-objective-reader.js";
 import {
 	defaultPredicateForKind,
@@ -131,6 +135,45 @@ export async function runCronPreflight(
 	// `emitted` structurally, so this cron preflight does NOT need
 	// (and MUST NOT) call `recordInjectionEmitted` manually.
 	void reminderResult;
+
+	// STEP 2.5: Etapa 4a graph-drift sensor (deterministic, no LLM).
+	// Shells out to the `codegraph` CLI to detect symbols whose
+	// blast-radius extends outside the changeset. Findings bypass
+	// the LLM supervisor path entirely (advisory only, PISO; the
+	// hard-stop obligation is Etapa 4b). The brief is explicit:
+	// "Capa de grafo determinista, sin LLM en el sensor. Barata."
+	// This step is also advisory-only by construction.
+	//
+	// Coverage caveat (documented in PR body): the regex parser
+	// only extracts `function NAME(` and indented method
+	// declarations. Arrow-const exports (e.g. `export const x = () =>
+	// ...`), getters/setters, overloads, and signatures longer than
+	// SIGNATURE_TERRITORY_LINES are not parseable; the sensor
+	// deliberately SKIPS those symbols (fail-closed) rather than
+	// assuming a signature change. Today that's ~1 symbol + edge
+	// cases (negligible). If the codebase shifts to arrow-const
+	// style, the coverage would drop in silence — known limit,
+	// not a bug.
+	try {
+		const graphDriftFindings = detectGraphDriftFindings({
+			projectRoot: input.projectPath,
+			changedFiles: input.changedFiles,
+			graphProjectRoot: input.projectPath,
+		});
+		if (graphDriftFindings.length > 0) {
+			emitGraphDriftAdvisory(
+				input.stateRoot,
+				graphDriftFindings,
+				input.now ?? new Date(),
+			);
+		}
+	} catch {
+		// graph-drift is best-effort. A failure here MUST NOT break
+		// the cron pipeline — the LLM impulses and the supervisor
+		// chain still run, and the human operator can investigate
+		// the absence separately. Matches the brief's "silent
+		// fall-through" tone.
+	}
 
 	// STEP 3a: hygiene emission (forward obligation #1 from PR #153 audit).
 	// Run the hygiene sensor against the project's repo and emit
