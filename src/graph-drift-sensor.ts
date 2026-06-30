@@ -285,7 +285,15 @@ export type GraphDriftFinding = {
 	symbol: string;
 	/** Path (relative to projectRoot) to the caller file, with start line. */
 	caller: { file: string; line: number };
-	/** Severity — always "warning" for Etapa 4a (advisory). */
+	/**
+	 * Etapa 4a: severity on the finding object is always "warning"
+	 * (advisory). The actual envelope severity (warning|critical)
+	 * is decided at emit time by `graphDriftSeverityForCurrentMode()`
+	 * based on the IDU_PI_GRAPH_DRIFT_BLOCKING env var. The
+	 * `severity` field on the finding stays as the per-finding
+	 * advisory level (always "warning" today) so the structured
+	 * signal inside JSONL is consistent regardless of mode.
+	 */
 	severity: "warning";
 	/** Brief summary line. */
 	summary: string;
@@ -498,12 +506,41 @@ export function detectGraphDriftFindings(
 }
 
 /**
+ * Etapa 4b mode: when this env var is set to `"critical"`, the sensor
+ * emits advisories with severity="critical" so the preflight
+ * (`readPendingBlockingInjection`) reports them as BLOCKING. When
+ * the env var is unset (or any other value, including "warning"),
+ * the sensor stays in PISO mode and emits severity="warning".
+ *
+ * The default is PISO on purpose: the brief §4.3 says the human
+ * in the bridge is the training period. Hard-blocking from day 1
+ * would make the ledger accumulate only "I ack'd because the
+ * build broke" data, not "I ack'd because this finding was useful"
+ * data. Once the ledger demonstrates the signal is real (4b+
+ * meta-work), the operator flips IDU_PI_GRAPH_DRIFT_BLOCKING=critical
+ * and the same sensor becomes the gate. The transition is one env
+ * var, no code change.
+ */
+export function graphDriftSeverityForCurrentMode():
+	| "info"
+	| "warning"
+	| "critical" {
+	return process.env.IDU_PI_GRAPH_DRIFT_BLOCKING === "critical"
+		? "critical"
+		: "warning";
+}
+
+/**
  * Append a graph-drift advisory directly to the stateRoot's
  * `injections.jsonl` so it surfaces to `idu-pending-injections`
  * without going through the LLM supervisor-main path. The
  * determinism is the contract: this advisory is not derived from
- * a model response and never blocks (severity = warning). Etapa 4b
- * turns the gate from PISO to TECHO.
+ * a model response. Severity is decided by the env-var-gated
+ * `graphDriftSeverityForCurrentMode()` so the operator can flip
+ * between PISO (warning) and TECHO (critical) without code
+ * change. The preflight (`readPendingBlockingInjection`) reads the
+ * same JSONL file the sensor writes, so a mode flip is the entire
+ * 4b surface — no other module changes are required.
  */
 export function emitGraphDriftAdvisory(
 	stateRoot: string,
@@ -511,13 +548,12 @@ export function emitGraphDriftAdvisory(
 	now: Date = new Date(),
 ): number {
 	if (findings.length === 0) return 0;
+	const severity = graphDriftSeverityForCurrentMode();
 	// We intentionally do not call appendInjection here. That helper
 	// exists for LLM-categorized supervisor_advisory envelopes.
 	// Graph-drift advisories are first-class data with their own
 	// shape (deterministic, no LLM), so they need their own
-	// write path. We append a JSONL line directly.
-	// Implementation note: this is a thin shim. Real ergonomics
-	// (idempotent advisoryId, lifecycle event wiring) land in 4b.
+	// write path.
 	mkdirSync(stateRoot, { recursive: true });
 	const path = join(stateRoot, "injections.jsonl");
 	for (const f of findings) {
@@ -525,9 +561,9 @@ export function emitGraphDriftAdvisory(
 			ts: now.toISOString(),
 			triggerId: "graph_drift_sensor",
 			decisionEnvelope: {
-				severity: f.severity,
+				severity,
 				summary: f.summary,
-				options: ["review_callers", "update_caller"],
+				options: ["review_callers", "update_caller", "acknowledge"],
 				evidenceRefs: [
 					`symbol:${f.file}:${f.symbol}`,
 					`caller:${f.caller.file}:${f.caller.line}`,

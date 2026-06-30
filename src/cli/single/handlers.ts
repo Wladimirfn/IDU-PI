@@ -38,7 +38,10 @@ import {
 	formatIduSessionStatus,
 	getIduSessionStatus,
 } from "../../idu-session.js";
-import { readPendingBlockingInjection } from "../../objective-injection.js";
+import {
+	readPendingBlockingByKind,
+	readPendingBlockingInjection,
+} from "../../objective-injection.js";
 import { recordLifecycleEvent } from "../../telemetry-lifecycle.js";
 import { recordCliUsage } from "../usage.js";
 import { ackAdvisory, type AckAdvisoryResult } from "../../idu-ack-advisory.js";
@@ -87,7 +90,16 @@ import { formatPendingInjections } from "../tail-formatters/index.js";
  * without going back through cli.ts.
  */
 function pisoBannerLine(workspaceRoot: string): string {
-	const blocking = readPendingBlockingInjection(workspaceRoot);
+	// Etapa 4b.1: kind-aware read. The PISO banner shows the
+	// constitution reminder specifically. A graph_drift_finding
+	// (which is the Etapa 4a/4b sensor's territory) is handled by
+	// the preflight gate separately and must not mask the
+	// reminder. Without the kind filter, a recent graph-drift
+	// advisory would override the reminder banner.
+	const blocking = readPendingBlockingByKind(
+		workspaceRoot,
+		"objective_reminder",
+	);
 	if (!blocking) return "";
 	const mins = Math.floor(blocking.ageMs / 60_000);
 	return `\u26a0 BLOCKING: ${blocking.severity} ${blocking.kind} — ${blocking.summary} (acked=${blocking.acked}, ageMs=${blocking.ageMs} ~${mins}m) — pull \`idu_pending_injections\` and act\n`;
@@ -303,6 +315,30 @@ export function handleIduPreflight(
 		requiresHuman: report.requiresHumanConfirmation,
 		ok: report.okToProceed,
 	});
+	// Etapa 4b fail-closed path. When IDU_PI_GRAPH_DRIFT_BLOCKING=critical
+	// and there is a graph-drift blocking injection that has not been
+	// acked, the preflight refuses to proceed. PISO mode (default,
+	// env var unset) is unchanged: blocking is reported, not enforced.
+	// Each ack lands in the decision-ledger (the data feed for
+	// B3 suppression), so the operator can keep PISO mode while
+	// the ledger accumulates signal.
+	const enforceBlocking = process.env.IDU_PI_GRAPH_DRIFT_BLOCKING === "critical";
+	if (enforceBlocking) {
+		const blocking = readPendingBlockingInjection(runtime.workspaceRoot);
+		if (blocking && blocking.kind === "graph_drift_finding" && !blocking.acked) {
+			const lines = [
+				"BLOCKING: " + blocking.severity + " " + blocking.kind + " - " + blocking.summary,
+				"  pull idu_pending_injections and ack with idu-ack-advisory <id> --reason \"<why this finding is OK>\"",
+				"  or update the uncovered caller and re-run idu-skills-deploy --target <host>",
+				"  (acked=" + blocking.acked + ", ageMs=" + blocking.ageMs + ")",
+			];
+			return {
+				exitCode: 1,
+				stdout: lines.join("\n") + "\n",
+				stderr: "",
+			};
+		}
+	}
 	return ok(runtime.formatPreflight(report));
 }
 
