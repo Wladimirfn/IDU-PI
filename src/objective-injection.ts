@@ -29,7 +29,17 @@ import {
 } from "./injection-store.js";
 import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
 
-export type ObjectiveReminderKind = "objective_reminder";
+export type ObjectiveReminderKind =
+	| "objective_reminder"
+	/**
+	 * Etapa 4a: deterministic, codegraph-driven blast-radius audit.
+	 * The sensor writes with this kind to <stateRoot>/injections.jsonl
+	 * so the same PISO/TECHO pipeline (readPendingBlockingInjection)
+	 * consumes it. Mode is PISO by default; flip
+	 * IDU_PI_GRAPH_DRIFT_BLOCKING=critical to promote to TECHO
+	 * (Etapa 4b fail-closed).
+	 */
+	| "graph_drift_finding";
 
 export type ObjectiveReminder = {
 	injectionId: string;
@@ -64,15 +74,36 @@ export function resolveTurnCounterPath(stateRoot: string): string {
 }
 
 /**
- * Read the most recent un-acked blocking `objective_reminder`
- * injection from the state's `injections.jsonl`. Returns null when
- * there is no pending blocking reminder.
+ * Read the most recent un-acked blocking injection from the state's
+ * `injections.jsonl`, optionally filtered by `kind`. Returns null
+ * when there is no pending blocking injection that matches.
  *
- * This is the PISO gate's read path: the MCP envelope() and the CLI
- * banner both call this on every response.
+ * Two kind-specific read paths share one file:
+ *
+ * - `kind = undefined` (default): the global state — the most
+ *   recent un-acked injection across all kinds. Used by the
+ *   MCP `envelope()` which propagates the overall blocking
+ *   state to the orchestrator (most recent across kinds, one per
+ *   call — not "all kinds at once"). Callers that need every
+ *   pending injection should iterate `readAllObjectiveReminders`
+ *   directly.
+ *
+ * - `kind = "objective_reminder"`: the PISO banner. The banner
+ *   shows the constitution reminder specifically; a graph-drift
+ *   warning is handled separately and must NOT mask the reminder
+ *   banner (Etapa 4b.1 bug — un-read-aware tapaba el reminder).
+ *
+ * - `kind = "graph_drift_finding"`: the TECHO gate. The preflight
+ *   checks THIS kind only; the reminder does not satisfy the
+ *   gate condition (the obligation is on the orchestrator to
+ *   update the uncovered caller, not on the reminder).
+ *
+ * Etapa 4b.1: read is kind-aware so two kinds in the same
+ * channel do not mask each other.
  */
-export function readPendingBlockingInjection(
+export function readPendingBlockingByKind(
 	stateRoot: string,
+	kind: ObjectiveReminderKind | undefined,
 	now: Date = new Date(),
 ): BlockingInjection | null {
 	const injections = readAllObjectiveReminders(stateRoot);
@@ -80,6 +111,7 @@ export function readPendingBlockingInjection(
 	for (const inj of injections) {
 		if (inj.acked) continue;
 		if (!inj.decisionRequired) continue;
+		if (kind !== undefined && inj.kind !== kind) continue;
 		if (mostRecent === null || Date.parse(inj.ts) > Date.parse(mostRecent.ts)) {
 			mostRecent = inj;
 		}
@@ -97,6 +129,26 @@ export function readPendingBlockingInjection(
 		ageMs,
 	};
 	return blocking;
+}
+
+/**
+ * Backward-compat wrapper: the most recent un-acked blocking
+ * injection across ALL kinds. Callers that need kind-specific
+ * reading (e.g. the PISO banner) should use
+ * `readPendingBlockingByKind(stateRoot, "objective_reminder")`
+ * directly so a `graph_drift_finding` cannot mask the reminder.
+ *
+ * Used by:
+ *   - `mcp/_shared/index.ts` `envelope()` — propagates the overall
+ *     blocking state to the orchestrator (any kind is relevant).
+ *   - `mcp/objective/handlers.ts` `idu_objective_status` — same
+ *     envelope, global view.
+ */
+export function readPendingBlockingInjection(
+	stateRoot: string,
+	now: Date = new Date(),
+): BlockingInjection | null {
+	return readPendingBlockingByKind(stateRoot, undefined, now);
 }
 
 function readAllObjectiveReminders(stateRoot: string): ObjectiveReminder[] {
@@ -121,9 +173,19 @@ function readAllObjectiveReminders(stateRoot: string): ObjectiveReminder[] {
 		if (!isObjectiveReminderRecord(parsed)) continue;
 		const v = parsed as Record<string, unknown>;
 		const envelope = v.decisionEnvelope as Record<string, unknown>;
+		// Etapa 4a: the kind on disk is the kind written by the
+		// source. Previously hardcoded to "objective_reminder"
+		// (which silently coerced graph_drift_finding rows into
+		// objective_reminder and made the kind field useless for
+		// filtering). Preserve the source-of-truth kind so the
+		// preflight can discriminate by `kind === "graph_drift_finding"`.
+		const kind: ObjectiveReminderKind =
+			v.kind === "graph_drift_finding"
+				? "graph_drift_finding"
+				: "objective_reminder";
 		const reminder: ObjectiveReminder = {
 			injectionId: v.injectionId as string,
-			kind: "objective_reminder",
+			kind,
 			decisionRequired: envelope.orchestratorDecisionRequired as boolean,
 			severity: envelope.severity as "info" | "warning" | "critical",
 			summary: envelope.summary as string,
@@ -143,7 +205,9 @@ function isObjectiveReminderRecord(value: unknown): value is Record<
 } {
 	if (typeof value !== "object" || value === null) return false;
 	const v = value as Record<string, unknown>;
-	if (v.kind !== "objective_reminder") return false;
+	if (v.kind !== "objective_reminder" && v.kind !== "graph_drift_finding") {
+		return false;
+	}
 	if (typeof v.injectionId !== "string") return false;
 	if (typeof v.acked !== "boolean") return false;
 	if (typeof v.ts !== "string") return false;
