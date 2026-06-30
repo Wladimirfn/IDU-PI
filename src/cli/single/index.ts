@@ -10,6 +10,7 @@ export {
 	handleIduHygieneMigrate,
 	handleIduAckAdvisory,
 	handleIduHygieneSweep,
+	handleIduSkillsDeploy,
 	handleIduPreflight,
 	handleIduAdvisory,
 	handleIduPostflight,

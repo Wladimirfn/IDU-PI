@@ -222,6 +222,73 @@ export function handleIduHygieneSweep(runtime: CliRuntime): CliResult {
 	};
 }
 
+// 10. idu-skills-deploy | skills-deploy
+// Mirror idu-pi-owned skills from <repo>/.idu/skills/ to a host's
+// skills dir, selecting via --target and optionally --scope.
+// See src/skills-host-deploy.ts for the contract.
+import {
+	deploySkillsToHost,
+	formatSkillsHostDeployResult,
+	parseSkillTarget,
+	resolveSkillTarget,
+	type SkillTargetId,
+	type SkillTargetScope,
+} from "../../skills-host-deploy.js";
+
+export function handleIduSkillsDeploy(
+	runtime: CliRuntime,
+	rest: string[] = [],
+): CliResult {
+	const repoRoot = runtime.projectPath;
+	if (!repoRoot) {
+		return fail(
+			"idu-skills-deploy requiere un proyecto activo (runtime.projectPath).",
+		);
+	}
+	let parsed: { target: SkillTargetId; scope: SkillTargetScope };
+	try {
+		parsed = parseSkillTarget(rest);
+	} catch (error) {
+		return fail(
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+	const sourceDir = join(repoRoot, ".idu", "skills");
+	const target = resolveSkillTarget({
+		target: parsed.target,
+		scope: parsed.scope,
+		repoRoot,
+	});
+	const hostDir = target.dir;
+	if (parsed.scope === "global") {
+		// Opt-in confirmation: global deploys touch the user's HOME.
+		// Force them to be explicit. The CLI flag is the contract;
+		// any call without the flag fails closed here. parseSkillTarget
+		// sets scope === 'global' only if the user passed --scope
+		// global, so this gate is double-protection: even if the parser
+		// changed in the future, scope === 'global' implies --scope
+		// was observed.
+		const explicit = rest.includes("--scope=global") || rest.includes("--scope");
+		if (!explicit) {
+			return fail(
+				`--scope global requiere la flag explícita. idu-pi no toca tu HOME sin confirmación.`,
+			);
+		}
+	}
+	const result = deploySkillsToHost({
+		sourceDir,
+		hostDir,
+		projectPath: repoRoot,
+		repoRoot,
+		hostLabel: parsed.target,
+	});
+	return {
+		exitCode: 0,
+		stdout: formatSkillsHostDeployResult(result),
+		stderr: "",
+	};
+}
+
 // 10. idu-preflight | preflight
 export function handleIduPreflight(
 	runtime: CliRuntime,
