@@ -257,7 +257,36 @@ test("migrateHygieneLayout: skills migration by SKILL.md enumeration", () => {
 			existsSync(join(repoRoot, ".idu", "skills", "skill-b", "SKILL.md")),
 		);
 		assert.ok(existsSync(join(repoRoot, ".idu", "skills", "INDEX.md")));
-		assert.ok(!existsSync(join(repoRoot, ".agents", "skills")));
+
+		// Source preservation contract (Skills branch is additive):
+		// the legacy .agents/skills/ directory MUST still exist and
+		// its content (skill files + INDEX.md) MUST still be there.
+		// cutting was the bug — mirroring is the fix. If this assertion
+		// regresses to !existsSync, the cut is back.
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills")),
+			".agents/skills preserved (host read-path intact)",
+		);
+		assert.ok(
+			existsSync(
+				join(repoRoot, ".agents", "skills", "skill-a", "SKILL.md"),
+			),
+			"skill-a SKILL.md preserved at .agents/skills/skill-a/SKILL.md",
+		);
+		assert.ok(
+			existsSync(
+				join(repoRoot, ".agents", "skills", "skill-b", "SKILL.md"),
+			),
+			"skill-b SKILL.md preserved at .agents/skills/skill-b/SKILL.md",
+		);
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills", "INDEX.md")),
+			"INDEX.md preserved at .agents/skills/INDEX.md",
+		);
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills", ".gitkeep")),
+			".gitkeep preserved at .agents/skills/.gitkeep",
+		);
 	} finally {
 		repoCleanup();
 		stateCleanup();
@@ -368,7 +397,31 @@ test("migrateHygieneLayout: skill dir with sub-dirs is moved recursively", () =>
 				join(repoRoot, ".idu", "skills", "rich-skill", "templates", "t1.md"),
 			),
 		);
-		assert.ok(!existsSync(join(repoRoot, ".agents", "skills", "rich-skill")));
+		// Source preservation: <repo>/.agents/skills/rich-skill/ must
+		// still exist with its full recursive content. The copy is
+		// additive — host read-path stays intact.
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills", "rich-skill")),
+			"rich-skill preserved at .agents/skills/rich-skill",
+		);
+		assert.ok(
+			existsSync(
+				join(repoRoot, ".agents", "skills", "rich-skill", "SKILL.md"),
+			),
+			"rich-skill SKILL.md preserved",
+		);
+		assert.ok(
+			existsSync(
+				join(repoRoot, ".agents", "skills", "rich-skill", "examples", "ex1.md"),
+			),
+			"rich-skill examples/ex1.md preserved",
+		);
+		assert.ok(
+			existsSync(
+				join(repoRoot, ".agents", "skills", "rich-skill", "templates", "t1.md"),
+			),
+			"rich-skill templates/t1.md preserved",
+		);
 	} finally {
 		repoCleanup();
 		stateCleanup();
@@ -465,9 +518,26 @@ test("migrateHygieneLayout: migrates BOTH config and skills in one call", () => 
 		);
 		assert.ok(existsSync(join(repoRoot, ".idu", "skills", ".gitkeep")));
 
-		// Legacy gone
+		// Governance config IS idu-pi territory — legacy <repo>/config/
+		// is gone after migration. This branch uses safeMove by design.
 		assert.ok(!existsSync(join(repoRoot, "config")));
-		assert.ok(!existsSync(join(repoRoot, ".agents", "skills")));
+
+		// Skills are NOT idu-pi exclusive territory — legacy
+		// <repo>/.agents/skills/ is the host read-path and MUST be
+		// preserved. The migration is additive (safeCopy, not
+		// safeMove). Hosting skill files there is the host's contract.
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills")),
+			".agents/skills preserved (host read-path intact)",
+		);
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills", "skill-a", "SKILL.md")),
+			"skill-a SKILL.md preserved at .agents/skills",
+		);
+		assert.ok(
+			existsSync(join(repoRoot, ".agents", "skills", ".gitkeep")),
+			".gitkeep preserved at .agents/skills",
+		);
 	} finally {
 		repoCleanup();
 		stateCleanup();

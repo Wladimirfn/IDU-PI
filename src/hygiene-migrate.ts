@@ -92,8 +92,16 @@ export function migrateHygieneLayout(input: {
 	// 2. Skills: by directory enumeration + SKILL.md presence.
 	// Any subdir of <repo>/.agents/skills/ that contains SKILL.md is an
 	// idu-pi skill (idu-pi's format). Subdirs without SKILL.md are the
-	// user's; we leave them alone. The auditor-required principle: idu-pi
-	// only migrates what its own files say it owns.
+	// user's; we leave them alone.
+	//
+	// Skills use safeCopy (NOT safeMove). Rationale: .agents/skills/,
+	// .pi/skills/, .claude/skills/ are where the host CLI reads skills
+	// from — they are NOT "legacy to remove" but deployments the host
+	// requires. Cutting (safeMove) destroyed the host's view of skills
+	// across the project boundary. The new model is additive: idu-pi
+	// mirrors idu-pi-owned skills into <repo>/.idu/skills/ while
+	// preserving the source directory so the host (and any other
+	// consumer) keeps reading from its expected location.
 	if (existsSync(iduSkillsDir)) {
 		result.skipped.push({
 			from: legacySkillsDir,
@@ -112,24 +120,24 @@ export function migrateHygieneLayout(input: {
 					message: `failed to enumerate legacy skills dir: ${(err as Error).message}`,
 				});
 			}
-			// Move each subdir that has SKILL.md (idu-pi-owned)
+			// Copy each subdir that has SKILL.md (idu-pi-owned)
 			for (const name of entries) {
 				const from = join(legacySkillsDir, name);
 				const to = join(iduSkillsDir, name);
 				if (!existsSync(join(from, "SKILL.md"))) continue; // not idu-pi-owned
 				try {
-					safeMove(from, to);
+					safeCopy(from, to);
 					result.moved.push({ from, to });
 				} catch (err) {
 					result.errors.push({ from, message: (err as Error).message });
 				}
 			}
-			// Move INDEX.md (idu-pi's auto-generated index)
+			// Copy INDEX.md (idu-pi's auto-generated index)
 			const indexMd = join(legacySkillsDir, "INDEX.md");
 			if (existsSync(indexMd)) {
 				try {
 					const indexMdTo = join(iduSkillsDir, "INDEX.md");
-					safeMove(indexMd, indexMdTo);
+					safeCopy(indexMd, indexMdTo);
 					result.moved.push({ from: indexMd, to: indexMdTo });
 				} catch (err) {
 					result.errors.push({
@@ -138,12 +146,12 @@ export function migrateHygieneLayout(input: {
 					});
 				}
 			}
-			// Move .gitkeep (idu-pi-owned, created by initProjectAssets)
+			// Copy .gitkeep (idu-pi-owned, created by initProjectAssets)
 			const gitkeep = join(legacySkillsDir, ".gitkeep");
 			if (existsSync(gitkeep)) {
 				try {
 					const gitkeepTo = join(iduSkillsDir, ".gitkeep");
-					safeMove(gitkeep, gitkeepTo);
+					safeCopy(gitkeep, gitkeepTo);
 					result.moved.push({ from: gitkeep, to: gitkeepTo });
 				} catch (err) {
 					result.errors.push({
@@ -153,9 +161,11 @@ export function migrateHygieneLayout(input: {
 				}
 			}
 		}
-		// If the legacy skills dir is now empty, remove it. If the user has
-		// other files/dirs in there (non-SKILL.md), we leave them.
-		tryRmdirIfEmpty(legacySkillsDir);
+		// Note (skill branch): do NOT remove the legacy skills directory.
+		// .agents/skills/ is the host's read-path; idu-pi mirrors the
+		// idu-pi-owned subset into <repo>/.idu/skills/ but leaves the
+		// source intact. The previous tryRmdirIfEmpty(legacySkillsDir)
+		// call is intentionally removed.
 	}
 
 	// 3. Log to events
@@ -188,6 +198,20 @@ function safeMove(from: string, to: string): void {
 		}
 		throw err;
 	}
+}
+
+/**
+ * Safe additive copy. Mirror of safeMove WITHOUT the rmSync step.
+ * Used by the Skills branch of migrateHygieneLayout because
+ * .agents/skills/ is the host CLI's read-path (not a legacy dir to
+ * retire). cpSync handles both files and dirs (recursive); not
+ * copyFileSync (file-only). Same EXDEV semantics as safeMove: a single
+ * filesystem uses cpSync too — the difference is strictly the absence
+ * of rmSync at the end.
+ */
+function safeCopy(from: string, to: string): void {
+	mkdirSync(dirname(to), { recursive: true });
+	cpSync(from, to, { recursive: true });
 }
 
 function appendToEventsLog(
