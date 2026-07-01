@@ -23,6 +23,7 @@ import {
 } from "./idu-installer.js";
 import { resolveProjectStatePaths } from "./project-state.js";
 import { loadProjectCore } from "./project-core.js";
+import { loadConfirmedProjectConstitution } from "./project-constitution.js";
 import { slugifyProjectId } from "./projects.js";
 import {
 	buildIduUsageReport,
@@ -704,24 +705,39 @@ function projectCoreStatus(
 
 function constitutionStatus(
 	stateRoot: string,
-	exists: (path: string) => boolean,
+	_exists: (path: string) => boolean,
 ): CliHomeProjectStatus["constitution"] {
-	const constitutionPath = join(
-		stateRoot,
-		"config",
-		"project-constitution.json",
-	);
-	if (!exists(constitutionPath)) return "missing";
-	try {
-		const parsed = JSON.parse(readFileSync(constitutionPath, "utf8")) as {
-			status?: string;
-		};
-		if (parsed.status === "active") return "active";
-		if (parsed.status === "stale") return "stale";
-		return "draft";
-	} catch {
-		return "unknown";
+	// Etapa 4b.1 fix (kind-aware display): use the same loadConfirmed
+	// loader the real enforcement gate uses (R5.2 fail-loud contract).
+	// The pre-fix version hardcoded Layout B (`<stateRoot>/config/...`)
+	// Etapa 4b.1 fix (kind-aware display): the pre-fix hardcoded
+	// Layout B (`<stateRoot>/config/project-constitution.json`).
+	// After the project migrated to Layout A (`.idu/config/...`),
+	// the hardcode read the empty Layout B slot and returned
+	// "missing" even when the project had its constitution at
+	// Layout A. The rejected alternative fix (loadProjectConstitution,
+	// 3-level silent fallback: Layout A → Layout B → package-bundled
+	// default) was rejected precisely because it would re-introduce
+	// the cwd-fallback trap that R5.1/R5.2 work explicitly closed —
+	// a default-fabricated "draft" or "active" would mask the
+	// absence of real governance. The discriminated union
+	// `LoadConfirmedProjectConstitutionResult` (kind: "ok" | "skipped")
+	// forces this caller to discriminate: skipped means no real
+	// governance is active (surface as "missing" in the TUI, not
+	// as a fabricated status). The ok branch projects the loaded
+	// constitution's actual status.
+	const result = loadConfirmedProjectConstitution(stateRoot);
+	if (result.kind === "skipped") {
+		// Reasons include: no-stateRoot, core-not-confirmed,
+		// core-loaded-default (cwd-fallback trap), read-failed. All
+		// mean the project has no real confirmed constitution; the
+		// honest TUI answer is "missing" so the operator knows to
+		// run idu-birth-validate.
+		return "missing";
 	}
+	if (result.constitution.status === "active") return "active";
+	if (result.constitution.status === "stale") return "stale";
+	return "draft";
 }
 
 function readSupervisorStatus(
