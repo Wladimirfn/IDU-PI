@@ -386,16 +386,16 @@ test("current project panel recommends core confirmation for draft project core"
 		mkdirSync(projectPath, { recursive: true });
 		const workspaceRoot = join(root, "workspace");
 		const stateRoot = join(workspaceRoot, "projects", "project");
-		const configPath = join(stateRoot, "config");
-		mkdirSync(configPath, { recursive: true });
+		// Etapa 4b.1 fix (kind-aware display): the constitution is
+		// only loaded when the core is confirmed (R5.2 fail-loud
+		// contract). A draft core short-circuits the constitution
+		// loader with kind: "skipped" reason: "core-not-confirmed",
+		// which the TUI surfaces as "missing" — the honest signal
+		// that the project has no real confirmed governance.
+		mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 		writeFileSync(
-			join(configPath, "project-core.json"),
+			join(stateRoot, ".idu", "config", "project-core.json"),
 			JSON.stringify({ status: "draft" }),
-			"utf8",
-		);
-		writeFileSync(
-			join(configPath, "project-constitution.json"),
-			JSON.stringify({ sourceCoreStatus: "draft" }),
 			"utf8",
 		);
 		const registryPath = join(root, "projects.json");
@@ -429,7 +429,10 @@ test("current project panel recommends core confirmation for draft project core"
 		});
 		const output = formatCliProjectStatus(status);
 		assert.match(output, /Project Core: pending/u);
-		assert.match(output, /Constitution: draft/u);
+		// Etapa 4b.1: a draft core means the constitution loader
+		// short-circuits with kind: "skipped", so the TUI shows
+		// "missing" — not a fabricated "draft".
+		assert.match(output, /Constitution: missing/u);
 		assert.match(output, /recommended next: confirm_core/u);
 		assert.doesNotMatch(output, /recommended next: bootstrap/u);
 	} finally {
@@ -443,19 +446,86 @@ test("current project panel shows active Constitution status", () => {
 		const projectPath = join(root, "project");
 		mkdirSync(projectPath, { recursive: true });
 		const workspaceRoot = join(root, "workspace");
-		// Migration to stateRoot-based reader: constitution now lives at
-		// <stateRoot>/config/project-constitution.json (Layout B).
 		const stateRoot = join(workspaceRoot, "projects", "project");
-		const configPath = join(stateRoot, "config");
-		mkdirSync(configPath, { recursive: true });
+		// Etapa 4b.1 fix: the constitution loader is gated by the
+		// project core. To show Constitution: "active" we need BOTH
+		// a confirmed core at Layout A AND a constitution at Layout
+		// A. The pre-fix test only wrote Layout B; the bug let
+		// the TUI show "active" without the core being confirmed.
+		mkdirSync(join(stateRoot, ".idu", "config"), { recursive: true });
 		writeFileSync(
-			join(configPath, "project-constitution.json"),
-			JSON.stringify({ status: "active" }),
+			join(stateRoot, ".idu", "config", "project-core.json"),
+			JSON.stringify({
+				version: "1.0.0",
+				projectName: "Demo",
+				projectGoal: "Test goal.",
+				problemStatement: "Test problem.",
+				targetUsers: ["planner"],
+				projectType: "telegram-bot",
+				complexityLevel: "medium",
+				deploymentTarget: "server",
+				securityLevel: "medium",
+				dataSensitivity: "medium",
+				preferredStack: ["TypeScript"],
+				rejectedStack: ["spreadsheet"],
+				architectureStyle: "modular",
+				includedScope: ["scope"],
+				excludedScope: ["other"],
+				initialModules: ["m"],
+				criticalFlows: ["f"],
+				successCriteria: ["s"],
+				validationCommands: ["v"],
+				humanDecisions: ["h"],
+				assumptions: ["a"],
+				openQuestions: ["q"],
+				status: "confirmed",
+				createdAt: "2026-05-22T00:00:00.000Z",
+				updatedAt: "2026-05-22T00:00:00.000Z",
+			}),
+			"utf8",
+		);
+		// Reuse the package's default constitution as a base — its
+		// shape is the contract that loadConfirmedProjectConstitution
+		// enforces. Override only the active state for the test.
+		// Etapa 4b.1: a confirmed core + active constitution surfaces
+		// "Constitution: active" in the TUI (the same path the real
+		// enforcement gate uses, R5.2 fail-loud).
+		const validConstitution = JSON.parse(
+			readFileSync(join(process.cwd(), "config", "default-constitution.json"), "utf8"),
+		);
+		validConstitution.sourceCoreStatus = "confirmed";
+		validConstitution.status = "active";
+		writeFileSync(
+			join(stateRoot, ".idu", "config", "project-constitution.json"),
+			JSON.stringify(validConstitution),
+			"utf8",
+		);
+		// Register the project so buildCliHomeStatus resolves the
+		// stateRoot to <workspaceRoot>/projects/project (where the
+		// core and constitution live). Without this, the home shows
+		// the project as unregistered and constitutionStatus never
+		// sees the files.
+		mkdirSync(join(root, "data"), { recursive: true });
+		const registryPath = join(root, "data", "projects.json");
+		writeFileSync(
+			registryPath,
+			JSON.stringify({
+				activeProjectId: "project",
+				projects: [
+					{
+						id: "project",
+						name: "project",
+						path: projectPath,
+						stateRoot,
+					},
+				],
+			}),
 			"utf8",
 		);
 		const status = buildCliHomeStatus({
 			cwd: projectPath,
 			gitRoot: projectPath,
+			registryPath,
 			env: {
 				DEFAULT_CWD: projectPath,
 				ALLOWED_ROOTS: root,
