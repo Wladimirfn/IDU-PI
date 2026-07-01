@@ -144,18 +144,47 @@ try {
 # Step 2.5: run cron preflight. Fires the postflight -> sensor -> AgentLab
 # -> supervisor chain and writes supervisor_advisory to injections.jsonl
 # (PR-105a + PR-105b). The changedFiles arg is the list of files modified
-# since the last commit. If the repo has no HEAD~1 (first commit) or git is
-# unavailable, the preflight runs with no changed files and produces no
-# sensor impulses — this is the safe no-op path.
+# since the LAST PROCESSED commit (not just HEAD~1..HEAD). If multiple
+# commits land between ticks (e.g. a burst of PR merges), all of them
+# are diffed in one pass. If the repo has no HEAD (first commit) or git
+# is unavailable, the preflight runs with no changed files and produces
+# no sensor impulses — this is the safe no-op path.
 try {
 	$cliPath = Join-Path $Root 'dist/src/cli.js'
 	$changedFiles = @()
 	try {
-		# git diff against the previous commit. Excludes untracked, staged-only,
-		# and the diff line numbers — we only want the filenames.
-		$diffOutput = git diff --name-only HEAD~1 HEAD 2>$null
+		# Persist the last processed SHA so we diff lastSha..HEAD
+		# instead of HEAD~1..HEAD. The latter only catches the most
+		# recent commit and silently misses intermediate commits when
+		# multiple PRs merge in quick succession (e.g. 3 squashes in
+		# 30 minutes). The state file is a single line with the SHA.
+		$shaFile = if ($StateRoot) { Join-Path $StateRoot 'cron-last-sha.txt' } else { $null }
+		$lastSha = $null
+		if ($shaFile -and (Test-Path $shaFile)) {
+			$lastSha = (Get-Content $shaFile -Raw -ErrorAction SilentlyContinue).Trim()
+		}
+		$currentSha = git rev-parse HEAD 2>$null
+		if ($lastSha -and $currentSha -and ($lastSha -ne $currentSha)) {
+			# Normal path: diff from the last processed commit to HEAD.
+			# This catches ALL commits since the last tick, not just one.
+			$diffOutput = git diff --name-only $lastSha HEAD 2>$null
+		} elseif (-not $lastSha -and $currentSha) {
+			# First run (no state file yet): fall back to HEAD~1..HEAD
+			# so we don't dump the entire history on the first tick.
+			$diffOutput = git diff --name-only HEAD~1 HEAD 2>$null
+		} else {
+			# No changes since last tick (lastSha === currentSha) or
+			# git unavailable: no diff.
+			$diffOutput = $null
+		}
 		if ($diffOutput) {
 			$changedFiles = $diffOutput -split "`n" | Where-Object { $_ -ne '' }
+		}
+		# Persist the current SHA as the new watermark AFTER computing
+		# the diff (not before, so a crash mid-tick retries the same
+		# diff on the next run rather than skipping it).
+		if ($shaFile -and $currentSha) {
+			Set-Content -Path $shaFile -Value $currentSha.Trim() -NoNewline -ErrorAction SilentlyContinue
 		}
 	} catch {
 		Log ('changed_files_git_failed: ' + $_)
