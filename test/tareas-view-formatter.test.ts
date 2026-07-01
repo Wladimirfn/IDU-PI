@@ -426,8 +426,21 @@ test("formatColaDeAccionesFeed renders the count header and rows with kind and t
 	assert.match(output, /^Cola de acciones \(2\)/mu);
 	assert.ok(output.includes("supervisor"));
 	assert.ok(output.includes("agentlab"));
-	assert.ok(output.includes("2026-06-10T12:00:00.000Z"));
-	assert.ok(output.includes("2026-06-10T11:00:00.000Z"));
+	// Etapa 4c.1: ts is now rendered in the operator's local time as
+	// `YYYY-MM-DD HH:MM:SS` (not raw ISO with `Z`). Zone-agnostic: we
+	// check both that the raw ISO no longer leaks AND that the new
+	// local-time shape is present (the hour suffix depends on the
+	// runner's timezone, so we match `\d{2}:00:00` which holds for
+	// any of the 24-hour offsets the test fixtures produce).
+	assert.ok(
+		!/2026-06-10T1[12]:00:00\.000Z/.test(output),
+		"raw ISO timestamp should not leak into the displayed feed",
+	);
+	assert.match(
+		output,
+		/2026-06-1\d \d{2}:00:00/,
+		"expected local-time ts in `YYYY-MM-DD HH:MM:SS` format",
+	);
 });
 
 // Test 16: formatColaDeAccionesFeed body NEVER contains the

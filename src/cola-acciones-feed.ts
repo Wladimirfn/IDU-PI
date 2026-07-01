@@ -198,6 +198,29 @@ export function readColaDeAccionesFeed(
 	return merged;
 }
 
+/**
+ * Format a UTC ISO-8601 timestamp (`...Z`) as the operator's local
+ * time, `YYYY-MM-DD HH:MM:SS`. The "Cola de acciones" panel previously
+ * printed the raw ISO string with the trailing `Z`, which was correct
+ * but not human-readable in the operator's local time (8 AM showed
+ * up as "13:00" for an operator on UTC-3). This helper keeps the
+ * original `ts` (UTC) intact in the event object — only the display
+ * path formats to local.
+ *
+ * Returns the raw string on parse failure (so a malformed entry
+ * never breaks the whole feed).
+ */
+function formatLocalTs(ts: string): string {
+	const ms = Date.parse(ts);
+	if (!Number.isFinite(ms)) return ts;
+	const d = new Date(ms);
+	const pad = (n: number): string => String(n).padStart(2, "0");
+	return (
+		`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+		`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+	);
+}
+
 export function formatColaDeAccionesFeed(
 	events: readonly ColaDeAccionesEvent[],
 ): string {
@@ -207,7 +230,7 @@ export function formatColaDeAccionesFeed(
 	const header = `Cola de acciones (${events.length}):`;
 	const rows = events.map((event) => {
 		const kind = event.kind;
-		const ts = event.ts;
+		const ts = formatLocalTs(event.ts);
 		const summary = truncateSummary(event.summary);
 		return `${ts} | ${kind} | ${summary}`;
 	});
