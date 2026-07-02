@@ -249,6 +249,7 @@ import {
 	type AgentLabSpecialistAuditPlanOptions,
 } from "./agentlab-review-requests.js";
 import {
+	dispatchAgentLabReviewRun,
 	formatAgentLabReviewRunResult,
 	formatAgentLabReviewStatus,
 	getAgentLabReviewStatus,
@@ -1673,20 +1674,76 @@ export function createCliRuntime(
 		agentLabRequestReview: (pathOrLatest) =>
 			reviewAgentLabReviewRequest(pathOrLatest, reportsPath),
 		formatAgentLabReviewRequestReview,
-		agentLabReviewRun: (pathOrLatest) =>
-			runAgentLabReviewRequestFile({
-				pathOrLatest,
-				reportsPath: reportsPath,
+		agentLabReviewRun: (pathOrLatest) => {
+			// FIX 2 — async dispatch (PR2). The runner pipeline now runs as
+			// a detached promise inside dispatchAgentLabReviewRun; the call
+			// returns immediately with `{runId, dispatchPath}`. The dispatch
+			// sentinel is shaped as a minimal `AgentLabReviewRunResult`
+			// (empty runs, dispatched message in `consolidatedSummary`,
+			// `safeNotes` carrying `runId` + `dispatchPath`) so the existing
+			// `Promise<AgentLabReviewRunResult>` signature is preserved for
+			// non-MCP consumers. The detached pipeline writes the canonical
+			// `<runId>.json` on completion and emits supervisor activity
+			// events via `recordSupervisorActivityEventDeferred`.
+			const dispatched = dispatchAgentLabReviewRun({
+				reportsPath,
 				projectId: activeProject.id,
 				projectPath: activeProject.path,
-				router: agentRouter,
-				modelAssignments,
-				// B5 PR3 v2 (REQ-B5-5): thread `stateRoot` and
-				// `invocationSink` so the runner's `usePromptForRole`
-				// branch fires when `request.model` is set.
-				stateRoot: masterPlanStateRoot,
-				invocationSink: labDbRepository.appendInvocation.bind(labDbRepository),
-			}),
+				maxMinutes: 15,
+				requestId: `agentlab-review-run-${Date.now()}`,
+				runLab: () =>
+					runAgentLabReviewRequestFile({
+						pathOrLatest,
+						reportsPath,
+						projectId: activeProject.id,
+						projectPath: activeProject.path,
+						router: agentRouter,
+						modelAssignments,
+						// B5 PR3 v2 (REQ-B5-5): thread `stateRoot` and
+						// `invocationSink` so the runner's `usePromptForRole`
+						// branch fires when `request.model` is set.
+						stateRoot: masterPlanStateRoot,
+						invocationSink: labDbRepository.appendInvocation.bind(labDbRepository),
+					}),
+				onActivity: (event) => {
+					// Supervisor activity emission. Uses the deferred helper
+					// already imported at the top of this module — no new
+					// event types introduced (design D8). The dispatch kind
+					// is carried via `status` + `reason` (allowed unions).
+					const status = event.kind === "dispatch_failed" ? "warning" : "completed";
+					const reason = event.kind === "dispatch_failed" ? "supervisor_failed" : undefined;
+					recordSupervisorActivityEventDeferred(runtimeStateRoot, {
+						projectId: activeProject.id,
+						eventType: "supervisor_tick",
+						origin: "pi_runtime_event",
+						trigger: "manual",
+						status,
+						...(reason ? { reason } : {}),
+						ok: event.kind !== "dispatch_failed",
+						durationMs: Date.now(),
+					});
+				},
+			}, "general");
+			const dispatchEnvelope: AgentLabReviewRunResult = {
+				generatedAt: dispatched.startedAt,
+				sourceRequestFile: "dispatch",
+				warning: "Revisión AgentLab. No aplica cambios.",
+				projectId: activeProject.id,
+				runs: [],
+				consolidatedSummary: `AgentLab review run dispatched: ${dispatched.runId}`,
+				consolidatedFindings: [],
+				recommendedNext: `Poll agentlab_review_status ${dispatched.runId}`,
+				requiresHumanApproval: false,
+				safeNotes: [
+					"AgentLab review dispatched as fire-and-forget (Fix 2).",
+					`runId: ${dispatched.runId}`,
+					`dispatchPath: ${dispatched.dispatchPath}`,
+					`Poll status with: agentlab_review_status ${dispatched.runId}`,
+				],
+				path: dispatched.dispatchPath,
+			};
+			return Promise.resolve(dispatchEnvelope);
+		},
 		formatAgentLabReviewRunResult,
 		agentLabReviewStatus: (pathOrLatest) =>
 			getAgentLabReviewStatus(pathOrLatest, reportsPath),
