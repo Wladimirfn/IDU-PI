@@ -1169,6 +1169,14 @@ test("format run muestra resumen", async () => {
 // dispatchAgentLabReviewRun / resolveAgentLabReviewRunStatus MUST satisfy.
 // Compile-time RED gate: these imports fail until PR1 implements production.
 
+// PR2 (Fix 2 — async dispatch) — production-real pipeline contract tests.
+// Pin the contract that the detached promise:
+//   (a) does NOT block the dispatcher return
+//   (b) eventually writes <runId>.json atomically on completion
+//   (c) emits a supervisor activity event (via the optional onActivity hook)
+// All 4 PR1 tests above MUST still pass — REPLACEMENT of stub bodies, not
+// removal of stub seam.
+
 function dispatchFixture() {
 	const reportsPath = join(root(), "reports");
 	mkdirSync(reportsPath, { recursive: true });
@@ -1278,4 +1286,135 @@ test("PR1 status never mixes concurrent generations; status(latest) picks by mti
 
 	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
 	assert.equal(statusLatest.runId, runIdB, "latest must resolve to the most-recently-written runId (by mtime)");
+});
+
+// ===== PR2 (Fix 2) — production-real pipeline contract tests =====
+
+// Helper: wait for a predicate up to `maxMs`, polling every `intervalMs`.
+async function waitFor(
+	predicate: () => boolean,
+	maxMs = 2000,
+	intervalMs = 10,
+): Promise<boolean> {
+	const deadline = Date.now() + maxMs;
+	while (Date.now() < deadline) {
+		if (predicate()) return true;
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+	return predicate();
+}
+
+test("PR2 dispatch returns immediately even when runLab takes >100ms (detached promise)", async () => {
+	const { input } = dispatchFixture();
+	const start = Date.now();
+	let runLabFinishedAt = 0;
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => {
+			// Simulate the lab work taking 250ms — the dispatcher MUST
+			// return well before this completes.
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			runLabFinishedAt = Date.now();
+			return completedRunSummary();
+		},
+	}, "security");
+	const elapsedMs = Date.now() - start;
+
+	assert.ok(elapsedMs < 100, `dispatch must return <100ms even with a slow runLab; took ${elapsedMs}ms`);
+	assert.equal(result.status, "dispatched", "dispatch envelope status must remain 'dispatched'");
+	assert.match(result.runId, /^run-\d{10}-[a-z0-9]+$/u, "dispatch envelope must include a valid runId");
+
+	// Wait for the detached promise to complete — proves the pipeline ran.
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `run artifact must be written after runLab resolves: ${runFile}`);
+	assert.ok(runLabFinishedAt > 0, "runLab must have completed");
+	assert.ok(runLabFinishedAt - start >= 200, `runLab must have run for ~250ms; took ${runLabFinishedAt - start}ms`);
+
+	// Dispatch return happened BEFORE runLab finished — the detached contract.
+	assert.ok(elapsedMs < runLabFinishedAt - start, `dispatch must return BEFORE runLab finishes; elapsed=${elapsedMs}ms runLab-duration=${runLabFinishedAt - start}ms`);
+});
+
+test("PR2 detached runLab failure writes failed run artifact (status: failed)", async () => {
+	const { input } = dispatchFixture();
+	const failureMessage = "synthetic lab failure for PR2";
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => {
+			throw new Error(failureMessage);
+		},
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `failed run artifact must be written even when runLab throws: ${runFile}`);
+
+	const status = resolveAgentLabReviewRunStatus({ runId: result.runId, reportsPath: input.reportsPath });
+	assert.equal(status.kind, "completed", "kind stays 'completed' once the run file exists");
+	assert.equal(status.status, "failed", "failed runLab must produce status: failed");
+});
+
+test("PR2 detached runLab success writes run artifact matching runLab's summary", async () => {
+	const { input } = dispatchFixture();
+	const summary = completedRunSummary();
+	summary.runs[0]!.status = "partial";
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => summary,
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `run artifact must be written when runLab resolves: ${runFile}`);
+
+	const status = resolveAgentLabReviewRunStatus({ runId: result.runId, reportsPath: input.reportsPath });
+	assert.equal(status.kind, "completed", "kind must be 'completed' once the run file is written");
+	assert.equal(status.status, "partial", "runLab-returned status must propagate to run artifact");
+});
+
+test("PR2 detached promise emits completion activity via onActivity hook", async () => {
+	const { input } = dispatchFixture();
+	const activityEvents: Array<{ kind: string; runId: string }> = [];
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => completedRunSummary(),
+		onActivity: (event) => {
+			activityEvents.push({ kind: event.kind, runId: event.runId });
+		},
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, "run artifact must be written for activity emission to settle");
+
+	// Wait for the .finally to drain the activity emission.
+	const started = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_started"), 1000);
+	assert.ok(started, `dispatch_started activity must be emitted; got ${JSON.stringify(activityEvents)}`);
+	const completed = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_completed"), 1000);
+	assert.ok(completed, `dispatch_completed activity must be emitted on success; got ${JSON.stringify(activityEvents)}`);
+
+	for (const event of activityEvents) {
+		assert.equal(event.runId, result.runId, `activity event runId must match dispatch envelope`);
+	}
+});
+
+test("PR2 detached promise emits dispatch_failed activity when runLab rejects", async () => {
+	const { input } = dispatchFixture();
+	const activityEvents: Array<{ kind: string; runId: string }> = [];
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => {
+			throw new Error("boom");
+		},
+		onActivity: (event) => {
+			activityEvents.push({ kind: event.kind, runId: event.runId });
+		},
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, "run artifact must be written even when runLab rejects");
+
+	const failed = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_failed"), 1000);
+	assert.ok(failed, `dispatch_failed activity must be emitted on rejection; got ${JSON.stringify(activityEvents)}`);
 });

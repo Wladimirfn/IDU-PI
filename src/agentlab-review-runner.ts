@@ -1839,8 +1839,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // PR1 (Fix 2 — async dispatch) — foundation: types + dispatch stub +
-// status resolver + atomic write + runId mint. PR2 adds the detached
-// pipeline. Fix 1 territory untouched.
+// status resolver + atomic write + runId mint. PR2 replaces the dispatch
+// stub body with the detached pipeline; the seam (signature) stays.
+// Fix 1 territory untouched.
 
 export type DispatchAgentLabReviewRunInput = {
 	reportsPath: string;
@@ -1848,6 +1849,12 @@ export type DispatchAgentLabReviewRunInput = {
 	projectPath: string;
 	maxMinutes: number;
 	requestId: string;
+	// PR2 additions: optional callback hooks. When `runLab` is provided,
+	// the dispatch stub kicks off the pipeline as a detached promise;
+	// when absent (PR1 tests), the placeholder is written and the call
+	// returns synchronously with no background work — backward compatible.
+	runLab?: () => Promise<AgentLabReviewRunResult | undefined>;
+	onActivity?: (event: { kind: "dispatch_started" | "dispatch_completed" | "dispatch_failed"; runId: string; error?: string }) => void;
 };
 
 export type DispatchAgentLabReviewRunResult = {
@@ -1903,8 +1910,13 @@ export function writeAgentLabReviewRunAtomic(
 	return finalPath;
 }
 
-// PR1 stub: mints runId, writes dispatch placeholder, returns envelope sync.
-// PR2 replaces the body with a detached promise that runs the real pipeline.
+// PR2 production body: mints runId, writes dispatch placeholder synchronously,
+// returns the dispatched envelope, then kicks off the lab pipeline as a
+// detached promise (NO spawn, NO Worker — design D1 in-process detached).
+// On completion: writes <runId>.json atomically + emits completion activity.
+// On failure: writes <runId>.json with status: failed + emits failed activity.
+// When `runLab` is absent (PR1 test path) the placeholder is written and
+// no background work runs — preserves the PR1 stub contract.
 export function dispatchAgentLabReviewRun(
 	input: DispatchAgentLabReviewRunInput,
 	_specialty: string,
@@ -1914,6 +1926,61 @@ export function dispatchAgentLabReviewRun(
 	mkdirSync(runDirectory(input.reportsPath), { recursive: true });
 	const finalPath = dispatchFilePath(input.reportsPath, runId);
 	atomicWriteJson(finalPath, { runId, status: "dispatched", startedAt });
+
+	if (input.onActivity) input.onActivity({ kind: "dispatch_started", runId });
+
+	if (input.runLab) {
+		void input
+			.runLab()
+			.then((summary) => {
+				const artifact =
+					summary ?? ({
+						generatedAt: new Date().toISOString(),
+						sourceRequestFile: input.requestId,
+						warning: "Revisión AgentLab. No aplica cambios." as const,
+						projectId: input.projectId,
+						runs: [],
+						consolidatedSummary: "completed",
+						consolidatedFindings: [],
+						recommendedNext: "none",
+						requiresHumanApproval: false,
+						safeNotes: [],
+					} satisfies AgentLabReviewRunResult);
+				writeAgentLabReviewRunAtomic(runId, input.reportsPath, artifact);
+				if (input.onActivity) input.onActivity({ kind: "dispatch_completed", runId });
+			})
+			.catch((err: unknown) => {
+				const error = err instanceof Error ? err.message : String(err);
+				const failed: AgentLabReviewRunResult = {
+					generatedAt: new Date().toISOString(),
+					sourceRequestFile: input.requestId,
+					warning: "Revisión AgentLab. No aplica cambios." as const,
+					projectId: input.projectId,
+					runs: [
+						{
+							requestId: input.requestId,
+							specialty: "general",
+							status: "failed",
+							commandsExecuted: [],
+							rawSummary: `Lab pipeline failed: ${error}`,
+							contractValidation: { valid: false, errors: [error] },
+							findings: [],
+							recommendations: [],
+							testsSuggested: [],
+							requiresHumanApproval: true,
+						},
+					],
+					consolidatedSummary: "failed",
+					consolidatedFindings: [],
+					recommendedNext: "none",
+					requiresHumanApproval: true,
+					safeNotes: [],
+				};
+				writeAgentLabReviewRunAtomic(runId, input.reportsPath, failed);
+				if (input.onActivity) input.onActivity({ kind: "dispatch_failed", runId, error });
+			});
+	}
+
 	return { runId, status: "dispatched", dispatchPath: finalPath, startedAt };
 }
 
