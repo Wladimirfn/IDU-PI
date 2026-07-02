@@ -503,8 +503,16 @@ export function handleIduDecisionLedger(
 		const m = /^--limit\s+(\d+)$/u.exec(arg);
 		if (m) limit = Number(m[1]);
 	}
+	// Bug 2 fix: recordDecision (called from markInjectionAcked in
+	// injection-store.ts) writes with projectId="default". The pre-fix
+	// handler defaulted projectId to runtime.workspaceRoot (the
+	// stateRoot path), which never matches "default" in the DB —
+	// so listDecisions returned 0 even though lab.db had 63 rows.
+	// The dbPath (join(runtime.workspaceRoot, "lab.db")) was already
+	// correct because runtime.workspaceRoot IS the stateRoot for the
+	// active project.
 	if (!projectId) {
-		projectId = runtime.workspaceRoot;
+		projectId = "default";
 	}
 	const dbPath = join(runtime.workspaceRoot, "lab.db");
 	const decisions = listDecisions(dbPath, { projectId, since, limit });
