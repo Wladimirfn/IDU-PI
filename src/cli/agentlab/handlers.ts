@@ -101,13 +101,25 @@ export async function handleAgentLabReviewRun(
 	runtime: CliRuntime,
 	rest: string[] = [],
 ): Promise<CliResult> {
-	return ok(
-		runtime.formatAgentLabReviewRunResult(
-			await runtime.agentLabReviewRun(
-				rest.join(" ").trim() || "latest",
-			),
-		),
+	const result = await runtime.agentLabReviewRun(
+		rest.join(" ").trim() || "latest",
 	);
+	// PR3 (Fix 2 — async dispatch): dispatched sentinel renders as a
+	// one-liner ack with `runId` + pointer to `agentlab_review_status`.
+	// Sync-blocking callers (Fix 1 tests, in-process harnesses) keep the
+	// existing consolidated-summary format.
+	const dispatchedMatch = /^AgentLab review run dispatched: (\S+)\s*$/u.exec(
+		result.consolidatedSummary,
+	);
+	if (dispatchedMatch && result.runs.length === 0) {
+		const runId = dispatchedMatch[1]!;
+		return ok(
+			`AgentLab review run dispatched: ${runId}\n` +
+				`  dispatch: ${result.path ?? ""}\n` +
+				`  poll with: agentlab_review_status ${runId}\n`,
+		);
+	}
+	return ok(runtime.formatAgentLabReviewRunResult(result));
 }
 
 export function handleAgentLabReviewStatus(
