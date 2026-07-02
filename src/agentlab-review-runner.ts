@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
 	existsSync,
 	lstatSync,
@@ -7,6 +7,8 @@ import {
 	readFileSync,
 	readdirSync,
 	readlinkSync,
+	renameSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -1834,4 +1836,124 @@ function dedupe(values: string[]): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object";
+}
+
+// PR1 (Fix 2 — async dispatch) — foundation: types + dispatch stub +
+// status resolver + atomic write + runId mint. PR2 adds the detached
+// pipeline. Fix 1 territory untouched.
+
+export type DispatchAgentLabReviewRunInput = {
+	reportsPath: string;
+	projectId: string;
+	projectPath: string;
+	maxMinutes: number;
+	requestId: string;
+};
+
+export type DispatchAgentLabReviewRunResult = {
+	runId: string;
+	status: "dispatched";
+	dispatchPath: string;
+	startedAt: string;
+};
+
+export type ResolveAgentLabReviewRunStatusInput = { runId?: string; reportsPath: string };
+
+export type ResolveAgentLabReviewRunStatusResult =
+	| { kind: "completed"; runId: string; status: "completed" | "failed" | "partial" | "timed_out" | "skipped" | "security_violation"; result: AgentLabReviewRunResult }
+	| { kind: "running"; runId: string; status: "running" }
+	| { kind: "missing"; runId: string; status: "dispatched" };
+
+const RUN_FILE_SUFFIX = ".json";
+const DISPATCH_FILE_SUFFIX = ".dispatch.json";
+
+// runId format: `run-<unixSeconds10>-<hex6>`. Matches /^run-\d{10}-[a-z0-9]+$/.
+export function mintAgentLabReviewRunId(): string {
+	const seconds = Math.floor(Date.now() / 1000);
+	const random = randomBytes(6).toString("hex").slice(0, 6);
+	return `run-${seconds}-${random}`;
+}
+
+function runDirectory(reportsPath: string): string {
+	return join(resolve(reportsPath), "..", "agentlabs", "runs");
+}
+
+function runFilePath(reportsPath: string, runId: string): string {
+	return join(runDirectory(reportsPath), `${runId}${RUN_FILE_SUFFIX}`);
+}
+
+function dispatchFilePath(reportsPath: string, runId: string): string {
+	return join(runDirectory(reportsPath), `${runId}${DISPATCH_FILE_SUFFIX}`);
+}
+
+function atomicWriteJson(finalPath: string, payload: object): void {
+	const tempPath = `${finalPath}.${process.pid}.${Date.now()}.tmp`;
+	writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+	renameSync(tempPath, finalPath);
+}
+
+export function writeAgentLabReviewRunAtomic(
+	runId: string,
+	reportsPath: string,
+	summary: AgentLabReviewRunResult,
+): string {
+	mkdirSync(runDirectory(reportsPath), { recursive: true });
+	const finalPath = runFilePath(reportsPath, runId);
+	atomicWriteJson(finalPath, summary);
+	return finalPath;
+}
+
+// PR1 stub: mints runId, writes dispatch placeholder, returns envelope sync.
+// PR2 replaces the body with a detached promise that runs the real pipeline.
+export function dispatchAgentLabReviewRun(
+	input: DispatchAgentLabReviewRunInput,
+	_specialty: string,
+): DispatchAgentLabReviewRunResult {
+	const runId = mintAgentLabReviewRunId();
+	const startedAt = new Date().toISOString();
+	mkdirSync(runDirectory(input.reportsPath), { recursive: true });
+	const finalPath = dispatchFilePath(input.reportsPath, runId);
+	atomicWriteJson(finalPath, { runId, status: "dispatched", startedAt });
+	return { runId, status: "dispatched", dispatchPath: finalPath, startedAt };
+}
+
+// Resolution order: <runId>.json → <runId>.dispatch.json → missing.
+function resolveRunByRunId(reportsPath: string, runId: string): ResolveAgentLabReviewRunStatusResult {
+	const runFile = runFilePath(reportsPath, runId);
+	if (existsSync(runFile)) {
+		const raw = JSON.parse(readFileSync(runFile, "utf8")) as AgentLabReviewRunResult;
+		return { kind: "completed", runId, status: raw.runs[0]?.status ?? "completed", result: raw };
+	}
+	if (existsSync(dispatchFilePath(reportsPath, runId))) {
+		return { kind: "running", runId, status: "running" };
+	}
+	return { kind: "missing", runId, status: "dispatched" };
+}
+
+function findLatestRunFileByMtime(reportsPath: string): string | undefined {
+	const dir = runDirectory(reportsPath);
+	if (!existsSync(dir)) return undefined;
+	const candidates = safeReadDirNames(dir)
+		.filter((name) => name.endsWith(RUN_FILE_SUFFIX) && !name.endsWith(DISPATCH_FILE_SUFFIX))
+		.map((name) => join(dir, name));
+	if (candidates.length === 0) return undefined;
+	let latest: { path: string; mtime: number } | undefined;
+	for (const candidate of candidates) {
+		const mtime = statSync(candidate).mtimeMs;
+		if (!latest || mtime > latest.mtime) latest = { path: candidate, mtime };
+	}
+	return latest?.path;
+}
+
+// With runId: pinned by id. Without: latest by mtime-max (design D5).
+export function resolveAgentLabReviewRunStatus(
+	input: ResolveAgentLabReviewRunStatusInput,
+): ResolveAgentLabReviewRunStatusResult {
+	if (input.runId) return resolveRunByRunId(input.reportsPath, input.runId);
+	const latest = findLatestRunFileByMtime(input.reportsPath);
+	if (!latest) return { kind: "missing", runId: "", status: "dispatched" };
+	const name = latest.split(/[\\/]/).pop() ?? "";
+	const runId = name.endsWith(RUN_FILE_SUFFIX) ? name.slice(0, -RUN_FILE_SUFFIX.length) : name;
+	const raw = JSON.parse(readFileSync(latest, "utf8")) as AgentLabReviewRunResult;
+	return { kind: "completed", runId, status: raw.runs[0]?.status ?? "completed", result: raw };
 }
