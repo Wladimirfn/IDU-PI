@@ -180,12 +180,13 @@ try {
 		if ($diffOutput) {
 			$changedFiles = $diffOutput -split "`n" | Where-Object { $_ -ne '' }
 		}
-		# Persist the current SHA as the new watermark AFTER computing
-		# the diff (not before, so a crash mid-tick retries the same
-		# diff on the next run rather than skipping it).
-		if ($shaFile -and $currentSha) {
-			Set-Content -Path $shaFile -Value $currentSha.Trim() -NoNewline -ErrorAction SilentlyContinue
-		}
+		# NOTE: the watermark (cron-last-sha.txt) is written AFTER the
+		# preflight completes successfully — NOT here. Writing it before
+		# the preflight runs would advance the SHA even if the node
+		# process crashes, losing that range of commits forever (same
+		# class of bug as HEAD~1..HEAD missing burst merges). The
+		# watermark write is at the end of this try block, gated on
+		# $preflightExit -eq 0.
 	} catch {
 		Log ('changed_files_git_failed: ' + $_)
 	}
@@ -196,6 +197,20 @@ try {
 	Log ('cron_preflight_exit=' + $preflightExit + ' changed_files=' + $changedFiles.Count)
 	Log ('cron_preflight_output: ' + ($preflightOutput -join ' | '))
 	Write-Host $preflightOutput
+	# Advance the watermark ONLY if the preflight succeeded. If the
+	# node process crashed or returned non-zero, the watermark stays
+	# at the previous SHA so the next tick retries the same range.
+	# A persistent failure will show repeated log entries with the
+	# same changed_files count — the operator notices and fixes.
+	if ($preflightExit -eq 0) {
+		$shaFile = if ($StateRoot) { Join-Path $StateRoot 'cron-last-sha.txt' } else { $null }
+		$currentSha = git rev-parse HEAD 2>$null
+		if ($shaFile -and $currentSha) {
+			Set-Content -Path $shaFile -Value $currentSha.Trim() -NoNewline -ErrorAction SilentlyContinue
+		}
+	} else {
+		Log ('watermark_NOT_advanced: preflightExit=' + $preflightExit + ' (next tick will retry the same range)')
+	}
 } catch {
 	Write-Host ('cron preflight falló: ' + $_) -ForegroundColor Red
 	Log ('cron_preflight_failed: ' + $_)
