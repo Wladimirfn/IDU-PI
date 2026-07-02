@@ -34,6 +34,7 @@ import {
 } from "../src/agentlab-review-runner.js";
 import type { AgentProfile } from "../src/config.js";
 import type { PiRpcProgressEvent, PiRpcPromptResult } from "../src/pi-rpc.js";
+import type { AgentLabFinding } from "../src/agentlab-supervisor-contract.js";
 
 class FakeSession implements AgentSession {
 	readonly cwd: string;
@@ -506,7 +507,21 @@ test("run latest con 5 requests master_plan no falla por directorios", async () 
 	});
 
 	assert.equal(result.runs.length, 5);
-	assert.equal(result.runs.filter((run) => run.status === "failed").length, 0);
+	// FIX 1 (fail-loud): garbage lab output ("legacy summary") now produces
+	// 5 failed runs (one per request), each carrying an "invalid-json:"
+	// reason. The runner still doesn't crash on the untracked directory,
+	// and there is no security_violation. The original "0 failed" assertion
+	// encoded the silent-fabrication bug.
+	assert.equal(
+		result.runs.filter((run) => run.status === "failed").length,
+		5,
+	);
+	for (const run of result.runs) {
+		assert.match(
+			run.contractValidation.errors.join("\n"),
+			/^invalid-json:/u,
+		);
+	}
 	assert.equal(
 		result.runs.filter((run) => run.status === "security_violation").length,
 		0,
@@ -839,7 +854,7 @@ test("report JSON válido se valida contra contrato", async () => {
 	assert.equal(run.findings.length, 1);
 });
 
-test("report texto legacy se convierte en contrato válido sin inventar findings", async () => {
+test("output sin JSON termina el run como failed con reason legible sin inventar findings", async () => {
 	const { router, projectPath } = routerWith(
 		"[tool:read] iniciando...\nResumen legacy sin JSON",
 	);
@@ -848,13 +863,175 @@ test("report texto legacy se convierte en contrato válido sin inventar findings
 		projectPath,
 		request: request("security"),
 	});
-	assert.equal(run.status, "partial");
-	assert.equal(run.workloadEnvelope?.status, "partial");
-	assert.equal(run.contractValidation.valid, true);
+	// FIX 1 (fail-loud): no JSON parseable from the lab must NOT silently
+	// become a fabricated "partial" run. It must be a real failure whose
+	// reason surfaces through contractValidation.errors, with no findings
+	// and no fallback qualityWarnings.
+	assert.equal(run.status, "failed");
+	assert.equal(run.workloadEnvelope?.status, "failed");
+	assert.equal(run.contractValidation.valid, false);
+	assert.ok(
+		run.contractValidation.errors.length > 0,
+		"contractValidation.errors must be non-empty for a failed run",
+	);
+	assert.match(
+		run.contractValidation.errors.join("\n"),
+		/^invalid-json:/u,
+	);
 	assert.equal(run.findings.length, 0);
-	assert.match(run.qualityWarnings?.join("\n") ?? "", /fallback/u);
-	assert.doesNotMatch(run.rawSummary, /\[tool:read\]/u);
-	assert.match(run.rawSummary, /Resumen legacy/u);
+	assert.equal(run.qualityWarnings, undefined);
+});
+
+test("parser con output sin JSON devuelve errors no-vacío sin report", () => {
+	// FIX 1 (fail-loud): the parser must surface a non-empty errors array
+	// when no JSON candidate was found, so the caller can route to failedRun.
+	const result = parseAgentLabReviewReportFromOutput(
+		"ruido sin llaves\n[tool:read] x",
+		request("security"),
+	);
+	assert.equal(result.report, undefined);
+	assert.ok(
+		result.errors.length > 0,
+		"errors must be non-empty when no JSON candidate produces a report",
+	);
+	assert.ok(
+		typeof result.errors[0] === "string" && result.errors[0].length > 0,
+		"first error must be a non-empty string",
+	);
+});
+
+test("report JSON válido sigue produciendo run completed (regresión)", async () => {
+	// FIX 1 regression guard: valid JSON must still flow through the happy
+	// path and produce a completed run, not a failed one.
+	const { router, projectPath } = routerWith(
+		`\n\`\`\`json\n${validReport()}\n\`\`\``,
+	);
+	const run = await runAgentLabReviewRequest({
+		router,
+		projectPath,
+		request: request("security"),
+	});
+	assert.equal(run.status, "completed");
+	assert.equal(run.contractValidation.valid, true);
+	assert.equal(run.findings.length, 1);
+});
+
+test("report parcial con estructura reconocible se repara a partial con qualityWarning (tier 2 preservado)", () => {
+	// FIX 1 regression guard: tier 2 (repair) MUST keep working. A report-shaped
+	// but incomplete JSON must be repaired with a qualityWarning, NOT failed.
+	const output = JSON.stringify({
+		requestId: "request-security",
+		projectId: "pi-telegram-bridge",
+		specialty: "security",
+		status: "completed",
+		summary: "Riesgo detectado.",
+		safetyFindings: [{ title: "Auth difuso", severity: "high" }],
+		recommendations: ["Revisar auth"],
+	});
+	const result = parseAgentLabReviewReportFromOutput(output, request("security"));
+	assert.ok(result.report, "tier 2 must produce a report");
+	assert.equal(result.errors.length, 0);
+	assert.match(result.qualityWarnings?.join("\n") ?? "", /reparó/u);
+});
+
+test("review_status con 1 failed + 1 completed muestra ambos discriminados", () => {
+	// FIX 1 discrimination guard: when one run is failed (with invalid-json
+	// reason) and another is completed, formatAgentLabReviewStatus must show
+	// each specialty with its own status. The failed run must NOT contribute
+	// findings or testsSuggested (it is excluded from the consolidated evidence).
+	const failed = {
+		requestId: "request-security",
+		specialty: "security" as const,
+		status: "failed" as const,
+		commandsExecuted: [],
+		rawSummary: "[tool:read] x",
+		contractValidation: {
+			valid: false,
+			errors: ["invalid-json: Unexpected token r in JSON at position 0"],
+		},
+		findings: [],
+		recommendations: [],
+		testsSuggested: [],
+		requiresHumanApproval: false,
+	};
+	const completed = {
+		requestId: "request-database",
+		specialty: "database" as const,
+		status: "completed" as const,
+		commandsExecuted: [],
+		rawSummary: "DB review ok",
+		contractValidation: { valid: true, errors: [] },
+		findings: [
+			{
+				title: "idx-missing",
+				description: "Missing index",
+				evidence: "schema",
+				severity: "medium" as const,
+				confidence: "high" as const,
+				category: "performance",
+				affectedFiles: ["src/db.ts"],
+				affectedFlows: ["query"],
+				relatedRules: [],
+				controlPillars: ["quality"],
+			} satisfies AgentLabFinding,
+		],
+		recommendations: [],
+		testsSuggested: ["add index test"],
+		requiresHumanApproval: false,
+	};
+	const status = {
+		valid: true,
+		path: "current.json",
+		name: "current",
+		errors: [],
+		result: {
+			generatedAt: "2026-07-02T00:00:00.000Z",
+			sourceRequestFile: "request.json",
+			warning: "Revisión AgentLab. No aplica cambios." as const,
+			projectId: "pi-telegram-bridge",
+			runs: [failed, completed],
+			consolidatedSummary: "DB review ok",
+			consolidatedFindings: [
+				{
+					title: "idx-missing",
+					description: "Missing index",
+					evidence: "schema",
+					severity: "medium" as const,
+					confidence: "high" as const,
+					category: "performance",
+					affectedFiles: ["src/db.ts"],
+					affectedFlows: ["query"],
+					relatedRules: [],
+					controlPillars: ["quality"],
+				} satisfies AgentLabFinding,
+			],
+			recommendedNext: "Add index test.",
+			requiresHumanApproval: false,
+			safeNotes: [],
+		},
+	};
+	const formatted = formatAgentLabReviewStatus(status);
+	assert.match(formatted, /security: failed/u);
+	assert.match(formatted, /database: completed/u);
+	// Discrimination: the failed run must NOT bleed into the consolidated
+	// findings list or testsSuggested list — only the completed run contributes.
+	const titles = status.result.consolidatedFindings.map((f) => f.title);
+	assert.deepEqual(titles, ["idx-missing"]);
+	assert.deepEqual(
+		status.result.runs
+			.filter((run) => run.status !== "failed")
+			.flatMap((run) => run.testsSuggested),
+		["add index test"],
+	);
+	// Reason preservation: the fail-loud reason must remain on the run's
+	// contractValidation.errors so downstream consumers (and humans reading
+	// the persisted run JSON) see WHY it failed.
+	const failedRun = status.result.runs.find((r) => r.status === "failed");
+	assert.ok(failedRun, "failed run must be in result.runs");
+	assert.match(
+		failedRun.contractValidation.errors.join("\n"),
+		/^invalid-json:/u,
+	);
 });
 
 test("report parcial se repara a contrato válido", () => {

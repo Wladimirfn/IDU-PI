@@ -330,6 +330,15 @@ export async function runAgentLabReviewRequest(
 				"AgentLab retornó status failed.",
 				...parsed.errors,
 			]);
+		} else if (!parsed.report) {
+			// FIX 1 (fail-loud): invalid JSON or no parseable report must NOT
+			// become a bogus "completed"/"partial" run. Propagate the first
+			// parser error as the visible reason via contractValidation.errors.
+			const reason =
+				parsed.errors[0] ?? "AgentLab output no produjo AgentLabReviewReport.";
+			run = failedRun(input.request, profile, runtime.cwd, result.output, [
+				`invalid-json: ${reason}`,
+			]);
 		} else {
 			run = completedRun(
 				input.request,
@@ -610,19 +619,6 @@ export function extractAgentLabReviewReportFromOutput(
 			}
 		}
 	}
-	const fallback = fallbackAgentLabReviewReport(request, legacySummary(output));
-	const fallbackResult = validateAgentLabReportAgainstSupervisorContract(
-		fallback,
-		request,
-	);
-	if (fallbackResult.ok)
-		return {
-			report: fallbackResult.report,
-			errors: [],
-			qualityWarnings: [
-				"AgentLab no devolvió JSON válido; Idu-pi generó un reporte fallback sin hallazgos.",
-			],
-		};
 	return {
 		errors: errors.length
 			? dedupe(errors)
