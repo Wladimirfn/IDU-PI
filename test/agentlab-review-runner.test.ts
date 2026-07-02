@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	readFileSync,
 	rmSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { mkdtempSync } from "node:fs";
 import test from "node:test";
 import {
@@ -31,10 +33,15 @@ import {
 	runAgentLabReviewRequestFile,
 	selectAgentLabProfile,
 	snapshotRealRepoState,
+	dispatchAgentLabReviewRun,
+	resolveAgentLabReviewRunStatus,
+	mintAgentLabReviewRunId,
+	writeAgentLabReviewRunAtomic,
 } from "../src/agentlab-review-runner.js";
 import type { AgentProfile } from "../src/config.js";
 import type { PiRpcProgressEvent, PiRpcPromptResult } from "../src/pi-rpc.js";
 import type { AgentLabFinding } from "../src/agentlab-supervisor-contract.js";
+import type { AgentLabReviewRunResult } from "../src/agentlab-review-runner.js";
 
 class FakeSession implements AgentSession {
 	readonly cwd: string;
@@ -1156,4 +1163,119 @@ test("format run muestra resumen", async () => {
 		router,
 	});
 	assert.match(formatAgentLabReviewRunResult(result), /AgentLab Review Run/u);
+});
+
+// PR1 (Fix 2 — async dispatch) — RED contract tests. Pin the contract that
+// dispatchAgentLabReviewRun / resolveAgentLabReviewRunStatus MUST satisfy.
+// Compile-time RED gate: these imports fail until PR1 implements production.
+
+function dispatchFixture() {
+	const reportsPath = join(root(), "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	const projectPath = gitProject();
+	return {
+		reportsPath,
+		input: { reportsPath, projectId: "pi-telegram-bridge", projectPath, maxMinutes: 1, requestId: "agentlab-pi-telegram-bridge-manual-security-01" },
+	};
+}
+
+function completedRunSummary(): AgentLabReviewRunResult {
+	return {
+		generatedAt: "2026-05-25T10:01:00.000Z",
+		sourceRequestFile: "agentlab-review-request-20260525-100000.json",
+		warning: "Revisión AgentLab. No aplica cambios." as const,
+		projectId: "pi-telegram-bridge",
+		runs: [{
+			requestId: "agentlab-pi-telegram-bridge-manual-security-01",
+			specialty: "security" as AgentLabSpecialty,
+			status: "completed" as const,
+			commandsExecuted: [], rawSummary: "ok",
+			contractValidation: { valid: true, errors: [] },
+			findings: [], recommendations: [], testsSuggested: [],
+			requiresHumanApproval: false,
+		}],
+		consolidatedSummary: "completed", consolidatedFindings: [],
+		recommendedNext: "none", requiresHumanApproval: false, safeNotes: [],
+	};
+}
+
+test("PR1 dispatch returns immediately with runId and status dispatched", () => {
+	const { input } = dispatchFixture();
+	const start = Date.now();
+	const result = dispatchAgentLabReviewRun(input, "security");
+	const elapsedMs = Date.now() - start;
+
+	assert.ok(elapsedMs < 500, `dispatch must return synchronously (<500ms); took ${elapsedMs}ms`);
+	assert.match(result.runId, /^run-\d{10}-[a-z0-9]+$/u, `runId must match /run-\\d{10}-[a-z0-9]+/`);
+	assert.equal(result.status, "dispatched", "envelope status must be \"dispatched\"");
+	assert.ok(existsSync(result.dispatchPath), `dispatchPath must exist on disk: ${result.dispatchPath}`);
+	const raw = JSON.parse(readFileSync(result.dispatchPath, "utf8")) as { runId: string; status: string; startedAt: string };
+	assert.equal(raw.runId, result.runId, "placeholder runId must match envelope");
+	assert.equal(raw.status, "dispatched", "placeholder status must be \"dispatched\"");
+	assert.match(raw.startedAt, /^\d{4}-\d{2}-\d{2}T/u, "placeholder startedAt must be ISO");
+});
+
+test("PR1 status during execution reports running when only dispatch.json exists", () => {
+	const { input, reportsPath } = dispatchFixture();
+	const { runId, dispatchPath } = dispatchAgentLabReviewRun(input, "security");
+	const runFile = dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+
+	assert.ok(existsSync(dispatchPath), "dispatch placeholder must exist on disk");
+	assert.equal(existsSync(runFile), false, `run artifact must NOT exist while running: ${runFile}`);
+
+	const status = resolveAgentLabReviewRunStatus({ runId, reportsPath });
+	assert.equal(status.status, "running", "status while dispatch.json exists and run.json does not must be \"running\"");
+	assert.equal(status.runId, runId, "status.runId must echo the queried runId");
+	assert.equal(status.kind, "running", "status.kind discriminator must report \"running\"");
+});
+
+test("PR1 status after completion reports completed or failed based on run.json", () => {
+	const { input, reportsPath } = dispatchFixture();
+	const { runId, dispatchPath } = dispatchAgentLabReviewRun(input, "security");
+	const runFile = dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+
+	const completed = completedRunSummary();
+	assert.equal(writeAgentLabReviewRunAtomic(runId, input.reportsPath, completed), runFile, "atomic write must land at run.json path");
+	rmSync(dispatchPath, { force: true });
+
+	const status = resolveAgentLabReviewRunStatus({ runId, reportsPath });
+	assert.equal(status.status, "completed", "run.json with status=completed must resolve to \"completed\"");
+	assert.equal(status.kind, "completed", "kind discriminator must report \"completed\"");
+
+	// Flip to failed: resolver must track the distinction (kind stays "completed" — file present).
+	const failed = { ...completed, runs: [{ ...completed.runs[0]!, status: "failed" as const }] };
+	writeAgentLabReviewRunAtomic(runId, input.reportsPath, failed);
+	const failedStatus = resolveAgentLabReviewRunStatus({ runId, reportsPath });
+	assert.equal(failedStatus.status, "failed", "run.json with status=failed must resolve to \"failed\"");
+	assert.equal(failedStatus.kind, "completed", "kind stays \"completed\" (file present)");
+});
+
+test("PR1 status never mixes concurrent generations; status(latest) picks by mtime", () => {
+	const { reportsPath } = dispatchFixture();
+
+	const runIdA = mintAgentLabReviewRunId();
+	const runIdB = mintAgentLabReviewRunId();
+	const runDir = resolve(join(reportsPath, "..", "agentlabs", "runs"));
+	mkdirSync(runDir, { recursive: true });
+
+	const older = completedRunSummary();
+	older.generatedAt = "2026-05-25T09:00:00.000Z";
+	const newer = { ...completedRunSummary(), generatedAt: "2026-05-25T10:00:00.000Z" };
+
+	writeAgentLabReviewRunAtomic(runIdA, reportsPath, older);
+	// Force a measurable mtime gap so findLatestByMtime has a deterministic winner.
+	utimesSync(join(runDir, `${runIdA}.json`), new Date("2026-05-25T09:00:00.000Z"), new Date("2026-05-25T09:00:00.000Z"));
+	writeAgentLabReviewRunAtomic(runIdB, reportsPath, newer);
+	utimesSync(join(runDir, `${runIdB}.json`), new Date("2026-05-25T10:00:00.000Z"), new Date("2026-05-25T10:00:00.000Z"));
+
+	const statusA = resolveAgentLabReviewRunStatus({ runId: runIdA, reportsPath });
+	assert.equal(statusA.runId, runIdA, "statusA.runId must echo runIdA (no mix with runB)");
+	assert.equal(statusA.status, "completed", "statusA.status must report runA's status");
+
+	const statusB = resolveAgentLabReviewRunStatus({ runId: runIdB, reportsPath });
+	assert.equal(statusB.runId, runIdB, "statusB.runId must echo runIdB (no mix with runA)");
+	assert.equal(statusB.status, "completed", "statusB.status must report runB's status");
+
+	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
+	assert.equal(statusLatest.runId, runIdB, "latest must resolve to the most-recently-written runId (by mtime)");
 });
