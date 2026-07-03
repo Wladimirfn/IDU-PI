@@ -168,6 +168,14 @@ export async function handleAgentLabRequestCreate(
 /**
  * idu_agentlab_review_run — execute explicit AgentLab review.
  * Body verbatim from src/mcp-server.ts L4815-L4862.
+ *
+ * PR3 (Fix 2 — async dispatch): when the runtime returns the
+ * dispatched sentinel (`consolidatedSummary` starts with
+ * `"AgentLab review run dispatched: "`), surface the dispatched
+ * envelope shape `{runId, status: "dispatched", dispatchPath}` at
+ * `data` and DO NOT aggregate runs (the lab is in flight, no
+ * `result.runs` to summarize yet). The sync-blocking path
+ * (Fix 1 callers + test harnesses) keeps the existing envelope.
  */
 export async function handleAgentLabReviewRun(
 	name: IduMcpToolName,
@@ -177,6 +185,39 @@ export async function handleAgentLabReviewRun(
 ): Promise<IduMcpToolResult> {
 	const selector = stringArg(args, "selector") ?? "latest";
 	const result = await runtime.agentLabReviewRun(selector);
+
+	// Dispatched branch: PR2 sentinel. The runtime's
+	// dispatchAgentLabReviewRun wrote `<runId>.dispatch.json` and
+	// returned the dispatch envelope with empty `runs`.
+	const dispatchedMatch = /^AgentLab review run dispatched: (\S+)\s*$/u.exec(
+		result.consolidatedSummary,
+	);
+	if (dispatchedMatch && result.runs.length === 0) {
+		const runId = dispatchedMatch[1]!;
+		const dispatchPath = result.path ?? "";
+		return envelope({
+			stateRoot: "",
+
+			ok: true,
+			tool: name,
+			projectId: runtime.projectId,
+			projectPath: runtime.projectPath,
+			summary: `AgentLab review run dispatched: ${runId}`,
+			data: {
+				runId,
+				status: "dispatched",
+				dispatchPath,
+				result,
+			},
+			safeNotes: [
+				...resolution.safeNotes,
+				...result.safeNotes,
+				"AgentLab review dispatched as fire-and-forget (Fix 2).",
+				`Poll status with: agentlab_review_status ${runId}`,
+			],
+		});
+	}
+
 	const aggregateStatus = aggregateRunStatus(
 		result.runs.map((run) => run.status),
 	);

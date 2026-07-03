@@ -1169,6 +1169,14 @@ test("format run muestra resumen", async () => {
 // dispatchAgentLabReviewRun / resolveAgentLabReviewRunStatus MUST satisfy.
 // Compile-time RED gate: these imports fail until PR1 implements production.
 
+// PR2 (Fix 2 — async dispatch) — production-real pipeline contract tests.
+// Pin the contract that the detached promise:
+//   (a) does NOT block the dispatcher return
+//   (b) eventually writes <runId>.json atomically on completion
+//   (c) emits a supervisor activity event (via the optional onActivity hook)
+// All 4 PR1 tests above MUST still pass — REPLACEMENT of stub bodies, not
+// removal of stub seam.
+
 function dispatchFixture() {
 	const reportsPath = join(root(), "reports");
 	mkdirSync(reportsPath, { recursive: true });
@@ -1278,4 +1286,240 @@ test("PR1 status never mixes concurrent generations; status(latest) picks by mti
 
 	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
 	assert.equal(statusLatest.runId, runIdB, "latest must resolve to the most-recently-written runId (by mtime)");
+});
+
+// ===== PR2 (Fix 2) — production-real pipeline contract tests =====
+
+// Helper: wait for a predicate up to `maxMs`, polling every `intervalMs`.
+async function waitFor(
+	predicate: () => boolean,
+	maxMs = 2000,
+	intervalMs = 10,
+): Promise<boolean> {
+	const deadline = Date.now() + maxMs;
+	while (Date.now() < deadline) {
+		if (predicate()) return true;
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+	return predicate();
+}
+
+test("PR2 dispatch returns immediately even when runLab takes >100ms (detached promise)", async () => {
+	const { input } = dispatchFixture();
+	const start = Date.now();
+	let runLabFinishedAt = 0;
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => {
+			// Simulate the lab work taking 250ms — the dispatcher MUST
+			// return well before this completes.
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			runLabFinishedAt = Date.now();
+			return completedRunSummary();
+		},
+	}, "security");
+	const elapsedMs = Date.now() - start;
+
+	assert.ok(elapsedMs < 100, `dispatch must return <100ms even with a slow runLab; took ${elapsedMs}ms`);
+	assert.equal(result.status, "dispatched", "dispatch envelope status must remain 'dispatched'");
+	assert.match(result.runId, /^run-\d{10}-[a-z0-9]+$/u, "dispatch envelope must include a valid runId");
+
+	// Wait for the detached promise to complete — proves the pipeline ran.
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `run artifact must be written after runLab resolves: ${runFile}`);
+	assert.ok(runLabFinishedAt > 0, "runLab must have completed");
+	assert.ok(runLabFinishedAt - start >= 200, `runLab must have run for ~250ms; took ${runLabFinishedAt - start}ms`);
+
+	// Dispatch return happened BEFORE runLab finished — the detached contract.
+	assert.ok(elapsedMs < runLabFinishedAt - start, `dispatch must return BEFORE runLab finishes; elapsed=${elapsedMs}ms runLab-duration=${runLabFinishedAt - start}ms`);
+});
+
+test("PR2 detached runLab failure writes failed run artifact (status: failed)", async () => {
+	const { input } = dispatchFixture();
+	const failureMessage = "synthetic lab failure for PR2";
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => {
+			throw new Error(failureMessage);
+		},
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `failed run artifact must be written even when runLab throws: ${runFile}`);
+
+	const status = resolveAgentLabReviewRunStatus({ runId: result.runId, reportsPath: input.reportsPath });
+	assert.equal(status.kind, "completed", "kind stays 'completed' once the run file exists");
+	assert.equal(status.status, "failed", "failed runLab must produce status: failed");
+});
+
+test("PR2 detached runLab success writes run artifact matching runLab's summary", async () => {
+	const { input } = dispatchFixture();
+	const summary = completedRunSummary();
+	summary.runs[0]!.status = "partial";
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => summary,
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `run artifact must be written when runLab resolves: ${runFile}`);
+
+	const status = resolveAgentLabReviewRunStatus({ runId: result.runId, reportsPath: input.reportsPath });
+	assert.equal(status.kind, "completed", "kind must be 'completed' once the run file is written");
+	assert.equal(status.status, "partial", "runLab-returned status must propagate to run artifact");
+});
+
+test("PR2 detached promise emits completion activity via onActivity hook", async () => {
+	const { input } = dispatchFixture();
+	const activityEvents: Array<{ kind: string; runId: string }> = [];
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => completedRunSummary(),
+		onActivity: (event) => {
+			activityEvents.push({ kind: event.kind, runId: event.runId });
+		},
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, "run artifact must be written for activity emission to settle");
+
+	// Wait for the .finally to drain the activity emission.
+	const started = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_started"), 1000);
+	assert.ok(started, `dispatch_started activity must be emitted; got ${JSON.stringify(activityEvents)}`);
+	const completed = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_completed"), 1000);
+	assert.ok(completed, `dispatch_completed activity must be emitted on success; got ${JSON.stringify(activityEvents)}`);
+
+	for (const event of activityEvents) {
+		assert.equal(event.runId, result.runId, `activity event runId must match dispatch envelope`);
+	}
+});
+
+test("PR2 detached promise emits dispatch_failed activity when runLab rejects", async () => {
+	const { input } = dispatchFixture();
+	const activityEvents: Array<{ kind: string; runId: string }> = [];
+	const result = dispatchAgentLabReviewRun({
+		...input,
+		runLab: async () => {
+			throw new Error("boom");
+		},
+		onActivity: (event) => {
+			activityEvents.push({ kind: event.kind, runId: event.runId });
+		},
+	}, "security");
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, "run artifact must be written even when runLab rejects");
+
+	const failed = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_failed"), 1000);
+	assert.ok(failed, `dispatch_failed activity must be emitted on rejection; got ${JSON.stringify(activityEvents)}`);
+});
+
+// ===== PR4 (Fix 2 audit) — latest-resolution dispatch inclusion =====
+
+test("PR4 dispatch más nuevo que run viejo coexistente: latest resuelve al dispatch (running) con el runId nuevo", () => {
+	// Reproduce Demo C of the audit: an older completed run sits on disk while a
+	// newer dispatch placeholder (no run artifact yet) exists. findLatestRunFileByMtime
+	// must include `.dispatch.json` candidates; resolution must delegate to
+	// resolveRunByRunId, which sees the absent run file + present dispatch and
+	// returns kind=running with the NEW dispatch runId — NOT the old completed runId.
+	const { reportsPath } = dispatchFixture();
+
+	const oldRunId = mintAgentLabReviewRunId();
+	const newRunId = mintAgentLabReviewRunId();
+	const runDir = resolve(join(reportsPath, "..", "agentlabs", "runs"));
+	mkdirSync(runDir, { recursive: true });
+
+	// Old completed run (runIdA.json), mtime pinned to T-2h.
+	writeAgentLabReviewRunAtomic(oldRunId, reportsPath, completedRunSummary());
+	utimesSync(
+		join(runDir, `${oldRunId}.json`),
+		new Date("2026-05-25T09:00:00.000Z"),
+		new Date("2026-05-25T09:00:00.000Z"),
+	);
+
+	// New dispatch placeholder (runIdB.dispatch.json), mtime pinned to T+0 — newer.
+	writeFileSync(
+		join(runDir, `${newRunId}.dispatch.json`),
+		JSON.stringify({ runId: newRunId, status: "dispatched", startedAt: "2026-05-25T11:00:00.000Z" }, null, 2),
+		"utf8",
+	);
+	utimesSync(
+		join(runDir, `${newRunId}.dispatch.json`),
+		new Date("2026-05-25T11:00:00.000Z"),
+		new Date("2026-05-25T11:00:00.000Z"),
+	);
+
+	// status(latest) must point at the NEW dispatch, not the OLD completed run.
+	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
+	assert.equal(
+		statusLatest.runId,
+		newRunId,
+		"latest must resolve to the NEW dispatch runId (newest by mtime across both suffixes)",
+	);
+	assert.equal(
+		statusLatest.kind,
+		"running",
+		"latest.kind must be 'running' when only the .dispatch.json placeholder exists for the newest mtime",
+	);
+	assert.equal(statusLatest.status, "running", "latest.status must be 'running' for an in-flight dispatch");
+
+	// The old runId is still pinnable — caller can ask for it explicitly.
+	const statusOld = resolveAgentLabReviewRunStatus({ runId: oldRunId, reportsPath });
+	assert.equal(statusOld.runId, oldRunId, "old runId must still resolve to itself when pinned");
+	assert.equal(statusOld.kind, "completed", "old runId.kind must remain 'completed' (run file present)");
+	assert.equal(statusOld.status, "completed", "old runId.status must remain 'completed'");
+});
+
+test("PR4 run y dispatch del MISMO runId coexistiendo: latest resuelve al completed (run file prevalece sobre residual dispatch.json)", () => {
+	// Residual .dispatch.json post-completion (e.g. crash during cleanup or
+	// lock-leak scenario) must NOT regress latest to 'running' when the run
+	// file is already present. resolveRunByRunId checks the run file FIRST
+	// and only falls through to dispatch if the run file is absent — and
+	// findLatestRunFileByMtime must include both suffixes in its mtime-max
+	// scan so it can pick the run file (which has the newer mtime in normal
+	// completion) and hand the runId to resolveRunByRunId.
+	const { reportsPath } = dispatchFixture();
+
+	const runId = mintAgentLabReviewRunId();
+	const runDir = resolve(join(reportsPath, "..", "agentlabs", "runs"));
+	mkdirSync(runDir, { recursive: true });
+
+	// Completed run file written first.
+	writeAgentLabReviewRunAtomic(runId, reportsPath, completedRunSummary());
+	utimesSync(
+		join(runDir, `${runId}.json`),
+		new Date("2026-05-25T11:00:00.000Z"),
+		new Date("2026-05-25T11:00:00.000Z"),
+	);
+
+	// Residual dispatch placeholder (cleanup never ran) — mtime intentionally
+	// OLDER than the run file so the residual cannot win by accident.
+	writeFileSync(
+		join(runDir, `${runId}.dispatch.json`),
+		JSON.stringify({ runId, status: "dispatched", startedAt: "2026-05-25T10:30:00.000Z" }, null, 2),
+		"utf8",
+	);
+	utimesSync(
+		join(runDir, `${runId}.dispatch.json`),
+		new Date("2026-05-25T10:30:00.000Z"),
+		new Date("2026-05-25T10:30:00.000Z"),
+	);
+
+	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
+	assert.equal(
+		statusLatest.runId,
+		runId,
+		"latest must resolve to the runId when both .json and .dispatch.json coexist",
+	);
+	assert.equal(
+		statusLatest.kind,
+		"completed",
+		"latest.kind must be 'completed' (run file present takes precedence over residual dispatch)",
+	);
+	assert.equal(statusLatest.status, "completed", "latest.status must be 'completed'");
 });
