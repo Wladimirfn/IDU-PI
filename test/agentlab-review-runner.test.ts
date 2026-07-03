@@ -1418,3 +1418,108 @@ test("PR2 detached promise emits dispatch_failed activity when runLab rejects", 
 	const failed = await waitFor(() => activityEvents.some((e) => e.kind === "dispatch_failed"), 1000);
 	assert.ok(failed, `dispatch_failed activity must be emitted on rejection; got ${JSON.stringify(activityEvents)}`);
 });
+
+// ===== PR4 (Fix 2 audit) — latest-resolution dispatch inclusion =====
+
+test("PR4 dispatch más nuevo que run viejo coexistente: latest resuelve al dispatch (running) con el runId nuevo", () => {
+	// Reproduce Demo C of the audit: an older completed run sits on disk while a
+	// newer dispatch placeholder (no run artifact yet) exists. findLatestRunFileByMtime
+	// must include `.dispatch.json` candidates; resolution must delegate to
+	// resolveRunByRunId, which sees the absent run file + present dispatch and
+	// returns kind=running with the NEW dispatch runId — NOT the old completed runId.
+	const { reportsPath } = dispatchFixture();
+
+	const oldRunId = mintAgentLabReviewRunId();
+	const newRunId = mintAgentLabReviewRunId();
+	const runDir = resolve(join(reportsPath, "..", "agentlabs", "runs"));
+	mkdirSync(runDir, { recursive: true });
+
+	// Old completed run (runIdA.json), mtime pinned to T-2h.
+	writeAgentLabReviewRunAtomic(oldRunId, reportsPath, completedRunSummary());
+	utimesSync(
+		join(runDir, `${oldRunId}.json`),
+		new Date("2026-05-25T09:00:00.000Z"),
+		new Date("2026-05-25T09:00:00.000Z"),
+	);
+
+	// New dispatch placeholder (runIdB.dispatch.json), mtime pinned to T+0 — newer.
+	writeFileSync(
+		join(runDir, `${newRunId}.dispatch.json`),
+		JSON.stringify({ runId: newRunId, status: "dispatched", startedAt: "2026-05-25T11:00:00.000Z" }, null, 2),
+		"utf8",
+	);
+	utimesSync(
+		join(runDir, `${newRunId}.dispatch.json`),
+		new Date("2026-05-25T11:00:00.000Z"),
+		new Date("2026-05-25T11:00:00.000Z"),
+	);
+
+	// status(latest) must point at the NEW dispatch, not the OLD completed run.
+	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
+	assert.equal(
+		statusLatest.runId,
+		newRunId,
+		"latest must resolve to the NEW dispatch runId (newest by mtime across both suffixes)",
+	);
+	assert.equal(
+		statusLatest.kind,
+		"running",
+		"latest.kind must be 'running' when only the .dispatch.json placeholder exists for the newest mtime",
+	);
+	assert.equal(statusLatest.status, "running", "latest.status must be 'running' for an in-flight dispatch");
+
+	// The old runId is still pinnable — caller can ask for it explicitly.
+	const statusOld = resolveAgentLabReviewRunStatus({ runId: oldRunId, reportsPath });
+	assert.equal(statusOld.runId, oldRunId, "old runId must still resolve to itself when pinned");
+	assert.equal(statusOld.kind, "completed", "old runId.kind must remain 'completed' (run file present)");
+	assert.equal(statusOld.status, "completed", "old runId.status must remain 'completed'");
+});
+
+test("PR4 run y dispatch del MISMO runId coexistiendo: latest resuelve al completed (run file prevalece sobre residual dispatch.json)", () => {
+	// Residual .dispatch.json post-completion (e.g. crash during cleanup or
+	// lock-leak scenario) must NOT regress latest to 'running' when the run
+	// file is already present. resolveRunByRunId checks the run file FIRST
+	// and only falls through to dispatch if the run file is absent — and
+	// findLatestRunFileByMtime must include both suffixes in its mtime-max
+	// scan so it can pick the run file (which has the newer mtime in normal
+	// completion) and hand the runId to resolveRunByRunId.
+	const { reportsPath } = dispatchFixture();
+
+	const runId = mintAgentLabReviewRunId();
+	const runDir = resolve(join(reportsPath, "..", "agentlabs", "runs"));
+	mkdirSync(runDir, { recursive: true });
+
+	// Completed run file written first.
+	writeAgentLabReviewRunAtomic(runId, reportsPath, completedRunSummary());
+	utimesSync(
+		join(runDir, `${runId}.json`),
+		new Date("2026-05-25T11:00:00.000Z"),
+		new Date("2026-05-25T11:00:00.000Z"),
+	);
+
+	// Residual dispatch placeholder (cleanup never ran) — mtime intentionally
+	// OLDER than the run file so the residual cannot win by accident.
+	writeFileSync(
+		join(runDir, `${runId}.dispatch.json`),
+		JSON.stringify({ runId, status: "dispatched", startedAt: "2026-05-25T10:30:00.000Z" }, null, 2),
+		"utf8",
+	);
+	utimesSync(
+		join(runDir, `${runId}.dispatch.json`),
+		new Date("2026-05-25T10:30:00.000Z"),
+		new Date("2026-05-25T10:30:00.000Z"),
+	);
+
+	const statusLatest = resolveAgentLabReviewRunStatus({ reportsPath });
+	assert.equal(
+		statusLatest.runId,
+		runId,
+		"latest must resolve to the runId when both .json and .dispatch.json coexist",
+	);
+	assert.equal(
+		statusLatest.kind,
+		"completed",
+		"latest.kind must be 'completed' (run file present takes precedence over residual dispatch)",
+	);
+	assert.equal(statusLatest.status, "completed", "latest.status must be 'completed'");
+});

@@ -2000,8 +2000,12 @@ function resolveRunByRunId(reportsPath: string, runId: string): ResolveAgentLabR
 function findLatestRunFileByMtime(reportsPath: string): string | undefined {
 	const dir = runDirectory(reportsPath);
 	if (!existsSync(dir)) return undefined;
+	// PR4 (Fix 2 audit): include BOTH .json and .dispatch.json so an in-flight
+	// dispatch placeholder can win the mtime-max when it is newer than the
+	// last completed run. resolveRunByRunId then discriminates run vs dispatch
+	// correctly (run file present → completed; only dispatch → running).
 	const candidates = safeReadDirNames(dir)
-		.filter((name) => name.endsWith(RUN_FILE_SUFFIX) && !name.endsWith(DISPATCH_FILE_SUFFIX))
+		.filter((name) => name.endsWith(RUN_FILE_SUFFIX))
 		.map((name) => join(dir, name));
 	if (candidates.length === 0) return undefined;
 	let latest: { path: string; mtime: number } | undefined;
@@ -2020,7 +2024,12 @@ export function resolveAgentLabReviewRunStatus(
 	const latest = findLatestRunFileByMtime(input.reportsPath);
 	if (!latest) return { kind: "missing", runId: "", status: "dispatched" };
 	const name = latest.split(/[\\/]/).pop() ?? "";
-	const runId = name.endsWith(RUN_FILE_SUFFIX) ? name.slice(0, -RUN_FILE_SUFFIX.length) : name;
-	const raw = JSON.parse(readFileSync(latest, "utf8")) as AgentLabReviewRunResult;
-	return { kind: "completed", runId, status: raw.runs[0]?.status ?? "completed", result: raw };
+	// PR4: strip whichever trailing suffix the candidate had (.json or
+	// .dispatch.json) so resolveRunByRunId gets a bare runId.
+	const runId = name.endsWith(DISPATCH_FILE_SUFFIX)
+		? name.slice(0, -DISPATCH_FILE_SUFFIX.length)
+		: name.endsWith(RUN_FILE_SUFFIX)
+			? name.slice(0, -RUN_FILE_SUFFIX.length)
+			: name;
+	return resolveRunByRunId(input.reportsPath, runId);
 }
