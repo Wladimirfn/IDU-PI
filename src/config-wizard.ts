@@ -277,7 +277,7 @@ function writeLocalSkillIndex(projectPath: string): string {
 				.filter((name) => existsSync(join(skillsRoot, name, "SKILL.md")))
 				.sort()
 		: [];
-	const content = `# Project Skill Index\n\nRead this index first, then open only the matching SKILL.md.\n\n| Skill | Path |\n| --- | --- |\n${entries.map((name) => `| ${name} | .idu/skills/${name}/SKILL.md |`).join("\n")}\n`;
+	const content = `# Project Skill Index\n\nThis is the **SOURCE** for project skills under idu-pi. Host mirrors (e.g. \`.agents/skills/\` for OpenCode, \`.pi/skills/\` for Pi) **refresh via idu-skills-deploy** (see deploy-out #214, commits \`a1df851\` and \`44616e3\`). The idu-pi source-of-truth lives here under \`.idu/skills/\`. If you are a host CLI (OpenCode, Pi) and the host mirror is stale, run \`idu-skills-deploy\` to refresh; do NOT hand-edit the mirror.\n\nRead this index first, then open only the matching SKILL.md.\n\n| Skill | Path |\n| --- | --- |\n${entries.map((name) => `| ${name} | .idu/skills/${name}/SKILL.md |`).join("\n")}\n`;
 	const indexPath = join(projectPath, SKILL_INDEX);
 	writeFileSync(indexPath, content, "utf8");
 	return indexPath;
