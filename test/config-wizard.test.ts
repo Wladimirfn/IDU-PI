@@ -712,6 +712,55 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 	assert.match(formatSkillsSyncResult(result), /Skills sincronizadas/);
 });
 
+test("syncNecessarySkills INDEX header marks .idu/skills/ as the SOURCE and paths stay under .idu", () => {
+	// F2 (lab.db id 73) regression guard: the generated INDEX must (a) carry the
+	// SOURCE header that documents the .idu/skills/ vs host-mirror contract, and
+	// (b) keep every path under .idu/skills/. The negative assertion for
+	// .agents/skills/ catches the original hygiene-migrate verbatim-copy bug.
+	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
+	const sourceSkillsDir = join(tempDir(), "source-skills");
+	for (const skill of NECESSARY_PROJECT_SKILLS) {
+		const skillDir = join(sourceSkillsDir, skill);
+		mkdirSync(skillDir, { recursive: true });
+		writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`, "utf8");
+	}
+
+	syncNecessarySkills(sourceSkillsDir, projectPath, stateRoot);
+
+	const indexPath = join(projectPath, ".idu", "skills", "INDEX.md");
+	const indexContent = readFileSync(indexPath, "utf8");
+
+	// Header present (durable across regenerations)
+	assert.match(
+		indexContent,
+		/This is the \*\*SOURCE\*\* for project skills under idu-pi/,
+		"INDEX must carry the SOURCE header so the contract survives skills_sync regenerations",
+	);
+	assert.match(
+		indexContent,
+		/host mirrors.*refresh via idu-skills-deploy/is,
+		"INDEX header must document the host-mirror refresh protocol",
+	);
+
+	// All paths under .idu/skills/ (positive assertion)
+	assert.match(
+		indexContent,
+		/\| \S+ \| \.idu\/skills\/\S+\/SKILL\.md \|/,
+		"INDEX must use .idu/skills/ paths",
+	);
+
+	// No path row under .agents/skills/ (negative regression guard).
+	// The header text is allowed to MENTION .agents/skills/ as a host-mirror
+	// example (that's the SOURCE contract), but no PATH row in the table can
+	// point at .agents/skills/ — that was the F2 bug.
+	assert.doesNotMatch(
+		indexContent,
+		/\| \S+ \| \.agents\/skills\//,
+		"INDEX must not contain any PATH row pointing at .agents/skills/ (F2 regression: original bug from hygiene-migrate verbatim copy)",
+	);
+});
+
 test("formatConfigOverview and formatConfigDoctor hide secrets and show next steps", () => {
 	const projectPath = tempDir();
 	const stateRoot = tempStateRoot();
