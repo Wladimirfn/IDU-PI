@@ -41,7 +41,7 @@ import {
 import type { AgentProfile } from "../src/config.js";
 import type { PiRpcProgressEvent, PiRpcPromptResult } from "../src/pi-rpc.js";
 import type { AgentLabFinding } from "../src/agentlab-supervisor-contract.js";
-import type { AgentLabReviewRunResult } from "../src/agentlab-review-runner.js";
+import type { AgentLabReviewRunResult, AgentLabReviewStatus } from "../src/agentlab-review-runner.js";
 
 class FakeSession implements AgentSession {
 	readonly cwd: string;
@@ -1559,4 +1559,113 @@ test("PR4 run y dispatch del MISMO runId coexistiendo: latest resuelve al comple
 		"latest.kind must be 'completed' (run file present takes precedence over residual dispatch)",
 	);
 	assert.equal(statusLatest.status, "completed", "latest.status must be 'completed'");
+});
+
+// ===== Issue #246 (Fix Running Status) — RED-first E2E contract tests =====
+// These three tests pin the contract that `getAgentLabReviewStatus(runId)`
+// MUST distinguish "running" (only `.dispatch.json` on disk) from "completed"
+// (full `.json`) from "missing" (neither), and that the runner uses the
+// existing `runFilePath` / `dispatchFilePath` helpers (no path-construction
+// duplication). The pre-fix code conflates these cases into `valid: false`
+// with a generic path-resolution error, so all three tests fail RED until
+// the type gains `state` and `resolveRunPath` learns the dispatch fallback.
+
+test("Issue #246 status poll while run is in flight returns state=running, valid=true", () => {
+	// T1.1 RED contract: dispatch a real run, do NOT write <runId>.json, then
+	// call getAgentLabReviewStatus(runId). The fix MUST set state="running",
+	// keep valid=true, leave result=undefined, and point name at the dispatch
+	// file so callers can read it if they want the dispatch envelope.
+	const { input, reportsPath } = dispatchFixture();
+	const { runId, dispatchPath } = dispatchAgentLabReviewRun(input, "security");
+	const runFile = dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+
+	assert.ok(existsSync(dispatchPath), "dispatch placeholder must exist");
+	assert.equal(existsSync(runFile), false, "run artifact must NOT exist yet (in-flight)");
+
+	const status = getAgentLabReviewStatus(runId, reportsPath);
+
+	assert.equal(status.state, "running", "state discriminator must report 'running' for in-flight dispatch");
+	assert.equal(status.valid, true, "valid MUST be true for in-flight dispatch (issue #246 symptom)");
+	assert.equal(status.result, undefined, "result MUST be undefined while run is in flight");
+	assert.deepEqual(status.errors, [], "errors MUST be empty for an in-flight dispatch");
+	assert.match(status.name, /\.dispatch\.json$/u, `name MUST point at the dispatch file; got: ${status.name}`);
+	assert.equal(status.path, dispatchPath, "path MUST equal the dispatch file path on disk");
+});
+
+test("Issue #246 status poll after run file is written returns state=completed, valid=true, result populated", () => {
+	// T1.2 RED contract: same setup as running but write the final run file
+	// after dispatch. The fix MUST report state="completed" with the result
+	// populated — i.e. the post-fix code MUST NOT regress to state="running"
+	// just because a dispatch placeholder might still exist (residual case
+	// from PR4 audit is explicitly handled by checking the run file first).
+	const { input, reportsPath } = dispatchFixture();
+	const { runId, dispatchPath } = dispatchAgentLabReviewRun(input, "security");
+	const completed = completedRunSummary();
+	assert.equal(
+		writeAgentLabReviewRunAtomic(runId, input.reportsPath, completed),
+		dispatchPath.replace(/\.dispatch\.json$/u, ".json"),
+		"atomic write must land at run.json path",
+	);
+
+	const status = getAgentLabReviewStatus(runId, reportsPath);
+
+	assert.equal(status.state, "completed", "state discriminator must report 'completed' when run.json exists");
+	assert.equal(status.valid, true, "valid MUST be true for a completed run");
+	assert.ok(status.result, "result MUST be populated for a completed run");
+	assert.equal(status.result?.runs[0]?.status, "completed", "result.runs[0].status must propagate from the run file");
+});
+
+test("Issue #246 status poll for runId with neither .json nor .dispatch.json returns state=missing with clear error", () => {
+	// T1.5 (extra) RED contract: when neither <runId>.json nor <runId>.dispatch.json
+	// exists, the fix MUST report state="missing", valid=false, and a human-readable
+	// error message that mentions BOTH filenames (so the operator can tell whether
+	// the dispatch was lost or the run never executed). The pre-fix code falls into
+	// the generic path-resolution error and does NOT mention the dispatch file.
+	const reportsPath = join(root(), "reports");
+	mkdirSync(reportsPath, { recursive: true });
+
+	const status = getAgentLabReviewStatus("run-9999999999-zzzzzz", reportsPath);
+
+	assert.equal(status.state, "missing", "state discriminator must report 'missing' when neither file exists");
+	assert.equal(status.valid, false, "valid MUST be false when neither file exists");
+	assert.ok(status.errors.length > 0, "errors MUST be non-empty");
+	assert.match(
+		status.errors.join("\n"),
+		/\.json/u,
+		"error message must reference the .json filename",
+	);
+	assert.match(
+		status.errors.join("\n"),
+		/\.dispatch\.json/u,
+		"error message must also reference the .dispatch.json filename (issue #246)",
+	);
+});
+
+test("Issue #246 formatter surfaces running state with explicit banner + Recommended next line", () => {
+	// T1.6 RED contract: formatAgentLabReviewStatus MUST branch on state and
+	// emit a literal "Estado: en vuelo" banner plus a Recommended next line
+	// that includes the runId, when state="running". The pre-fix formatter
+	// only branches on valid/result and would render the invalid-fallback
+	// (or nothing useful) for an in-flight dispatch.
+	const status: AgentLabReviewStatus = {
+		valid: true,
+		path: "/fake/runs/run-1783107836-0c0b0b.dispatch.json",
+		name: "run-1783107836-0c0b0b.dispatch.json",
+		errors: [],
+		state: "running",
+		// result intentionally omitted (in-flight)
+	};
+	const formatted = formatAgentLabReviewStatus(status);
+	assert.match(formatted, /Estado: en vuelo/u, `formatter must surface the running banner; got:\n${formatted}`);
+	assert.match(formatted, /Recommended next:/u, `formatter must surface a Recommended next line; got:\n${formatted}`);
+	assert.match(
+		formatted,
+		/run-1783107836-0c0b0b/u,
+		`Recommended next line must include the runId; got:\n${formatted}`,
+	);
+	assert.match(
+		formatted,
+		/agentlab_review_status/u,
+		`Recommended next line must point at agentlab_review_status; got:\n${formatted}`,
+	);
 });

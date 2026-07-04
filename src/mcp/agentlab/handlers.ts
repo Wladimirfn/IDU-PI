@@ -279,13 +279,16 @@ export async function handleAgentLabReviewStatus(
 	const runs = status.result?.runs ?? [];
 	const workloadEnvelope = agentLabStatusWorkloadEnvelope(status);
 	const recommendations = runs.flatMap((run) => run.recommendations);
-	const agentLabRequiresHuman =
+	// Issue #246: in-flight dispatch is NOT a human-required event.
+	const baseRequiresHuman =
 		!status.valid ||
 		status.result?.requiresHumanApproval === true ||
 		runs.some((run) => run.requiresHumanApproval) ||
 		recommendations.some(
 			(recommendation) => recommendation.requiresHumanApproval,
 		);
+	const agentLabRequiresHuman =
+		status.state === "running" ? false : baseRequiresHuman;
 	const agentLabHumanActions = agentLabRequiresHuman
 		? [
 				{
@@ -306,21 +309,35 @@ export async function handleAgentLabReviewStatus(
 				},
 			]
 		: [];
+	// Issue #246: branch on status.state. running → "allow", missing →
+	// "ask_human". Reuses existing recommendation values — no enum growth.
+	const isRunning = status.state === "running";
+	const isMissing = status.state === "missing";
 	const decisionEnvelope = buildDecisionEnvelope({
 		tool: name,
-		recommendation: status.valid
-			? agentLabRequiresHuman
+		recommendation: isRunning
+			? "allow"
+			: isMissing
 				? "ask_human"
-				: "warn"
-			: "block",
+				: status.valid
+					? agentLabRequiresHuman
+						? "ask_human"
+						: "warn"
+					: "block",
 		severity: agentLabRequiresHuman ? "needs_approval" : "warning",
 		confidence: 0.74,
-		summary: status.valid
-			? `Estado AgentLab: ${status.name}`
-			: "Estado AgentLab inválido.",
-		requiresHuman: agentLabRequiresHuman,
+		summary: isRunning
+			? `Estado AgentLab: ${status.name} (en vuelo)`
+			: isMissing
+				? "Estado AgentLab: run no encontrado."
+				: status.valid
+					? `Estado AgentLab: ${status.name}`
+					: "Estado AgentLab inválido.",
+		requiresHuman: isMissing || (!isRunning && agentLabRequiresHuman),
 		orchestratorDecisionRequired: true,
-		allowedToProceed: status.valid && !agentLabRequiresHuman,
+		allowedToProceed: isRunning
+			? true
+			: !isMissing && status.valid && !agentLabRequiresHuman,
 		evidenceRefs: (status.result?.consolidatedFindings ?? []).map(
 			(finding, index) => `agentlab-finding:${index + 1}:${finding.title}`,
 		),
@@ -337,9 +354,13 @@ export async function handleAgentLabReviewStatus(
 		tool: name,
 		projectId: runtime.projectId,
 		projectPath: runtime.projectPath,
-		summary: status.valid
-			? `Estado AgentLab: ${status.name}`
-			: "Estado AgentLab inválido.",
+		summary: isRunning
+			? `Estado AgentLab: ${status.name} (en vuelo)`
+			: isMissing
+				? "Estado AgentLab: run no encontrado."
+				: status.valid
+					? `Estado AgentLab: ${status.name}`
+					: "Estado AgentLab inválido.",
 		data: {
 			decisionEnvelope,
 			workloadEnvelope,

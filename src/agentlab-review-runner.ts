@@ -96,6 +96,9 @@ export type AgentLabReviewStatus = {
 	errors: string[];
 	result?: AgentLabReviewRunResult;
 	workloadEnvelope?: AgentLabWorkloadEnvelope;
+	// Issue #246: additive discriminator — "completed" | "running" | "missing".
+	// Optional for backwards compatibility.
+	state?: "completed" | "running" | "missing";
 };
 
 export type RunAgentLabReviewRequestFileInput = {
@@ -387,12 +390,24 @@ export function getAgentLabReviewStatus(
 	reportsPath: string,
 ): AgentLabReviewStatus {
 	const resolved = resolveRunPath(pathOrLatest, reportsPath);
+	// Issue #246: short-circuit the running branch — the dispatch placeholder
+	// has shape {runId,status,startedAt}, not AgentLabReviewRunResult.
+	if (resolved.state === "running") {
+		return {
+			path: resolved.path,
+			name: basename(resolved.path),
+			valid: true,
+			errors: [],
+			state: "running",
+		};
+	}
 	if (!resolved.valid) {
 		return {
 			path: resolved.path,
 			name: basename(resolved.path),
 			valid: false,
 			errors: resolved.errors,
+			...(resolved.state ? { state: resolved.state } : {}),
 		};
 	}
 	try {
@@ -409,6 +424,7 @@ export function getAgentLabReviewStatus(
 				name: basename(resolved.path),
 				valid: false,
 				errors: bindingErrors,
+				state: resolved.state,
 				workloadEnvelope: buildAgentLabWorkloadEnvelope({
 					status: "stale",
 					statusReason: bindingErrors[0] ?? "AgentLab run stale.",
@@ -424,6 +440,7 @@ export function getAgentLabReviewStatus(
 			valid: true,
 			errors: [],
 			result,
+			state: resolved.state,
 		};
 	} catch (error) {
 		return {
@@ -431,6 +448,7 @@ export function getAgentLabReviewStatus(
 			name: basename(resolved.path),
 			valid: false,
 			errors: [error instanceof Error ? error.message : String(error)],
+			...(resolved.state ? { state: resolved.state } : {}),
 		};
 	}
 }
@@ -520,9 +538,36 @@ export function formatAgentLabReviewRunResult(
 export function formatAgentLabReviewStatus(
 	status: AgentLabReviewStatus,
 ): string {
-	if (!status.valid || !status.result) {
+	// Issue #246: branch on state. In-flight gets banner + poll hint;
+	// missing gets the no-encontrado banner; completed keeps existing output.
+	if (status.state === "running") {
+		const runIdMatch = /^run-\d+-[a-z0-9]+/u.exec(status.name);
+		const runId = runIdMatch ? runIdMatch[0] : status.name;
 		return [
 			"AgentLab Review Status",
+			"",
+			"Estado: en vuelo (dispatch encontrado, run final todavía no escrito)",
+			"",
+			"Archivo:",
+			status.name || status.path,
+			"",
+			"Válido:",
+			"sí",
+			"",
+			"Recommended next:",
+			`Run ${runId} en vuelo. Poll de nuevo con agentlab_review_status ${runId} después de unos segundos.`,
+		].join("\n");
+	}
+	if (!status.valid || !status.result) {
+		const banner =
+			status.state === "missing"
+				? "Estado: no encontrado"
+				: status.state === "completed"
+					? "Estado: completed"
+					: null;
+		return [
+			"AgentLab Review Status",
+			...(banner ? ["", banner] : []),
 			"",
 			"Archivo:",
 			status.name || status.path,
@@ -1521,7 +1566,7 @@ function snapshotFiles(
 function resolveRunPath(
 	pathOrLatest: string,
 	reportsPath: string,
-): { valid: boolean; path: string; errors: string[] } {
+): { valid: boolean; path: string; errors: string[]; state?: "completed" | "running" | "missing" } {
 	const reports = resolve(reportsPath);
 	if (pathOrLatest.trim() === "latest") {
 		const latest = latestRunFile(reports);
@@ -1530,11 +1575,12 @@ function resolveRunPath(
 				valid: false,
 				path: reports,
 				errors: ["No encontré runs AgentLab en agentlabs/runs ni reports."],
+				state: "missing",
 			};
 		}
 		const fileCheck = validateAgentLabArtifactFile(latest);
 		return fileCheck.valid
-			? { valid: true, path: latest, errors: [] }
+			? { valid: true, path: latest, errors: [], state: "completed" }
 			: { valid: false, path: latest, errors: fileCheck.errors };
 	}
 	const trimmed = pathOrLatest.trim();
@@ -1563,9 +1609,33 @@ function resolveRunPath(
 			],
 		};
 	}
+	// Issue #246: for a bare runId, fall back to the dispatch placeholder
+	// when <runId>.json is absent. Check existence BEFORE the full
+	// validateAgentLabArtifactFile pass — that pass treats symlinks/dirs
+	// as errors, but a missing run.json is the normal in-flight case.
+	const selector = parseAgentLabRunSelector(trimmed);
+	if (selector?.kind === "run_id" && !existsSync(candidate)) {
+		const dispatchPath = dispatchFilePath(reportsPath, selector.runId);
+		if (existsSync(dispatchPath)) {
+			return {
+				valid: true,
+				path: dispatchPath,
+				errors: [],
+				state: "running",
+			};
+		}
+		return {
+			valid: false,
+			path: candidate,
+			errors: [
+				`No existe archivo: ${candidate} ni ${dispatchPath}. ¿Se perdió el dispatch o nunca corrió?`,
+			],
+			state: "missing",
+		};
+	}
 	const fileCheck = validateAgentLabArtifactFile(candidate);
 	return fileCheck.valid
-		? { valid: true, path: candidate, errors: [] }
+		? { valid: true, path: candidate, errors: [], state: "completed" }
 		: { valid: false, path: candidate, errors: fileCheck.errors };
 }
 
