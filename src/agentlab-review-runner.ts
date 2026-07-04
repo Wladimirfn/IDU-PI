@@ -1606,7 +1606,7 @@ function latestRunFile(reportsPath: string): string | undefined {
 	}
 	if (!existsSync(reportsPath)) return undefined;
 	const legacy = safeReadDirNames(reportsPath)
-		.filter((file) => /^agentlab-review-run-\d{8}-\d{6}\.json$/u.test(file))
+		.filter((file) => isAgentLabRunFilename(file))
 		.sort()
 		.at(-1);
 	return legacy ? join(reportsPath, legacy) : undefined;
