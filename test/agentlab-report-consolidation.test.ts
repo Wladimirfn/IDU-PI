@@ -408,3 +408,31 @@ test("format consolidate muestra nota segura", () => {
 	assert.match(text, /No apliqué cambios/u);
 	assert.match(text, /no ejecuté AgentLabs/u);
 });
+
+test("consolidate latest resuelve run legacy en reports sin agentlabs/runs", () => {
+	// Regression test pinning that the legacy reports/ fallback for the
+	// "agentlab-review-run" label still resolves when no agentlabs/ dir exists.
+	// Before the latestFile signature change, the fallback scanned reports/
+	// with the broad `isAgentLabRunFilename` predicate (which also accepts
+	// current.json and the new run-<unix>-<hex> format). After this change,
+	// the fallback uses the strict legacy regex
+	// /^agentlab-review-run-\d{8}-\d{6}\.json$/u — pinning that the LEGACY
+	// format specifically still resolves when reports/ is the only source.
+	const temp = root();
+	const reportsPath = join(temp, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	// Deliberately do NOT create temp/agentlabs/ — the fallback must resolve
+	// from reports/ alone.
+	const legacyName = "agentlab-review-run-20260611-101530.json";
+	const source = writeRun(reportsPath, legacyName);
+
+	const result = consolidateAgentLabReviewRun("latest", reportsPath);
+
+	assert.equal(result.valid, true, `expected valid run, got: ${result.errors.join(" | ")}`);
+	assert.equal(result.sourceReviewRun, source);
+	assert.match(
+		result.sourceReviewRun ?? "",
+		new RegExp(`reports[\\\\/]${legacyName.replace(/\./g, "\\.")}$`, "u"),
+		`sourceReviewRun must point to the legacy file in reports/`,
+	);
+});
