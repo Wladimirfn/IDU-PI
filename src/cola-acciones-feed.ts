@@ -8,6 +8,7 @@ import {
 	readIduUsageEvents,
 	type IduUsageEvent,
 } from "./usage-events.js";
+import { isAgentLabRunFilename } from "./agentlab-run-selector.js";
 
 /**
  * "Cola de acciones" feed (live, read-only).
@@ -105,7 +106,7 @@ function normalizeAgentLabRuns(
 	const runDir = join(stateRoot, "agentlabs", "runs");
 	if (!existsSync(runDir)) return [];
 	const files = safeReadDirNames(runDir).filter((name) =>
-		/^(?:current|agentlab-review-run-\d{8}-\d{6})\.json$/u.test(name),
+		isAgentLabRunFilename(name),
 	);
 	if (files.length === 0) return [];
 	const out: ColaDeAccionesEvent[] = [];
