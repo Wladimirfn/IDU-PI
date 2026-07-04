@@ -1144,6 +1144,43 @@ test("status current missing reports current.json candidate", () => {
 	assert.match(status.errors.join("\n"), /current\.json/u);
 });
 
+test("status latest resuelve archivo legacy en reports sin agentlabs/runs", () => {
+	// Regression test for commit 2 of change
+	// 2026-07-03-fix-run-selector-unify. Before this commit, latestRunFile's
+	// fallback scanned reports/ with an inline regex
+	// /^agentlab-review-run-\d{8}-\d{6}\.json$/u. After the migration to
+	// isAgentLabRunFilename, the helper ALSO accepts current.json and the
+	// new run-<unix>-<hex>.json format, so this test pins that the LEGACY
+	// format specifically still resolves when reports/ is the only source.
+	const temp = root();
+	const reportsPath = join(temp, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	// Deliberately do NOT create temp/agentlabs/runs/ — the fallback must
+	// resolve from reports/ alone.
+	const legacyName = "agentlab-review-run-20260611-101530.json";
+	writeFileSync(
+		join(reportsPath, legacyName),
+		JSON.stringify({
+			warning: "Revisión AgentLab. No aplica cambios.",
+			generatedAt: "2026-06-11T10:15:30.000Z",
+			sourceRequestFile: "reports/agentlab-review-request-20260611-101500.json",
+			projectId: "pi-telegram-bridge",
+			runs: [],
+		}),
+		"utf8",
+	);
+
+	const status = getAgentLabReviewStatus("latest", reportsPath);
+
+	assert.equal(status.valid, true, `expected valid run, got: ${status.errors.join(" | ")}`);
+	assert.match(
+		status.path,
+		new RegExp(`reports[\\\\/]${legacyName.replace(/\./g, "\\.")}$`, "u"),
+		`status.path must point to the legacy file in reports/`,
+	);
+	assert.equal(status.name, legacyName);
+});
+
 test("format run muestra resumen", async () => {
 	const { router, projectPath, workspaceRoot } = routerWith(validReport());
 	const reportsPath = join(workspaceRoot, "reports");

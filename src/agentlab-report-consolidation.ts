@@ -23,6 +23,7 @@ import type {
 	SkillImprovementRisk,
 } from "./skill-improvement-proposals.js";
 import type { SemanticAgentTaskType } from "./semantic-agent-tasks.js";
+import { isAgentLabRunFilename } from "./agentlab-run-selector.js";
 
 export type AgentLabConsolidatedFinding = {
 	title: string;
@@ -150,9 +151,15 @@ type RunSummaryLike = {
 
 const WARNING = "Consolidación AgentLab. No aplica cambios." as const;
 const CURRENT_FILE = "current.json";
-const RUN_RE = /^(?:current|agentlab-review-run-\d{8}-\d{6})\.json$/u;
 const CONSOLIDATION_RE =
 	/^(?:consolidated-current|agentlab-consolidation-\d{8}-\d{6})\.json$/u;
+// Predicate wrapper around CONSOLIDATION_RE — keeps the regex private to this
+// module. The agentlab-review-run path uses `isAgentLabRunFilename` from the
+// shared helper (REQ-FRS-2). The consolidation path is out of scope for the
+// helper, so it stays local.
+function isConsolidationFilename(name: string): boolean {
+	return CONSOLIDATION_RE.test(name);
+}
 const SEVERITY_ORDER: AgentLabFindingSeverity[] = [
 	"info",
 	"low",
@@ -172,7 +179,8 @@ export function consolidateAgentLabReviewRun(
 	const resolved = resolveReportPath(
 		pathOrLatest,
 		reportsPath,
-		RUN_RE,
+		isAgentLabRunFilename,
+		/^agentlab-review-run-\d{8}-\d{6}\.json$/u,
 		"agentlab-review-run",
 	);
 	if (!resolved.valid)
@@ -256,6 +264,7 @@ export function getAgentLabConsolidationStatus(
 	const resolved = resolveReportPath(
 		pathOrLatest,
 		reportsPath,
+		isConsolidationFilename,
 		CONSOLIDATION_RE,
 		"agentlab-consolidation",
 	);
@@ -816,7 +825,8 @@ type NormalizedRunSummary = {
 function resolveReportPath(
 	pathOrLatest: string,
 	reportsPath: string,
-	fileRe: RegExp,
+	isValidFilename: (basename: string) => boolean,
+	legacyReportsRegex: RegExp,
 	label: string,
 ):
 	| { valid: true; path: string; errors: [] }
@@ -826,7 +836,13 @@ function resolveReportPath(
 	const requested = pathOrLatest.trim() || "latest";
 	const path =
 		requested === "latest"
-			? latestFile(reports, artifactDir, fileRe, label)
+			? latestFile(
+					reports,
+					artifactDir,
+					isValidFilename,
+					legacyReportsRegex,
+					label,
+				)
 			: resolveCandidate(reports, artifactDir, requested);
 	if (!path) {
 		return {
@@ -847,7 +863,7 @@ function resolveReportPath(
 			],
 		};
 	}
-	if (!fileRe.test(basename(path))) {
+	if (!isValidFilename(basename(path))) {
 		return {
 			valid: false,
 			path,
@@ -878,7 +894,8 @@ function resolveCandidate(
 function latestFile(
 	reports: string,
 	artifactDir: string,
-	fileRe: RegExp,
+	isValidFilename: (basename: string) => boolean,
+	legacyReportsRegex: RegExp,
 	label: string,
 ): string | undefined {
 	const currentName =
@@ -889,14 +906,14 @@ function latestFile(
 	if (existsSync(current)) return current;
 	if (existsSync(artifactDir)) {
 		const latest = safeReadDirNames(artifactDir)
-			.filter((file) => fileRe.test(file))
+			.filter((file) => isValidFilename(file))
 			.sort()
 			.at(-1);
 		if (latest) return join(artifactDir, latest);
 	}
 	if (!existsSync(reports)) return undefined;
 	const legacy = safeReadDirNames(reports)
-		.filter((file) => fileRe.test(file))
+		.filter((file) => legacyReportsRegex.test(file))
 		.sort()
 		.at(-1);
 	return legacy ? join(reports, legacy) : undefined;

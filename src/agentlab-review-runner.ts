@@ -32,6 +32,10 @@ import {
 	reviewAgentLabReviewRequest,
 	type AgentLabReviewRequestPlan,
 } from "./agentlab-review-requests.js";
+import {
+	isAgentLabRunFilename,
+	parseAgentLabRunSelector,
+} from "./agentlab-run-selector.js";
 import { cleanAgentOutput, summarizeOutput } from "./lab-reports.js";
 import {
 	profileForModelRole,
@@ -148,7 +152,6 @@ export type RealRepoDiff = {
 
 const WARNING = "Revisión AgentLab. No aplica cambios." as const;
 const RUN_CURRENT_FILE = "current.json";
-const RUN_RE = /^(?:current|agentlab-review-run-\d{8}-\d{6})\.json$/u;
 
 export async function runAgentLabReviewRequestFile(
 	input: RunAgentLabReviewRequestFileInput,
@@ -1551,12 +1554,12 @@ function resolveRunPath(
 			],
 		};
 	}
-	if (!RUN_RE.test(basename(candidate))) {
+	if (!isAgentLabRunFilename(basename(candidate))) {
 		return {
 			valid: false,
 			path: candidate,
 			errors: [
-				"El archivo debe llamarse current.json o agentlab-review-run-*.json.",
+				"El archivo debe llamarse current.json, agentlab-review-run-*.json, o run-<unix>-<hex>.json.",
 			],
 		};
 	}
@@ -1572,6 +1575,16 @@ function resolveRunCandidate(
 	requested: string,
 ): string {
 	const normalized = requested === "current" ? RUN_CURRENT_FILE : requested;
+	// Bare runId (no path, no .json suffix) — append the suffix and route to
+	// the agentlabs/runs directory. This is the contract dispatched runIds
+	// follow: `dispatchAgentLabReviewRun().runId` → caller passes it back to
+	// `getAgentLabReviewStatus(runId)` and gets `valid: true`. Without this
+	// branch the candidate resolved to a non-existent path and validation
+	// failed even after the parser fix.
+	const selector = parseAgentLabRunSelector(normalized);
+	if (selector?.kind === "run_id") {
+		return resolve(join(runDir, `${selector.runId}.json`));
+	}
 	if (isAbsolute(normalized)) return resolve(normalized);
 	if (normalized.startsWith("reports/"))
 		return resolve(join(reports, normalized.slice("reports/".length)));
@@ -1586,7 +1599,7 @@ function latestRunFile(reportsPath: string): string | undefined {
 	if (existsSync(current)) return current;
 	if (existsSync(runDir)) {
 		const latest = safeReadDirNames(runDir)
-			.filter((file) => RUN_RE.test(file))
+			.filter((file) => isAgentLabRunFilename(file))
 			.sort()
 			.at(-1);
 		if (latest) return join(runDir, latest);
