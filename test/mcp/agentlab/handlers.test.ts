@@ -16,7 +16,12 @@ import {
 import { handleAgentLabReviewRun as cliRun } from "../../../src/cli/agentlab/handlers.js";
 import type { IduMcpProjectResolution } from "../../../src/mcp-server.js";
 import type { CliRuntime } from "../../../src/cli.js";
-import type { AgentLabReviewRunResult, AgentLabReviewStatus } from "../../../src/agentlab-review-runner.js";
+import {
+	dispatchAgentLabReviewRun,
+	getAgentLabReviewStatus,
+	type AgentLabReviewRunResult,
+	type AgentLabReviewStatus,
+} from "../../../src/agentlab-review-runner.js";
 import type { JsonObject } from "../../../src/mcp/_shared/index.js";
 import type { IduMcpToolName, IduMcpToolResult } from "../../../src/mcp/_shared/index.js";
 
@@ -198,4 +203,113 @@ test("PR3 CLI formatter renders dispatched sentinel as one-liner ack", async () 
 	assert.equal(result.exitCode, 0);
 	assert.match(result.stdout, new RegExp(`AgentLab review run dispatched: ${runId}\\b`, "u"));
 	assert.match(result.stdout, /agentlab_review_status \S+/u);
+});
+
+// ===== Issue #246 (Fix Running Status) — RED-first MCP handler contract =====
+// T1.9 RED contract: handleAgentLabReviewStatus MUST branch on status.state
+// and forward state="running" into data.status.state with recommendation="allow"
+// + allowedToProceed=true + requiresHuman=false. The pre-fix code falls into
+// the agentLabRequiresHuman escalation path (which yields recommendation
+// "ask_human" for an in-flight run that has no result yet) — issue #246
+// symptom. We exercise the REAL handler against a REAL dispatch-only fixture
+// so the fix is end-to-end pinned, not just a unit-level mock.
+
+test("Issue #246 MCP handler surfaces running state as allow + state forwarded in data.status", async () => {
+	const reportsPath = tmpReportsDir();
+	const runId = `run-${Math.floor(Date.now() / 1000)}-live`;
+	writeDispatch(reportsPath, runId);
+
+	// Build a runtime that delegates agentLabReviewStatus to the REAL
+	// getAgentLabReviewStatus (not a mock) — so we exercise the same code
+	// path the CLI and Telegram bot use, end-to-end.
+	const runtime = makeRuntime(reportsPath, {
+		agentLabReviewStatus: (selector: string) => getAgentLabReviewStatus(selector, reportsPath),
+	});
+
+	const result = await mcpStatus(
+		"idu_agentlab_review_status" as IduMcpToolName, { selector: runId } as JsonObject, runtime, RESOLUTION,
+	);
+	const data = result.data as {
+		status?: AgentLabReviewStatus;
+		decisionEnvelope?: { recommendation?: string; allowedToProceed?: boolean; requiresHuman?: boolean; summary?: string };
+	};
+
+	assert.ok(data.status, "data.status must be forwarded by the handler");
+	assert.equal(
+		data.status.state,
+		"running",
+		`data.status.state must be 'running' for an in-flight dispatch; got: ${data.status.state}`,
+	);
+	assert.equal(data.status.valid, true, "data.status.valid must be true for in-flight dispatch");
+	assert.match(data.status.name ?? "", /\.dispatch\.json$/u, "data.status.name must point at the dispatch file");
+
+	assert.ok(data.decisionEnvelope, "decisionEnvelope must be present");
+	assert.equal(
+		data.decisionEnvelope.recommendation,
+		"allow",
+		`decisionEnvelope.recommendation must be 'allow' for in-flight dispatch (issue #246); got: ${data.decisionEnvelope.recommendation}`,
+	);
+	assert.equal(
+		data.decisionEnvelope.allowedToProceed,
+		true,
+		"decisionEnvelope.allowedToProceed must be true for in-flight dispatch",
+	);
+	assert.equal(
+		data.decisionEnvelope.requiresHuman,
+		false,
+		"decisionEnvelope.requiresHuman must be false for in-flight dispatch",
+	);
+	assert.match(
+		data.decisionEnvelope.summary ?? "",
+		/en vuelo/u,
+		`decisionEnvelope.summary must include '(en vuelo)'; got: ${data.decisionEnvelope.summary}`,
+	);
+});
+
+test("Issue #246 MCP handler surfaces missing state as ask_human + state forwarded in data.status", async () => {
+	const reportsPath = tmpReportsDir();
+	const runtime = makeRuntime(reportsPath, {
+		agentLabReviewStatus: (selector: string) => getAgentLabReviewStatus(selector, reportsPath),
+	});
+
+	const result = await mcpStatus(
+		"idu_agentlab_review_status" as IduMcpToolName,
+		{ selector: "run-9999999999-zzzzzz" } as JsonObject,
+		runtime,
+		RESOLUTION,
+	);
+	const data = result.data as {
+		status?: AgentLabReviewStatus;
+		decisionEnvelope?: { recommendation?: string; allowedToProceed?: boolean; requiresHuman?: boolean; summary?: string };
+	};
+
+	assert.ok(data.status, "data.status must be forwarded by the handler");
+	assert.equal(
+		data.status.state,
+		"missing",
+		`data.status.state must be 'missing' for an unknown runId; got: ${data.status.state}`,
+	);
+	assert.equal(data.status.valid, false, "data.status.valid must be false for a missing run");
+
+	assert.ok(data.decisionEnvelope, "decisionEnvelope must be present");
+	assert.equal(
+		data.decisionEnvelope.recommendation,
+		"ask_human",
+		"decisionEnvelope.recommendation must be 'ask_human' for missing runs",
+	);
+	assert.equal(
+		data.decisionEnvelope.requiresHuman,
+		true,
+		"decisionEnvelope.requiresHuman must be true for missing runs",
+	);
+	assert.equal(
+		data.decisionEnvelope.allowedToProceed,
+		false,
+		"decisionEnvelope.allowedToProceed must be false for missing runs",
+	);
+	assert.match(
+		data.decisionEnvelope.summary ?? "",
+		/no encontrado/u,
+		`decisionEnvelope.summary must read 'run no encontrado.'; got: ${data.decisionEnvelope.summary}`,
+	);
 });
