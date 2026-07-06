@@ -82,7 +82,7 @@ export async function handleRoleEngineControl(
 			: disableRoleEngineConfig(stateRoot, role);
 	const roleEngineBinding = runtime.rebindRoleEngine?.();
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -134,7 +134,7 @@ export async function handleRoleEngineStatus(
 	const status = getRoleEngineConfigStatus(stateRoot);
 	const runtimeStatus = runtime.getRoleEngineStatus?.();
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

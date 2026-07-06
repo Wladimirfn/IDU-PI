@@ -1502,7 +1502,7 @@ export async function callIduMcpTool(
 	}
 	if (!isToolName(name)) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: null,
 
 			ok: false,
 			tool: "idu_status",
@@ -1565,7 +1565,7 @@ export async function callIduMcpTool(
 		return result;
 	} catch (error) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: resolution.stateRoot ?? null,
 
 			ok: false,
 			tool: name,
@@ -1741,7 +1741,7 @@ async function handleProjectLifecycleTool(
 		}
 	} catch (error) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: null,
 
 			ok: false,
 			tool: name,
@@ -3516,7 +3516,7 @@ export function invalidMcpInput(
 	data: JsonObject = {},
 ): IduMcpToolResult {
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
 
 		ok: false,
 		tool: name,

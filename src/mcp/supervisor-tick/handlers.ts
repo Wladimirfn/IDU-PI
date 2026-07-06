@@ -67,8 +67,9 @@ export async function handleSupervisorTick(
 		name,
 		alignmentAdvisory,
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -113,7 +114,7 @@ export async function handleExecutionDirectorTick(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.executionDirectorTick) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -126,6 +127,7 @@ export async function handleExecutionDirectorTick(
 		});
 	}
 	const result = runtime.executionDirectorTick();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const decisionEnvelope = buildDecisionEnvelope({
 		tool: name,
 		recommendation: result.status === "proposal_created" ? "warn" : "allow",
@@ -144,7 +146,7 @@ export async function handleExecutionDirectorTick(
 			: ["No proposal action required from this tick."],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -185,7 +187,7 @@ export async function handleProposalOutbox(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.proposalOutbox) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -198,8 +200,9 @@ export async function handleProposalOutbox(
 		});
 	}
 	const proposals = runtime.proposalOutbox();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -227,7 +230,7 @@ export async function handleProposalDetail(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.proposalDetail) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -241,8 +244,9 @@ export async function handleProposalDetail(
 	}
 	const id = requiredText(args, "id");
 	const proposal = runtime.proposalDetail(id);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: Boolean(proposal),
 		tool: name,
@@ -299,8 +303,9 @@ export async function handleSupervisorConsult(
 			? ["Read response and decide"]
 			: ["Resolve blocker and retry consult"],
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: result.ok,
 		tool: name,
@@ -358,8 +363,9 @@ export async function handleSupervisorCronPlan(
 		name,
 		alignmentAdvisory,
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

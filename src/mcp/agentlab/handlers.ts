@@ -65,9 +65,10 @@ export async function handleAgentLabRequestCreate(
 	]);
 	const selector = stringArg(args, "selector") ?? "latest";
 	const specialties = agentLabSpecialtiesArg(args, "specialties");
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	if (source === "specialist-audit-plan" && specialties.errors.length > 0) {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: false,
 			tool: name,
@@ -88,9 +89,10 @@ export async function handleAgentLabRequestCreate(
 	// B5 PR3 v2 (REQ-B5-5): accept the optional `model` and
 	// `stateRoot` args so the CLI/MCP surfaces can pick a
 	// canonical model id or fall back to the create-time
-	// auto-pick.
+	// auto-pick. Renamed to `userStateRoot` (decision T1.2 #4)
+	// to avoid shadowing the resolved stateRoot used in the envelope.
 	const model = stringArg(args, "model");
-	const stateRoot = stringArg(args, "stateRoot");
+	const userStateRoot = stringArg(args, "stateRoot");
 	const sourceLibraryEvidence =
 		source === "external-source-intelligence"
 			? compactSourceLibraryEvidence(
@@ -103,7 +105,7 @@ export async function handleAgentLabRequestCreate(
 		specialties: specialties.values,
 		externalSourceLibraryEvidence: sourceLibraryEvidence,
 		...(model !== undefined ? { model } : {}),
-		...(stateRoot !== undefined ? { stateRoot } : {}),
+		...(userStateRoot !== undefined ? { stateRoot: userStateRoot } : {}),
 	});
 	const workloadEnvelope =
 		plan.workloadEnvelope ??
@@ -135,7 +137,7 @@ export async function handleAgentLabRequestCreate(
 		],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: plan.errors.length === 0,
 		tool: name,
@@ -185,6 +187,7 @@ export async function handleAgentLabReviewRun(
 ): Promise<IduMcpToolResult> {
 	const selector = stringArg(args, "selector") ?? "latest";
 	const result = await runtime.agentLabReviewRun(selector);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 
 	// Dispatched branch: PR2 sentinel. The runtime's
 	// dispatchAgentLabReviewRun wrote `<runId>.dispatch.json` and
@@ -196,7 +199,7 @@ export async function handleAgentLabReviewRun(
 		const runId = dispatchedMatch[1]!;
 		const dispatchPath = result.path ?? "";
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: true,
 			tool: name,
@@ -239,7 +242,7 @@ export async function handleAgentLabReviewRun(
 			runs: result.runs,
 		});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -276,6 +279,7 @@ export async function handleAgentLabReviewStatus(
 ): Promise<IduMcpToolResult> {
 	const selector = stringArg(args, "selector") ?? "latest";
 	const status = runtime.agentLabReviewStatus(selector);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const runs = status.result?.runs ?? [];
 	const workloadEnvelope = agentLabStatusWorkloadEnvelope(status);
 	const recommendations = runs.flatMap((run) => run.recommendations);
@@ -348,7 +352,7 @@ export async function handleAgentLabReviewStatus(
 		),
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: status.valid,
 		tool: name,

@@ -100,7 +100,7 @@ export async function handlePendingInjections(
 		}
 	}
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -346,7 +346,7 @@ export async function handleOutboxPrune(
 	const plan = planPrune(stateRoot, { olderThanDays });
 	if (!confirm) {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: true,
 			tool: name,
@@ -375,7 +375,7 @@ export async function handleOutboxPrune(
 	}
 	const result = applyPrune(stateRoot, plan, { olderThanDays });
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -408,8 +408,9 @@ export async function handleSubscribeTriggers(
 	runtime: CliRuntime,
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

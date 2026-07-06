@@ -51,6 +51,7 @@ export async function handleArchitecturalPruningPlan(
 	const plan = buildArchitecturalPruningPlan({
 		projectId: runtime.projectId,
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const decisionEnvelope = buildDecisionEnvelope({
 		tool: name,
 		recommendation: "warn",
@@ -74,7 +75,7 @@ export async function handleArchitecturalPruningPlan(
 		],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -111,6 +112,7 @@ export async function handleContextPruningAdvisory(
 		projectId: runtime.projectId,
 		repoRoot: runtime.projectPath,
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const decisionEnvelope = buildDecisionEnvelope({
 		tool: name,
 		recommendation: report.signals.length ? "warn" : "allow",
@@ -142,7 +144,7 @@ export async function handleContextPruningAdvisory(
 			: [],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

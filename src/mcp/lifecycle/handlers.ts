@@ -59,7 +59,7 @@ import type {
 export async function handleProjectStatus(
 	name: IduProjectLifecycleToolName,
 	args: JsonObject,
-	_options: IduMcpServerOptions,
+	options: IduMcpServerOptions,
 	config: BridgeConfig,
 	registryPath: string,
 ): Promise<IduMcpToolResult> {
@@ -73,8 +73,16 @@ export async function handleProjectStatus(
 		registryPath,
 		mcpAvailable: true,
 	});
+	// REQ-EI-4 (P5): thread stateRoot from resolution. Lifecycle handlers
+	// don't have `runtime` in scope; resolution.stateRoot is the only
+	// available signal. Test T1.1 excludes LIFECYCLE_TOOLS so the
+	// workspaceRoot fallback is not exercised here.
+	const resolution = (
+		options.projectResolver ?? resolveMcpProjectContext
+	)(stringArg(args, "projectPath"));
+	const stateRoot = resolution.stateRoot ?? null;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -117,13 +125,19 @@ export async function handleProjectEnroll(
 export async function handleBootstrapProject(
 	name: IduProjectLifecycleToolName,
 	args: JsonObject,
-	_options: IduMcpServerOptions,
+	options: IduMcpServerOptions,
 	config: BridgeConfig,
 	registryPath: string,
 ): Promise<IduMcpToolResult> {
 	const projectPath = requiredText(args, "projectPath");
 	const allowCreateDrafts = booleanArg(args, "allowCreateDrafts", false);
 	const activate = booleanArg(args, "activate", false);
+	// REQ-EI-4 (P5): thread stateRoot from resolution (see handleProjectStatus
+	// comment for the lifecycle-vs-runtime rationale).
+	const resolution = (
+		options.projectResolver ?? resolveMcpProjectContext
+	)(stringArg(args, "projectPath"));
+	const stateRoot = resolution.stateRoot ?? null;
 	if (!allowCreateDrafts) {
 		const result = projectEnroll({
 			projectPath,
@@ -136,7 +150,7 @@ export async function handleBootstrapProject(
 			activateIduSession(result.project.id);
 		}
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			...projectEnrollEnvelope(name, result),
 			summary: activate
@@ -159,7 +173,7 @@ export async function handleBootstrapProject(
 		consentGiven: true,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -242,7 +256,7 @@ export async function handleStart(
 	const supervisorStartup = runtime.supervisorOnIduActivation();
 	const connection = runtime.inspectConnection();
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
 
 		ok: true,
 		tool: name,

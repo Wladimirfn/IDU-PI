@@ -128,7 +128,7 @@ export async function handleAutonomousAlertsStatus(
 		cooldowns: state.cooldowns,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -205,7 +205,7 @@ export async function handleAutonomousAlertsTick(
 	}
 	const finalReport = { ...report, tasksCreated };
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -238,7 +238,7 @@ export async function handleAutonomousAlertsControl(
 ): Promise<IduMcpToolResult> {
 	if (!resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -255,6 +255,7 @@ export async function handleAutonomousAlertsControl(
 		});
 	}
 	const action = requiredText(args, "action");
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const now = new Date();
 	const current = readAutonomousAlertEngineState(resolution.stateRoot, now);
 	let disabledDomains = current.control.disabledDomains;
@@ -301,7 +302,7 @@ export async function handleAutonomousAlertsControl(
 		now,
 	);
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -459,7 +460,7 @@ export async function handleAutomaticov1Cycle(
 		],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

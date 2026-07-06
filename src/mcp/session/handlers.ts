@@ -52,7 +52,7 @@ export async function handleStatus(
 	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const triggerEngine = getTriggerEngineConfigStatus(stateRoot);
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -87,8 +87,9 @@ export async function handleActivate(
 ): Promise<IduMcpToolResult> {
 	const session = activateIduSession(runtime.projectId);
 	const roleEngineBinding = runtime.rebindRoleEngine?.();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -120,8 +121,9 @@ export async function handleDeactivate(
 ): Promise<IduMcpToolResult> {
 	const session = deactivateIduSession(runtime.projectId);
 	const roleEngineBinding = runtime.unbindRoleEngine?.();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -147,9 +149,10 @@ export async function handleProjectResetState(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const confirmed = booleanArg(args, "confirm", false);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	if (!confirmed) {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: false,
 			tool: name,
@@ -166,7 +169,7 @@ export async function handleProjectResetState(
 	}
 	const result = runtime.projectStateReset(true);
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

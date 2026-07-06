@@ -47,7 +47,7 @@ export async function handleGenesisMissionDraft(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -65,7 +65,7 @@ export async function handleGenesisMissionDraft(
 		projectPath: runtime.projectPath,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot,
 
 		ok: true,
 		tool: name,
@@ -93,7 +93,7 @@ export async function handleGenesisMissionConfirm(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -109,7 +109,7 @@ export async function handleGenesisMissionConfirm(
 	const owner = stringArg(args, "owner");
 	if (!owner) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: resolution.stateRoot,
 
 			ok: false,
 			tool: name,
@@ -132,7 +132,7 @@ export async function handleGenesisMissionConfirm(
 	});
 	if (!result.ok) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: resolution.stateRoot,
 
 			ok: false,
 			tool: name,
@@ -145,7 +145,7 @@ export async function handleGenesisMissionConfirm(
 		});
 	}
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot,
 
 		ok: true,
 		tool: name,
@@ -173,7 +173,7 @@ export async function handleSkillForTask(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -188,7 +188,7 @@ export async function handleSkillForTask(
 	const request = requiredText(args, "request");
 	const skills = loadSkillsForTask(resolution.stateRoot, request);
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot,
 
 		ok: true,
 		tool: name,
@@ -216,9 +216,10 @@ export async function handleSkillDraftFromLessons(
 ): Promise<IduMcpToolResult> {
 	const rawMode = stringArg(args, "mode") ?? "proposal-only";
 	const mode = rawMode as SkillDraftFromLessonsMode;
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	if (mode !== "proposal-only" && mode !== "approved-only") {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: false,
 			tool: name,
@@ -281,7 +282,7 @@ export async function handleSkillDraftFromLessons(
 		nextActions: result.nextActions,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

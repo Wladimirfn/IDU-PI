@@ -87,7 +87,7 @@ export async function handleSupervisorTrigger(
 	if (action === "enable") {
 		const result = enableSupervisorTrigger(stateRoot, { source: "cli" });
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: true,
 			tool: name,
@@ -105,7 +105,7 @@ export async function handleSupervisorTrigger(
 	if (action === "disable") {
 		const result = disableSupervisorTrigger(stateRoot, { source: "cli" });
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: true,
 			tool: name,
@@ -122,7 +122,7 @@ export async function handleSupervisorTrigger(
 	}
 	const status = getSupervisorTriggerStatus(stateRoot);
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -165,7 +165,7 @@ export async function handleTriggerEngine(
 	if (action === "enable") {
 		const result = enableTriggerEngineConfig(stateRoot, { source: "cli" });
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: true,
 			tool: name,
@@ -183,7 +183,7 @@ export async function handleTriggerEngine(
 	if (action === "disable") {
 		const result = disableTriggerEngineConfig(stateRoot, { source: "cli" });
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: true,
 			tool: name,
@@ -200,7 +200,7 @@ export async function handleTriggerEngine(
 	}
 	const status = getTriggerEngineConfigStatus(stateRoot);
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -266,7 +266,7 @@ export async function handleSupervisorSelfMaintenanceAdvisory(
 		...taskRead.safeNotes,
 	];
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
