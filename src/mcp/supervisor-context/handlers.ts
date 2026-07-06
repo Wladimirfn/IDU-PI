@@ -19,6 +19,7 @@
 //   - All other identifiers are imports or already-imported helpers.
 
 import type { CliRuntime } from "../../cli.js";
+import type { ContextBudgetUsage } from "../../context-budget.js";
 import { buildDecisionEnvelope, decisionEnvelopeFromAdvisory } from "../../decision-envelope.js";
 import type { IduMcpProjectResolution } from "../../mcp-server.js";
 import {
@@ -44,6 +45,7 @@ import type {
 	IduMcpToolName,
 	JsonObject,
 } from "../_shared/index.js";
+import { buildTruncationNotice } from "../envelope-advisory/truncation-notice.js";
 
 /**
  * idu_supervisor_context_pack — compose a supervisor context pack.
@@ -96,6 +98,26 @@ export async function handleSupervisorContextPack(
 		],
 		nextActions: arrayField(pack, "autonomyGates").map(String),
 	});
+	// REQ-EI-3 (P4): top-level truncation notice. When the context pack
+	// dropped content, prepend the notice so the orchestrator sees it
+	// before scrolling the rest of `safeNotes`. The existing
+	// `contextBudget.truncated` bool on the payload is preserved for
+	// consumer compatibility.
+	const contextBudget = pack.contextBudget as
+		| ContextBudgetUsage
+		| undefined;
+	const truncationNotice =
+		contextBudget && typeof contextBudget === "object"
+			? buildTruncationNotice(contextBudget)
+			: null;
+	const safeNotes = [
+		...resolution.safeNotes,
+		"Context pack advisory: no implementé, no escribí archivos y no ejecuté AgentLabs.",
+		"Inyecta metas y gates; el orquestador decide y ejecuta.",
+	];
+	if (truncationNotice !== null) {
+		safeNotes.unshift(truncationNotice);
+	}
 	return envelope({
 		stateRoot,
 
@@ -105,11 +127,7 @@ export async function handleSupervisorContextPack(
 		projectPath: runtime.projectPath,
 		summary: String(pack.summary),
 		data: pack,
-		safeNotes: [
-			...resolution.safeNotes,
-			"Context pack advisory: no implementé, no escribí archivos y no ejecuté AgentLabs.",
-			"Inyecta metas y gates; el orquestador decide y ejecuta.",
-		],
+		safeNotes,
 	});
 }
 

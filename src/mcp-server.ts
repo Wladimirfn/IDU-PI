@@ -2908,6 +2908,26 @@ function budgetStringArray(
 	return sliceListToBudget({ items, profile, path });
 }
 
+/**
+ * Resolve the source path of an excerpt item.
+ *
+ * Used by `budgetJsonArray` to attach a `fuente` key on truncated
+ * excerpts (REQ-EI-1, P1). Looks at `item.source` → `item.path` →
+ * `item.filePath`, in that order. Returns the first string it finds
+ * verbatim, or `undefined` when none of the three keys is present.
+ *
+ * Pure function. Idempotent: same input → same output. Accepts any
+ * record-like input — only the three known keys are inspected.
+ */
+export function resolveExcerptSource(item: unknown): string | undefined {
+	if (typeof item !== "object" || item === null) return undefined;
+	const record = item as Record<string, unknown>;
+	if (typeof record.source === "string") return record.source;
+	if (typeof record.path === "string") return record.path;
+	if (typeof record.filePath === "string") return record.filePath;
+	return undefined;
+}
+
 function budgetJsonArray(
 	items: unknown[],
 	profile: ContextBudgetProfile,
@@ -2926,10 +2946,12 @@ function budgetJsonArray(
 		});
 		usages.push(result.usage);
 		if (!result.usage.truncated) return item;
+		const fuente = resolveExcerptSource(item);
 		return {
 			contextBudgetTruncated: true,
 			excerpt: result.text,
 			originalType: Array.isArray(item) ? "array" : typeof item,
+			...(fuente ? { fuente } : {}),
 		};
 	});
 	if (items.length > budget.maxArrayItems) {
