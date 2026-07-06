@@ -125,21 +125,22 @@ test("[resolveSkillsDirPath] retorna `null` cuando ninguno de los tres existe", 
 
 const SAMPLE_REPO_PATH = "C:\\idu-test\\repo-root\\paths-integration";
 
-function resolution(stateRoot: string | undefined): IduMcpProjectResolution {
+function resolution(
+	stateRoot: string | undefined,
+	projectPath: string = stateRoot ? join(stateRoot, "repo") : SAMPLE_REPO_PATH,
+): IduMcpProjectResolution {
 	// Tolerar `stateRoot === undefined`: NO joineamos con "repo" en ese caso
 	// porque `join(undefined, "repo")` falla. Usamos `fake-repo-root` como
-	// sentinela — `runtime()` lo detecta y devuelve `workspaceRoot: ""`
-	// para que el fallback `?? runtime.workspaceRoot` en `handleStatus`
-	// colapse a falsy → `stateRootPath: null` y `repoPath: null` (el path
-	// del repo todavía no fue resuelto).
-	const basePath =
-		stateRoot && stateRoot.length > 0
-			? join(stateRoot, "repo")
-			: SAMPLE_REPO_PATH;
+	// sentinela — `runtime()` lo detecta y devuelve `workspaceRoot: ""`.
+	// NOTA: ese branch NO ejercita el fallback null de `repoPath`
+	// (`runtime.workspaceRoot || runtime.projectPath || null`) porque
+	// `projectPath` queda como string truthy (`SAMPLE_REPO_PATH`).
+	// El branch null de `repoPath` se cubre en el segundo test
+	// (resolución con `projectPath: ""` + runtime con `workspaceRoot: ""`).
 	return {
 		status: "registered_project",
 		projectId: "mcp-idu-status-paths-project",
-		projectPath: basePath,
+		projectPath,
 		stateRoot,
 		recommendedNext: "ready",
 		safeNotes: [],
@@ -205,6 +206,67 @@ test("[idu_status integration] expone repoPath, stateRootPath y skillsDirPath en
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
+});
+
+// =====================================================================
+// P2 — Branch null: `repoPath` y `stateRootPath` caen a `null` cuando
+// tanto `resolution.stateRoot` como `runtime.workspaceRoot` y
+// `runtime.projectPath` son todos falsy.
+//
+// POR QUÉ un test separado:
+//   El test de arriba provee un `stateRoot` real (tmpdir), lo que
+//   fuerza `runtime.workspaceRoot` a un string no vacío vía
+//   `runtime(stateRoot + "/repo")`. Resultado: el fallback null
+//   de `handleStatus` (L85 de src/mcp/session/handlers.ts:
+//   `runtime.workspaceRoot || runtime.projectPath || null`) nunca
+//   se ejecuta y `repoPath` siempre termina como string.
+//
+//   Acá forzamos AMBOS lados vacíos: `resolution.projectPath = ""`
+//   y `resolution.stateRoot = undefined`. El factory stub devuelve
+//   un `runtime` con `workspaceRoot: ""` y `projectPath: ""`. Eso
+//   ejercita los dos branches null:
+//     - `repoPath: null`
+//     - `stateRootPath: null`
+//     - `skillsDirPath: null` (porque `repoPath` es null, el
+//       ternario `repoPath ? resolveSkillsDirPath(repoPath) : null`
+//       colapsa al lado null)
+// =====================================================================
+
+test("[idu_status integration] repoPath y stateRootPath caen a null cuando workspaceRoot y projectPath son empty", async () => {
+	const result = await callIduMcpTool(
+		"idu_status",
+		{},
+		{
+			projectResolver: () => resolution(undefined, ""),
+			runtimeFactory: () =>
+				({
+					projectId: "mcp-idu-status-paths-project",
+					projectPath: "",
+					workspaceRoot: "",
+					labDbPath: "fake-lab.db",
+				}) as unknown as CliRuntime,
+		},
+	);
+
+	// Ambos campos DEBEN estar presentes con valor `null` (no ausentes,
+	// no strings vacíos — REQ-EI-2 P2 manda explícito-null para
+	// distinguir "no resuelto" de "ausente").
+	assert.ok(
+		"repoPath" in result.data,
+		"`data.repoPath` debe estar presente en idu_status",
+	);
+	assert.ok(
+		"stateRootPath" in result.data,
+		"`data.stateRootPath` debe estar presente en idu_status",
+	);
+	assert.ok(
+		"skillsDirPath" in result.data,
+		"`data.skillsDirPath` debe estar presente en idu_status",
+	);
+
+	assert.equal(result.data.repoPath, null);
+	assert.equal(result.data.stateRootPath, null);
+	assert.equal(result.data.skillsDirPath, null);
 });
 
 // Mantener `listIduMcpTools` importado para que el test parametriza-
