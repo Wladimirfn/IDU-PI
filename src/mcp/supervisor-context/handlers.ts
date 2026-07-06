@@ -57,7 +57,7 @@ export async function handleSupervisorContextPack(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -75,6 +75,7 @@ export async function handleSupervisorContextPack(
 		request,
 		booleanArg(args, "includePlanSnapshot", false),
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const supervisorConsultation = pack.supervisorConsultation as
 		| SupervisorConsultation
 		| undefined;
@@ -96,7 +97,7 @@ export async function handleSupervisorContextPack(
 		nextActions: arrayField(pack, "autonomyGates").map(String),
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -147,8 +148,9 @@ export async function handleOrchestratorProcedure(
 		evidenceRefs: ["project:resolution", "procedure:must_consult"],
 		nextActions: [String(procedure.recommendedNext)],
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -193,8 +195,9 @@ export async function handleTaskContext(
 		],
 		gates: ["Preflight antes de delegar", "Orquestador decide si procede"],
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

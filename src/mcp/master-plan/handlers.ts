@@ -63,7 +63,7 @@ export async function handleMasterPlanStatus(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanStatus) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -76,8 +76,9 @@ export async function handleMasterPlanStatus(
 		});
 	}
 	const status = runtime.masterPlanStatus();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -101,7 +102,7 @@ export async function handleMasterPlanCreate(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanRedraft) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -114,8 +115,9 @@ export async function handleMasterPlanCreate(
 		});
 	}
 	const result = runtime.masterPlanRedraft(stringArg(args, "reason"));
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -149,7 +151,7 @@ export async function handleMasterPlanReview(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -164,8 +166,9 @@ export async function handleMasterPlanReview(
 	const review = runtime.masterPlanReview(
 		stringArg(args, "selector") ?? "latest",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: review.plan.status !== "incompatible",
 		tool: name,
@@ -196,7 +199,7 @@ export async function handleMasterPlanApprove(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanApprove) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -213,8 +216,9 @@ export async function handleMasterPlanApprove(
 		stringArg(args, "reason"),
 		"mcp",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -249,7 +253,7 @@ export async function handleMasterPlanReject(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReject) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -265,8 +269,9 @@ export async function handleMasterPlanReject(
 		stringArg(args, "selector") ?? "latest",
 		stringArg(args, "reason"),
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -301,7 +306,7 @@ export async function handlePlanSnapshot(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -317,8 +322,9 @@ export async function handlePlanSnapshot(
 		stringArg(args, "selector") ?? "latest",
 	);
 	const snapshot = buildPlanSnapshot(review, runtime);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -345,7 +351,7 @@ export async function handleNextAdvisoryAction(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -365,6 +371,7 @@ export async function handleNextAdvisoryAction(
 		stringArg(args, "mode") ?? "from_plan",
 		stringArg(args, "maxScope") ?? "small",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	advisoryAction.decisionEnvelope = buildDecisionEnvelope({
 		tool: name,
 		recommendation: String(advisoryAction.recommendation),
@@ -380,7 +387,7 @@ export async function handleNextAdvisoryAction(
 		nextActions: [String(advisoryAction.recommendation)],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -408,7 +415,7 @@ export async function handleContinuationProposal(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -428,8 +435,9 @@ export async function handleContinuationProposal(
 		positiveIntegerArg(args, "autonomyWindowMinutes"),
 		stringArg(args, "maxScope") ?? "small",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -458,7 +466,7 @@ export async function handleTaskPackageCreate(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -470,6 +478,7 @@ export async function handleTaskPackageCreate(
 			errors: ["Master Plan no disponible en este runtime."],
 		});
 	}
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const request = requiredText(args, "request");
 	const review = runtime.masterPlanReview("latest");
 	const snapshot = buildPlanSnapshot(review, runtime);
@@ -507,7 +516,7 @@ export async function handleTaskPackageCreate(
 		},
 	);
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

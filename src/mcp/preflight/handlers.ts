@@ -147,8 +147,9 @@ export async function handleAdvisory(
 		risks: [String(advisory.level)],
 		gates: ["Advisory al orquestador", "Sin scan/IA/AgentLab automático"],
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -292,7 +293,7 @@ export async function handlePostflight(
 		suggestedAgentLabs: report.suggestedAgentLabs,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot: sensorStateRoot,
 
 		ok: true,
 		tool: name,

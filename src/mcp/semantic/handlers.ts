@@ -36,8 +36,9 @@ export async function handleSemanticAuditStatus(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const report = runtime.semanticAuditStatus();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

@@ -43,8 +43,9 @@ export async function handleTask(
 	const text = requiredText(args, "text");
 	const kind = inferTaskTemplateKind(text);
 	const task = runtime.createTask(kind, text);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -75,8 +76,9 @@ export async function handleQueueDetail(
 	const tasks = runtimeWithList.listTasks
 		? runtimeWithList.listTasks()
 		: parseTaskList(runtime.queueDetail());
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -125,10 +127,11 @@ export async function handleQueueComplete(
 			evidence: string,
 		) => StructuredTask | undefined;
 	};
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const task = runtimeWithComplete.queueComplete?.(taskId, evidence);
 	if (!task) {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: false,
 			tool: name,
@@ -141,7 +144,7 @@ export async function handleQueueComplete(
 		});
 	}
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

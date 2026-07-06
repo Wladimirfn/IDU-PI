@@ -57,7 +57,7 @@ export async function handleExternalIntelligenceReport(
 ): Promise<IduMcpToolResult> {
 	if (!resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -81,6 +81,7 @@ export async function handleExternalIntelligenceReport(
 		projectId: runtime.projectId,
 		sourceIds: stringListArg(args, "sourceIds"),
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const paths = writeExternalIntelligenceReport({
 		stateRoot: resolution.stateRoot,
 		report,
@@ -118,7 +119,7 @@ export async function handleExternalIntelligenceReport(
 			: [],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -161,6 +162,7 @@ export async function handleExternalSourceRecommend(
 		framework: stringArg(args, "framework"),
 		maxMatches: positiveIntegerArg(args, "maxMatches"),
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const decisionEnvelope = buildDecisionEnvelope({
 		tool: name,
 		recommendation: report.matches.length ? "allow" : "warn",
@@ -179,7 +181,7 @@ export async function handleExternalSourceRecommend(
 		],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,

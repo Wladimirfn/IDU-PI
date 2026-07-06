@@ -122,6 +122,10 @@ export type IduMcpToolResult = {
 	tool: IduMcpToolName;
 	projectId: string | null;
 	projectPath: string | null;
+	// REQ-EI-4 (P5): top-level stateRoot propagation. Non-optional:
+	// either the resolved absolute path or `null`. Never absent, never
+	// `""`. See design §3.1 + §12 (double-layer gap correction).
+	stateRoot: string | null;
 	summary: string;
 	data: JsonObject;
 	safeNotes: string[];
@@ -203,7 +207,7 @@ function envelope(input: {
 	data: JsonObject;
 	safeNotes?: string[];
 	errors?: string[];
-	stateRoot?: string;
+	stateRoot?: string | null;
 }): IduMcpToolResult {
 	// PR-A.2 + PR-B: when `stateRoot` is undefined, callers fall back to
 	// `runtime.workspaceRoot`. After PR-B's `resolveMcpProjectContext`
@@ -211,13 +215,23 @@ function envelope(input: {
 	// fallback only fires in the early error path (unregistered_project).
 	// In that case the gate is null, which is correct because the
 	// orchestrator needs to enroll the project first.
-	const stateRoot = input.stateRoot ?? "";
-	const blocking = stateRoot ? readPendingBlockingInjection(stateRoot) : null;
+	const inputStateRoot = input.stateRoot ?? null;
+	// REQ-EI-4 (P5) truthy-coercion: the output's `stateRoot` must be
+	// `string | null` (never `""` and never absent). Design §3.1 explicit:
+	// "PISO con truthy-check". `""` from upstream (e.g. resolveMcpProjectContext
+	// empty fallback) collapses to `null` here, satisfying REQ-EI-4 ("no
+	// string vacío"). The internal blocking gate uses the same truthy
+	// semantics — `""`/`null`/`undefined` all skip the PISO read.
+	const outputStateRoot = inputStateRoot ? inputStateRoot : null;
+	const blocking = inputStateRoot
+		? readPendingBlockingInjection(inputStateRoot)
+		: null;
 	return {
 		ok: input.ok,
 		tool: input.tool,
 		projectId: input.projectId,
 		projectPath: input.projectPath,
+		stateRoot: outputStateRoot,
 		summary: redactSecrets(input.summary),
 		data: redactObject(input.data),
 		safeNotes: dedupe([...SAFE_BASE_NOTES, ...(input.safeNotes ?? [])]),

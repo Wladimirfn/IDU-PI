@@ -64,8 +64,9 @@ export async function handleSourceStatus(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const status = runtime.sourceLibraryStatus();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: status.errors.length === 0,
 		tool: name,
@@ -93,8 +94,9 @@ export async function handleSourceAdd(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const result = runtime.sourceLibraryAdd(requiredText(args, "path"));
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: result.errors.length === 0,
 		tool: name,
@@ -125,8 +127,9 @@ export async function handleSourceRemove(
 	const result = runtime.sourceLibraryRemove(
 		requiredText(args, "sourceId"),
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: result.errors.length === 0,
 		tool: name,
@@ -159,8 +162,9 @@ export async function handleSourceRead(
 		"source_chunk_read",
 		"result.content",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -190,8 +194,9 @@ export async function handleSourceExtract(
 	const result = runtime.sourceLibraryExtract(
 		requiredText(args, "sourceId"),
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -221,8 +226,9 @@ export async function handleSourceReport(
 	const result = runtime.sourceLibraryReport(
 		requiredText(args, "sourceId"),
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -251,8 +257,9 @@ export async function handleSourceResearchReport(
 	const result = withSourceResearchBudget(
 		runtime.sourceLibraryResearch(requiredText(args, "query")),
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -280,8 +287,9 @@ export async function handleSourceDigest(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const result = runtime.sourceDigest(requiredText(args, "sourceId"));
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -309,8 +317,9 @@ export async function handleSourceDigestStatus(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const result = runtime.sourceDigestStatus();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -344,8 +353,9 @@ export async function handleSourceChunkRead(
 		"source_chunk_read",
 		"result.content",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -390,8 +400,9 @@ export async function handleSourceRecommendForTask(
 			String(match.orchestratorInstruction ?? ""),
 		),
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -437,8 +448,9 @@ export async function handleSourceRequiredActions(
 			),
 		},
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -492,8 +504,9 @@ export async function handleSourceSkillCandidatesCreate(
 			"Optional future AgentLab review can audit comprehension and duplicates.",
 		],
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -523,8 +536,9 @@ export async function handleSourceSkillCandidatesReview(
 	const review = runtime.sourceSkillCandidatesReview(
 		stringArg(args, "pathOrLatest") ?? "latest",
 	);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: review.ok,
 		tool: name,
@@ -554,8 +568,9 @@ export async function handleSourceRefresh(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const status = runtime.sourceLibraryRefresh();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: status.errors.length === 0,
 		tool: name,

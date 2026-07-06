@@ -80,7 +80,7 @@ export async function handleBirthStatus(
 		stateRoot,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -109,7 +109,7 @@ export async function handleBirthExistingScan(
 	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	if (!runtime.projectPath) {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: false,
 			tool: name,
@@ -127,7 +127,7 @@ export async function handleBirthExistingScan(
 		projectPath: runtime.projectPath,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -170,7 +170,7 @@ export async function handleBirthBibliotecarioDiscovery(
 		masterPlanSummary: "",
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -211,7 +211,7 @@ export async function handleBirthPrototypeMaster(
 		...(params.approvedBy ? { approvedBy: params.approvedBy } : {}),
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -239,7 +239,7 @@ export async function handleBirthGeneralSpec(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -265,7 +265,7 @@ export async function handleBirthGeneralSpec(
 		stateRoot: resolution.stateRoot,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot,
 
 		ok: true,
 		tool: name,
@@ -293,7 +293,7 @@ export async function handleBirthGeneralSpecDerive(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -315,7 +315,7 @@ export async function handleBirthGeneralSpecDerive(
 			promptForRole ?? (async () => ({ ok: false, output: "" })),
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot: resolution.stateRoot,
 
 		ok: true,
 		tool: name,
@@ -344,7 +344,7 @@ export async function handleBirthValidate(
 	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	if (!runtime.projectPath) {
 		return envelope({
-			stateRoot: "",
+			stateRoot,
 
 			ok: false,
 			tool: name,
@@ -362,7 +362,7 @@ export async function handleBirthValidate(
 		projectPath: runtime.projectPath,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -416,7 +416,7 @@ export async function handleBirthRepoPlan(
 		repoPlan: plan,
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: env.decision.repoWritesAllowed,
 		tool: name,

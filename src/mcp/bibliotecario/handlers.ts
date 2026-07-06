@@ -77,8 +77,9 @@ export async function handlePrepare(
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
 	const result = runtime.prepare();
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: result.errors.length === 0,
 		tool: name,
@@ -120,7 +121,7 @@ export async function handleBibliotecarioInit(
 		});
 	}
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -182,7 +183,7 @@ export async function handleModelInvocationStatus(
 		runtime.formatModelInvocationStatus ?? formatModelInvocationStatus;
 	const output = `lab.db path: ${labDbPath}\n${formatter(result.report)}`;
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -227,8 +228,9 @@ export async function handleSkillRating(
 	const score = scoreArg(args, "score");
 			if (!score.ok)
 				return invalidMcpInput(name, runtime, resolution, score.error);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const result = runSkillRating([proposalId, score.text], {
-		stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
+		stateRoot,
 	});
 	if (!result.ok) {
 		return invalidMcpInput(name, runtime, resolution, result.error, {
@@ -238,7 +240,7 @@ export async function handleSkillRating(
 		});
 	}
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
@@ -282,6 +284,7 @@ export async function handleBibliotecarioProactiveAdvisory(
 		projectId: runtime.projectId,
 		repoRoot: runtime.projectPath,
 	});
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	let skillReview: JsonObject;
 	let skillReviewStatus = "missing";
 	try {
@@ -458,7 +461,7 @@ export async function handleBibliotecarioProactiveAdvisory(
 		],
 	});
 	return envelope({
-		stateRoot: "",
+		stateRoot,
 
 		ok: true,
 		tool: name,
