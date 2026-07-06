@@ -8,4 +8,5 @@ export {
 	handleDeactivate,
 	handleProjectResetState,
 	handleStatus,
+	resolveSkillsDirPath,
 } from "./handlers.js";

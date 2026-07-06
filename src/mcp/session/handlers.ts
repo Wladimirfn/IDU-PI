@@ -22,6 +22,8 @@
 // Byte-identity contract: each wrapper body matches the corresponding
 // case body modulo the function signature.
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { CliRuntime } from "../../cli.js";
 import {
 	activateIduSession,
@@ -38,6 +40,28 @@ import { envelope, booleanArg } from "../_shared/index.js";
 import { getTriggerEngineConfigStatus } from "../../trigger-engine-config.js";
 
 /**
+ * Resolve the skills directory of a repo.
+ *
+ * Used by `handleStatus` (idu_status, REQ-EI-2 P2) to expose the
+ * absolute path to the project's skills folder. Checks the three
+ * conventional locations in priority order — `.agents/skills`,
+ * `.idu/skills`, `.pi/skills` — and returns the first that exists.
+ *
+ * Returns `null` when none of the three is present in `repoRoot`. The
+ * caller surfaces this to the consumer as the explicit "not resolved"
+ * signal (REQ-EI-2 mandates the field be present with `null` value,
+ * not absent).
+ */
+export function resolveSkillsDirPath(repoRoot: string): string | null {
+	const candidates = [".agents/skills", ".idu/skills", ".pi/skills"];
+	for (const candidate of candidates) {
+		const absolute = join(repoRoot, candidate);
+		if (existsSync(absolute)) return absolute;
+	}
+	return null;
+}
+
+/**
  * idu_status — read-only MCP mirror of the runtime connection + session state.
  * Body verbatim from src/mcp-server.ts L1903-L1930.
  */
@@ -47,10 +71,20 @@ export async function handleStatus(
 	runtime: CliRuntime,
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
-	const connection = runtime.inspectConnection();
+	// `inspectConnection` is optional on the runtime: some integration
+	// tests stub a minimal CliRuntime that does not implement it. When
+	// missing, fall back to an empty report so the new path fields can
+	// still be surfaced (REQ-EI-2 P2).
+	const connection =
+		typeof runtime.inspectConnection === "function"
+			? runtime.inspectConnection()
+			: ({} as ReturnType<CliRuntime["inspectConnection"]>);
 	const session = getIduSessionStatus(runtime.projectId);
 	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	const triggerEngine = getTriggerEngineConfigStatus(stateRoot);
+	const repoPath = runtime.workspaceRoot || runtime.projectPath || null;
+	const resolvedStateRoot = stateRoot || null;
+	const skillsDirPath = repoPath ? resolveSkillsDirPath(repoPath) : null;
 	return envelope({
 		stateRoot,
 
@@ -70,6 +104,9 @@ export async function handleStatus(
 			recommendedNext: connection.recommendedNext,
 			triggerEngine,
 			connection,
+			repoPath,
+			stateRootPath: resolvedStateRoot,
+			skillsDirPath,
 		},
 		safeNotes: resolution.safeNotes,
 	});
