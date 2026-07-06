@@ -238,7 +238,7 @@ export async function handleAutonomousAlertsControl(
 ): Promise<IduMcpToolResult> {
 	if (!resolution.stateRoot) {
 		return envelope({
-			stateRoot: "", /* unregistered: sin state todavía */
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,

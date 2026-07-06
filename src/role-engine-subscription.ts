@@ -96,7 +96,7 @@ export function unbindRoleEngineSubscription(
 	if (!binding) {
 		return {
 			projectId,
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 			enabled: false,
 			subscriptionCount: 0,
 			rebound: false,
@@ -122,7 +122,7 @@ export function getRoleEngineSubscriptionStatus(
 	if (!binding) {
 		return {
 			projectId,
-			stateRoot: "",
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 			enabled: false,
 			subscriptionCount: 0,
 			rebound: false,

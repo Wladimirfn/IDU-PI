@@ -47,7 +47,7 @@ export async function handleGenesisMissionDraft(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "", /* unregistered: sin state todavía */
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -93,7 +93,7 @@ export async function handleGenesisMissionConfirm(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "", /* unregistered: sin state todavía */
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
@@ -173,7 +173,7 @@ export async function handleSkillForTask(
 ): Promise<IduMcpToolResult> {
 	if (resolution.status !== "registered_project" || !resolution.stateRoot) {
 		return envelope({
-			stateRoot: "", /* unregistered: sin state todavía */
+			stateRoot: "", /* BUCKET-D unregistered: sin state todavía */
 
 			ok: false,
 			tool: name,
