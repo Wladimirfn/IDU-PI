@@ -56,11 +56,74 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { callIduMcpTool, type IduMcpProjectResolution } from "../src/mcp-server.js";
 import type { CliRuntime } from "../src/cli.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ContextBudgetUsage } from "../src/context-budget.js";
+
+// =====================================================================
+// Env isolation (fix test-only para T1.10 en CI)
+//
+// CAUSA RAÍZ (reproducida, ver issue #252):
+//
+//   Varios tests del repo (p.ej. `mcp-server.test.ts` L31-33,
+//   `mcp-excerpt-fuente.test.ts` L40-42) setean
+//   `ALLOWED_ROOTS` / `DEFAULT_CWD` / `AGENT_WORKSPACE_ROOT` al cargar
+//   el módulo y NUNCA los limpian. En CI el orden de tests los ejecuta
+//   antes que T1.10, y esos env vars restrictivos contaminan el
+//   runtime de `callIduMcpTool`.
+//
+//   El fake `projectPath = "C:/projects/sistema"` de T1.10 queda
+//   fuera de `ALLOWED_ROOTS` → `buildSupervisorContextPack` lanza
+//   "Ruta fuera de ALLOWED_ROOTS" → `callIduMcpTool` catchea el throw
+//   y devuelve `data: {}` → `result.data.contextBudget` es
+//   `undefined` → `budget.truncated` explota con
+//   "Cannot read properties of undefined (reading 'truncated')".
+//
+//   Local pasa porque el orden es distinto y T1.10 corre con env
+//   limpio. Es la misma clase de issue que #209/#211 (order-dependent
+//   test failures por environment pollution).
+//
+// FIX:
+//
+//   Snapshot+restore de las 3 env vars polluted keys en beforeEach /
+//   afterEach. Solo se aplica a este archivo, no es cleanup amplio
+//   de los otros 10+ tests que setean env sin limpiar (eso es issue
+//   separado, explícitamente out of scope).
+//
+//   `beforeEach`/`afterEach` a nivel de SUITE (no de módulo) porque
+//   la contaminación ocurre en RUNTIME cuando `callIduMcpTool` lee
+//   `process.env` al resolver el project context. Borrar a nivel
+//   módulo (top-level) no serviría: la contaminación puede llegar
+//   DESPUÉS de que este módulo ya cargó.
+// =====================================================================
+
+const POLLUTED_ENV_KEYS = [
+	"ALLOWED_ROOTS",
+	"DEFAULT_CWD",
+	"AGENT_WORKSPACE_ROOT",
+] as const;
+
+let savedEnv: Record<string, string | undefined>;
+
+beforeEach(() => {
+	savedEnv = {};
+	for (const key of POLLUTED_ENV_KEYS) {
+		savedEnv[key] = process.env[key];
+		delete process.env[key];
+	}
+});
+
+afterEach(() => {
+	for (const key of POLLUTED_ENV_KEYS) {
+		if (savedEnv[key] === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = savedEnv[key];
+		}
+	}
+});
 
 // --- fixtures locales (mínimo viable para `buildSupervisorContextPack`) ---
 
