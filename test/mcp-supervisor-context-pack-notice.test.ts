@@ -280,7 +280,17 @@ test("T1.10 safeNotes incluye aviso cuando contextBudget está truncado", async 
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
-	const budget = result.data.contextBudget as ContextBudgetUsage;
+	// Precondición: si contextBudget es undefined, el error-envelope tiene
+	// el mensaje real del throw. Imprimirlo verbatim antes de fallar.
+	const budget = result.data.contextBudget as ContextBudgetUsage | undefined;
+	assert.ok(
+		budget !== undefined,
+		`PRECONDITION FAILED: contextBudget is undefined. ` +
+		`ok=${result.ok} ` +
+		`summary=${JSON.stringify(result.summary)} ` +
+		`errors=${JSON.stringify(result.errors)} ` +
+		`dataKeys=${JSON.stringify(Object.keys(result.data ?? {}))}`,
+	);
 	assert.equal(budget.truncated, true, "precondición: budget debe estar truncado");
 
 	const aviso = (result.safeNotes as string[]).find((n) =>
@@ -335,7 +345,17 @@ test("T1.10 el aviso de truncamiento es el primer safeNote user-provided", async
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
-	const budget = result.data.contextBudget as ContextBudgetUsage;
+	// Precondición: si contextBudget es undefined, el error-envelope tiene
+	// el mensaje real del throw. Imprimirlo verbatim antes de fallar.
+	const budget = result.data.contextBudget as ContextBudgetUsage | undefined;
+	assert.ok(
+		budget !== undefined,
+		`PRECONDITION FAILED: contextBudget is undefined. ` +
+		`ok=${result.ok} ` +
+		`summary=${JSON.stringify(result.summary)} ` +
+		`errors=${JSON.stringify(result.errors)} ` +
+		`dataKeys=${JSON.stringify(Object.keys(result.data ?? {}))}`,
+	);
 	assert.equal(budget.truncated, true, "precondición: budget debe estar truncado");
 
 	assert.ok(
@@ -377,7 +397,17 @@ test("T1.10 safeNotes NO incluye aviso cuando contextBudget NO está truncado", 
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
-	const budget = result.data.contextBudget as ContextBudgetUsage;
+	// Precondición: si contextBudget es undefined, el error-envelope tiene
+	// el mensaje real del throw. Imprimirlo verbatim antes de fallar.
+	const budget = result.data.contextBudget as ContextBudgetUsage | undefined;
+	assert.ok(
+		budget !== undefined,
+		`PRECONDITION FAILED: contextBudget is undefined. ` +
+		`ok=${result.ok} ` +
+		`summary=${JSON.stringify(result.summary)} ` +
+		`errors=${JSON.stringify(result.errors)} ` +
+		`dataKeys=${JSON.stringify(Object.keys(result.data ?? {}))}`,
+	);
 	assert.equal(
 		budget.truncated,
 		false,
