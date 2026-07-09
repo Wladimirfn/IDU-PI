@@ -56,11 +56,65 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { callIduMcpTool, type IduMcpProjectResolution } from "../src/mcp-server.js";
 import type { CliRuntime } from "../src/cli.js";
 import type { ProjectPreflightReport } from "../src/project-preflight.js";
 import type { ContextBudgetUsage } from "../src/context-budget.js";
+
+// =====================================================================
+// Env isolation (fix test-only para T1.10 en CI)
+//
+// CAUSA RAÍZ (reproducida, ver issue #252):
+//
+//   `buildSupervisorContextPack` agrega `governanceConfig:
+//   governanceConfigData()`. Ese helper llama `loadConfig()` y requiere
+//   `DEFAULT_CWD`, aunque el test inyecte runtime/resolution. Local pasa
+//   porque `.env` existe y `applyPackageEnvDefaults()` re-siembra el env
+//   en cada llamada; CI no tiene `.env`, entonces el handler lanza y
+//   `callIduMcpTool` devuelve un error-envelope sin `contextBudget`.
+//
+// FIX:
+//
+//   Snapshot+restore de las 3 env vars polluted keys en beforeEach /
+//   afterEach y `DEFAULT_CWD = tmpdir()` hermético para no depender del
+//   `.env` local. Solo se aplica a este archivo, no es cleanup amplio
+//   de los otros 10+ tests que setean env sin limpiar (eso es issue
+//   separado, explícitamente out of scope).
+//
+//   `beforeEach`/`afterEach` a nivel de SUITE (no de módulo) porque
+//   la contaminación ocurre en RUNTIME cuando `callIduMcpTool` lee
+//   `process.env` al resolver el project context. Borrar a nivel
+//   módulo (top-level) no serviría: la contaminación puede llegar
+//   DESPUÉS de que este módulo ya cargó.
+// =====================================================================
+
+const POLLUTED_ENV_KEYS = [
+	"ALLOWED_ROOTS",
+	"DEFAULT_CWD",
+	"AGENT_WORKSPACE_ROOT",
+] as const;
+
+let savedEnv: Record<string, string | undefined>;
+
+beforeEach(() => {
+	savedEnv = {};
+	for (const key of POLLUTED_ENV_KEYS) {
+		savedEnv[key] = process.env[key];
+		delete process.env[key];
+	}
+	process.env.DEFAULT_CWD = tmpdir();
+});
+
+afterEach(() => {
+	for (const key of POLLUTED_ENV_KEYS) {
+		if (savedEnv[key] === undefined) {
+			delete process.env[key];
+		} else {
+			process.env[key] = savedEnv[key];
+		}
+	}
+});
 
 // --- fixtures locales (mínimo viable para `buildSupervisorContextPack`) ---
 
@@ -217,7 +271,17 @@ test("T1.10 safeNotes incluye aviso cuando contextBudget está truncado", async 
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
-	const budget = result.data.contextBudget as ContextBudgetUsage;
+	// Precondición: si contextBudget es undefined, el error-envelope tiene
+	// el mensaje real del throw. Imprimirlo verbatim antes de fallar.
+	const budget = result.data.contextBudget as ContextBudgetUsage | undefined;
+	assert.ok(
+		budget !== undefined,
+		`PRECONDITION FAILED: contextBudget is undefined. ` +
+		`ok=${result.ok} ` +
+		`summary=${JSON.stringify(result.summary)} ` +
+		`errors=${JSON.stringify(result.errors)} ` +
+		`dataKeys=${JSON.stringify(Object.keys(result.data ?? {}))}`,
+	);
 	assert.equal(budget.truncated, true, "precondición: budget debe estar truncado");
 
 	const aviso = (result.safeNotes as string[]).find((n) =>
@@ -272,7 +336,17 @@ test("T1.10 el aviso de truncamiento es el primer safeNote user-provided", async
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
-	const budget = result.data.contextBudget as ContextBudgetUsage;
+	// Precondición: si contextBudget es undefined, el error-envelope tiene
+	// el mensaje real del throw. Imprimirlo verbatim antes de fallar.
+	const budget = result.data.contextBudget as ContextBudgetUsage | undefined;
+	assert.ok(
+		budget !== undefined,
+		`PRECONDITION FAILED: contextBudget is undefined. ` +
+		`ok=${result.ok} ` +
+		`summary=${JSON.stringify(result.summary)} ` +
+		`errors=${JSON.stringify(result.errors)} ` +
+		`dataKeys=${JSON.stringify(Object.keys(result.data ?? {}))}`,
+	);
 	assert.equal(budget.truncated, true, "precondición: budget debe estar truncado");
 
 	assert.ok(
@@ -314,7 +388,17 @@ test("T1.10 safeNotes NO incluye aviso cuando contextBudget NO está truncado", 
 		{ runtimeFactory: () => runtime, projectResolver: () => registered() },
 	);
 
-	const budget = result.data.contextBudget as ContextBudgetUsage;
+	// Precondición: si contextBudget es undefined, el error-envelope tiene
+	// el mensaje real del throw. Imprimirlo verbatim antes de fallar.
+	const budget = result.data.contextBudget as ContextBudgetUsage | undefined;
+	assert.ok(
+		budget !== undefined,
+		`PRECONDITION FAILED: contextBudget is undefined. ` +
+		`ok=${result.ok} ` +
+		`summary=${JSON.stringify(result.summary)} ` +
+		`errors=${JSON.stringify(result.errors)} ` +
+		`dataKeys=${JSON.stringify(Object.keys(result.data ?? {}))}`,
+	);
 	assert.equal(
 		budget.truncated,
 		false,
