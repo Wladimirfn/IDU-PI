@@ -55,7 +55,10 @@ export function buildPostflightTaskTrace(
 	const missingExpectedContracts = input.expectedContracts.filter(
 		(contract) => !observedContracts.includes(contract),
 	);
-	const observedChangeMode = input.report.observedChangeMode ?? "code";
+	const observedChangeMode =
+		effectiveChangedFiles.length === 0
+			? "no-op"
+			: (input.report.observedChangeMode ?? "code");
 	const modeMatches = input.expectedChangeMode
 		? input.expectedChangeMode === observedChangeMode
 		: true;
