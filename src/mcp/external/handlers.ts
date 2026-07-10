@@ -29,7 +29,6 @@ import {
 } from "../../external-source-registry.js";
 import type { IduMcpProjectResolution } from "../../mcp-server.js";
 import {
-	governanceConfigData,
 	workerBoundaryData,
 } from "../../mcp-server.js";
 import {
@@ -130,7 +129,7 @@ export async function handleExternalIntelligenceReport(
 			decisionEnvelope,
 			report,
 			paths,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes: [
@@ -191,7 +190,7 @@ export async function handleExternalSourceRecommend(
 		data: {
 			decisionEnvelope,
 			report,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes: [

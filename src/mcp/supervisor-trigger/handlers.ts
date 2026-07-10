@@ -30,7 +30,6 @@ import type { IduMcpProjectResolution } from "../../mcp-server.js";
 import {
 	activeMcpProjectId,
 	buildRuntimeSelfMaintenanceReport,
-	governanceConfigData,
 	invalidMcpInput,
 	supervisorTriggerActionArg,
 	workerBoundaryData,
@@ -278,7 +277,7 @@ export async function handleSupervisorSelfMaintenanceAdvisory(
 			report,
 			signals: report.signals,
 			structuredTaskInputStatus: taskRead.status,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes,
