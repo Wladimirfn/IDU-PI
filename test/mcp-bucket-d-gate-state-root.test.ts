@@ -11,19 +11,20 @@ import {
 } from "../src/mcp-server.js";
 
 // Test-of-record for the 13 BUCKET-D "master-plan / supervisor gate" sites.
-// Phase 1B (issue #259, type:chore). NO production change and NO comment
-// change in this phase.
+// Phase 2 (issue #257, type:fix). The gate branch now propagates the real
+// resolution.stateRoot instead of the literal "".
 //
 // Sibling to Phase 1A (issue #258), which pinned the 9 *unregistered*
-// sites. This file pins the other BUCKET-D family: sites that DO have a
-// resolved stateRoot but guard on a runtime capability. When the capability
-// is absent the handler returns `envelope({ stateRoot: "" })`, and the
-// shared `envelope()` truthy-coerces the literal `""` → `null` on the wire.
+// sites, and Phase 1B (issue #259), which pinned these 13 gate sites
+// asserting `null` BEFORE the coercion landed. This file covers the other
+// BUCKET-D family: sites that DO have a resolved stateRoot but guard on a
+// runtime capability. When the capability is absent the handler returns
+// `envelope({ stateRoot: resolution.stateRoot ?? "" })`, and the shared
+// `envelope()` keeps the truthy resolved stateRoot on the wire.
 //
-// These tests pin TODAY's behavior so the Phase 2 coercion work
-// (issue #257 — make the gate branch return the real resolution.stateRoot
-// instead of "") has a regression net that documents the value flipping
-// from `null` → <stateRoot> when the coercion lands.
+// Phase 1B pinned the pre-coercion `null` behavior. Phase 2 flips the
+// assertion to the real resolved stateRoot (GATE_STATE_ROOT) now that the
+// gate branch returns `resolution.stateRoot` instead of "".
 //
 // IMPORTANT difference from Phase 1A: the resolution here is a REGISTERED
 // project WITH a real stateRoot (a fresh tmpdir). The early unregistered
@@ -127,20 +128,20 @@ const GATE_SITES = [
 
 // One table-driven test, one uniform runtime, one uniform assertion. No
 // per-site branching: every gate fires on the same all-capabilities-absent
-// runtime, and every gate returns `envelope({ stateRoot: "" })` which the
-// shared envelope() truthy-coerces to `null`.
+// runtime, and every gate returns `envelope({ stateRoot: resolution.stateRoot })`
+// which the shared envelope() keeps as the real resolved path on the wire.
 for (const site of GATE_SITES) {
-	test(`[bucket-d 1B] ${site.tool} capability-absent gate emits stateRoot=null`, async () => {
+	test(`[bucket-d 2] ${site.tool} capability-absent gate emits real stateRoot`, async () => {
 		const result = await callIduMcpTool(site.tool, { ...site.args }, {
 			projectResolver: () => registeredResolution(),
 			runtimeFactory: gateRuntimeFactory,
 		});
 
-		// Primary contract (REQ-BD1B-1): the gate branch's literal
-		// `stateRoot: ""` is truthy-coerced by envelope() to `null`.
-		assert.equal(result.stateRoot, null);
+		// Primary contract (REQ-BD2-1): the gate branch propagates the
+		// real resolution.stateRoot; envelope() keeps it on the wire.
+		assert.equal(result.stateRoot, GATE_STATE_ROOT);
 		// Secondary: confirms the guard-failure branch was taken (these
-		// are not success paths).
+		// are not success paths) — only stateRoot changed, not ok.
 		assert.equal(result.ok, false);
 	});
 }
