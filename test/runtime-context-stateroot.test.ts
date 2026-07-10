@@ -88,10 +88,18 @@ function tempDir(): string {
 	return dir;
 }
 
-after(async () => {
+/**
+ * Deterministic teardown invoked from `after()` and from the cleanup test.
+ * Removes all scratch subdirs tracked in `tempRoots[]`.
+ */
+async function cleanupHermeticRoot(): Promise<void> {
 	await Promise.all(
 		tempRoots.map((dir) => rm(dir, { recursive: true, force: true })),
 	);
+}
+
+after(async () => {
+	await cleanupHermeticRoot();
 });
 
 type SeedInput = {
@@ -539,3 +547,27 @@ test(
 		);
 	},
 );
+
+// ---------------------------------------------------------------------------
+// Test 7 (cleanup): The module-level HERMETIC_ROOT created by mkdtempSync
+// must be removed by the deterministic teardown so it does not leak into the
+// system temp dir on every run. This test is intentionally LAST so it does
+// not remove HERMETIC_ROOT before the other tests need it.
+// ---------------------------------------------------------------------------
+
+test("cleanup: HERMETIC_ROOT is removed after teardown runs", async () => {
+	// HERMETIC_ROOT must exist during the test suite.
+	assert.equal(
+		existsSync(HERMETIC_ROOT),
+		true,
+		"HERMETIC_ROOT must exist during the test suite",
+	);
+	// Invoke the deterministic teardown — after() calls the same helper.
+	await cleanupHermeticRoot();
+	// HERMETIC_ROOT must be gone.
+	assert.equal(
+		existsSync(HERMETIC_ROOT),
+		false,
+		"HERMETIC_ROOT must be removed by cleanup (currently leaks every run)",
+	);
+});
