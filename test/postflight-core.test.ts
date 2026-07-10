@@ -88,3 +88,43 @@ test("postflight task trace reports unexpected files, missing contracts, and mod
 	assert.deepEqual(trace.modeDelta, { expected: "code", observed: "docs" });
 	assert.equal(trace.objectiveProgress, "unclear");
 });
+
+test("postflight task trace treats fully-ignored changes as no-op mode", () => {
+	const trace = buildPostflightTaskTrace({
+		expectedContracts: [],
+		expectedFiles: [],
+		expectedChangeMode: "no-op",
+		ignoredFiles: [".codegraph/", "birth/"],
+		report: {
+			changedFiles: [".codegraph/", "birth/"],
+			observedChangeMode: "code",
+			impactedAreas: [],
+			risk: "low",
+		},
+	});
+
+	assert.equal(trace.observedChangeMode, "no-op");
+	assert.equal(trace.matchesIntent, true);
+	assert.equal(trace.modeDelta, null);
+	assert.deepEqual(trace.ignoredFiles, [".codegraph/", "birth/"]);
+	assert.equal(trace.objectiveProgress, "none");
+});
+
+test("postflight task trace keeps raw mode when an unignored file exists", () => {
+	const trace = buildPostflightTaskTrace({
+		expectedContracts: [],
+		expectedFiles: ["docs/"],
+		expectedChangeMode: "no-op",
+		ignoredFiles: [".codegraph/"],
+		report: {
+			changedFiles: [".codegraph/", "src/rogue.ts"],
+			observedChangeMode: "code",
+			impactedAreas: ["orquestación"],
+			risk: "low",
+		},
+	});
+
+	assert.equal(trace.matchesIntent, false);
+	assert.deepEqual(trace.unexpectedAreas, ["src/rogue.ts"]);
+	assert.deepEqual(trace.ignoredFiles, [".codegraph/"]);
+});
