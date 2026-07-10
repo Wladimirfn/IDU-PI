@@ -63,7 +63,7 @@ export async function handleMasterPlanStatus(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanStatus) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -102,7 +102,7 @@ export async function handleMasterPlanCreate(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanRedraft) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -151,7 +151,7 @@ export async function handleMasterPlanReview(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -199,7 +199,7 @@ export async function handleMasterPlanApprove(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanApprove) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -253,7 +253,7 @@ export async function handleMasterPlanReject(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReject) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -306,7 +306,7 @@ export async function handlePlanSnapshot(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -351,7 +351,7 @@ export async function handleNextAdvisoryAction(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -415,7 +415,7 @@ export async function handleContinuationProposal(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -466,7 +466,7 @@ export async function handleTaskPackageCreate(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
