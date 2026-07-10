@@ -41,7 +41,6 @@ import { buildMasterPlanTaskTree } from "../../master-plan-task-tree.js";
 import type { IduMcpProjectResolution } from "../../mcp-server.js";
 import {
 	buildRuntimeSelfMaintenanceReport,
-	governanceConfigData,
 	loadRuntimeAutomaticov1Plan,
 	loadRuntimeExecutionReadiness,
 	workerBoundaryData,
@@ -470,7 +469,7 @@ export async function handleAutomaticov1Cycle(
 		data: {
 			decisionEnvelope,
 			result,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes: [

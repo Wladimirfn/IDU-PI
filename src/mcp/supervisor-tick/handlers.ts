@@ -30,7 +30,6 @@ import { buildDecisionEnvelope } from "../../decision-envelope.js";
 import { buildSupervisorLoopOrchestratorAdvisory } from "../../orchestrator-advisory.js";
 import type { IduMcpProjectResolution } from "../../mcp-server.js";
 import {
-	governanceConfigData,
 	workerBoundaryData,
 } from "../../mcp-server.js";
 import { decisionEnvelopeFromAdvisory } from "../../decision-envelope.js";
@@ -79,7 +78,7 @@ export async function handleSupervisorTick(
 		data: {
 			alignmentAdvisory,
 			decisionEnvelope,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 			stepsExecuted: result.steps.filter(
 				(step) => step.status !== "skipped",
@@ -162,7 +161,7 @@ export async function handleExecutionDirectorTick(
 			savedProposals: result.savedProposals,
 			blockingReasons: result.blockingReasons,
 			evidenceRefs: result.evidenceRefs,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 			result,
 		},
@@ -375,7 +374,7 @@ export async function handleSupervisorCronPlan(
 		data: {
 			alignmentAdvisory,
 			decisionEnvelope,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 			classification: plan.classification,
 			proposedActions: plan.proposedActions,

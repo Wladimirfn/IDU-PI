@@ -28,7 +28,6 @@ import { buildContextPruningAdvisoryReport } from "../../context-pruning-advisor
 import { buildDecisionEnvelope } from "../../decision-envelope.js";
 import type { IduMcpProjectResolution } from "../../mcp-server.js";
 import {
-	governanceConfigData,
 	workerBoundaryData,
 } from "../../mcp-server.js";
 import { envelope } from "../_shared/index.js";
@@ -86,7 +85,7 @@ export async function handleArchitecturalPruningPlan(
 			decisionEnvelope,
 			plan,
 			candidates: plan.candidates,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes: [
@@ -155,7 +154,7 @@ export async function handleContextPruningAdvisory(
 			decisionEnvelope,
 			report,
 			signals: report.signals,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes: [

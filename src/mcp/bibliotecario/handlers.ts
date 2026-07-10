@@ -48,7 +48,6 @@ import {
 	boundSourceRecommendationForInjection,
 	compactSourceSkillCandidateReview,
 	arrayField,
-	governanceConfigData,
 	invalidMcpInput,
 	scoreArg,
 	workerBoundaryData,
@@ -476,7 +475,7 @@ export async function handleBibliotecarioProactiveAdvisory(
 			skillOptimization,
 			failureSemanticDebt,
 			resourceContextCheck,
-			governanceConfig: governanceConfigData(),
+			governanceConfig: runtime.governanceConfig,
 			workerBoundary: workerBoundaryData(),
 		},
 		safeNotes: [
