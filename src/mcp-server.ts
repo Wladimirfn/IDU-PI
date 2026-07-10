@@ -5,7 +5,6 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
 	canonicalDirectory,
-	governanceConfigFromConfig,
 	isAllowedCwd,
 	loadConfig,
 } from "./config.js";
@@ -1757,15 +1756,6 @@ async function handleProjectLifecycleTool(
 			errors: [redactSecrets(errorMessage(error))],
 		});
 	}
-}
-
-export function governanceConfigData(): JsonObject {
-	// Phase 0 (#263): delegates to the pure helper so there is exactly one
-	// place that knows the payload shape. Still reads env (unchanged contract
-	// for the 18 in-handler call sites not migrated in this phase).
-	return governanceConfigFromConfig(
-		loadConfig({ requireTelegram: false }),
-	);
 }
 
 export function workerBoundaryData(): JsonObject {
