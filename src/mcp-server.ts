@@ -3,7 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
-import { canonicalDirectory, isAllowedCwd, loadConfig } from "./config.js";
+import {
+	canonicalDirectory,
+	governanceConfigFromConfig,
+	isAllowedCwd,
+	loadConfig,
+} from "./config.js";
 import { createCliRuntime, type CliRuntime } from "./cli.js";
 import { runSensorImpulses } from "./sensor-impulses.js";
 import { categorizeFindings } from "./supervisor-categorize.js";
@@ -1755,12 +1760,12 @@ async function handleProjectLifecycleTool(
 }
 
 export function governanceConfigData(): JsonObject {
-	const config = loadConfig({ requireTelegram: false });
-	return {
-		...config.iduGovernance,
-		principle:
-			"Idu-pi MCP informa, audita y recomienda; el orquestador decide, ejecuta y comunica.",
-	};
+	// Phase 0 (#263): delegates to the pure helper so there is exactly one
+	// place that knows the payload shape. Still reads env (unchanged contract
+	// for the 18 in-handler call sites not migrated in this phase).
+	return governanceConfigFromConfig(
+		loadConfig({ requireTelegram: false }),
+	);
 }
 
 export function workerBoundaryData(): JsonObject {
@@ -1800,7 +1805,9 @@ export function buildOrchestratorProcedure(
 	resolution: IduMcpProjectResolution,
 ): JsonObject {
 	const connection = runtime.inspectConnection();
-	const governanceConfig = governanceConfigData();
+	// Phase 0 (#263): governance config comes from the runtime (populated by
+	// createCliRuntime), not from a fresh loadConfig() that needs DEFAULT_CWD.
+	const governanceConfig = runtime.governanceConfig;
 	const workerBoundary = workerBoundaryData();
 	const baseSteps = [
 		"Consultar Idu-pi MCP para estado, contratos y riesgos.",
@@ -2514,7 +2521,8 @@ export function buildSupervisorContextPack(
 			safeReads.usage,
 			...(embeddedPlanSnapshotUsage ? [embeddedPlanSnapshotUsage] : []),
 		]),
-		governanceConfig: governanceConfigData(),
+		// Phase 0 (#263): runtime-owned governance config (no DEFAULT_CWD read).
+		governanceConfig: runtime.governanceConfig,
 		workerBoundary: workerBoundaryData(),
 		orchestratorAdvisories,
 	};
@@ -2873,7 +2881,8 @@ export function buildPlanSnapshot(
 		blockers: blockers.items,
 		recommendedNext: recommendedNext.items,
 		recommendedAgentLabs: recommendedAgentLabs.items,
-		governanceConfig: governanceConfigData(),
+		// Phase 0 (#263): runtime-owned governance config (no DEFAULT_CWD read).
+		governanceConfig: runtime.governanceConfig,
 		workerBoundary: workerBoundaryData(),
 		contextBudget: mergeContextBudgetUsage("plan_snapshot", [
 			objective.usage,

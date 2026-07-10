@@ -23,6 +23,7 @@ import {
 	type IduMcpProjectResolution,
 	type IduMcpRuntimeFactory,
 } from "../src/mcp-server.js";
+import { IDU_GOVERNANCE_PRINCIPLE } from "../src/config.js";
 
 const hermeticMcpRoot = mkdtempSync(join(tmpdir(), "idu-mcp-hermetic-"));
 const hermeticProjectPath = join(hermeticMcpRoot, "project");
@@ -215,6 +216,14 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 		projectId: "sistema_de_mantencion",
 		projectPath,
 		workspaceRoot: "C:/idu/workspace",
+		// Phase 0 (#263): migrated builders read runtime.governanceConfig.
+		governanceConfig: {
+			mcpAuthorityMode: "advisory",
+			agentLabMode: "audit_only",
+			workspaceOwner: "orchestrator",
+			autoRefreshLabProfiles: true,
+			principle: IDU_GOVERNANCE_PRINCIPLE,
+		},
 		inspectConnection: () => connection(projectPath),
 		formatConnection: () => "connection",
 		formatDashboard: () => "dashboard",
