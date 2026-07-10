@@ -59,7 +59,7 @@ export async function handleSupervisorContextPack(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.masterPlanReview) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,

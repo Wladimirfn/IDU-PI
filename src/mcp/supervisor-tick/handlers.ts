@@ -114,7 +114,7 @@ export async function handleExecutionDirectorTick(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.executionDirectorTick) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -187,7 +187,7 @@ export async function handleProposalOutbox(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.proposalOutbox) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
@@ -230,7 +230,7 @@ export async function handleProposalDetail(
 ): Promise<IduMcpToolResult> {
 	if (!runtime.proposalDetail) {
 		return envelope({
-			stateRoot: "", /* BUCKET-D master plan gate: sin state todavía */
+			stateRoot: resolution.stateRoot ?? "", /* BUCKET-D master plan gate: guard failure; project state may still exist */
 
 			ok: false,
 			tool: name,
