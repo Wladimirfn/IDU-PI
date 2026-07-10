@@ -90,12 +90,17 @@ function tempDir(): string {
 
 /**
  * Deterministic teardown invoked from `after()` and from the cleanup test.
- * Removes all scratch subdirs tracked in `tempRoots[]`.
+ * Removes all scratch subdirs (tempRoots[]) AND the module-level
+ * HERMETIC_ROOT parent so nothing leaks in the system temp dir.
+ * Safe to call multiple times (force: true).
  */
 async function cleanupHermeticRoot(): Promise<void> {
 	await Promise.all(
 		tempRoots.map((dir) => rm(dir, { recursive: true, force: true })),
 	);
+	// tempDir() creates scratch subdirs INSIDE HERMETIC_ROOT, so the parent
+	// would leak every run without this recursive removal.
+	await rm(HERMETIC_ROOT, { recursive: true, force: true });
 }
 
 after(async () => {
