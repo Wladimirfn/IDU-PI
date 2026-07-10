@@ -31,6 +31,34 @@ export type IduGovernanceConfig = {
 	autoRefreshLabProfiles: boolean;
 };
 
+/**
+ * Governance config payload emitted on MCP response builders. Preserves the
+ * shape historically produced by governanceConfigData() (the iduGovernance
+ * block plus the principle text).
+ */
+export type GovernanceConfigPayload = IduGovernanceConfig & {
+	principle: string;
+};
+
+/**
+ * Principle text shared by every governance config payload. Extracted so the
+ * pure helper and the legacy zero-arg governanceConfigData() agree on it.
+ */
+export const IDU_GOVERNANCE_PRINCIPLE =
+	"Idu-pi MCP informa, audita y recomienda; el orquestador decide, ejecuta y comunica.";
+
+/**
+ * Pure helper: derive the governance config payload from an already-loaded
+ * BridgeConfig. No env reads, no filesystem access. Used by createCliRuntime
+ * to populate CliRuntime.governanceConfig so the migrated MCP response
+ * builders no longer need DEFAULT_CWD (issue #263).
+ */
+export function governanceConfigFromConfig(
+	config: BridgeConfig,
+): GovernanceConfigPayload {
+	return { ...config.iduGovernance, principle: IDU_GOVERNANCE_PRINCIPLE };
+}
+
 export type BridgeConfig = {
 	telegramBotToken: string;
 	allowedUserId: number;

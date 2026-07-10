@@ -2,9 +2,11 @@
 import { pathToFileURL } from "node:url";
 import {
 	canonicalDirectory,
+	governanceConfigFromConfig,
 	isAllowedCwd,
 	loadConfig,
 	type BridgeConfig,
+	type GovernanceConfigPayload,
 } from "./config.js";
 import { AgentRouter } from "./agent-router.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
@@ -595,6 +597,10 @@ export type CliRuntime = {
 	projectPath: string;
 	workspaceRoot: string;
 	labDbPath?: string;
+	// Phase 0 (#263): runtime-owned governance config, populated from the
+	// config already loaded by createCliRuntime. Optional to avoid churn on
+	// existing typed-literal test fakes; always present on production runtimes.
+	governanceConfig?: GovernanceConfigPayload;
 	digestNotify?: (text: string) => void;
 	sessionStatePath?: string;
 	promptForRole?: (
@@ -1047,6 +1053,9 @@ export function createCliRuntime(
 		projectId: activeProject.id,
 		projectPath: activeProject.path,
 		workspaceRoot: runtimeWorkspaceRoot,
+		// Phase 0 (#263): governance config derived from the config already
+		// loaded above, so migrated MCP builders need no DEFAULT_CWD read.
+		governanceConfig: governanceConfigFromConfig(config),
 		...(projectStatePaths ? { labDbPath } : {}),
 		promptForRole: (role, message) =>
 			agentRouter.promptForRole(role, message, {
