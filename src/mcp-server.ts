@@ -3463,7 +3463,6 @@ function inferContractsFromSnapshot(
 		...(text.match(/mcp|agent|orquestador|subagent|agentlab|governance/u)
 			? ["agent"]
 			: []),
-		"agent",
 	]);
 }
 
