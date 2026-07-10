@@ -16,6 +16,7 @@ import {
 	getIduSessionStatus,
 } from "../src/idu-session.js";
 import {
+	buildNextAdvisoryAction,
 	callIduMcpTool,
 	handleMcpRequest,
 	listIduMcpTools,
@@ -59,7 +60,10 @@ import {
 	flushContextQualityEvents,
 	readContextQualityEvents,
 } from "../src/context-quality-events.js";
-import type { ContextBudgetUsage } from "../src/context-budget.js";
+import {
+	createContextBudgetUsage,
+	type ContextBudgetUsage,
+} from "../src/context-budget.js";
 import type { IduPrepareResult } from "../src/idu-prepare.js";
 import type { IduSupervisorLoopResult } from "../src/idu-supervisor-loop.js";
 import type { IduSupervisorCronPlanResult } from "../src/idu-supervisor-cron.js";
@@ -5204,4 +5208,30 @@ test("MCP idu_agentlab_request_create threads the model arg through to the runti
 	} finally {
 		rmSync(reportsPath, { recursive: true, force: true });
 	}
+});
+
+test("buildNextAdvisoryAction omits agent contract when no keyword matches (#255)", () => {
+	const snapshot = {
+		authority: "advisory" as const,
+		planStatus: "approved",
+		objective: "neutral objective without contract keywords",
+		operationalContracts: [],
+		flows: [],
+		contextBudget: createContextBudgetUsage("plan_snapshot"),
+	};
+	const result = buildNextAdvisoryAction(
+		snapshot,
+		"continue with the next step",
+		"from_plan",
+		"small",
+	);
+	const candidateAction = (result as {
+		candidateAction: { contractsAffected: string[] };
+	}).candidateAction;
+	assert.equal(Array.isArray(candidateAction.contractsAffected), true);
+	assert.ok(
+		!candidateAction.contractsAffected.includes("agent"),
+		`contractsAffected must not include the unconditional "agent": ${JSON.stringify(candidateAction.contractsAffected)}`,
+	);
+	assert.deepEqual(candidateAction.contractsAffected, []);
 });
