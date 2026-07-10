@@ -32,17 +32,15 @@ export type IduGovernanceConfig = {
 };
 
 /**
- * Governance config payload emitted on MCP response builders. Preserves the
- * shape historically produced by governanceConfigData() (the iduGovernance
- * block plus the principle text).
+ * Governance config payload emitted on MCP response builders. Carries the
+ * iduGovernance block plus the principle text.
  */
 export type GovernanceConfigPayload = IduGovernanceConfig & {
 	principle: string;
 };
 
 /**
- * Principle text shared by every governance config payload. Extracted so the
- * pure helper and the legacy zero-arg governanceConfigData() agree on it.
+ * Principle text shared by every governance config payload.
  */
 export const IDU_GOVERNANCE_PRINCIPLE =
 	"Idu-pi MCP informa, audita y recomienda; el orquestador decide, ejecuta y comunica.";
