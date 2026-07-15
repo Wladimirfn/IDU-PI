@@ -23,4 +23,5 @@ export {
 	handleIduSubscribeTriggers,
 	handleIduTriggerEngine,
 	handleIduTriggerShow,
+	handleLockCleanup,
 } from "./handlers.js";

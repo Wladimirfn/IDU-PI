@@ -4,19 +4,28 @@ import {
 	existsSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
 	acquireExclusiveFileLock,
+	acquireMaintenanceLock,
+	cleanupStaleLockfiles,
+	deriveMaintenanceEndpoint,
 	releaseExclusiveFileLock,
 	resolveLockTimeoutMs,
 } from "../src/state-root-file-lock.js";
 import * as lockModule from "../src/state-root-file-lock.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(HERE, "..", "..");
+const LOCK_SRC_PATH = join(REPO_ROOT, "src", "state-root-file-lock.ts");
 
 function tempDir(prefix = "idu-lock-"): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -695,4 +704,162 @@ test("resolveLockTimeoutMs honors IDU_LOCK_TIMEOUT_MS only and ignores all other
 		resolveLockTimeoutMs({ IDU_LOCK_TIMEOUT_MS: "5000" }),
 		5000,
 	);
+});
+
+// ===========================================================================
+// Phase 1 — AST bans: no file-based maintenance/reap surface (spec #3098 rev7)
+// ===========================================================================
+
+test("AST ban: no '.lock.maintenance' or '.reaped.' literal in state-root-file-lock.ts", () => {
+	const src = readFileSync(LOCK_SRC_PATH, "utf8");
+	assert.ok(
+		!/\.maintenance\b/u.test(src),
+		"source must not reference a '.maintenance' file path (file-based gate removed)",
+	);
+	assert.ok(
+		!/\.reaped\b/u.test(src),
+		"source must not reference '.reaped' evidence files (reap surface removed)",
+	);
+});
+
+test("AST ban: no fs.rename/renameSync in state-root-file-lock.ts", () => {
+	const src = readFileSync(LOCK_SRC_PATH, "utf8");
+	// Ban rename CALLS (with parens), not the word in comments.
+	assert.ok(
+		!/renameSync\s*\(|fs\.rename\s*\(|\.rename\s*\(/u.test(src),
+		"source must not call renameSync/fs.rename (rename-based gate recovery prohibited)",
+	);
+});
+
+test("AST ban: no startedAt/process.kill/mtime/TTL in maintenance gate section (CLI matrix excluded)", () => {
+	const src = readFileSync(LOCK_SRC_PATH, "utf8");
+	const start = src.indexOf("MAINTENANCE GATE START");
+	const end = src.indexOf("MAINTENANCE GATE END");
+	assert.ok(start !== -1 && end !== -1 && start < end, "maintenance gate section markers must exist");
+	const gateSection = src.slice(start, end);
+	// The maintenance gate acquire/hold/release flow must not branch on PID
+	// liveness, TTL, age, mtime, or startedAt. Only EADDRINUSE + connect-probe
+	// decide gate state. (The CLI verified-dead matrix in classifyLockfile is
+	// OUTSIDE this section and explicitly excluded.)
+	assert.ok(
+		!/\bprocess\.kill\b/u.test(gateSection),
+		"maintenance gate section must not use process.kill (no PID liveness in gate flow)",
+	);
+	assert.ok(
+		!/\bstartedAt\b/u.test(gateSection),
+		"maintenance gate section must not reference startedAt (no age/TTL in gate flow)",
+	);
+	assert.ok(
+		!/\bstatSync\b/u.test(gateSection),
+		"maintenance gate section must not use statSync (no mtime in gate flow)",
+	);
+});
+
+test("AST ban: no reapRename/renameBack/deleteIsolated/verifyDead family dispatch in state-root-file-lock.ts", () => {
+	const src = readFileSync(LOCK_SRC_PATH, "utf8");
+	const bannedFns = ["reapRename", "renameBack", "deleteIsolated", "verifyDead", "reapMaintenanceOrReaped"];
+	for (const fn of bannedFns) {
+		assert.ok(
+			!src.includes(fn),
+			`source must not define or call '${fn}' (reap family removed)`,
+		);
+	}
+});
+
+// ===========================================================================
+// Phase 3 — Integration: no file-gate artifacts from acquireExclusiveFileLock
+// ===========================================================================
+
+test("integration: acquireExclusiveFileLock happy path writes no .lock.maintenance or .reaped.* artifacts", async () => {
+	const dir = tempDir();
+	try {
+		const targetPath = join(dir, "data.jsonl");
+		const result = await acquireExclusiveFileLock(targetPath, { timeoutMs: 1000, pollMs: 25 });
+		assert.equal(result.ok, true);
+		if (!result.ok) return;
+		// After acquire, the only lock-related file should be the normal .lock.
+		const entries = readdirSync(dir);
+		const lockFiles = entries.filter((n) => n.includes(".lock"));
+		assert.ok(lockFiles.includes("data.jsonl.lock"), "normal .lock created");
+		const banned = entries.filter(
+			(n) => n.includes(".lock.maintenance") || n.includes(".reaped."),
+		);
+		assert.deepEqual(banned, [], "no .lock.maintenance or .reaped.* artifacts");
+		await releaseExclusiveFileLock({ lockPath: result.lockPath, token: result.token });
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("integration: N acquire/release cycles leave no .lock.maintenance or .reaped.* in lockfile dir", async () => {
+	const dir = tempDir();
+	try {
+		for (let i = 0; i < 3; i++) {
+			const targetPath = join(dir, `cycle-${i}.jsonl`);
+			const r = await acquireExclusiveFileLock(targetPath, { timeoutMs: 1000, pollMs: 25 });
+			if (r.ok) await releaseExclusiveFileLock({ lockPath: r.lockPath, token: r.token });
+		}
+		const entries = readdirSync(dir);
+		const banned = entries.filter(
+			(n) => n.includes(".lock.maintenance") || n.includes(".reaped."),
+		);
+		assert.deepEqual(banned, [], "no maintenance/reaped artifacts after N cycles");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("integration: cleanupStaleLockfiles refused while maintenance gate held by concurrent process", async (t) => {
+	const dir = tempDir();
+	let child: ReturnType<typeof spawn> | null = null;
+	try {
+		// Create a verified-dead lockfile (eligible for cleanup).
+		child = spawn(process.execPath, ["-e", "setInterval(() => {}, 60000);"], { stdio: "ignore" });
+		const childPid = child.pid!;
+		await sleep(150);
+		child.kill("SIGKILL");
+		await sleep(150);
+		let dead = false;
+		try { process.kill(childPid, 0); } catch (err) { dead = (err as NodeJS.ErrnoException).code === "ESRCH"; }
+		if (!dead) { t.skip("platform does not report ESRCH"); return; }
+
+		const lockPath = join(dir, "dead.lock");
+		writeFileSync(lockPath, JSON.stringify({
+			pid: childPid, startedAt: "2026-01-01T00:00:00.000Z", token: "dead", host: hostname(),
+		}));
+
+		// Hold the maintenance kernel gate (simulating a concurrent acquireExclusiveFileLock).
+		const gate = await acquireMaintenanceLock(lockPath, 5000);
+		if (!gate.ok) { t.skip("could not acquire maintenance gate for test"); return; }
+
+		// Run cleanup with confirm — must be refused because the gate is busy.
+		const result = await cleanupStaleLockfiles(dir, { confirmDelete: true });
+		const victim = result.actions.find((a) => a.lockPath === lockPath);
+		assert.ok(victim, "dead lockfile has an action");
+		assert.equal(victim!.action, "refused", "cleanup must be refused while gate is held");
+		assert.ok(
+			/gate|coordination|busy/iu.test(victim!.action === "refused" ? victim!.reason : ""),
+			"refusal reason must mention gate contention",
+		);
+		assert.equal(existsSync(lockPath), true, "dead lockfile must survive (gate blocked deletion)");
+
+		await gate.handle.release();
+	} finally {
+		try { child?.kill("SIGKILL"); } catch { /* */ }
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+// ===========================================================================
+// Phase 2 — endpoint derivation via public exports
+// ===========================================================================
+
+test("deriveMaintenanceEndpoint: stable SHA-256 hash endpoint matches acquireMaintenanceLock endpoint", async () => {
+	const lockPath = join(tempDir(), "derive-test.lock");
+	const ep = deriveMaintenanceEndpoint(lockPath);
+	const result = await acquireMaintenanceLock(lockPath, 1000);
+	if (result.ok) {
+		assert.equal(result.endpoint, ep, "acquired endpoint must match derived endpoint");
+		await result.handle.release();
+	}
 });
