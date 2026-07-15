@@ -668,13 +668,13 @@ import {
 	runLockCleanup,
 } from "../../lockfile-cleanup-command.js";
 
-export function handleLockCleanup(
+export async function handleLockCleanup(
 	runtime: CliRuntime,
 	rest: string[] = [],
-): CliResult {
+): Promise<CliResult> {
 	const parsed = parseLockCleanupArgs(rest);
 	const stateRoot = parsed.stateRoot ?? runtime.workspaceRoot;
 	const targetDir = join(stateRoot, "reports");
-	const result = runLockCleanup({ targetDir, confirm: parsed.confirm, allowedRoot: runtime.workspaceRoot });
+	const result = await runLockCleanup({ targetDir, confirm: parsed.confirm, allowedRoot: runtime.workspaceRoot });
 	return { exitCode: result.exitCode, stdout: result.stdout, stderr: "" };
 }

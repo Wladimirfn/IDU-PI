@@ -93,7 +93,9 @@ function isPathConfined(candidate: string, root: string): boolean {
  * - `confirm: true` → deletes ONLY verified-dead local PIDs; refuses every
  *   other holder; exit 1 if any entry was refused, else 0.
  */
-export function runLockCleanup(input: LockCleanupInput): LockCleanupOutput {
+export async function runLockCleanup(
+	input: LockCleanupInput,
+): Promise<LockCleanupOutput> {
 	if (input.confirm) {
 		if (input.allowedRoot !== undefined && !isPathConfined(input.targetDir, input.allowedRoot)) {
 			return {
@@ -105,7 +107,7 @@ export function runLockCleanup(input: LockCleanupInput): LockCleanupOutput {
 				].join("\n"),
 			};
 		}
-		const result = cleanupStaleLockfiles(input.targetDir, {
+		const result = await cleanupStaleLockfiles(input.targetDir, {
 			confirmDelete: true,
 		});
 		return {

@@ -337,7 +337,7 @@ test("cleanupStaleLockfiles: confirmDelete=false refuses all, deletes nothing, e
 			host: hostname(),
 		});
 
-		const result = cleanupStaleLockfiles(dir, { confirmDelete: false });
+		const result = await cleanupStaleLockfiles(dir, { confirmDelete: false });
 		assert.equal(result.exitCode, 0);
 		const allRefused = result.actions.every((a) => a.action === "refused");
 		assert.ok(allRefused, "no-confirm mode refuses every entry");
@@ -387,7 +387,7 @@ test("cleanupStaleLockfiles: confirmDelete=true deletes ONLY verified-dead, exit
 			host: hostname(),
 		});
 
-		const result = cleanupStaleLockfiles(dir, { confirmDelete: true });
+		const result = await cleanupStaleLockfiles(dir, { confirmDelete: true });
 		const deleted = result.actions.filter((a) => a.action === "deleted");
 		const refused = result.actions.filter((a) => a.action === "refused");
 		assert.equal(deleted.length, 1, "exactly the verified-dead lockfile deleted");
@@ -438,7 +438,7 @@ test("cleanupStaleLockfiles: confirmDelete=true on all-eligible batch exits 0", 
 			host: hostname(),
 		});
 
-		const result = cleanupStaleLockfiles(dir, { confirmDelete: true });
+		const result = await cleanupStaleLockfiles(dir, { confirmDelete: true });
 		assert.equal(result.actions.length, 1);
 		assert.equal(result.actions[0]!.action, "deleted");
 		assert.equal(result.exitCode, 0, "no refusals → exit 0");
@@ -467,7 +467,7 @@ test("cleanupStaleLockfiles: confirmDelete=true refuses pid-recycled (alive) hol
 			host: hostname(),
 		});
 
-		const result = cleanupStaleLockfiles(dir, { confirmDelete: true });
+		const result = await cleanupStaleLockfiles(dir, { confirmDelete: true });
 		assert.equal(result.exitCode, 1);
 		const recycled = result.actions.find((a) => a.lockPath === lockPath);
 		assert.ok(recycled, "recycled lockfile has an action");
@@ -488,7 +488,7 @@ test("cleanupStaleLockfiles: confirmDelete=true refuses pid-recycled (alive) hol
 // runLockCleanup — command-level output + exit codes
 // ---------------------------------------------------------------------------
 
-test("runLockCleanup: read-only mode lists verdicts, deletes nothing, exit 0", () => {
+test("runLockCleanup: read-only mode lists verdicts, deletes nothing, exit 0", async () => {
 	const dir = tempDir();
 	try {
 		writeLock(dir, "alive.lock", {
@@ -497,7 +497,7 @@ test("runLockCleanup: read-only mode lists verdicts, deletes nothing, exit 0", (
 			token: "a",
 			host: hostname(),
 		});
-		const result = runLockCleanup({ targetDir: dir, confirm: false });
+		const result = await runLockCleanup({ targetDir: dir, confirm: false });
 		assert.equal(result.exitCode, 0);
 		assert.ok(result.stdout.includes("alive.lock"), "listing names the lockfile");
 		assert.ok(result.stdout.includes("refused:alive-local"), "listing shows verdict");
@@ -508,7 +508,7 @@ test("runLockCleanup: read-only mode lists verdicts, deletes nothing, exit 0", (
 	}
 });
 
-test("runLockCleanup: confirm=true with only refusals exits 1 and deletes nothing", () => {
+test("runLockCleanup: confirm=true with only refusals exits 1 and deletes nothing", async () => {
 	const dir = tempDir();
 	try {
 		const aliveLock = writeLock(dir, "alive.lock", {
@@ -517,7 +517,7 @@ test("runLockCleanup: confirm=true with only refusals exits 1 and deletes nothin
 			token: "a",
 			host: hostname(),
 		});
-		const result = runLockCleanup({ targetDir: dir, confirm: true });
+		const result = await runLockCleanup({ targetDir: dir, confirm: true });
 		assert.equal(result.exitCode, 1);
 		assert.ok(result.stdout.includes("refused"), "refusal surfaced");
 		assert.equal(existsSync(aliveLock), true, "alive lockfile untouched even with confirm");
@@ -526,10 +526,10 @@ test("runLockCleanup: confirm=true with only refusals exits 1 and deletes nothin
 	}
 });
 
-test("runLockCleanup: empty directory → exit 0, no lockfiles", () => {
+test("runLockCleanup: empty directory → exit 0, no lockfiles", async () => {
 	const dir = tempDir();
 	try {
-		const result = runLockCleanup({ targetDir: dir, confirm: false });
+		const result = await runLockCleanup({ targetDir: dir, confirm: false });
 		assert.equal(result.exitCode, 0);
 		assert.ok(/no lockfiles/iu.test(result.stdout), "reports none found");
 	} finally {
@@ -634,7 +634,7 @@ test("cleanupStaleLockfiles: dead lock replaced by live under gate → survives,
 			pid: childPid, startedAt: "2026-01-01T00:00:00.000Z", token: "dead", host: hostname(),
 		});
 
-		const result = cleanupStaleLockfiles(dir, {
+		const result = await cleanupStaleLockfiles(dir, {
 			confirmDelete: true,
 			onAfterListing: () => {
 				// Between listing and delete, another process swaps the dead lock for a LIVE one.
@@ -661,11 +661,11 @@ test("cleanupStaleLockfiles: dead lock replaced by live under gate → survives,
 });
 
 // Path confinement: --confirm must refuse before deletion when targetDir escapes allowedRoot.
-test("runLockCleanup: confirm with external targetDir outside allowedRoot → refused, exit 1", () => {
+test("runLockCleanup: confirm with external targetDir outside allowedRoot → refused, exit 1", async () => {
 	const allowed = tempDir("idu-allowed-");
 	const outside = tempDir("idu-outside-");
 	try {
-		const result = runLockCleanup({ targetDir: outside, confirm: true, allowedRoot: allowed });
+		const result = await runLockCleanup({ targetDir: outside, confirm: true, allowedRoot: allowed });
 		assert.equal(result.exitCode, 1);
 		assert.ok(/REFUSED|escapes/iu.test(result.stdout), "signals path-confinement refusal");
 	} finally {
@@ -674,13 +674,13 @@ test("runLockCleanup: confirm with external targetDir outside allowedRoot → re
 	}
 });
 
-test("runLockCleanup: confirm with symlink escaping allowedRoot → refused", (t) => {
+test("runLockCleanup: confirm with symlink escaping allowedRoot → refused", async (t) => {
 	const allowed = tempDir("idu-allowed-");
 	const outside = tempDir("idu-outside-");
 	const link = join(allowed, "escaped-link");
 	try {
 		try { symlinkSync(outside, link); } catch { t.skip("symlink creation not supported on this platform"); return; }
-		const result = runLockCleanup({ targetDir: join(link, "reports"), confirm: true, allowedRoot: allowed });
+		const result = await runLockCleanup({ targetDir: join(link, "reports"), confirm: true, allowedRoot: allowed });
 		assert.equal(result.exitCode, 1);
 		assert.ok(/REFUSED|escapes/iu.test(result.stdout), "symlink escape refused");
 	} finally {

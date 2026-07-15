@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	closeSync,
 	mkdirSync,
@@ -8,7 +8,9 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { hostname } from "node:os";
+import { chmod as fsChmod, unlink } from "node:fs/promises";
+import { createConnection, createServer, type Server } from "node:net";
+import { hostname, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -122,7 +124,6 @@ export async function acquireExclusiveFileLock(
 	const timeoutMs = options?.timeoutMs ?? resolveLockTimeoutMs();
 	const pollMs = options?.pollMs ?? DEFAULT_POLL_MS;
 	const lockPath = `${targetPath}.lock`;
-	const gatePath = `${lockPath}.maintenance`;
 
 	// Ensure the parent directory of the lockfile exists.
 	try {
@@ -142,34 +143,38 @@ export async function acquireExclusiveFileLock(
 			host: hostname(),
 		});
 
-		// Coordination gate (TOCTOU): briefly held during creation so cleanup can't unlink a lock mid-acquire.
-		const gate = tryCreateExclusive(gatePath, content);
-		if (gate.kind === "io_error") {
-			return {
-				ok: false,
-				code: "LOCK_IO_ERROR",
-				diagnostics: buildDiagnostics(lockPath, gate.error),
-			};
-		}
-		if (gate.kind !== "created") {
-			const remaining = deadline - Date.now();
-			if (remaining <= 0) {
+		// Maintenance kernel gate: held ONLY around the O_EXCL lock creation so
+		// the CLI cleanup path cannot classify-then-delete a lock mid-acquire.
+		// The writer (supervisor-response-history) is unaware of this gate.
+		const remaining = Math.max(0, deadline - Date.now());
+		const gate = await acquireMaintenanceLock(lockPath, remaining);
+		if (!gate.ok) {
+			if (gate.code === "MAINTENANCE_IO_ERROR") {
+				return {
+					ok: false,
+					code: "LOCK_IO_ERROR",
+					diagnostics: buildDiagnostics(
+						lockPath,
+						gate.diagnostics.lastError?.code,
+					),
+				};
+			}
+			// MAINTENANCE_BUSY — gate contended; check overall deadline.
+			if (deadline - Date.now() <= 0) {
 				return {
 					ok: false,
 					code: "LOCK_TIMEOUT",
 					diagnostics: buildDiagnostics(lockPath, undefined),
 				};
 			}
-			await sleep(Math.min(pollMs, remaining));
+			await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
 			continue;
 		}
 
+		// Under gate: attempt O_EXCL creation of the normal .lock.
 		const createResult = tryCreateExclusive(lockPath, content);
-		try {
-			unlinkSync(gatePath);
-		} catch {
-			/* gate already released */
-		}
+		await gate.handle.release();
+
 		if (createResult.kind === "created") {
 			return { ok: true, lockPath, token };
 		}
@@ -182,15 +187,14 @@ export async function acquireExclusiveFileLock(
 		}
 
 		// createResult.kind === "exists" — poll until timeout.  NEVER reclaim.
-		const remaining = deadline - Date.now();
-		if (remaining <= 0) {
+		if (deadline - Date.now() <= 0) {
 			return {
 				ok: false,
 				code: "LOCK_TIMEOUT",
 				diagnostics: buildDiagnostics(lockPath, undefined),
 			};
 		}
-		await sleep(Math.min(pollMs, remaining));
+		await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
 	}
 }
 
@@ -523,14 +527,14 @@ export function listLockfiles(dir: string): LockfileListing[] {
  * Never deletes alive, remote-host, permission-denied, pid-recycled,
  * malformed, malformed-pid, or unverified holders.
  */
-export function cleanupStaleLockfiles(
+export async function cleanupStaleLockfiles(
 	dir: string,
 	opts: {
 		confirmDelete: boolean;
 		/** Test/diagnostic hook: invoked after listing, before destructive phase. */
 		onAfterListing?: (dir: string) => void;
 	},
-): CleanupResult {
+): Promise<CleanupResult> {
 	const listings = listLockfiles(dir);
 	opts.onAfterListing?.(dir);
 	const actions: CleanupAction[] = [];
@@ -538,12 +542,13 @@ export function cleanupStaleLockfiles(
 	for (const entry of listings) {
 		if (entry.verdict === "eligible:verified-dead-local") {
 			if (opts.confirmDelete) {
-				const gatePath = `${entry.lockPath}.maintenance`;
-				const gate = tryCreateExclusive(
-					gatePath,
-					JSON.stringify({ pid: process.pid, ts: Date.now() }),
+				// Maintenance kernel gate: held around classify/revalidate/delete
+				// so acquireExclusiveFileLock cannot create a lock mid-delete.
+				const gate = await acquireMaintenanceLock(
+					entry.lockPath,
+					resolveLockTimeoutMs(),
 				);
-				if (gate.kind !== "created") {
+				if (!gate.ok) {
 					actions.push({
 						lockPath: entry.lockPath,
 						action: "refused",
@@ -565,11 +570,7 @@ export function cleanupStaleLockfiles(
 						verdict: current.verdict,
 						reason: "identity changed under coordination gate (TOCTOU protection)",
 					});
-					try {
-						unlinkSync(gatePath);
-					} catch {
-						/* gate released */
-					}
+					await gate.handle.release();
 					continue;
 				}
 				try {
@@ -590,11 +591,7 @@ export function cleanupStaleLockfiles(
 						}`,
 					});
 				}
-				try {
-					unlinkSync(gatePath);
-				} catch {
-					/* gate released */
-				}
+				await gate.handle.release();
 			} else {
 				actions.push({
 					lockPath: entry.lockPath,
@@ -636,3 +633,348 @@ function refusalReason(verdict: LockfileVerdict): string {
 			return "not eligible for deletion";
 	}
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// MAINTENANCE GATE — node:net kernel primitive (spec #3098 rev7, design #3099 rev6)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// Zero-dependency cross-process maintenance exclusivity via a kernel-released
+// node:net server endpoint. Hold = "kernel endpoint bound to this process";
+// release = server.close() (+ POSIX socket unlink); crash = kernel teardown.
+// No file-based coordination gate, no reap evidence files, no rename, no
+// TTL/PID liveness. Both acquireExclusiveFileLock and cleanupStaleLockfiles
+// acquire/release this SAME gate around their critical sections so the writer
+// stays unaware.
+//
+// ─── MAINTENANCE GATE START ───
+
+const IS_WIN = platform() === "win32";
+const MAINT_POLL_MS = 25;
+
+/**
+ * Dependency-injection seam for the POSIX socket-permission hardening step
+ * (verify report #3260 warning 1). Lets tests exercise the chmod path and its
+ * failure/cleanup behaviour deterministically on any host. All fields are
+ * optional and default to the real filesystem/kernel operations.
+ */
+export type MaintenanceSocketDeps = {
+	/** chmod the bound socket path; defaults to node:fs/promises chmod. */
+	chmod?: (path: string, mode: number) => Promise<void>;
+	/** unlink used in the chmod-failure cleanup; defaults to node:fs/promises unlink. */
+	unlink?: (path: string) => Promise<void>;
+	/** platform predicate; defaults to the module IS_WIN constant. */
+	isWindows?: () => boolean;
+};
+
+export interface MaintenanceHandle {
+	release(): Promise<void>;
+	readonly endpoint: string;
+}
+
+export interface MaintenanceDiagnostics {
+	platform: NodeJS.Platform;
+	endpoint: string;
+	lastError?: { code?: string; message: string };
+	elapsedMs: number;
+}
+
+export type MaintenanceAcquireResult =
+	| { ok: true; handle: MaintenanceHandle; endpoint: string }
+	| {
+			ok: false;
+			code: "MAINTENANCE_BUSY";
+			diagnostics: MaintenanceDiagnostics;
+	  }
+	| {
+			ok: false;
+			code: "MAINTENANCE_IO_ERROR";
+			diagnostics: MaintenanceDiagnostics;
+	  };
+
+function hashLockPath(canonicalLockPath: string): string {
+	return createHash("sha256").update(canonicalLockPath).digest("hex");
+}
+
+/**
+ * Derive the deterministic kernel endpoint for a canonical lockPath.
+ *
+ * Windows: `\\.\pipe\idu-pi-maint-<sha256hex>` (full 64 hex; ≤256 chars).
+ * POSIX:   `${tmpdir()}/idu-pi-maint-<sha256hex[0:16]>.sock` (≤108 chars).
+ *
+ * Stable across processes and runs (same lockPath → byte-identical endpoint).
+ */
+export function deriveMaintenanceEndpoint(
+	canonicalLockPath: string,
+): string {
+	const hash = hashLockPath(canonicalLockPath);
+	if (IS_WIN) {
+		return `\\\\.\\pipe\\idu-pi-maint-${hash}`;
+	}
+	// POSIX: tmpdir + truncated hash (socket path-limit safe, hash-isolated).
+	return `${tmpdir()}/idu-pi-maint-${hash.slice(0, 16)}.sock`;
+}
+
+/**
+ * Try to bind a fresh node:net server to the endpoint.
+ *
+ * Returns `acquired` (with the bound server), `busy` (EADDRINUSE), or `io`
+ * (any other error — fail-closed).
+ */
+function tryListen(
+	endpoint: string,
+): Promise<
+	| { kind: "acquired"; server: Server }
+	| { kind: "busy" }
+	| { kind: "io"; error: { code?: string; message: string } }
+> {
+	return new Promise((resolve) => {
+		const server = createServer();
+		let settled = false;
+		const onListening = () => {
+			if (settled) return;
+			settled = true;
+			resolve({ kind: "acquired", server });
+		};
+		const onError = (err: NodeJS.ErrnoException) => {
+			if (settled) return;
+			settled = true;
+			try {
+				server.close();
+			} catch {
+				/* not listening — nothing to close */
+			}
+			if (err.code === "EADDRINUSE") {
+				resolve({ kind: "busy" });
+			} else {
+				resolve({
+					kind: "io",
+					error: { code: err.code, message: err.message },
+				});
+			}
+		};
+		server.once("listening", onListening);
+		server.once("error", onError);
+		server.listen(endpoint);
+	});
+}
+
+/**
+ * POSIX connect-probe: determine whether a live listener exists at the
+ * endpoint. `connected` = live (busy); `ECONNREFUSED` = stale path (holder
+ * crashed, path survived); anything else = fail-closed.
+ */
+function connectProbe(
+	endpoint: string,
+): Promise<"connected" | "ECONNREFUSED" | string> {
+	return new Promise((resolve) => {
+		const socket = createConnection(endpoint);
+		let settled = false;
+		const done = (val: string) => {
+			if (settled) return;
+			settled = true;
+			socket.destroy();
+			resolve(val);
+		};
+		socket.once("connect", () => done("connected"));
+		socket.once("error", (err: NodeJS.ErrnoException) =>
+			done(err.code ?? "UNKNOWN"),
+		);
+		// Bounded timeout so the probe never hangs.
+		const timer = setTimeout(() => done("PROBE_TIMEOUT"), 500);
+		socket.once("close", () => clearTimeout(timer));
+	});
+}
+
+/** Unlink a path, ignoring ENOENT (already gone), using the real fs.unlink. */
+async function safeUnlinkPath(path: string): Promise<void> {
+	return safeUnlinkPathDeps(path);
+}
+
+/**
+ * Deps-aware unlink that ignores ENOENT. Falls back to the real fs.unlink when
+ * no seam is provided. Used both by the regular cleanup paths and by the
+ * chmod-failure recovery so the failure path is platform-safe under test.
+ */
+async function safeUnlinkPathDeps(
+	path: string,
+	deps?: MaintenanceSocketDeps,
+): Promise<void> {
+	const unlinkFn = deps?.unlink ?? unlink;
+	try {
+		await unlinkFn(path);
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+	}
+}
+
+/** Close a server, swallowing the synchronous ERR_SERVER_NOT_RUNNING edge case. */
+function closeServerQuiet(server: Server): Promise<void> {
+	return new Promise((resolve) => {
+		try {
+			server.close(() => resolve());
+		} catch {
+			resolve();
+		}
+	});
+}
+
+/**
+ * Harden a freshly bound POSIX Unix-socket endpoint to 0o600 BEFORE exposing an
+ * ok maintenance handle (verify report #3260 warning 1). tmpdir is
+ * world-writable; without tightening perms another local user could
+ * symlink-attack the predicted socket path.
+ *
+ * - Windows: named pipe — no filesystem chmod; return acquired unchanged.
+ * - POSIX:   chmod the socket path to 0o600. On failure, close the server,
+ *            unlink the stale socket (ENOENT-safe), and return an io result so
+ *            the caller maps it to MAINTENANCE_IO_ERROR — an ok handle is NEVER
+ *            exposed on chmod failure.
+ */
+async function hardenAcquired(
+	server: Server,
+	endpoint: string,
+	deps?: MaintenanceSocketDeps,
+): Promise<
+	| { kind: "acquired"; server: Server }
+	| { kind: "io"; error: { code?: string; message: string } }
+> {
+	const isWin = deps?.isWindows?.() ?? IS_WIN;
+	if (isWin) return { kind: "acquired", server };
+	const chmodFn = deps?.chmod ?? ((p, m) => fsChmod(p, m));
+	try {
+		await chmodFn(endpoint, 0o600);
+	} catch (err) {
+		const e = err as NodeJS.ErrnoException;
+		// Never expose the handle: tear down the listener, remove the stale
+		// socket path, and fail closed with the observed error.
+		await closeServerQuiet(server);
+		await safeUnlinkPathDeps(endpoint, deps);
+		return {
+			kind: "io",
+			error: {
+				code: e.code ?? "ECHMOD",
+				message: `chmod 0600 failed: ${e.message}`,
+			},
+		};
+	}
+	return { kind: "acquired", server };
+}
+
+/**
+ * Single acquisition attempt. On EADDRINUSE:
+ * - Windows → busy (pipe namespace; no filesystem cleanup).
+ * - POSIX   → connect-probe:
+ *     connected    → busy (live listener)
+ *     ECONNREFUSED → unlink stale socket path, retry bind exactly once
+ *     other        → IO fail-closed (no unlink-retry)
+ */
+async function attemptAcquire(
+	endpoint: string,
+	deps?: MaintenanceSocketDeps,
+): Promise<
+	| { kind: "acquired"; server: Server }
+	| { kind: "busy" }
+	| { kind: "io"; error: { code?: string; message: string } }
+> {
+	const first = await tryListen(endpoint);
+	if (first.kind === "acquired") return hardenAcquired(first.server, endpoint, deps);
+	if (first.kind === "io") return first;
+
+	// EADDRINUSE — disambiguate by platform.
+	if (IS_WIN) return { kind: "busy" };
+
+	const probe = await connectProbe(endpoint);
+	if (probe === "connected") return { kind: "busy" };
+	if (probe === "ECONNREFUSED") {
+		// Dead socket path — unlink then retry bind exactly once.
+		await safeUnlinkPath(endpoint);
+		const retry = await tryListen(endpoint);
+		if (retry.kind === "acquired") return hardenAcquired(retry.server, endpoint, deps);
+		return retry;
+	}
+	return {
+		kind: "io",
+		error: { code: probe, message: `connect-probe error: ${probe}` },
+	};
+}
+
+function makeMaintenanceHandle(
+	server: Server,
+	endpoint: string,
+): MaintenanceHandle {
+	let released = false;
+	return {
+		endpoint,
+		async release(): Promise<void> {
+			if (released) return;
+			released = true;
+			await new Promise<void>((resolve) => {
+				server.close(() => resolve());
+			});
+			// POSIX: clean up the socket file (ENOENT-safe).
+			// Windows: no filesystem cleanup — pipe is kernel-managed.
+			if (!IS_WIN) {
+				await safeUnlinkPath(endpoint);
+			}
+		},
+	};
+}
+
+/**
+ * Acquire maintenance exclusivity for `canonicalLockPath` via a node:net
+ * kernel endpoint. Bounded poll until `timeoutMs`.
+ *
+ * Returns `ok` with a `MaintenanceHandle` on success, `MAINTENANCE_BUSY` on
+ * contention/timeout, or `MAINTENANCE_IO_ERROR` on genuine failure.
+ */
+export async function acquireMaintenanceLock(
+	canonicalLockPath: string,
+	timeoutMs: number,
+	deps?: MaintenanceSocketDeps,
+): Promise<MaintenanceAcquireResult> {
+	const endpoint = deriveMaintenanceEndpoint(canonicalLockPath);
+	const startMs = Date.now();
+	const deadline = startMs + timeoutMs;
+	let lastError: { code?: string; message: string } | undefined;
+
+	for (;;) {
+		const outcome = await attemptAcquire(endpoint, deps);
+		if (outcome.kind === "acquired") {
+			return {
+				ok: true,
+				handle: makeMaintenanceHandle(outcome.server, endpoint),
+				endpoint,
+			};
+		}
+		if (outcome.kind === "io") {
+			return {
+				ok: false,
+				code: "MAINTENANCE_IO_ERROR",
+				diagnostics: {
+					platform: platform(),
+					endpoint,
+					lastError: outcome.error,
+					elapsedMs: Date.now() - startMs,
+				},
+			};
+		}
+		// busy → bounded poll
+		lastError = { code: "EADDRINUSE", message: "endpoint in use" };
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) {
+			return {
+				ok: false,
+				code: "MAINTENANCE_BUSY",
+				diagnostics: {
+					platform: platform(),
+					endpoint,
+					lastError,
+					elapsedMs: Date.now() - startMs,
+				},
+			};
+		}
+		await sleep(Math.min(MAINT_POLL_MS, remaining));
+	}
+}
+
+// ─── MAINTENANCE GATE END ───
