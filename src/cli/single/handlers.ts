@@ -656,3 +656,25 @@ export function handleIduTriggerShow(rest: string[] = []): CliResult {
 	].join("\n");
 	return ok(output);
 }
+
+// 22. idu-lock-cleanup | lock-cleanup
+//
+// CLI-only safe lockfile cleanup surface (spec #3098 rev4, design #3099 rev3).
+// Defaults to read-only listing; deletes ONLY verified-dead local PIDs under
+// an explicit --confirm flag. NEVER invoked from any automatic code path and
+// NOT exposed via MCP. See src/lockfile-cleanup-command.ts for the contract.
+import {
+	parseLockCleanupArgs,
+	runLockCleanup,
+} from "../../lockfile-cleanup-command.js";
+
+export function handleLockCleanup(
+	runtime: CliRuntime,
+	rest: string[] = [],
+): CliResult {
+	const parsed = parseLockCleanupArgs(rest);
+	const stateRoot = parsed.stateRoot ?? runtime.workspaceRoot;
+	const targetDir = join(stateRoot, "reports");
+	const result = runLockCleanup({ targetDir, confirm: parsed.confirm, allowedRoot: runtime.workspaceRoot });
+	return { exitCode: result.exitCode, stdout: result.stdout, stderr: "" };
+}

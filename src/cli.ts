@@ -569,6 +569,7 @@ import {
 	handleIduSubscribeTriggers,
 	handleIduTriggerEngine,
 	handleIduTriggerShow,
+	handleLockCleanup,
 } from "./cli/single/index.js";
 
 // PR 7a (Item 4): cluster M (role) case wrappers for the dispatch switch.
@@ -2323,6 +2324,9 @@ export async function runCliCommand(
 				return handleBirthRepoPlan(activeRuntime, rest);
 			case "idu-trigger-show":
 				return handleIduTriggerShow(rest);
+			case "idu-lock-cleanup":
+			case "lock-cleanup":
+				return handleLockCleanup(activeRuntime, rest);
 			default:
 				return {
 					exitCode: 1,

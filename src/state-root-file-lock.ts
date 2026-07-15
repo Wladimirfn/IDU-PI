@@ -3,12 +3,13 @@ import {
 	closeSync,
 	mkdirSync,
 	openSync,
+	readdirSync,
 	readFileSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { hostname } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,6 +122,7 @@ export async function acquireExclusiveFileLock(
 	const timeoutMs = options?.timeoutMs ?? resolveLockTimeoutMs();
 	const pollMs = options?.pollMs ?? DEFAULT_POLL_MS;
 	const lockPath = `${targetPath}.lock`;
+	const gatePath = `${lockPath}.maintenance`;
 
 	// Ensure the parent directory of the lockfile exists.
 	try {
@@ -140,7 +142,34 @@ export async function acquireExclusiveFileLock(
 			host: hostname(),
 		});
 
+		// Coordination gate (TOCTOU): briefly held during creation so cleanup can't unlink a lock mid-acquire.
+		const gate = tryCreateExclusive(gatePath, content);
+		if (gate.kind === "io_error") {
+			return {
+				ok: false,
+				code: "LOCK_IO_ERROR",
+				diagnostics: buildDiagnostics(lockPath, gate.error),
+			};
+		}
+		if (gate.kind !== "created") {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) {
+				return {
+					ok: false,
+					code: "LOCK_TIMEOUT",
+					diagnostics: buildDiagnostics(lockPath, undefined),
+				};
+			}
+			await sleep(Math.min(pollMs, remaining));
+			continue;
+		}
+
 		const createResult = tryCreateExclusive(lockPath, content);
+		try {
+			unlinkSync(gatePath);
+		} catch {
+			/* gate already released */
+		}
 		if (createResult.kind === "created") {
 			return { ok: true, lockPath, token };
 		}
@@ -344,4 +373,266 @@ function isPositiveInteger(value: unknown): value is number {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+// ---------------------------------------------------------------------------
+// CLI-only safe lockfile cleanup primitives
+// (spec #3098 rev4 "CLI-only safe lockfile cleanup surface", design #3099 rev3)
+// ---------------------------------------------------------------------------
+//
+// These primitives power the explicit, human-invoked CLI cleanup surface.
+// They are NEVER called from any automatic code path (acquire / persist /
+// postflight). The pid probe here is the ONLY place a process.kill(pid, 0)
+// result gates an action (deletion eligibility) — and only under an explicit
+// destructive-confirmation flag. The automatic acquire path remains no-reclaim
+// under every condition (see the invariant block above).
+
+export type LockfileVerdict =
+	| "eligible:verified-dead-local"
+	| "refused:alive-local"
+	| "refused:remote-host"
+	| "refused:malformed"
+	| "refused:pid-probe-error"
+	| "refused:malformed-pid";
+
+export type LockfileListing = {
+	lockPath: string;
+	holderPid?: number;
+	holderHost?: string;
+	holderStartedAt?: string;
+	verdict: LockfileVerdict;
+};
+
+export type CleanupAction =
+	| { lockPath: string; action: "deleted"; pid: number; startedAt?: string }
+	| {
+			lockPath: string;
+			action: "refused";
+			verdict: LockfileVerdict;
+			reason: string;
+	  };
+
+export type CleanupResult = { actions: CleanupAction[]; exitCode: number };
+
+/**
+ * Classify a single lockfile into a deletion-eligibility verdict.
+ *
+ * Read-only: never deletes, renames, or modifies the lockfile.
+ *
+ * Verdict matrix (spec #3098 rev4):
+ * - parseable JSON, current host, positive-integer pid, `process.kill(pid, 0)`
+ *   → ESRCH  → `eligible:verified-dead-local`
+ * - same but probe succeeds (alive or pid-recycled) → `refused:alive-local`
+ * - host differs from current hostname → `refused:remote-host`
+ * - non-JSON / not an object / missing required fields → `refused:malformed`
+ * - pid missing / zero / negative / non-integer → `refused:malformed-pid`
+ * - pid probe errors with anything other than ESRCH (e.g. EPERM)
+ *   → `refused:pid-probe-error`
+ */
+export function classifyLockfile(lockPath: string): LockfileListing {
+	const listing: LockfileListing = {
+		lockPath,
+		verdict: "refused:malformed",
+	};
+
+	let raw: string;
+	try {
+		raw = readFileSync(lockPath, "utf8");
+	} catch {
+		return { ...listing, verdict: "refused:malformed" };
+	}
+
+	let meta: unknown;
+	try {
+		meta = JSON.parse(raw);
+	} catch {
+		return { ...listing, verdict: "refused:malformed" };
+	}
+
+	if (!isRecord(meta)) {
+		return { ...listing, verdict: "refused:malformed" };
+	}
+
+	const { pid, host, startedAt } = meta;
+
+	if (typeof startedAt === "string" && startedAt.length > 0) {
+		listing.holderStartedAt = startedAt;
+	}
+	if (typeof host === "string" && host.length > 0) {
+		listing.holderHost = host;
+	}
+
+	if (!isPositiveInteger(pid)) {
+		return { ...listing, verdict: "refused:malformed-pid" };
+	}
+
+	listing.holderPid = pid;
+
+	// Eligibility requires host === current hostname. A missing host field
+	// (tampered/corrupt lockfile) cannot satisfy "current host" → malformed.
+	if (typeof host !== "string") {
+		return { ...listing, verdict: "refused:malformed" };
+	}
+	if (host !== hostname()) {
+		return { ...listing, verdict: "refused:remote-host" };
+	}
+
+	// Local pid — probe liveness. This is the ONLY place the pid probe gates
+	// an action (deletion eligibility), per the explicit CLI cleanup surface.
+	try {
+		process.kill(pid, 0);
+		return { ...listing, verdict: "refused:alive-local" };
+	} catch (error: unknown) {
+		const probeCode = (error as NodeJS.ErrnoException).code;
+		if (probeCode === "ESRCH") {
+			return { ...listing, verdict: "eligible:verified-dead-local" };
+		}
+		// EPERM or any other error → cannot verify dead → refuse.
+		return { ...listing, verdict: "refused:pid-probe-error" };
+	}
+}
+
+/**
+ * Read-only listing of every `*.lock` file in `dir`, each with a
+ * deletion-eligibility verdict. Never deletes, renames, or modifies any
+ * lockfile. A missing directory yields an empty list (no throw).
+ */
+export function listLockfiles(dir: string): LockfileListing[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return [];
+	}
+	return entries
+		.filter((name) => name.endsWith(".lock"))
+		.map((name) => classifyLockfile(join(dir, name)))
+		.sort((a, b) => a.lockPath.localeCompare(b.lockPath));
+}
+
+/**
+ * Cleanup stale lockfiles in `dir`.
+ *
+ * - `confirmDelete: false` → every entry is reported as `refused` with a
+ *   "requires --confirm" reason; nothing is deleted; exit code 0.
+ * - `confirmDelete: true` → a lockfile is deleted ONLY when its verdict is
+ *   `eligible:verified-dead-local` (parseable JSON, current host, positive
+ *   pid, `process.kill(pid, 0)` → ESRCH). Every other holder is refused and
+ *   left untouched. The exit code is 1 if any entry was refused, else 0.
+ *
+ * Never deletes alive, remote-host, permission-denied, pid-recycled,
+ * malformed, malformed-pid, or unverified holders.
+ */
+export function cleanupStaleLockfiles(
+	dir: string,
+	opts: {
+		confirmDelete: boolean;
+		/** Test/diagnostic hook: invoked after listing, before destructive phase. */
+		onAfterListing?: (dir: string) => void;
+	},
+): CleanupResult {
+	const listings = listLockfiles(dir);
+	opts.onAfterListing?.(dir);
+	const actions: CleanupAction[] = [];
+
+	for (const entry of listings) {
+		if (entry.verdict === "eligible:verified-dead-local") {
+			if (opts.confirmDelete) {
+				const gatePath = `${entry.lockPath}.maintenance`;
+				const gate = tryCreateExclusive(
+					gatePath,
+					JSON.stringify({ pid: process.pid, ts: Date.now() }),
+				);
+				if (gate.kind !== "created") {
+					actions.push({
+						lockPath: entry.lockPath,
+						action: "refused",
+						verdict: entry.verdict,
+						reason: "coordination gate unavailable (concurrent acquire/cleanup)",
+					});
+					continue;
+				}
+				// Re-classify under gate to defeat TOCTOU.
+				const current = classifyLockfile(entry.lockPath);
+				if (
+					current.verdict !== "eligible:verified-dead-local" ||
+					current.holderPid !== entry.holderPid ||
+					current.holderHost !== entry.holderHost
+				) {
+					actions.push({
+						lockPath: entry.lockPath,
+						action: "refused",
+						verdict: current.verdict,
+						reason: "identity changed under coordination gate (TOCTOU protection)",
+					});
+					try {
+						unlinkSync(gatePath);
+					} catch {
+						/* gate released */
+					}
+					continue;
+				}
+				try {
+					unlinkSync(entry.lockPath);
+					actions.push({
+						lockPath: entry.lockPath,
+						action: "deleted",
+						pid: entry.holderPid as number,
+						startedAt: entry.holderStartedAt,
+					});
+				} catch (error: unknown) {
+					actions.push({
+						lockPath: entry.lockPath,
+						action: "refused",
+						verdict: entry.verdict,
+						reason: `delete failed: ${
+							(error as NodeJS.ErrnoException).code ?? String(error)
+						}`,
+					});
+				}
+				try {
+					unlinkSync(gatePath);
+				} catch {
+					/* gate released */
+				}
+			} else {
+				actions.push({
+					lockPath: entry.lockPath,
+					action: "refused",
+					verdict: entry.verdict,
+					reason: "deletion requires --confirm",
+				});
+			}
+		} else {
+			actions.push({
+				lockPath: entry.lockPath,
+				action: "refused",
+				verdict: entry.verdict,
+				reason: refusalReason(entry.verdict),
+			});
+		}
+	}
+
+	const refusedCount = actions.filter((a) => a.action === "refused").length;
+	// In confirm mode any refusal is a non-zero exit (operator must inspect).
+	// In read-only mode the listing is informational → exit 0.
+	const exitCode = opts.confirmDelete && refusedCount > 0 ? 1 : 0;
+	return { actions, exitCode };
+}
+
+function refusalReason(verdict: LockfileVerdict): string {
+	switch (verdict) {
+		case "refused:alive-local":
+			return "holder process is alive (or pid has been recycled by another process)";
+		case "refused:remote-host":
+			return "holder host differs from the current host";
+		case "refused:malformed":
+			return "lockfile is unreadable, non-JSON, or missing required fields";
+		case "refused:malformed-pid":
+			return "holder pid is missing, zero, negative, or non-integer";
+		case "refused:pid-probe-error":
+			return "pid liveness probe failed (EPERM or unknown error); cannot verify dead";
+		default:
+			return "not eligible for deletion";
+	}
 }
