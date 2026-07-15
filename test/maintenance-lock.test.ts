@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -105,6 +106,24 @@ test("acquireMaintenanceLock: after release, re-acquire succeeds", async () => {
 	const r2 = await acquireMaintenanceLock(lockPath, 2000);
 	assert.equal(r2.ok, true, "re-acquire after release must succeed");
 	if (r2.ok) await r2.handle.release();
+});
+
+test("acquireMaintenanceLock: release settles while an accepted client holds its stream open", async () => {
+	const result = await acquireMaintenanceLock(join(tempDir(), "held-client.lock"), 2000);
+	assert.equal(result.ok, true);
+	if (!result.ok) return;
+	const client = createConnection(result.endpoint);
+	await new Promise<void>((resolve, reject) => {
+		client.once("connect", resolve);
+		client.once("error", reject);
+	});
+	client.write("hold-open");
+	await sleep(50);
+	const release = result.handle.release();
+	const settled = await Promise.race([release.then(() => true), sleep(250).then(() => false)]);
+	client.destroy();
+	await release;
+	assert.equal(settled, true, "release must not wait for a client-held stream");
 });
 
 // ---------------------------------------------------------------------------
@@ -210,6 +229,30 @@ test("acquireMaintenanceLock: POSIX crash-release — holder SIGKILL → ECONNRE
 		const result = await acquireMaintenanceLock(lockPath, 2000);
 		assert.equal(result.ok, true, "must re-acquire after POSIX crash (stale path recovered)");
 		if (result.ok) await result.handle.release();
+	} finally {
+		try { child.kill("SIGKILL"); } catch { /* */ }
+		cleanup();
+	}
+});
+
+test("acquireMaintenanceLock: POSIX stale-socket unlink failure → MAINTENANCE_IO_ERROR", async (t) => {
+	if (IS_WIN) { t.skip("POSIX-specific: stale socket path recovery"); return; }
+	const lockPath = join(tempDir(), "stale-unlink-error.lock");
+	const { child, cleanup } = await forkHolder(lockPath, 30000);
+	try {
+		child.kill("SIGKILL");
+		await new Promise((r) => child.once("exit", r));
+		await sleep(300);
+		const result = await acquireMaintenanceLock(lockPath, 2000, {
+			unlink: async () => {
+				throw Object.assign(new Error("simulated stale cleanup EACCES"), { code: "EACCES" });
+			},
+		});
+		assert.equal(result.ok, false);
+		if (!result.ok) {
+			assert.equal(result.code, "MAINTENANCE_IO_ERROR");
+			assert.equal(result.diagnostics.lastError?.code, "EACCES");
+		}
 	} finally {
 		try { child.kill("SIGKILL"); } catch { /* */ }
 		cleanup();
@@ -358,4 +401,41 @@ test("W1: Windows named-pipe path skips chmod entirely (no filesystem chmod)", a
 	if (result.ok) await result.handle.release();
 	assert.equal(result.ok, true, "free Windows endpoint must acquire");
 	assert.equal(rec.chmodCalls.length, 0, "Windows named-pipe path must NEVER call chmod");
+});
+
+test("POSIX chmod cleanup unlink failure returns MAINTENANCE_IO_ERROR instead of rejecting", async () => {
+	const unlinkError = Object.assign(new Error("simulated cleanup EACCES"), {
+		code: "EACCES",
+	});
+	const result = await acquireMaintenanceLock(join(tempDir(), "chmod-cleanup.lock"), 2000, {
+		isWindows: () => false,
+		chmod: async () => {
+			throw Object.assign(new Error("simulated chmod failure"), { code: "EPERM" });
+		},
+		unlink: async () => {
+			throw unlinkError;
+		},
+	});
+
+	assert.equal(result.ok, false);
+	if (!result.ok) {
+		assert.equal(result.code, "MAINTENANCE_IO_ERROR");
+		assert.equal(result.diagnostics.lastError?.code, "EACCES");
+	}
+});
+
+test("POSIX release absorbs non-ENOENT unlink failure", async () => {
+	let unlinkCalls = 0;
+	const result = await acquireMaintenanceLock(join(tempDir(), "release-unlink.lock"), 2000, {
+		isWindows: () => false,
+		chmod: async () => {},
+		unlink: async () => {
+			unlinkCalls++;
+			throw Object.assign(new Error("simulated release EACCES"), { code: "EACCES" });
+		},
+	});
+
+	assert.equal(result.ok, true);
+	if (result.ok) await assert.doesNotReject(result.handle.release());
+	assert.equal(unlinkCalls, 1, "release must attempt POSIX socket cleanup");
 });

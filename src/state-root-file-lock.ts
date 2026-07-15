@@ -9,7 +9,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { chmod as fsChmod, unlink } from "node:fs/promises";
-import { createConnection, createServer, type Server } from "node:net";
+import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { hostname, platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -650,6 +650,7 @@ function refusalReason(verdict: LockfileVerdict): string {
 
 const IS_WIN = platform() === "win32";
 const MAINT_POLL_MS = 25;
+const maintenanceConnections = new WeakMap<Server, Set<Socket>>();
 
 /**
  * Dependency-injection seam for the POSIX socket-permission hardening step
@@ -726,9 +727,14 @@ function tryListen(
 	| { kind: "acquired"; server: Server }
 	| { kind: "busy" }
 	| { kind: "io"; error: { code?: string; message: string } }
-> {
+	> {
 	return new Promise((resolve) => {
-		const server = createServer();
+		const sockets = new Set<Socket>();
+		const server = createServer((socket) => {
+			sockets.add(socket);
+			socket.once("close", () => sockets.delete(socket));
+		});
+		maintenanceConnections.set(server, sockets);
 		let settled = false;
 		const onListening = () => {
 			if (settled) return;
@@ -783,11 +789,6 @@ function connectProbe(
 		const timer = setTimeout(() => done("PROBE_TIMEOUT"), 500);
 		socket.once("close", () => clearTimeout(timer));
 	});
-}
-
-/** Unlink a path, ignoring ENOENT (already gone), using the real fs.unlink. */
-async function safeUnlinkPath(path: string): Promise<void> {
-	return safeUnlinkPathDeps(path);
 }
 
 /**
@@ -848,7 +849,15 @@ async function hardenAcquired(
 		// Never expose the handle: tear down the listener, remove the stale
 		// socket path, and fail closed with the observed error.
 		await closeServerQuiet(server);
-		await safeUnlinkPathDeps(endpoint, deps);
+		try {
+			await safeUnlinkPathDeps(endpoint, deps);
+		} catch (cleanupErr) {
+			const cleanup = cleanupErr as NodeJS.ErrnoException;
+			return {
+				kind: "io",
+				error: { code: cleanup.code, message: cleanup.message },
+			};
+		}
 		return {
 			kind: "io",
 			error: {
@@ -887,7 +896,12 @@ async function attemptAcquire(
 	if (probe === "connected") return { kind: "busy" };
 	if (probe === "ECONNREFUSED") {
 		// Dead socket path — unlink then retry bind exactly once.
-		await safeUnlinkPath(endpoint);
+		try {
+			await safeUnlinkPathDeps(endpoint, deps);
+		} catch (err) {
+			const e = err as NodeJS.ErrnoException;
+			return { kind: "io", error: { code: e.code, message: e.message } };
+		}
 		const retry = await tryListen(endpoint);
 		if (retry.kind === "acquired") return hardenAcquired(retry.server, endpoint, deps);
 		return retry;
@@ -901,6 +915,7 @@ async function attemptAcquire(
 function makeMaintenanceHandle(
 	server: Server,
 	endpoint: string,
+	deps?: MaintenanceSocketDeps,
 ): MaintenanceHandle {
 	let released = false;
 	return {
@@ -910,11 +925,18 @@ function makeMaintenanceHandle(
 			released = true;
 			await new Promise<void>((resolve) => {
 				server.close(() => resolve());
+				for (const socket of maintenanceConnections.get(server) ?? []) {
+					socket.destroy();
+				}
 			});
 			// POSIX: clean up the socket file (ENOENT-safe).
 			// Windows: no filesystem cleanup — pipe is kernel-managed.
-			if (!IS_WIN) {
-				await safeUnlinkPath(endpoint);
+			if (!(deps?.isWindows?.() ?? IS_WIN)) {
+				try {
+					await safeUnlinkPathDeps(endpoint, deps);
+				} catch {
+					// Release is best-effort after the kernel listener is closed.
+				}
 			}
 		},
 	};
@@ -942,7 +964,7 @@ export async function acquireMaintenanceLock(
 		if (outcome.kind === "acquired") {
 			return {
 				ok: true,
-				handle: makeMaintenanceHandle(outcome.server, endpoint),
+				handle: makeMaintenanceHandle(outcome.server, endpoint, deps),
 				endpoint,
 			};
 		}
