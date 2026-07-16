@@ -22,6 +22,8 @@ credentials.json
 serviceAccountKey.json
 
 # Local runtime state / generated data
+/.codegraph/
+/birth/
 data/
 reports/
 workspaces/
