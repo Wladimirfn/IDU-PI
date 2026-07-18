@@ -548,6 +548,13 @@ export function projectEnroll(input: ProjectEnrollInput): ProjectEnrollResult {
 		registryPath: input.registryPath,
 		createIfMissing: false,
 	});
+	// A14: reject a worktree of an already-enrolled parent before any write.
+	const conflict = assertNotWorktreePath(projectPath, registry);
+	if (conflict) {
+		throw new Error(
+			`Cannot enroll ${projectPath}: it is a worktree of already-enrolled project ${conflict.parent}. Worktree enrollment is not allowed.`,
+		);
+	}
 	const project = addProject(
 		registry,
 		projectId,
@@ -715,6 +722,42 @@ function resolveWorktreeOverlayInstaller(input: {
 	} catch {
 		return { resolved: false };
 	}
+}
+
+// A14: write-guard. Rejects enrolling a git worktree of an already-enrolled
+// parent. Returns { parent } pointing at the enrolled parent's rootPath when
+// `candidate` is a worktree of a *different* registered project, or null when
+// it is not a worktree (or is the registered project itself — exact match is
+// allowed so re-enroll / setActiveProject on an enrolled root stays valid).
+//
+// Notes on the signature vs. the A14 brief:
+// - The brief sketched `ReadonlyArray<{ rootPath: string }>`; the real
+//   ProjectEntry field is `path`, and the underlying overlay needs the whole
+//   ProjectRegistry. We accept ProjectRegistry directly instead of inventing a
+//   parallel shape.
+// - workspaceRoot is only used by the overlay to derive a fallback stateRoot,
+//   which the guard discards; passing the candidate is harmless and keeps the
+//   guard free of a workspaceRoot parameter (so addProject/setActiveProject
+//   signatures do not change).
+export function assertNotWorktreePath(
+	candidate: string,
+	registry: ProjectRegistry,
+): { parent: string } | null {
+	const candidateCanonical = canonicalDirectory(candidate);
+	const overlay = resolveWorktreeOverlayInstaller({
+		candidatePath: candidateCanonical,
+		registry,
+		workspaceRoot: candidateCanonical,
+	});
+	if (!overlay.resolved || !overlay.projectId) return null;
+	const parent = registry.projects.find(
+		(entry) => entry.id === overlay.projectId,
+	);
+	if (!parent) return null;
+	// Exact-match: candidate IS the registered project root, not a worktree
+	// of a different project. Allow re-enroll / activation.
+	if (samePath(parent.path, candidateCanonical)) return null;
+	return { parent: parent.path };
 }
 
 export function projectInstallStatus(

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+	assertNotWorktreePath,
 	backupAgentConfigFile,
 	buildIduMcpConfig,
 	detectAgentConfigs,
@@ -28,6 +29,12 @@ import {
 	projectInstallStatus,
 	resolvePiAgentDir,
 } from "../src/idu-installer.js";
+import { canonicalDirectory } from "../src/config.js";
+import {
+	addProject,
+	setActiveProject,
+	type ProjectRegistry,
+} from "../src/projects.js";
 import { runCliCommand } from "../src/cli.js";
 
 function tempDir(prefix = "idu-installer-"): string {
@@ -843,5 +850,174 @@ test("project status rejects paths outside allowed roots", () => {
 			}),
 		/Ruta fuera de ALLOWED_ROOTS/u,
 	);
+	rmSync(root, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// A14: worktree-path enrollment write-guard
+// ---------------------------------------------------------------------------
+// Defense-in-depth: projectEnroll, addProject, and setActiveProject must all
+// reject a candidate that is a git worktree of an already-enrolled parent.
+// No --force escape hatch.
+
+function gitRun(args: string[], cwd: string): string {
+	return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+
+/** A real committed git repository (the "main repo") living under `parent`. */
+function makeMainRepo(parent: string, name = "main-repo"): string {
+	const repo = join(parent, name);
+	mkdirSync(repo, { recursive: true });
+	gitRun(["init"], repo);
+	gitRun(["config", "user.email", "test@example.com"], repo);
+	gitRun(["config", "user.name", "Test"], repo);
+	gitRun(["config", "core.autocrlf", "false"], repo);
+	writeFileSync(join(repo, "README.md"), "base\n", "utf8");
+	gitRun(["add", "."], repo);
+	gitRun(["commit", "-m", "init"], repo);
+	return repo;
+}
+
+/** A real linked worktree of `mainRepo`, placed under `parent`. */
+function makeWorktree(mainRepo: string, parent: string, name = "wt"): string {
+	const wt = join(parent, name);
+	gitRun(["worktree", "add", wt, "-b", "feature-x"], mainRepo);
+	return wt;
+}
+
+function registryWith(mainPath: string, mainId: string): ProjectRegistry {
+	return {
+		activeProjectId: mainId,
+		projects: [
+			{
+				id: mainId,
+				name: mainId,
+				path: canonicalDirectory(mainPath),
+				stateRoot: null,
+				lastSessionFile: null,
+			},
+		],
+	};
+}
+
+function cleanupWorktree(mainRepo: string, worktree: string): void {
+	try {
+		gitRun(["worktree", "remove", "--force", worktree], mainRepo);
+	} catch {
+		// best-effort: the temp tree is removed anyway
+	}
+}
+
+test("A14: assertNotWorktreePath returns null for a path that is not a worktree", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-null-"));
+	const mainRepo = makeMainRepo(root);
+	const registry = registryWith(mainRepo, "parent-proj");
+	// A plain directory without .git fails closed (no git invocation).
+	const plain = join(root, "plain");
+	mkdirSync(plain, { recursive: true });
+	assert.equal(assertNotWorktreePath(plain, registry), null);
+	// An unrelated standalone git repo is not a worktree of the registered parent.
+	const foreign = makeMainRepo(root, "foreign-repo");
+	assert.equal(assertNotWorktreePath(foreign, registry), null);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("A14: assertNotWorktreePath returns { parent } for a worktree of an enrolled parent", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-parent-"));
+	const mainRepo = makeMainRepo(root);
+	const worktree = makeWorktree(mainRepo, root);
+	const registry = registryWith(mainRepo, "parent-proj");
+	const result = assertNotWorktreePath(worktree, registry);
+	assert.ok(result, "expected the worktree to be detected");
+	assert.equal(result?.parent, canonicalDirectory(mainRepo));
+	cleanupWorktree(mainRepo, worktree);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("A14: projectEnroll throws when given a worktree path; error names the parent", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-enroll-"));
+	const workspaceRoot = join(root, "workspace");
+	const mainRepo = makeMainRepo(root);
+	const worktree = makeWorktree(mainRepo, root);
+	const registryPath = join(root, "registry", "projects.json");
+	// Enroll the parent first so it is in the registry.
+	projectEnroll({
+		projectPath: mainRepo,
+		workspaceRoot,
+		allowedRoots: [root],
+		registryPath,
+	});
+	const parentCanonical = canonicalDirectory(mainRepo);
+	assert.throws(
+		() =>
+			projectEnroll({
+				projectPath: worktree,
+				workspaceRoot,
+				allowedRoots: [root],
+				registryPath,
+			}),
+		(err: Error) => {
+			assert.match(
+				err.message,
+				/Cannot enroll .* worktree of already-enrolled project/u,
+			);
+			assert.ok(
+				err.message.includes(parentCanonical),
+				"error message must contain the parent project rootPath",
+			);
+			return true;
+		},
+	);
+	cleanupWorktree(mainRepo, worktree);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("A14: projectEnroll succeeds for a fresh, non-worktree path", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-fresh-"));
+	const workspaceRoot = join(root, "workspace");
+	const projectPath = join(root, "fresh-project");
+	mkdirSync(projectPath, { recursive: true });
+	const result = projectEnroll({
+		projectPath,
+		workspaceRoot,
+		allowedRoots: [root],
+		registryPath: join(root, "registry", "projects.json"),
+	});
+	assert.equal(result.project.path, canonicalDirectory(projectPath));
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("A14: addProject throws when given a worktree path", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-add-throws-"));
+	const mainRepo = makeMainRepo(root);
+	const worktree = makeWorktree(mainRepo, root);
+	const registry = registryWith(mainRepo, "parent-proj");
+	assert.throws(
+		() => addProject(registry, "worktree-id", worktree, [root]),
+		/worktree of already-enrolled project/u,
+	);
+	cleanupWorktree(mainRepo, worktree);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("A14: addProject succeeds for a fresh path", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-add-ok-"));
+	const fresh = join(root, "fresh");
+	mkdirSync(fresh, { recursive: true });
+	const registry: ProjectRegistry = { activeProjectId: null, projects: [] };
+	const project = addProject(registry, "fresh-id", fresh, [root]);
+	assert.equal(project.id, "fresh-id");
+	assert.equal(project.path, canonicalDirectory(fresh));
+	assert.equal(registry.projects.length, 1);
+	rmSync(root, { recursive: true, force: true });
+});
+
+test("A14: setActiveProject does not throw for an already-enrolled non-worktree path", () => {
+	const root = mkdtempSync(join(tmpdir(), "a14-active-"));
+	const mainRepo = makeMainRepo(root);
+	const registry = registryWith(mainRepo, "parent-proj");
+	const project = setActiveProject(registry, "parent-proj", [root]);
+	assert.equal(project.id, "parent-proj");
+	assert.equal(registry.activeProjectId, "parent-proj");
 	rmSync(root, { recursive: true, force: true });
 });

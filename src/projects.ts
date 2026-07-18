@@ -1,6 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { canonicalDirectory, isAllowedCwd } from "./config.js";
+// A14: worktree write-guard. This creates a projects <-> idu-installer import
+// cycle, which is safe in ESM: both modules only reference each other inside
+// function bodies (runtime), never at module-evaluation time. Function
+// declarations are hoisted, so live bindings resolve by first call.
+import { assertNotWorktreePath } from "./idu-installer.js";
 
 export type ProjectEntry = {
 	id: string;
@@ -111,6 +116,16 @@ export function addProject(
 		throw new Error(`Ruta fuera de ALLOWED_ROOTS: ${path}`);
 	}
 
+	// A14: defense-in-depth — reject a worktree of an already-enrolled parent.
+	// This covers direct callers (CLI /addproject, bootstrap) that bypass
+	// projectEnroll. Exact-match re-enroll is allowed inside the guard.
+	const conflict = assertNotWorktreePath(path, registry);
+	if (conflict) {
+		throw new Error(
+			`Cannot enroll ${path}: it is a worktree of already-enrolled project ${conflict.parent}. Worktree enrollment is not allowed.`,
+		);
+	}
+
 	const existing = registry.projects.find((project) => project.id === id);
 	const project: ProjectEntry = {
 		id,
@@ -141,6 +156,15 @@ export function setActiveProject(
 	const path = canonicalDirectory(project.path);
 	if (!isAllowedCwd(path, allowedRoots))
 		throw new Error(`Ruta fuera de ALLOWED_ROOTS: ${path}`);
+	// A14: defense-in-depth — if someone hand-edits the registry to inject a
+	// worktree path, setActiveProject must still reject it. Exact-match (the
+	// normal case: activating an enrolled root) is allowed inside the guard.
+	const conflict = assertNotWorktreePath(path, registry);
+	if (conflict) {
+		throw new Error(
+			`Cannot enroll ${path}: it is a worktree of already-enrolled project ${conflict.parent}. Worktree enrollment is not allowed.`,
+		);
+	}
 	project.path = path;
 	registry.activeProjectId = project.id;
 	return project;
