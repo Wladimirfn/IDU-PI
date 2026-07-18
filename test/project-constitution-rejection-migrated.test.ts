@@ -108,11 +108,20 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 
 	// -----------------------------------------------------------------------
 	// T3: importPattern — `mcp-write-shell-exec` AND `agentlabs-edit-shell-exec`
-	//     both match content with `writeFileSync(`. Two importPattern rules
-	//     cover the same substring; both fire (the gate emits two
-	//     `rejected_stack` failures).
+	//     both match content with `writeFileSync(`.
+	//
+	//     U2 of #288 added pathGuards:
+	//       - mcp-write-shell-exec:        ["src/**", "scripts/**"]
+	//       - agentlabs-edit-shell-exec:   ["src/agentlab-*.ts"]
+	//
+	//     T3a: probe at src/utils/logger.ts — only mcp-write-shell-exec fires
+	//          (agentlabs-edit-shell-exec is now correctly scoped to
+	//          src/agentlab-*.ts and MUST NOT fire on src/utils/*). This is
+	//          the REQ-RSP-002 "test path guard blocks" scenario.
+	//     T3b: probe at src/agentlab-fix-probe.ts — BOTH rules fire (path
+	//          matches both guards).
 	// -----------------------------------------------------------------------
-	it("T3: mcp-write-shell-exec + agentlabs-edit-shell-exec match writeFileSync( (importPattern)", () => {
+	it("T3a: mcp-write-shell-exec fires on src/utils/logger.ts; agentlabs-edit-shell-exec is blocked by its src/agentlab-*.ts guard (U2 pathGuard)", () => {
 		const constitution = buildConstitutionFromRejectedStack(
 			PROPOSED_REJECTED_RULES,
 		);
@@ -135,15 +144,48 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 		const ids = hits.map((h) => h.rule.id);
 		assert.ok(
 			ids.includes("mcp-write-shell-exec"),
-			`mcp-write-shell-exec MUST fire; got: ${ids.join(",")}`,
+			`mcp-write-shell-exec MUST fire on src/utils/logger.ts (matches "src/**" guard); got: ${ids.join(",")}`,
 		);
 		assert.ok(
-			ids.includes("agentlabs-edit-shell-exec"),
-			`agentlabs-edit-shell-exec MUST fire on writeFile substring; got: ${ids.join(",")}`,
+			!ids.includes("agentlabs-edit-shell-exec"),
+			`agentlabs-edit-shell-exec MUST NOT fire on src/utils/logger.ts after U2 (guard is src/agentlab-*.ts); got: ${ids.join(",")}`,
 		);
 		assert.ok(
 			hits.every((h) => h.matchedFile === probeFile),
 			"all hits must point at the probe file",
+		);
+	});
+
+	it("T3b: mcp-write-shell-exec + agentlabs-edit-shell-exec both fire on src/agentlab-fix-probe.ts (matches both guards)", () => {
+		const constitution = buildConstitutionFromRejectedStack(
+			PROPOSED_REJECTED_RULES,
+		);
+		// Path matches both guards: "src/**" (mcp-write-shell-exec) and
+		// "src/agentlab-*.ts" (agentlabs-edit-shell-exec). NOTE: this path also
+		// matches the agentlabs-edit-files filePattern rule, so we expect that
+		// hit too — we only assert the two importPattern rules here.
+		const probeFile = "src/agentlab-fix-probe.ts";
+		const map: Record<string, string> = {
+			[probeFile]:
+				'import { writeFileSync } from "node:fs";\nwriteFileSync("/tmp/x", "data");\n',
+		};
+		const readContent = (file: string): string | undefined => map[file];
+		const hits = hasRejection(
+			{
+				changedFiles: [probeFile],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		const ids = hits.map((h) => h.rule.id);
+		assert.ok(
+			ids.includes("mcp-write-shell-exec"),
+			`mcp-write-shell-exec MUST fire (matches "src/**" guard); got: ${ids.join(",")}`,
+		);
+		assert.ok(
+			ids.includes("agentlabs-edit-shell-exec"),
+			`agentlabs-edit-shell-exec MUST fire on src/agentlab-*.ts (matches guard); got: ${ids.join(",")}`,
 		);
 	});
 
