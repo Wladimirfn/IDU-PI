@@ -26,4 +26,9 @@ export type RuntimeContext = {
 	runtimeWorkspaceRoot: string;
 	reportsPath: string;
 	labDbPath: string;
+	// Worktree-aware resolution: the canonical worktree path to use for git
+	// operations (postflight, HEAD reads). Absent when the active project was
+	// resolved by exact match (governance path == git cwd). When present,
+	// activeProject.path/stateRoot still carry the parent governance identity.
+	effectiveCwd?: string;
 };

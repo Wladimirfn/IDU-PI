@@ -8,7 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { canonicalDirectory, isAllowedCwd } from "./config.js";
 import {
 	addProject,
@@ -16,6 +16,7 @@ import {
 	saveRegistry,
 	slugifyProjectId,
 	type ProjectEntry,
+	type ProjectRegistry,
 } from "./projects.js";
 import {
 	ensureProjectStateDirs,
@@ -134,6 +135,11 @@ export type ProjectInstallStatus = {
 	reportsDir: string;
 	mcpAvailable: boolean;
 	recommendedNext: string;
+	// Worktree-aware resolution: when projectPath is a git worktree of a
+	// registered parent, governance fields (projectId/stateRoot) come from the
+	// parent while effectiveCwd is the canonical worktree path. Absent on
+	// exact-match or unregistered results.
+	effectiveCwd?: string;
 };
 
 export type ProjectInstallStatusInput = {
@@ -578,6 +584,139 @@ export function projectEnroll(input: ProjectEnrollInput): ProjectEnrollResult {
 	};
 }
 
+// TODO(shared-module): this worktree overlay is a byte-identical duplicate of
+// resolveWorktreeOverlay in src/mcp-server.ts, kept here so the installer
+// read-path does not import the MCP entry. A follow-up slice extracts a single
+// shared, tested implementation. See SDD worktree-aware-project-resolution.
+type InstallerGitRunner = (args: string[], cwd: string) => string;
+
+const INSTALLER_GIT_TIMEOUT_MS = 5000;
+
+function defaultInstallerGitRunner(args: string[], cwd: string): string {
+	return execFileSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		timeout: INSTALLER_GIT_TIMEOUT_MS,
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+}
+
+function installerCanonicalCommonDir(raw: string, cwd: string): string {
+	const absolute = isAbsolute(raw) ? raw : resolve(cwd, raw);
+	return canonicalDirectory(absolute);
+}
+
+function installerPorcelainLists(
+	porcelain: string,
+	candidateCanonical: string,
+	cwd: string,
+): boolean {
+	for (const line of porcelain.split(/\r?\n/u)) {
+		if (!line.startsWith("worktree ")) continue;
+		const entry = line.slice("worktree ".length).trim();
+		if (!entry) continue;
+		try {
+			const absolute = isAbsolute(entry) ? entry : resolve(cwd, entry);
+			if (samePath(canonicalDirectory(absolute), candidateCanonical)) {
+				return true;
+			}
+		} catch {
+			continue;
+		}
+	}
+	return false;
+}
+
+type InstallerWorktreeOverlayResult = {
+	resolved: boolean;
+	projectId?: string;
+	stateRoot?: string;
+	effectiveCwd?: string;
+};
+
+function resolveWorktreeOverlayInstaller(input: {
+	candidatePath: string;
+	registry: ProjectRegistry;
+	workspaceRoot: string;
+	runGit?: InstallerGitRunner;
+}): InstallerWorktreeOverlayResult {
+	const runGit = input.runGit ?? defaultInstallerGitRunner;
+	try {
+		if (!existsSync(join(input.candidatePath, ".git"))) {
+			return { resolved: false };
+		}
+		const commonDirRaw = runGit(
+			["rev-parse", "--git-common-dir"],
+			input.candidatePath,
+		).trim();
+		if (!commonDirRaw) return { resolved: false };
+
+		const toplevelRaw = runGit(
+			["rev-parse", "--show-toplevel"],
+			input.candidatePath,
+		).trim();
+		if (!toplevelRaw) return { resolved: false };
+
+		const candidateCanonical = canonicalDirectory(input.candidatePath);
+		const toplevelCanonical = canonicalDirectory(
+			isAbsolute(toplevelRaw)
+				? toplevelRaw
+				: resolve(input.candidatePath, toplevelRaw),
+		);
+		if (!samePath(candidateCanonical, toplevelCanonical)) {
+			return { resolved: false };
+		}
+		const candidateCommonDir = installerCanonicalCommonDir(
+			commonDirRaw,
+			input.candidatePath,
+		);
+
+		for (const project of input.registry.projects) {
+			try {
+				const regCommonRaw = runGit(
+					["rev-parse", "--git-common-dir"],
+					project.path,
+				).trim();
+				if (!regCommonRaw) continue;
+				if (
+					!samePath(
+						installerCanonicalCommonDir(regCommonRaw, project.path),
+						candidateCommonDir,
+					)
+				) {
+					continue;
+				}
+				const porcelain = runGit(
+					["worktree", "list", "--porcelain"],
+					project.path,
+				);
+				if (
+					!installerPorcelainLists(
+						porcelain,
+						candidateCanonical,
+						project.path,
+					)
+				) {
+					continue;
+				}
+				return {
+					resolved: true,
+					projectId: project.id,
+					stateRoot:
+						project.stateRoot ??
+						join(input.workspaceRoot, "projects", project.id),
+					effectiveCwd: candidateCanonical,
+				};
+			} catch {
+				continue;
+			}
+		}
+		return { resolved: false };
+	} catch {
+		return { resolved: false };
+	}
+}
+
 export function projectInstallStatus(
 	input: ProjectInstallStatusInput,
 ): ProjectInstallStatus {
@@ -592,8 +731,27 @@ export function projectInstallStatus(
 	const project = registry.projects.find((entry) =>
 		samePath(entry.path, projectPath),
 	);
+	// Exact-match missed: try the worktree-aware overlay so a worktree of an
+	// enrolled parent reports registered=true with the parent's governance
+	// identity and effectiveCwd set to the canonical worktree path.
+	let resolvedProject = project;
+	let effectiveCwd: string | undefined;
+	if (!resolvedProject) {
+		const overlay = resolveWorktreeOverlayInstaller({
+			candidatePath: projectPath,
+			registry,
+			workspaceRoot: input.workspaceRoot,
+		});
+		if (overlay.resolved && overlay.projectId) {
+			resolvedProject =
+				registry.projects.find(
+					(entry) => entry.id === overlay.projectId,
+				) ?? undefined;
+			effectiveCwd = overlay.effectiveCwd;
+		}
+	}
 	const projectId =
-		project?.id ??
+		resolvedProject?.id ??
 		slugifyProjectId(projectPath.split(/[\\/]/u).at(-1) ?? "project");
 	const statePaths = resolveProjectStatePaths({
 		workspaceRoot: input.workspaceRoot,
@@ -603,14 +761,15 @@ export function projectInstallStatus(
 	return {
 		projectId,
 		projectPath,
-		registered: Boolean(project),
-		stateRoot: project?.stateRoot ?? statePaths.stateRoot,
+		registered: Boolean(resolvedProject),
+		stateRoot: resolvedProject?.stateRoot ?? statePaths.stateRoot,
 		labDbPath: statePaths.labDbPath,
 		reportsDir: statePaths.reportsDir,
 		mcpAvailable: input.mcpAvailable ?? false,
-		recommendedNext: project
+		recommendedNext: resolvedProject
 			? "Usá idu-pi setup status o idu-pi idu-status."
 			: "Registrá con idu-pi project enroll <projectPath>.",
+		...(effectiveCwd ? { effectiveCwd } : {}),
 	};
 }
 

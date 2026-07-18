@@ -10,6 +10,7 @@
  * to the original — see PR 3 commit body.)
  */
 
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -66,6 +67,7 @@ import {
 import {
 	readProjectPostflightGitState,
 	analyzeProjectPostflight,
+	type PostflightGitRunner,
 	type ProjectPostflightReport,
 } from "../../project-postflight.js";
 import { buildPostflightPhysicalGates } from "../../physical-gates.js";
@@ -277,6 +279,21 @@ export function buildPreflightReport(
 	});
 }
 
+// Bounded git subprocess helper for postflight git reads. Mirrors the
+// readGitHead precedent but adds an explicit timeout so a hanging git cannot
+// stall postflight. TODO(shared-module): extract alongside the worktree
+// overlay git runners into a single shared subprocess primitive.
+const POSTFLIGHT_GIT_TIMEOUT_MS = 5000;
+
+function gitOutput(args: string[], cwd: string): string {
+	return execFileSync("git", args, {
+		cwd,
+		encoding: "utf8",
+		timeout: POSTFLIGHT_GIT_TIMEOUT_MS,
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+}
+
 export function buildPostflightReport(
 	context: RuntimeContext,
 ): ProjectPostflightReport {
@@ -290,7 +307,14 @@ export function buildPostflightReport(
 					context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
 				)
 			: undefined;
-	const gitState = readProjectPostflightGitState(projectPath);
+	// Git state must reflect the EFFECTIVE working tree: when the active
+	// project was resolved via the worktree overlay, effectiveCwd is the
+	// worktree path and git diff/status must read from there, not from the
+	// governance (main repo) path. projectPath above is the governance path.
+	const gitCwd = context.effectiveCwd ?? projectPath;
+	const gitRunner: PostflightGitRunner = (_command, args) =>
+		gitOutput(args, gitCwd);
+	const gitState = readProjectPostflightGitState(gitCwd, gitRunner);
 	const constitution = loadConfirmedProjectConstitution(
 		context.activeProject.stateRoot ?? context.runtimeWorkspaceRoot,
 	);
