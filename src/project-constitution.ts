@@ -77,12 +77,16 @@ export type BehaviorKind =
 	| "network-bound"
 	| "external-write";
 
+export type PathGuardMode = "any" | "all";
+
+// #288: optional path-scoping metadata (not counted as a discriminator, R1)
+// on the CONTENT detectors only (R2); filePattern/depPattern reject it.
 export type RejectionDetection =
 	| { filePattern: string }
 	| { depPattern: string }
-	| { importPattern: string }
-	| { commandPattern: string }
-	| { behaviorPattern: BehaviorKind };
+	| { importPattern: string; pathGuards?: string[]; pathGuardMode?: PathGuardMode }
+	| { commandPattern: string; pathGuards?: string[]; pathGuardMode?: PathGuardMode }
+	| { behaviorPattern: BehaviorKind; pathGuards?: string[]; pathGuardMode?: PathGuardMode };
 
 export type RejectedRule = {
 	id: string;
@@ -422,13 +426,15 @@ export function evaluateConstitutionGates(
 	);
 	// Pass 1 — predicate failures. Empty when `changedFiles` / `deps` are absent
 	// (preflight) or when no rule's detection matches.
+	// R8: append a stable rule-ID suffix (never replace the human message).
 	for (const hit of hasRejection(input, rejectedRules)) {
 		const sev = normalizeRuleSeverity(hit.rule.severity);
+		const fileSuffix = hit.matchedFile ? `, file: ${hit.matchedFile}` : "";
 		failures.push(
 			issue(
 				"rejected_stack",
 				sev,
-				hit.rule.messages.blocked,
+				`${hit.rule.messages.blocked} (rule: ${hit.rule.id}${fileSuffix})`,
 			),
 		);
 	}
@@ -845,6 +851,20 @@ function readRejectedStack(
 			}
 			const key = presentKeys[0];
 			const inner = dRec[key];
+			const isContentDetector =
+				key === "importPattern" ||
+				key === "commandPattern" ||
+				key === "behaviorPattern";
+			// R2: guard metadata is accepted ONLY on the content detectors.
+			if (
+				("pathGuards" in dRec || "pathGuardMode" in dRec) &&
+				!isContentDetector
+			) {
+				errors.push(
+					`${prefix}: pathGuards/pathGuardMode are only allowed on importPattern, commandPattern, or behaviorPattern`,
+				);
+				continue;
+			}
 			if (key === "behaviorPattern") {
 				if (
 					typeof inner !== "string" ||
@@ -856,17 +876,31 @@ function readRejectedStack(
 					continue;
 				}
 				validatedDetection = { behaviorPattern: inner as BehaviorKind };
-			} else {
-				if (typeof inner !== "string" || !inner.trim()) {
-					errors.push(
-						`${prefix}: detection.${key} must be a non-empty string`,
-					);
-					continue;
+			} else if (typeof inner !== "string" || !inner.trim()) {
+				errors.push(
+					`${prefix}: detection.${key} must be a non-empty string`,
+				);
+				continue;
+			} else if (key === "filePattern") {
+				validatedDetection = { filePattern: inner };
+			} else if (key === "depPattern") {
+				validatedDetection = { depPattern: inner };
+			} else if (key === "importPattern") {
+				validatedDetection = { importPattern: inner };
+			} else if (key === "commandPattern") {
+				validatedDetection = { commandPattern: inner };
+			}
+			// R3: validate + canonicalize (and capture) guard metadata.
+			if (isContentDetector) {
+				const meta = readPathGuardMetadata(dRec, prefix, errors);
+				if (meta === null) continue; // invalid — error already pushed
+				if (meta) {
+					validatedDetection = {
+						...validatedDetection,
+						pathGuards: meta.pathGuards,
+						pathGuardMode: meta.pathGuardMode,
+					} as RejectionDetection;
 				}
-				if (key === "filePattern") validatedDetection = { filePattern: inner };
-				else if (key === "depPattern") validatedDetection = { depPattern: inner };
-				else if (key === "importPattern") validatedDetection = { importPattern: inner };
-				else if (key === "commandPattern") validatedDetection = { commandPattern: inner };
 			}
 		}
 		const severity = rec.severity;
@@ -913,6 +947,82 @@ function readRejectedStack(
 		out.push(rule);
 	}
 	return out;
+}
+
+// #288 R3: validate path-guard metadata. Returns canonical metadata, or
+// `undefined` (none/legacy), or `null` (invalid — error pushed).
+function readPathGuardMetadata(
+	dRec: Record<string, unknown>,
+	prefix: string,
+	errors: string[],
+): { pathGuards: string[]; pathGuardMode: PathGuardMode } | undefined | null {
+	const hasGuards = "pathGuards" in dRec;
+	const hasMode = "pathGuardMode" in dRec;
+	if (!hasGuards && !hasMode) return undefined; // legacy: no metadata
+	let mode: PathGuardMode | undefined;
+	if (hasMode) {
+		const rawMode = dRec.pathGuardMode;
+		if (rawMode === "any" || rawMode === "all") {
+			mode = rawMode;
+		} else {
+			errors.push(
+				`${prefix}: invalid pathGuardMode '${String(rawMode)}' (must be 'any' or 'all')`,
+			);
+			return null;
+		}
+	}
+	// R3: mode present without guards → fail-closed.
+	if (!hasGuards) {
+		errors.push(`${prefix}: pathGuardMode present without pathGuards`);
+		return null;
+	}
+	const rawGuards = dRec.pathGuards;
+	if (
+		!Array.isArray(rawGuards) ||
+		rawGuards.some((g) => typeof g !== "string")
+	) {
+		errors.push(`${prefix}: pathGuards must be an array of strings`);
+		return null;
+	}
+	const trimmed = rawGuards.map((g) => (g as string).trim());
+	if (trimmed.length === 0 || trimmed.some((g) => !g)) {
+		errors.push(
+			`${prefix}: pathGuards must be a non-empty array of non-blank strings`,
+		);
+		return null;
+	}
+	const canonical: string[] = [];
+	for (const g of trimmed) {
+		const norm = canonicalizePathGuard(g, prefix, errors);
+		if (norm === null) return null;
+		canonical.push(norm);
+	}
+	return { pathGuards: canonical, pathGuardMode: mode ?? "any" };
+}
+
+// #288 R3/R4: canonicalize one guard (reject \, absolute, ..; strip ./).
+function canonicalizePathGuard(
+	guard: string,
+	prefix: string,
+	errors: string[],
+): string | null {
+	if (guard.includes("\\")) {
+		errors.push(
+			`${prefix}: pathGuards entry must not contain backslashes`,
+		);
+		return null;
+	}
+	if (/^\//u.test(guard) || /^[A-Za-z]:/u.test(guard)) {
+		errors.push(`${prefix}: pathGuards entry must not be an absolute path`);
+		return null;
+	}
+	if (guard.split("/").some((seg) => seg === "..")) {
+		errors.push(
+			`${prefix}: pathGuards entry must not escape the repository root ('..')`,
+		);
+		return null;
+	}
+	return guard.replace(/^\.\//u, "");
 }
 
 // R3.1: convert the union form (RejectedStackEntry[]) into a uniform
@@ -1001,7 +1111,7 @@ export function hasRejection(
 			if (files.length === 0) continue;
 			const regex = safeRegExp(det.importPattern);
 			if (!regex) continue;
-			for (const f of files) {
+			for (const f of scopedFiles(det, files)) {
 				const content = readContent(f);
 				if (content && regex.test(content)) hits.push({ rule, matchedFile: f });
 			}
@@ -1012,7 +1122,7 @@ export function hasRejection(
 			if (files.length === 0) continue;
 			const regex = safeRegExp(det.commandPattern);
 			if (!regex) continue;
-			for (const f of files) {
+			for (const f of scopedFiles(det, files)) {
 				const diff = readDiff(f);
 				if (diff && regex.test(diff)) hits.push({ rule, matchedFile: f });
 			}
@@ -1021,7 +1131,7 @@ export function hasRejection(
 
 		if ("behaviorPattern" in det) {
 			if (files.length === 0) continue;
-			for (const f of files) {
+			for (const f of scopedFiles(det, files)) {
 				const content = readContent(f);
 				if (content && detectBehavior(content, det.behaviorPattern)) {
 					hits.push({ rule, matchedFile: f });
@@ -1098,6 +1208,21 @@ function matchesGlob(file: string, pattern: string): boolean {
 		.replace(new RegExp(QMARK, "gu"), "[^/]");
 	const regex = new RegExp(`^${regexStr}$`, "u");
 	return regex.test(normalized);
+}
+
+// #288 R5: scope changedFiles by guards before the content check. Unguarded
+// rules stay global; `any` = OR, `all` = same-file AND. Reuses matchesGlob.
+function scopedFiles(
+	det: { pathGuards?: string[]; pathGuardMode?: PathGuardMode },
+	files: string[],
+): string[] {
+	const guards = det.pathGuards;
+	if (!guards || guards.length === 0) return files; // legacy global (R5)
+	return files.filter((f) =>
+		det.pathGuardMode === "all"
+			? guards.every((g) => matchesGlob(f, g))
+			: guards.some((g) => matchesGlob(f, g)),
+	);
 }
 
 // R3.3: compile a user-supplied detection regex safely. Invalid patterns

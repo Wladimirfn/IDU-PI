@@ -1444,6 +1444,247 @@ describe("R3.3 predicate-driven rejectedStack gate", () => {
 	});
 });
 
+// #288 — rejected-stack path scoping (U1: R1–R5, R8). Strict TDD (RED first).
+
+function validateGuardedDetection(
+	detection: Record<string, unknown>,
+): { ok: boolean; rule?: RejectedRule } {
+	const result = validateProjectConstitution(
+		makeConstitutionLike([
+			{ ...makeValidRejectedRule(), detection } as unknown as RejectedStackEntry,
+		]),
+	);
+	if (!result.ok) return { ok: false };
+	return {
+		ok: true,
+		rule: result.constitution.technologyRules.rejectedStack[0] as RejectedRule,
+	};
+}
+
+// hasRejection over one guarded content rule with a DI map → sorted matches.
+function contentHits(
+	detection: Record<string, unknown>,
+	map: Record<string, string>,
+	hook: "readContent" | "readDiff",
+): string[] {
+	const rule = {
+		...makeValidRejectedRule(),
+		detection,
+	} as unknown as RejectedStackEntry;
+	const constitution = buildConstitutionWithRules([rule]);
+	const hits = hasRejection(
+		{ changedFiles: Object.keys(map), constitution },
+		normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+		hook === "readContent"
+			? { readContent: (f) => map[f] }
+			: { readDiff: (f) => map[f] },
+	);
+	return (hits.map((h) => h.matchedFile).filter(Boolean) as string[]).sort();
+}
+
+describe("#288 rejected-stack path scoping (R1–R5, R8)", () => {
+	it("R1: metadata is not a discriminator and is captured", () => {
+		const { ok, rule } = validateGuardedDetection({
+			importPattern: "writeFile",
+			pathGuards: ["src/**"],
+			pathGuardMode: "any",
+		});
+		assert.equal(ok, true);
+		const det = rule!.detection as { pathGuards?: string[]; pathGuardMode?: string };
+		assert.deepEqual(det.pathGuards, ["src/**"]);
+		assert.equal(det.pathGuardMode, "any");
+	});
+
+	it("R1: metadata-only detection (no discriminator) is rejected", () => {
+		assert.equal(validateGuardedDetection({ pathGuards: ["src/**"] }).ok, false);
+	});
+
+	it("R2: guards accepted + captured on command/behavior detectors", () => {
+		for (const det of [
+			{ commandPattern: "git\\s+push", pathGuards: ["scripts/**"] },
+			{ behaviorPattern: "long-running", pathGuards: ["src/mcp/**"] },
+		]) {
+			const { ok, rule } = validateGuardedDetection(det);
+			assert.equal(ok, true);
+			assert.ok((rule!.detection as { pathGuards?: string[] }).pathGuards);
+		}
+	});
+
+	it("R2: guards rejected on filePattern/depPattern", () => {
+		assert.equal(validateGuardedDetection({ filePattern: "src/**", pathGuards: ["src/x"] }).ok, false);
+		assert.equal(validateGuardedDetection({ depPattern: "puppeteer", pathGuards: ["src/x"] }).ok, false);
+	});
+
+	it("R3: omitted mode defaults to 'any'", () => {
+		const { ok, rule } = validateGuardedDetection({ importPattern: "x", pathGuards: ["src/**"] });
+		assert.equal(ok, true);
+		assert.equal((rule!.detection as { pathGuardMode?: string }).pathGuardMode, "any");
+	});
+
+	it("R3: mode without guards is rejected (fail-closed)", () => {
+		assert.equal(validateGuardedDetection({ importPattern: "x", pathGuardMode: "all" }).ok, false);
+	});
+
+	it("R3: invalid mode rejected", () => {
+		assert.equal(
+			validateGuardedDetection({ importPattern: "x", pathGuards: ["src/**"], pathGuardMode: "either" }).ok,
+			false,
+		);
+	});
+
+	it("R3: empty and blank guards rejected", () => {
+		assert.equal(validateGuardedDetection({ importPattern: "x", pathGuards: [] }).ok, false);
+		assert.equal(validateGuardedDetection({ importPattern: "x", pathGuards: ["", "  "] }).ok, false);
+	});
+
+	it("R3: backslash/absolute/parent-escape guards rejected", () => {
+		for (const bad of [["src\\mcp\\**"], ["C:/abs"], ["/abs"], ["\\\\server\\share"], ["../escape"]]) {
+			assert.equal(validateGuardedDetection({ importPattern: "x", pathGuards: bad }).ok, false);
+		}
+	});
+
+	it("R3: leading ./ is stripped", () => {
+		const { ok, rule } = validateGuardedDetection({ importPattern: "x", pathGuards: ["./src/foo.ts"] });
+		assert.equal(ok, true);
+		assert.deepEqual((rule!.detection as { pathGuards?: string[] }).pathGuards, ["src/foo.ts"]);
+	});
+
+	it("R4: Windows separator normalized + single-guard any filter", () => {
+		assert.deepEqual(
+			contentHits(
+				{ importPattern: "writeFileSync", pathGuards: ["src/mcp/**"] },
+				{
+					"src\\mcp\\foo.ts": 'import { writeFileSync } from "node:fs";',
+					"test/other.ts": 'import { writeFileSync } from "node:fs";',
+				},
+				"readContent",
+			),
+			["src\\mcp\\foo.ts"],
+		);
+	});
+
+	it("R4: consumes matchesGlob unchanged (zero-or-more **, case-sensitive, anchored)", () => {
+		assert.deepEqual(
+			contentHits(
+				{ importPattern: "writeFileSync", pathGuards: ["src/**/foo.ts"] },
+				{
+					"src/foo.ts": "writeFileSync",
+					"src/a/foo.ts": "writeFileSync",
+					"SRC/a/foo.ts": "writeFileSync",
+					"other/foo.ts": "writeFileSync",
+				},
+				"readContent",
+			),
+			["src/a/foo.ts", "src/foo.ts"],
+		);
+	});
+
+	it("R5: any-mode multi-guard OR", () => {
+		assert.deepEqual(
+			contentHits(
+				{
+					importPattern: "writeFileSync",
+					pathGuards: ["src/mcp/**", "src/cli.ts"],
+					pathGuardMode: "any",
+				},
+				{
+					"src/mcp/foo.ts": "writeFileSync",
+					"src/cli.ts": "writeFileSync",
+					"src/other.ts": "writeFileSync",
+				},
+				"readContent",
+			),
+			["src/cli.ts", "src/mcp/foo.ts"],
+		);
+	});
+
+	it("R5: all-mode same-file AND (counterexample)", () => {
+		assert.deepEqual(
+			contentHits(
+				{
+					importPattern: "writeFileSync",
+					pathGuards: ["src/mcp/**", "**/*.ts"],
+					pathGuardMode: "all",
+				},
+				{ "src/mcp/foo.txt": "writeFileSync", "src/mcp/bar.ts": "writeFileSync" },
+				"readContent",
+			),
+			["src/mcp/bar.ts"],
+		);
+	});
+
+	it("R5: commandPattern respects guards", () => {
+		assert.deepEqual(
+			contentHits(
+				{ commandPattern: "git\\s+commit", pathGuards: ["scripts/**"] },
+				{ "src/cli.ts": "+console.log('x')", "scripts/deploy.sh": "+git commit -m x" },
+				"readDiff",
+			),
+			["scripts/deploy.sh"],
+		);
+	});
+
+	it("R5: behaviorPattern respects guards", () => {
+		assert.deepEqual(
+			contentHits(
+				{ behaviorPattern: "long-running", pathGuards: ["src/mcp/**"] },
+				{
+					"src/mcp/loop.ts": "setInterval(() => {}, 1000);",
+					"src/other.ts": "setInterval(() => {}, 1000);",
+				},
+				"readContent",
+			),
+			["src/mcp/loop.ts"],
+		);
+	});
+
+	it("R5: unguarded content rule keeps legacy global behavior", () => {
+		assert.equal(
+			contentHits(
+				{ importPattern: "writeFileSync" },
+				{ "test/a.ts": "writeFileSync", "src/b.ts": "writeFileSync" },
+				"readContent",
+			).length,
+			2,
+		);
+	});
+
+	it("R8: file-backed hit appends '(rule: id, file: path)' (append-only)", () => {
+		const hit = evaluateConstitutionGates({
+			request: "",
+			changedFiles: ["src/mcp/foo.ts"],
+			constitution: buildConstitutionWithRules([makeValidRejectedRule({ id: "mcp-write", detection: { filePattern: "src/mcp/**" }, messages: { blocked: "MCP write rejected.", warning: "w" } })]),
+		}).failures.find((f) => f.gateId === "rejected_stack");
+		assert.ok(hit);
+		assert.equal(hit!.message, "MCP write rejected. (rule: mcp-write, file: src/mcp/foo.ts)");
+	});
+
+	it("R8: non-file hit appends '(rule: id)' only — no file/dep suffix", () => {
+		const hit = evaluateConstitutionGates({
+			request: "",
+			changedFiles: [],
+			deps: { dependencies: { puppeteer: "^1" }, devDependencies: {} },
+			constitution: buildConstitutionWithRules([makeValidRejectedRule({ id: "bad-dep", detection: { depPattern: "puppeteer" }, messages: { blocked: "Puppeteer rejected.", warning: "w" } })]),
+		}).failures.find((f) => f.gateId === "rejected_stack");
+		assert.ok(hit);
+		assert.equal(hit!.message, "Puppeteer rejected. (rule: bad-dep)");
+		assert.doesNotMatch(hit!.message, /file:|dep:/u);
+	});
+
+	it("R8: overlapping rules emit independent issues", () => {
+		const rs = evaluateConstitutionGates({
+			request: "",
+			changedFiles: ["src/mcp/foo.ts"],
+			constitution: buildConstitutionWithRules([
+				makeValidRejectedRule({ id: "r-a", detection: { filePattern: "src/mcp/**" }, messages: { blocked: "A blocked.", warning: "w" } }),
+				makeValidRejectedRule({ id: "r-b", detection: { filePattern: "src/**/*.ts" }, messages: { blocked: "B blocked.", warning: "w" } }),
+			]),
+		}).failures.filter((f) => f.gateId === "rejected_stack");
+		assert.equal(rs.length, 2);
+		assert.ok(rs.every((f) => /\(rule: r-[ab], file: src\/mcp\/foo\.ts\)$/u.test(f.message)));
+	});
+});
+
 function runGitIn(cwd: string, args: string[]): string {
 	return execFileSync("git", args, {
 		cwd,
