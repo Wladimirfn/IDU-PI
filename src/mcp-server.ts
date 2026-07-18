@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
@@ -1248,173 +1247,24 @@ export function listIduMcpTools(): IduMcpToolDefinition[] {
 	return TOOLS.map((toolDefinition) => ({ ...toolDefinition }));
 }
 
-/**
- * Git runner used by the worktree overlay. Returns trimmed-able stdout and
- * throws on nonzero exit / timeout, mirroring execFileSync semantics so the
- * overlay can fail closed uniformly.
- */
-export type WorktreeGitRunner = (args: string[], cwd: string) => string;
-
-export type WorktreeOverlayInput = {
-	candidatePath: string;
-	registry: ProjectRegistry;
-	workspaceRoot: string;
-	runGit?: WorktreeGitRunner;
+// Worktree-aware project resolution overlay (A15): the canonical implementation
+// now lives in ./worktree-resolution.js. The symbols are re-exported here so the
+// public API of mcp-server is unchanged (test/worktree-resolution/overlay.test.ts
+// imports resolveWorktreeOverlay + WorktreeGitRunner from src/mcp-server.js).
+// The local import binding keeps the internal call site (resolveMcpProjectContext)
+// working without touching it.
+import {
+	resolveWorktreeOverlay,
+	type WorktreeGitRunner,
+	type WorktreeOverlayInput,
+	type WorktreeOverlayResult,
+} from "./worktree-resolution.js";
+export {
+	resolveWorktreeOverlay,
+	type WorktreeGitRunner,
+	type WorktreeOverlayInput,
+	type WorktreeOverlayResult,
 };
-
-export type WorktreeOverlayResult = {
-	resolved: boolean;
-	projectId?: string;
-	projectPath?: string;
-	stateRoot?: string;
-	effectiveCwd?: string;
-};
-
-// Subprocess budget for git probes. Bounds T-Timeout: a hanging git is killed
-// and surfaces as a thrown error, which the overlay turns into fail-closed.
-const WORKTREE_GIT_TIMEOUT_MS = 5000;
-
-function defaultWorktreeGitRunner(args: string[], cwd: string): string {
-	return execFileSync("git", args, {
-		cwd,
-		encoding: "utf8",
-		timeout: WORKTREE_GIT_TIMEOUT_MS,
-		stdio: ["ignore", "pipe", "ignore"],
-	});
-}
-
-// git rev-parse --git-common-dir may return a relative path (e.g. ".git" for a
-// main repo). Resolve it against the cwd it was run from before canonicalizing.
-function canonicalCommonDir(raw: string, cwd: string): string {
-	const absolute = isAbsolute(raw) ? raw : resolve(cwd, raw);
-	return canonicalDirectory(absolute);
-}
-
-function porcelainListsWorktree(
-	porcelain: string,
-	candidateCanonical: string,
-	cwd: string,
-): boolean {
-	for (const line of porcelain.split(/\r?\n/u)) {
-		if (!line.startsWith("worktree ")) continue;
-		const entry = line.slice("worktree ".length).trim();
-		if (!entry) continue;
-		try {
-			const absolute = isAbsolute(entry) ? entry : resolve(cwd, entry);
-			if (samePath(canonicalDirectory(absolute), candidateCanonical)) {
-				return true;
-			}
-		} catch {
-			continue;
-		}
-	}
-	return false;
-}
-
-/**
- * Worktree-aware project resolution overlay (Option A).
- *
- * Runs ONLY after exact-match registry lookup fails. Verifies, in order:
- *  1. candidate is a git top-level (`.git` present),
- *  2. `git rev-parse --git-common-dir` of the candidate,
- *  3. A3: `git rev-parse --show-toplevel` round-trips back to the candidate
- *     (blocks symlink bypass into a foreign repo),
- *  4. a registered project shares the same canonical common-dir,
- *  5. the candidate appears in that project's `git worktree list --porcelain`
- *     (blocks a crafted sibling that merely fakes the common-dir).
- *
- * On success returns the parent project's governance identity (projectId,
- * projectPath, stateRoot) plus effectiveCwd = the canonical worktree path.
- * Any subprocess error, parse error, or membership failure fails closed
- * ({ resolved: false }); authority is NEVER inherited silently.
- *
- * TODO(shared-module): this helper is duplicated (with the git runner) in
- * src/cli.ts and src/idu-installer.ts for this slice. A follow-up slice must
- * extract it into a shared module so there is a single tested implementation.
- */
-export function resolveWorktreeOverlay(
-	input: WorktreeOverlayInput,
-): WorktreeOverlayResult {
-	const runGit = input.runGit ?? defaultWorktreeGitRunner;
-	try {
-		// 1. candidate must look like a git top-level (worktree or main repo).
-		if (!existsSync(join(input.candidatePath, ".git"))) {
-			return { resolved: false };
-		}
-
-		// 2. candidate common-dir.
-		const commonDirRaw = runGit(
-			["rev-parse", "--git-common-dir"],
-			input.candidatePath,
-		).trim();
-		if (!commonDirRaw) return { resolved: false };
-
-		// 3. A3: show-toplevel must round-trip to the candidate canonical path.
-		const toplevelRaw = runGit(
-			["rev-parse", "--show-toplevel"],
-			input.candidatePath,
-		).trim();
-		if (!toplevelRaw) return { resolved: false };
-
-		const candidateCanonical = canonicalDirectory(input.candidatePath);
-		const toplevelCanonical = canonicalDirectory(
-			isAbsolute(toplevelRaw)
-				? toplevelRaw
-				: resolve(input.candidatePath, toplevelRaw),
-		);
-		if (!samePath(candidateCanonical, toplevelCanonical)) {
-			return { resolved: false };
-		}
-
-		const candidateCommonDir = canonicalCommonDir(
-			commonDirRaw,
-			input.candidatePath,
-		);
-
-		// 4-5. find a registered project with a matching common-dir AND porcelain
-		// membership for the candidate.
-		for (const project of input.registry.projects) {
-			try {
-				const regCommonRaw = runGit(
-					["rev-parse", "--git-common-dir"],
-					project.path,
-				).trim();
-				if (!regCommonRaw) continue;
-				if (
-					!samePath(
-						canonicalCommonDir(regCommonRaw, project.path),
-						candidateCommonDir,
-					)
-				) {
-					continue;
-				}
-				const porcelain = runGit(
-					["worktree", "list", "--porcelain"],
-					project.path,
-				);
-				if (!porcelainListsWorktree(porcelain, candidateCanonical, project.path)) {
-					continue;
-				}
-				return {
-					resolved: true,
-					projectId: project.id,
-					projectPath: project.path,
-					stateRoot:
-						project.stateRoot ??
-						join(input.workspaceRoot, "projects", project.id),
-					effectiveCwd: candidateCanonical,
-				};
-			} catch {
-				// Fail closed per-project; try the next registered project.
-				continue;
-			}
-		}
-		return { resolved: false };
-	} catch {
-		// Fail closed on any unhandled subprocess / parse error.
-		return { resolved: false };
-	}
-}
 
 export function resolveMcpProjectContext(
 	inputProjectPath?: string,
