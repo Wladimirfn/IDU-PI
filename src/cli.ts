@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import {
 	canonicalDirectory,
@@ -9,6 +8,7 @@ import {
 	type BridgeConfig,
 	type GovernanceConfigPayload,
 } from "./config.js";
+import { resolveWorktreeOverlay } from "./worktree-resolution.js";
 import { AgentRouter } from "./agent-router.js";
 import { readPendingBlockingInjection } from "./objective-injection.js";
 import {
@@ -306,7 +306,7 @@ import {
 } from "./structured-task-queue.js";
 import type { TaskTemplateKind } from "./task-templates.js";
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
 import {
 	applySupervisorModelAssignment,
 	loadModelAssignments,
@@ -906,135 +906,6 @@ export type CliRuntime = {
 	activeProfileId?: () => string;
 };
 
-// TODO(shared-module): this worktree overlay is a byte-identical duplicate of
-// resolveWorktreeOverlay in src/mcp-server.ts (kept here to avoid a cross-module
-// import from the CLI entry into the MCP entry). A follow-up slice extracts a
-// single shared, tested implementation. See SDD worktree-aware-project-resolution.
-type RuntimeGitRunner = (args: string[], cwd: string) => string;
-
-const RUNTIME_GIT_TIMEOUT_MS = 5000;
-
-function defaultRuntimeGitRunner(args: string[], cwd: string): string {
-	return execFileSync("git", args, {
-		cwd,
-		encoding: "utf8",
-		timeout: RUNTIME_GIT_TIMEOUT_MS,
-		stdio: ["ignore", "pipe", "ignore"],
-	});
-}
-
-function runtimeCanonicalCommonDir(raw: string, cwd: string): string {
-	const absolute = isAbsolute(raw) ? raw : resolve(cwd, raw);
-	return canonicalDirectory(absolute);
-}
-
-function runtimePorcelainLists(
-	porcelain: string,
-	candidateCanonical: string,
-	cwd: string,
-): boolean {
-	for (const line of porcelain.split(/\r?\n/u)) {
-		if (!line.startsWith("worktree ")) continue;
-		const entry = line.slice("worktree ".length).trim();
-		if (!entry) continue;
-		try {
-			const absolute = isAbsolute(entry) ? entry : resolve(cwd, entry);
-			if (sameRuntimePath(canonicalDirectory(absolute), candidateCanonical)) {
-				return true;
-			}
-		} catch {
-			continue;
-		}
-	}
-	return false;
-}
-
-type RuntimeWorktreeOverlayResult = {
-	resolved: boolean;
-	projectId?: string;
-	effectiveCwd?: string;
-};
-
-function resolveWorktreeOverlayRuntime(input: {
-	candidatePath: string;
-	registry: ProjectRegistry;
-	workspaceRoot: string;
-	runGit?: RuntimeGitRunner;
-}): RuntimeWorktreeOverlayResult {
-	const runGit = input.runGit ?? defaultRuntimeGitRunner;
-	try {
-		if (!existsSync(join(input.candidatePath, ".git"))) {
-			return { resolved: false };
-		}
-		const commonDirRaw = runGit(
-			["rev-parse", "--git-common-dir"],
-			input.candidatePath,
-		).trim();
-		if (!commonDirRaw) return { resolved: false };
-
-		const toplevelRaw = runGit(
-			["rev-parse", "--show-toplevel"],
-			input.candidatePath,
-		).trim();
-		if (!toplevelRaw) return { resolved: false };
-
-		const candidateCanonical = canonicalDirectory(input.candidatePath);
-		const toplevelCanonical = canonicalDirectory(
-			isAbsolute(toplevelRaw)
-				? toplevelRaw
-				: resolve(input.candidatePath, toplevelRaw),
-		);
-		if (!sameRuntimePath(candidateCanonical, toplevelCanonical)) {
-			return { resolved: false };
-		}
-		const candidateCommonDir = runtimeCanonicalCommonDir(
-			commonDirRaw,
-			input.candidatePath,
-		);
-
-		for (const project of input.registry.projects) {
-			try {
-				const regCommonRaw = runGit(
-					["rev-parse", "--git-common-dir"],
-					project.path,
-				).trim();
-				if (!regCommonRaw) continue;
-				if (
-					!sameRuntimePath(
-						runtimeCanonicalCommonDir(regCommonRaw, project.path),
-						candidateCommonDir,
-					)
-				) {
-					continue;
-				}
-				const porcelain = runGit(
-					["worktree", "list", "--porcelain"],
-					project.path,
-				);
-				if (
-					!runtimePorcelainLists(
-						porcelain,
-						candidateCanonical,
-						project.path,
-					)
-				) {
-					continue;
-				}
-				return {
-					resolved: true,
-					projectId: project.id,
-					effectiveCwd: candidateCanonical,
-				};
-			} catch {
-				continue;
-			}
-		}
-		return { resolved: false };
-	} catch {
-		return { resolved: false };
-	}
-}
-
 type ResolvedRuntimeProject = {
 	project: ProjectEntry;
 	effectiveCwd?: string;
@@ -1060,7 +931,7 @@ function resolveRuntimeProject(
 	// Exact-match missed: try the worktree-aware overlay. A worktree of an
 	// enrolled parent resolves to the parent's ProjectEntry with effectiveCwd
 	// set to the canonical worktree path (separates governance from git cwd).
-	const overlay = resolveWorktreeOverlayRuntime({
+	const overlay = resolveWorktreeOverlay({
 		candidatePath: path,
 		registry,
 		workspaceRoot: config.agentWorkspaceRoot,
