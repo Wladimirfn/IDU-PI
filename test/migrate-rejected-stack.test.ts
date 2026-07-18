@@ -17,8 +17,15 @@ import {
 	PROPOSED_REJECTED_STACK,
 	addPathGuards,
 	replaceRejectedStack,
+	runPathGuardsGate,
 } from "../scripts/migrate-rejected-stack.js";
-import type { RejectedRule } from "../src/project-constitution.js";
+import type { PathGuardViolation } from "../scripts/migrate-rejected-stack.js";
+import { hasRejection } from "../src/project-constitution.js";
+import type {
+	ConstitutionGateInput,
+	ProjectConstitution,
+	RejectedRule,
+} from "../src/project-constitution.js";
 
 // =========================================================================
 // U2 of #288 — addPathGuards unit tests (TST-RSP-001).
@@ -404,5 +411,416 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 		assert.equal(dry.status, 0, `dry-run stderr: ${dry.stderr}`);
 		assert.match(dry.stdout, /already migrated:\s*true/u, "dry-run on migrated file must report alreadyMigrated=true");
 		assert.match(dry.stdout, /delta bytes:\s*0/u, "dry-run on migrated file must report delta bytes: 0");
+	});
+});
+
+// =========================================================================
+// U3 of #288 PR #2 — pathGuards dry-run gate tests (TST-PGG-001..005).
+//
+// The gate (`runPathGuardsGate`) was shipped in PR #1 (commit 8483c92) in
+// scripts/migrate-rejected-stack.ts. These tests exercise its four phases:
+//   Phase 1 — shape validation              (TST-PGG-001)
+//   Phase 2 — filesystem verification        (TST-PGG-002)
+//   Phase 3 — functional via real hasRejection (TST-PGG-003)
+//   Reporting/blocking in --apply (TST-PGG-004) and --dry-run (TST-PGG-005)
+//
+// Deviations accommodated (per apply-progress-pr1 obs 3561):
+//   1. matchesGlob is NOT exported — Phase 2 is exercised transitively via
+//      hasRejection's filePattern branch. Tests do NOT import matchesGlob.
+//   2. main() wires the gate with `process.cwd()` (NOT args.stateRoot).
+//      Integration tests spawn with `cwd: <temp>` so the gate walks an empty
+//      dir (no src/) and fails Phase 2. Unit tests pass `projectPath` directly
+//      to the gate function — it is a pure parameter, not read from cwd.
+//   3. Invalid globs are double-reported (invalid-glob + glob-matches-no-files)
+//      in dry-run/apply mode. Shape unit tests use mode "verify" to isolate
+//      Phase 1 (verify mode returns after shape checks).
+// =========================================================================
+
+// Build a minimal ProjectConstitution for hasRejection probes. Shape per
+// src/project-constitution.ts:23-45. Only technologyRules.rejectedStack is
+// overridden per-test so other rules do not pollute the result.
+function makeMinimalConstitution(rejectedStack: RejectedRule[]): ProjectConstitution {
+	return {
+		version: "1.0.0",
+		projectName: "path-guards-gate-test",
+		sourceCoreStatus: "draft",
+		principles: [],
+		forbiddenPractices: [],
+		requiredPractices: [],
+		technologyRules: { preferredStack: [], rejectedStack },
+		securityRules: [],
+		dataRules: [],
+		approvalRules: [],
+		validationGates: [],
+		specialistRoles: [],
+		createdAt: "",
+		updatedAt: "",
+		status: "active",
+	};
+}
+
+// Build a baseline pathGuarded importPattern rule. Fields not relevant to the
+// gate are filled with harmless defaults. `mode` defaults to "any".
+function makeImportRule(
+	id: string,
+	pathGuards: string[],
+	mode: "any" | "all" = "any",
+	importPattern = "writeFile|execSync|spawnSync",
+): RejectedRule {
+	return {
+		id,
+		summary: `fixture ${id}`,
+		category: "security",
+		detection: { importPattern, pathGuards, pathGuardMode: mode },
+		severity: "high",
+		rationale: "test fixture",
+		messages: { blocked: "b", warning: "w" },
+	};
+}
+
+// The 3 pathGuarded rules in PROPOSED_REJECTED_RULES — extracted dynamically
+// so the functional tests track the real production rules, not a copy.
+const PATH_GUARDED_RULES: RejectedRule[] = PROPOSED_REJECTED_RULES.filter((r) => {
+	const det = r.detection as { pathGuards?: unknown } | null;
+	return det !== null && typeof det === "object" && "pathGuards" in det;
+});
+
+// -------------------------------------------------------------------------
+// TST-PGG-001 — Shape validation (Phase 1, isolated via mode "verify").
+// Verify mode returns immediately after Phase 1, so Phase 2/3 cannot pollute
+// these assertions. Each test pins ONE violation kind + ruleId.
+// -------------------------------------------------------------------------
+
+describe("U3 gate shape validation (TST-PGG-001)", () => {
+	test("gate_shape_empty_guards: pathGuards:[] reports empty-guards", () => {
+		const rule = makeImportRule("empty-guards-rule", []);
+		const report = runPathGuardsGate([rule], ".", { mode: "verify" });
+		assert.equal(report.ok, false);
+		const v = report.violations.find((x) => x.kind === "empty-guards");
+		assert.ok(v, "must report empty-guards");
+		assert.equal(v!.ruleId, "empty-guards-rule");
+	});
+
+	test("gate_shape_behavior_pattern_with_guards: behaviorPattern + pathGuards reports behavior-pattern-with-guards", () => {
+		const rule: RejectedRule = {
+			id: "behavior-rule",
+			summary: "behavior + guards (forbidden combo per owner decision)",
+			category: "process",
+			detection: {
+				behaviorPattern: "long-running",
+				pathGuards: ["src/**"],
+				pathGuardMode: "any",
+			},
+			severity: "high",
+			rationale: "fixture",
+			messages: { blocked: "b", warning: "w" },
+		};
+		const report = runPathGuardsGate([rule], ".", { mode: "verify" });
+		assert.equal(report.ok, false);
+		const v = report.violations.find(
+			(x) => x.kind === "behavior-pattern-with-guards",
+		);
+		assert.ok(v, "must report behavior-pattern-with-guards");
+		assert.equal(v!.ruleId, "behavior-rule");
+	});
+
+	test("gate_shape_duplicate_id: same id + divergent pathGuards reports duplicate-id", () => {
+		const rule1 = makeImportRule("dup-rule", ["src/**"]);
+		const rule2 = makeImportRule("dup-rule", ["scripts/**"]);
+		const report = runPathGuardsGate([rule1, rule2], ".", { mode: "verify" });
+		assert.equal(report.ok, false);
+		const v = report.violations.find((x) => x.kind === "duplicate-id");
+		assert.ok(v, "must report duplicate-id");
+		assert.equal(v!.ruleId, "dup-rule");
+	});
+
+	test("gate_shape_invalid_glob: absolute-path glob reports invalid-glob", () => {
+		const rule = makeImportRule("invalid-glob-rule", ["/etc/passwd"]);
+		const report = runPathGuardsGate([rule], ".", { mode: "verify" });
+		assert.equal(report.ok, false);
+		const v = report.violations.find((x) => x.kind === "invalid-glob");
+		assert.ok(v, "must report invalid-glob");
+		assert.equal(v!.ruleId, "invalid-glob-rule");
+		assert.equal(v!.context, "/etc/passwd");
+	});
+
+	test("gate_shape_clean_rule_has_no_violations (Phase 1 sanity)", () => {
+		// A well-formed rule produces zero Phase 1 violations in verify mode.
+		const rule = makeImportRule("clean-rule", ["src/**"]);
+		const report = runPathGuardsGate([rule], ".", { mode: "verify" });
+		assert.equal(report.ok, true);
+		assert.deepEqual(report.violations, []);
+	});
+
+	// Type-level proof that PathGuardViolation is exported with the 6 kinds.
+	test("gate_shape_pathguardviolation_type_covers_six_kinds (type-level)", () => {
+		const sample: PathGuardViolation = { ruleId: "x", kind: "empty-guards" };
+		const kinds: PathGuardViolation["kind"][] = [
+			"empty-guards",
+			"behavior-pattern-with-guards",
+			"duplicate-id",
+			"invalid-glob",
+			"glob-matches-no-files",
+			"rule-fires-outside-scope",
+		];
+		assert.equal(sample.kind, "empty-guards");
+		assert.equal(kinds.length, 6);
+	});
+});
+
+// -------------------------------------------------------------------------
+// TST-PGG-002 — Filesystem verification (Phase 2).
+// Each glob must match at least one real file under projectPath. Tests pass
+// the temp dir DIRECTLY as projectPath (the gate takes it as a parameter;
+// no process.chdir needed — see deviation note at top of section).
+// -------------------------------------------------------------------------
+
+describe("U3 gate filesystem verification (TST-PGG-002)", () => {
+	// Per-test temp dir seeded with src/foo.ts + scripts/bar.ts. Removed in
+	// a finally so a failure does not leak temp dirs across test runs.
+	function seedTempProject(): string {
+		const dir = mkdtempSync(join(tmpdir(), "idu-pi-u3-fs-"));
+		mkdirSync(join(dir, "src"), { recursive: true });
+		mkdirSync(join(dir, "scripts"), { recursive: true });
+		writeFileSync(join(dir, "src", "foo.ts"), "// probe\n", "utf8");
+		writeFileSync(join(dir, "scripts", "bar.ts"), "// probe\n", "utf8");
+		return dir;
+	}
+
+	test("gate_filesystem_glob_matches: src/** against temp with src/foo.ts → no glob-matches-no-files", () => {
+		const dir = seedTempProject();
+		try {
+			const rule = makeImportRule("fs-ok-rule", ["src/**"]);
+			const report = runPathGuardsGate([rule], dir, { mode: "dry-run" });
+			const noFiles = report.violations.filter(
+				(x) => x.kind === "glob-matches-no-files",
+			);
+			assert.deepEqual(
+				noFiles,
+				[],
+				"src/** must match src/foo.ts — no glob-matches-no-files violation",
+			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("gate_filesystem_glob_typo: srcc/** → reports glob-matches-no-files", () => {
+		const dir = seedTempProject();
+		try {
+			const rule = makeImportRule("fs-typo-rule", ["srcc/**"]);
+			const report = runPathGuardsGate([rule], dir, { mode: "dry-run" });
+			assert.equal(report.ok, false);
+			const v = report.violations.find(
+				(x) => x.kind === "glob-matches-no-files",
+			);
+			assert.ok(v, "must report glob-matches-no-files for srcc/**");
+			assert.equal(v!.ruleId, "fs-typo-rule");
+			assert.equal(v!.context, "srcc/**");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+// -------------------------------------------------------------------------
+// TST-PGG-003 — Functional validation (Phase 3 via real hasRejection).
+// For each of the 3 pathGuarded rules: positive (in-scope file + matching
+// content) MUST fire; negative (out-of-scope file + same content) MUST NOT
+// fire. Plus a gate-level end-to-end check and the pathGuardMode "all" case
+// for the rule-fires-outside-scope violation kind.
+// -------------------------------------------------------------------------
+
+describe("U3 gate functional validation (TST-PGG-003)", () => {
+	// Derive an in-scope file path from a rule's first pathGuard, mirroring
+	// the gate's sampleFileUnderScope. "src/**" → "src/probe.ts";
+	// "src/agentlab-*.ts" → "src/agentlab-probe.ts".
+	function inScopeFile(rule: RejectedRule): string {
+		const det = rule.detection as { pathGuards?: string[] };
+		const first = det.pathGuards![0];
+		if (/\*\*\/?$/u.test(first)) return `${first.replace(/\*\*\/?$/u, "")}probe.ts`;
+		if (first.includes("*")) return first.replace(/\*/u, "probe");
+		return first;
+	}
+
+	// First alternative of the rule's importPattern — a token that matches the
+	// rule's regex. importPattern values are alternations ("a|b|c").
+	function firstAlternative(rule: RejectedRule): string {
+		const det = rule.detection as { importPattern: string };
+		return det.importPattern.split("|")[0];
+	}
+
+	for (const rule of PATH_GUARDED_RULES) {
+		test(`gate_functional_positive_${rule.id}: in-scope file + matching content → rule fires`, () => {
+			const file = inScopeFile(rule);
+			const token = firstAlternative(rule);
+			const content = `import { ${token} } from "synthetic-stub";`;
+			const input: ConstitutionGateInput = {
+				changedFiles: [file],
+				constitution: makeMinimalConstitution([rule]),
+			};
+			const hits = hasRejection(input, [rule], {
+				readContent: () => content,
+				readDiff: () => content,
+			});
+			assert.ok(
+				hits.length > 0,
+				`${rule.id} must fire for in-scope ${file} with matching content`,
+			);
+		});
+
+		test(`gate_functional_negative_${rule.id}: out-of-scope file + matching content → rule does NOT fire`, () => {
+			// "test/" is outside every current pathGuards scope (src/**,
+			// scripts/**, src/agentlab-*.ts) — scopedFiles filters it out.
+			const outOfScope = "test/__path_guards_gate_probe__.ts";
+			const token = firstAlternative(rule);
+			const content = `import { ${token} } from "synthetic-stub";`;
+			const input: ConstitutionGateInput = {
+				changedFiles: [outOfScope],
+				constitution: makeMinimalConstitution([rule]),
+			};
+			const hits = hasRejection(input, [rule], {
+				readContent: () => content,
+				readDiff: () => content,
+			});
+			assert.equal(
+				hits.length,
+				0,
+				`${rule.id} must NOT fire for out-of-scope ${outOfScope}`,
+			);
+		});
+	}
+
+	test("gate_functional_all_real_rules_pass_gate: the 3 pathGuarded rules produce no rule-fires-outside-scope", () => {
+		// End-to-end: the gate's internal functionalCheck runs positive AND
+		// negative probes for each rule. Uses the repo root as projectPath so
+		// Phase 2 globs (src/**, scripts/**, src/agentlab-*.ts) also match.
+		const report = runPathGuardsGate(PATH_GUARDED_RULES, process.cwd(), {
+			mode: "dry-run",
+		});
+		const functionalViolations = report.violations.filter(
+			(x) => x.kind === "rule-fires-outside-scope",
+		);
+		assert.deepEqual(
+			functionalViolations,
+			[],
+			"no rule-fires-outside-scope for the 3 real pathGuarded rules",
+		);
+	});
+
+	test("gate_functional_rule_fires_outside_scope_via_all_mode: pathGuardMode 'all' with divergent guards → rule-fires-outside-scope", () => {
+		// Defense-in-depth for the 6th violation kind. sampleFileUnderScope
+		// derives the sample from the FIRST guard only; under mode "all"
+		// scopedFiles requires the file to match BOTH guards. The sample
+		// matches "src/**" but NOT "scripts/**" → filtered out → positive
+		// probe returns 0 hits → rule-fires-outside-scope.
+		const rule = makeImportRule(
+			"all-mode-rule",
+			["src/**", "scripts/**"],
+			"all",
+		);
+		const report = runPathGuardsGate([rule], process.cwd(), {
+			mode: "dry-run",
+		});
+		const v = report.violations.find(
+			(x) => x.kind === "rule-fires-outside-scope",
+		);
+		assert.ok(
+			v,
+			"must report rule-fires-outside-scope under pathGuardMode 'all' with divergent guards",
+		);
+		assert.equal(v!.ruleId, "all-mode-rule");
+	});
+});
+
+// -------------------------------------------------------------------------
+// TST-PGG-004 — --apply blocking integration.
+// TST-PGG-005 — --dry-run reporting integration.
+//
+// The gate in main() uses process.cwd() (deviation #2). Spawning with
+// `cwd: <temp>` makes the gate walk an empty dir (the temp stateRoot has a
+// .idu/config/constitution but no src/) → Phase 2 reports glob-matches-no-
+// files for every pathGuarded rule → gateReport.ok = false → --apply exits 4
+// before writeAtomic, --dry-run prints FAIL and exits 0.
+// -------------------------------------------------------------------------
+
+describe("U3 gate integration — compiled CLI (TST-PGG-004 / TST-PGG-005)", () => {
+	// Temp stateRoot with a legacy constitution but NO src/ tree. The gate
+	// walks process.cwd() = this dir, finds no src/ or scripts/, reports
+	// glob-matches-no-files for every pathGuarded rule.
+	function makeEmptyStateRoot(): string {
+		const root = makeStateRoot();
+		writeLegacyConstitution(root, "A");
+		return root;
+	}
+
+	test("TST-PGG-004: --apply blocks on gate violations (exit 4, file NOT written)", () => {
+		const root = makeEmptyStateRoot();
+		const constitutionPath = join(
+			root,
+			".idu",
+			"config",
+			"project-constitution.json",
+		);
+		const before = readFileSync(constitutionPath, "utf8");
+
+		const result = spawnSync(
+			"node",
+			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			{
+				encoding: "utf8",
+				cwd: root,
+				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
+			},
+		);
+
+		assert.equal(
+			result.status,
+			4,
+			`--apply MUST exit 4 on gate failure; got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		assert.match(
+			result.stderr,
+			/Path guards gate FAILED/u,
+			"stderr must carry the gate failure banner",
+		);
+
+		const after = readFileSync(constitutionPath, "utf8");
+		assert.equal(
+			after,
+			before,
+			"constitution file MUST NOT be written when the gate fails",
+		);
+	});
+
+	test("TST-PGG-005: --dry-run reports gate violations (exit 0, FAIL summary on stdout)", () => {
+		const root = makeEmptyStateRoot();
+
+		const result = spawnSync(
+			"node",
+			[SCRIPT_PATH, "--dry-run", `--state-root=${root}`],
+			{
+				encoding: "utf8",
+				cwd: root,
+			},
+		);
+
+		assert.equal(
+			result.status,
+			0,
+			`--dry-run MUST exit 0 even on gate failure; got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		assert.match(
+			result.stdout,
+			/Path guards gate: FAIL/u,
+			"stdout must carry the gate FAIL summary",
+		);
+		// At least one per-violation line for a pathGuarded rule + the
+		// glob-matches-no-files kind. Format: "  - <ruleId>: <kind> (<context>)".
+		assert.match(
+			result.stdout,
+			/mcp-write-shell-exec: glob-matches-no-files \(src\/\*\*\)/u,
+			"stdout must list the glob-matches-no-files violation for mcp-write-shell-exec src/**",
+		);
 	});
 });
