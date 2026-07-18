@@ -9,7 +9,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 
@@ -17,24 +17,36 @@ const execFile = promisify(execFileCb);
 
 const SCRIPT_PATH = resolve("scripts/idu-supervisor-tick.ps1");
 
-type ScriptResult = { stdout: string; stderr: string; code: number | null };
+type ScriptResult = {
+	stdout: string;
+	stderr: string;
+	code: number | null;
+	durationMs: number;
+};
 
 async function runScript(
 	scriptPath: string,
 	env: Record<string, string | undefined>,
 	timeoutMs = 30_000,
 ): Promise<ScriptResult> {
+	const startedAt = performance.now();
+	const childEnv = { ...process.env, ...env };
+	const pathKey = Object.keys(childEnv).find(
+		(key) => key.toLowerCase() === "path",
+	) ?? "PATH";
+	const fakeBin = join(dirname(dirname(scriptPath)), "test-bin");
+	childEnv[pathKey] = `${fakeBin}${delimiter}${childEnv[pathKey] ?? ""}`;
 	try {
 		const { stdout, stderr } = await execFile(
 			"pwsh",
 			["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
 			{
-				env: { ...process.env, ...env },
+				env: childEnv,
 				timeout: timeoutMs,
 				windowsHide: true,
 			},
 		);
-		return { stdout, stderr, code: 0 };
+		return { stdout, stderr, code: 0, durationMs: performance.now() - startedAt };
 	} catch (err) {
 		const e = err as {
 			stdout?: string;
@@ -46,6 +58,7 @@ async function runScript(
 			stdout: e.stdout ?? "",
 			stderr: e.stderr ?? "",
 			code: typeof e.code === "number" ? e.code : null,
+			durationMs: performance.now() - startedAt,
 		};
 	}
 }
@@ -58,6 +71,13 @@ function copyScriptToTempRoot(): {
 	const fakeRoot = mkdtempSync(join(tmpdir(), "idu-supervisor-tick-"));
 	const fakeScriptsDir = join(fakeRoot, "scripts");
 	mkdirSync(fakeScriptsDir, { recursive: true });
+	const fakeBin = join(fakeRoot, "test-bin");
+	mkdirSync(fakeBin);
+	writeFileSync(
+		join(fakeBin, "corepack.cmd"),
+		'@echo invoked>"%~dp0corepack-invoked"\r\n@exit /b 1\r\n',
+		"utf8",
+	);
 	const fakeScript = join(fakeScriptsDir, "idu-supervisor-tick.ps1");
 	writeFileSync(fakeScript, readFileSync(SCRIPT_PATH, "utf8"), "utf8");
 	return {
@@ -173,6 +193,14 @@ test("script proceeds past skip checks when no interactive CLI is open and trigg
 			/skipped: trigger disabled by user/u,
 			`script must not skip with 'skipped: trigger disabled by user' when no trigger file is present, got: ${result.stdout}`,
 		);
+		assert.ok(
+			result.durationMs < 5_000,
+			`deterministic tsc failure must finish in under 5s, took ${result.durationMs.toFixed(0)}ms`,
+		);
+		assert.ok(
+			existsSync(join(fakeRoot, "test-bin", "corepack-invoked")),
+			"expected the test-local corepack executable to handle tsc",
+		);
 	} finally {
 		cleanup();
 	}
@@ -204,6 +232,14 @@ test("script proceeds past skip checks when trigger file exists with enabled: tr
 			result.stdout,
 			/skipped: trigger disabled by user/u,
 			`script must not skip when trigger is enabled, got: ${result.stdout}`,
+		);
+		assert.ok(
+			result.durationMs < 5_000,
+			`deterministic tsc failure must finish in under 5s, took ${result.durationMs.toFixed(0)}ms`,
+		);
+		assert.ok(
+			existsSync(join(fakeRoot, "test-bin", "corepack-invoked")),
+			"expected the test-local corepack executable to handle tsc",
 		);
 	} finally {
 		cleanup();
