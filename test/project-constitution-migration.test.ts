@@ -212,15 +212,36 @@ describe("R3.4 proposed rejectedStack array", () => {
 		}
 	});
 
-	test("every detection field has EXACTLY ONE key (or null, which is item 6 only)", () => {
+	test("every detection field has EXACTLY ONE discriminator key (pathGuards/pathGuardMode are optional modifiers, not discriminators)", () => {
+		// U2 of #288: importPattern / commandPattern / behaviorPattern variants
+		// may carry optional `pathGuards` + `pathGuardMode` modifiers alongside
+		// their discriminator key. The discriminator-key invariant is unchanged
+		// — exactly one of {filePattern, depPattern, importPattern, commandPattern,
+		// behaviorPattern} per detection — but the total key count may be 1 or 3.
+		const DISCRIMINATORS = new Set([
+			"filePattern",
+			"depPattern",
+			"importPattern",
+			"commandPattern",
+			"behaviorPattern",
+		]);
+		const MODIFIERS = new Set(["pathGuards", "pathGuardMode"]);
 		for (const rule of PROPOSED_REJECTED_RULES) {
 			assert.ok(rule.detection, `${rule.id} detection must be present`);
 			const keys = Object.keys(rule.detection);
+			const discriminatorKeys = keys.filter((k) => DISCRIMINATORS.has(k));
 			assert.equal(
-				keys.length,
+				discriminatorKeys.length,
 				1,
-				`${rule.id} detection must have exactly 1 key, got ${keys.length}`,
+				`${rule.id} detection must have exactly 1 discriminator key, got ${discriminatorKeys.length} (${discriminatorKeys.join(",")})`,
 			);
+			// Every non-discriminator key must be a recognized modifier.
+			for (const k of keys) {
+				assert.ok(
+					DISCRIMINATORS.has(k) || MODIFIERS.has(k),
+					`${rule.id} detection has unknown key "${k}" (not a discriminator, not a recognized modifier)`,
+				);
+			}
 		}
 	});
 

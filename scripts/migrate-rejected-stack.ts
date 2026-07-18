@@ -53,7 +53,7 @@
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RejectedRule } from "../src/project-constitution.js";
+import type { PathGuardMode, RejectedRule } from "../src/project-constitution.js";
 
 // ---------------------------------------------------------------------------
 // Proposed `RejectedRule[]` for items 1-5 + trailing string for item 6.
@@ -201,7 +201,11 @@ const PROPOSED_REJECTED_RULES: RejectedRule[] = [
 		summary:
 			"MCP tools that implement code or authorize changes — shell-exec / file-write imports",
 		category: "security",
-		detection: { importPattern: "writeFile|execSync|spawnSync" },
+		detection: {
+			importPattern: "writeFile|execSync|spawnSync",
+			pathGuards: ["src/**", "scripts/**"],
+			pathGuardMode: "any",
+		},
 		severity: "high",
 		rationale:
 			"Catches shell-exec / file-write imports anywhere in changedFiles. " +
@@ -236,7 +240,11 @@ const PROPOSED_REJECTED_RULES: RejectedRule[] = [
 		summary:
 			"AgentLabs that edit the real repository — shell-exec / file-write imports",
 		category: "security",
-		detection: { importPattern: "execSync|spawnSync|writeFile" },
+		detection: {
+			importPattern: "execSync|spawnSync|writeFile",
+			pathGuards: ["src/agentlab-*.ts"],
+			pathGuardMode: "any",
+		},
 		severity: "blocker",
 		rationale:
 			"Catches execSync/spawnSync/writeFile imports inside any agentlabs file. Fully deterministic — these primitives are the write surface of AgentLabs and cannot be allowed in audit-only contexts.",
@@ -290,7 +298,11 @@ const PROPOSED_REJECTED_RULES: RejectedRule[] = [
 		summary:
 			"Uncontrolled web/news search — cheerio/puppeteer/playwright imports",
 		category: "process",
-		detection: { importPattern: "cheerio|puppeteer|playwright" },
+		detection: {
+			importPattern: "cheerio|puppeteer|playwright",
+			pathGuards: ["src/**", "scripts/**"],
+			pathGuardMode: "any",
+		},
 		severity: "high",
 		rationale:
 			"Catches scraping imports (cheerio/puppeteer/playwright) anywhere in changedFiles. " +
@@ -350,9 +362,76 @@ const PROPOSED_REJECTED_RULES: RejectedRule[] = [
 // converts this string into `{ detection: null, advisoryOnly: true }`.
 const ITEM_6_STRING = "Repo writes outside explicit worker/orchestrator flows";
 
+// ---------------------------------------------------------------------------
+// U2 of #288 — pathGuards for importPattern rules whose `messages.blocked`
+// text implies a path scope (shell-exec under src/agentlab-*.ts, scrapers in
+// production source). The hardcoded PROPOSED_REJECTED_RULES already carries
+// these guards (MS-RSP-002); this lookup drives the explicit, auditable
+// `addPathGuards` step (MS-RSP-001) so the transformation is unit-testable
+// and survives future edits to PROPOSED_REJECTED_RULES.
+//
+// NOTE: must be declared BEFORE PROPOSED_REJECTED_STACK, which calls
+// `addPathGuards` at module initialization time. Both `PATH_GUARDS_BY_ID`
+// and `addPathGuards` are `const`/function-hoisted respectively — but the
+// lookup is a `const`, so it must precede the first call site lexically.
+// ---------------------------------------------------------------------------
+
+const PATH_GUARDS_BY_ID: Record<string, string[]> = {
+	"mcp-write-shell-exec": ["src/**", "scripts/**"],
+	"agentlabs-edit-shell-exec": ["src/agentlab-*.ts"],
+	"uncontrolled-search-imports": ["src/**", "scripts/**"],
+};
+
+/**
+ * Add `pathGuards` + `pathGuardMode: "any"` to the 3 importPattern rules
+ * named in `PATH_GUARDS_BY_ID`. Returns a NEW array (no input mutation).
+ *
+ * Idempotent: if a target rule's detection already carries a `pathGuards`
+ * array, the rule is returned unchanged (by reference). This guarantees
+ * re-runs produce byte-identical output (MS-RSP-005) and that running the
+ * function over `PROPOSED_REJECTED_RULES` (which already embeds the guards)
+ * is a no-op.
+ *
+ * Non-target rules (filePattern / commandPattern / behaviorPattern, and any
+ * importPattern rule not in the lookup) pass through unchanged.
+ */
+export function addPathGuards(rules: RejectedRule[]): RejectedRule[] {
+	return rules.map((rule) => {
+		const guards = PATH_GUARDS_BY_ID[rule.id];
+		if (!guards) return rule;
+		const det = rule.detection;
+		// Only the object-shaped detection variants can carry pathGuards. The
+		// RejectionDetection union also allows `null` (item-6 prose fallback,
+		// but that is a string in the array, not a RejectedRule). Guard anyway
+		// so the function is total.
+		if (!det || typeof det !== "object" || Array.isArray(det)) {
+			return rule;
+		}
+		// Idempotency: skip if detection already has a pathGuards array. This
+		// matches the post-U2 shape and the runtime's "presence ⇒ honored"
+		// contract from src/project-constitution.ts (scopedFiles).
+		const maybeDet = det as { pathGuards?: unknown };
+		if (Array.isArray(maybeDet.pathGuards)) {
+			return rule;
+		}
+		const nextDet: Record<string, unknown> = { ...(det as Record<string, unknown>) };
+		nextDet.pathGuards = guards;
+		nextDet.pathGuardMode = "any" as PathGuardMode;
+		return { ...rule, detection: nextDet as RejectedRule["detection"] };
+	});
+}
+
 // Full proposed `rejectedStack` array (11 rules + 1 trailing string).
+//
+// U2 of #288: the rules pass through `addPathGuards` so the pathGuards step
+// is an explicit, auditable transformation (MS-RSP-001). Because
+// PROPOSED_REJECTED_RULES already carries the guards (MS-RSP-002), this call
+// is idempotent — every target rule is returned by reference unchanged.
+// Belt-and-suspenders: the hardcoded guards make future re-migrations
+// byte-identical, while the runtime call proves the transformation works
+// independently of the hardcoded shape.
 const PROPOSED_REJECTED_STACK: Array<RejectedRule | string> = [
-	...PROPOSED_REJECTED_RULES,
+	...addPathGuards(PROPOSED_REJECTED_RULES),
 	ITEM_6_STRING,
 ];
 
