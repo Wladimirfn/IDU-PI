@@ -50,10 +50,11 @@
  *   already-migrated file yields the SAME bytes — no-op.
  */
 
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PathGuardMode, RejectedRule } from "../src/project-constitution.js";
+import { hasRejection } from "../src/project-constitution.js";
+import type { ConstitutionGateInput, PathGuardMode, ProjectConstitution, RejectedRule } from "../src/project-constitution.js";
 
 // ---------------------------------------------------------------------------
 // Proposed `RejectedRule[]` for items 1-5 + trailing string for item 6.
@@ -701,10 +702,352 @@ function printHelp(): void {
 			"(default exit 3). The actual data migration is gated by the explicit --apply",
 			"flag (auditor + orchestrator sign-off required before running --apply).",
 			"",
-			"Env: MIGRATE_APPLY_DELAY_MS overrides the 5-second warning sleep (set to 0 in tests).",
-			"",
-		].join("\n"),
+		"Env: MIGRATE_APPLY_DELAY_MS overrides the 5-second warning sleep (set to 0 in tests).",
+		"",
+	].join("\n"),
 	);
+}
+
+// ---------------------------------------------------------------------------
+// pathGuards dry-run gate (U3 of #288)
+//
+// Runs BEFORE `--apply` writes the constitution. Catches malformed pathGuards
+// (globs matching no real files, behaviorPattern rules that should stay
+// unscoped, duplicate rule IDs with divergent guards, invalid glob syntax)
+// and runs the real `hasRejection()` against synthetic in-scope / out-of-scope
+// probes to confirm each pathGuarded rule fires inside its scope and stays
+// silent outside it.
+//
+// Phase 1 (shape) always runs — pure, no I/O. Phase 2 (filesystem) and
+// Phase 3 (functional) are skipped in `--verify` mode (verify re-reads
+// already-applied data; re-running I/O + functional probes against it is
+// wasteful and would re-report already-accepted violations).
+//
+// Spec: REQ-PGG-001..004, MS-PGG-001..003 (obs 3557).
+// Design: helper signatures, wiring, probe constitution (obs 3558).
+// ---------------------------------------------------------------------------
+
+export type PathGuardViolation = {
+	ruleId: string;
+	kind:
+		| "empty-guards"
+		| "behavior-pattern-with-guards"
+		| "duplicate-id"
+		| "invalid-glob"
+		| "glob-matches-no-files"
+		| "rule-fires-outside-scope";
+	context?: string;
+};
+
+export type GateOptions = { mode: "dry-run" | "apply" | "verify" };
+export type GateReport = { violations: PathGuardViolation[]; ok: boolean };
+
+// Minimal constitution scaffold for hasRejection probes. Only
+// `technologyRules.rejectedStack` is overridden per-probe. Shape verified
+// against ProjectConstitution (src/project-constitution.ts:23-45).
+const MINIMAL_PROBE_CONSTITUTION: ProjectConstitution = {
+	version: "1.0.0",
+	projectName: "path-guards-gate-probe",
+	sourceCoreStatus: "draft",
+	principles: [],
+	forbiddenPractices: [],
+	requiredPractices: [],
+	technologyRules: { preferredStack: [], rejectedStack: [] },
+	securityRules: [],
+	dataRules: [],
+	approvalRules: [],
+	validationGates: [],
+	specialistRoles: [],
+	createdAt: "",
+	updatedAt: "",
+	status: "active",
+};
+
+// Directories excluded from the Phase 2 filesystem walk. node_modules and
+// .git are universal noise; dist is build output; .codegraph is the local
+// intelligence index. All four are gitignored or generated.
+const IGNORED_WALK_DIRS = new Set(["node_modules", ".git", "dist", ".codegraph"]);
+
+// True if `rule.detection` is a behaviorPattern variant AND has any
+// pathGuards set. Owner decision (obs 3556 §"User-Confirmed Decisions" #2):
+// behaviorPattern stays unscoped; the runtime validator currently ALLOWS
+// guards on behaviorPattern, so the gate is the sole enforcement point.
+function isBehaviorPatternWithGuards(rule: RejectedRule): boolean {
+	const det = rule.detection;
+	if (!det || typeof det !== "object") return false;
+	return "behaviorPattern" in det && extractGuards(det) !== undefined;
+}
+
+// Narrows the optional `pathGuards` field off the RejectionDetection union.
+// Returns the string[] if the field is present (even when empty — Phase 1
+// catches the empty case explicitly), `undefined` when absent.
+function extractGuards(
+	detection: RejectedRule["detection"],
+): string[] | undefined {
+	if (!detection || typeof detection !== "object") return undefined;
+	if (!("pathGuards" in detection)) return undefined;
+	const raw = (detection as { pathGuards?: unknown }).pathGuards;
+	return Array.isArray(raw) ? (raw as string[]) : undefined;
+}
+
+function hasPathGuards(rule: RejectedRule): boolean {
+	return extractGuards(rule.detection) !== undefined;
+}
+
+// Order-sensitive deep equality on two `pathGuards` arrays. Used by the
+// duplicate-id check to decide whether two rules sharing an `id` conflict.
+function equalPathGuards(
+	d1: RejectedRule["detection"],
+	d2: RejectedRule["detection"],
+): boolean {
+	const a = extractGuards(d1);
+	const b = extractGuards(d2);
+	if (a === undefined && b === undefined) return true;
+	if (a === undefined || b === undefined) return false;
+	if (a.length !== b.length) return false;
+	return a.every((v, i) => v === b[i]);
+}
+
+// Walks `projectPath` and returns POSIX-style relative file paths, skipping
+// IGNORED_WALK_DIRS at every level. Manual recursion (rather than
+// readdirSync({recursive:true})) so Dirent-based directory detection is
+// robust across Node versions and walk-time filesystem changes.
+function walkProjectFiles(projectPath: string): string[] {
+	const out: string[] = [];
+	const visit = (dir: string, relPrefix: string): void => {
+		try {
+			const entries = readdirSync(dir, { withFileTypes: true });
+			for (const e of entries) {
+				if (e.isDirectory()) {
+					if (IGNORED_WALK_DIRS.has(e.name)) continue;
+					visit(join(dir, e.name), relPrefix ? `${relPrefix}/${e.name}` : e.name);
+				} else if (e.isFile()) {
+					out.push(relPrefix ? `${relPrefix}/${e.name}` : e.name);
+				}
+			}
+		} catch {
+			// unreadable / missing directory — skip silently
+		}
+	};
+	visit(projectPath, "");
+	return out;
+}
+
+// Verifies at least one real file under `projectPath` matches `glob`.
+// `matchesGlob` (src/project-constitution.ts:1189) is private to that module
+// and the constraint forbids modifying it; we exercise the real matcher
+// transitively via `hasRejection`'s `filePattern` branch (which calls
+// matchesGlob at line 1088). One hasRejection call per glob — fast.
+function globMatchesAnyFile(glob: string, projectPath: string): boolean {
+	const files = walkProjectFiles(projectPath);
+	if (files.length === 0) return false;
+	const probeRule: RejectedRule = {
+		id: "__path_guards_glob_probe__",
+		summary: "glob probe",
+		category: "stack",
+		detection: { filePattern: glob },
+		severity: "low",
+		rationale: "",
+		messages: { blocked: "", warning: "" },
+	};
+	const input: ConstitutionGateInput = {
+		changedFiles: files,
+		constitution: MINIMAL_PROBE_CONSTITUTION,
+	};
+	return hasRejection(input, [probeRule]).length > 0;
+}
+
+// Derives a synthetic in-scope file path from the first pathGuard of `rule`.
+// Handles the two shapes used by the current pathGuarded rules:
+//   `<dir>/**`            → `<dir>/probe.ts`
+//   `<dir>/<pre>*<post>`  → `<dir>/<pre>probe<post>`
+// Returns `undefined` for exotic patterns (`**/x`, `a/**/b`, multi-`*`),
+// which makes functionalCheck skip the rule.
+function sampleFileUnderScope(rule: RejectedRule): string | undefined {
+	const guards = extractGuards(rule.detection);
+	if (!guards || guards.length === 0) return undefined;
+	const first = guards[0];
+	let sample: string;
+	if (/\*\*\/?$/u.test(first)) {
+		sample = `${first.replace(/\*\*\/?$/u, "")}probe.ts`;
+	} else if (first.includes("*")) {
+		sample = first.replace(/\*/u, "probe");
+	} else {
+		return undefined;
+	}
+	// Reject if any glob metacharacter survived (exotic patterns we don't handle).
+	if (/[*?]/u.test(sample)) return undefined;
+	return sample;
+}
+
+// Builds synthetic file content containing a token that matches the rule's
+// detection regex. importPattern / commandPattern are regex alternations
+// (e.g. "writeFile|execSync|spawnSync"); we pick the first alternative and
+// embed it in a plausible surrounding line. filePattern / depPattern /
+// behaviorPattern are skipped — the gate functional-checks content detectors
+// only (filePattern is covered by Phase 2; behaviorPattern must stay
+// unscoped per owner decision; depPattern needs package.json context).
+function contentForRule(rule: RejectedRule): string | undefined {
+	const det = rule.detection;
+	if (!det || typeof det !== "object") return undefined;
+	if ("importPattern" in det) {
+		const first = det.importPattern.split("|")[0];
+		return `import { ${first} } from "synthetic-stub"; // path-guards gate probe`;
+	}
+	if ("commandPattern" in det) {
+		const first = det.commandPattern.split("|")[0];
+		return `${first} # path-guards gate probe`;
+	}
+	return undefined;
+}
+
+// Runs the real `hasRejection()` against the rule under test with synthetic
+// in-scope and out-of-scope changedFiles. Positive: an in-scope file with
+// matching content MUST fire. Negative: an out-of-scope file with matching
+// content MUST NOT fire. Returns the offending file when either case fails.
+// `_projectPath` is kept in the signature to match the design contract
+// (obs 3558); the functional probes are self-contained and do not read disk.
+function functionalCheck(
+	rule: RejectedRule,
+	_projectPath: string,
+): { outOfScope?: { file: string } } {
+	const det = rule.detection;
+	if (!det || typeof det !== "object") return {};
+	if (!("importPattern" in det) && !("commandPattern" in det)) return {};
+
+	const sample = sampleFileUnderScope(rule);
+	const content = contentForRule(rule);
+	if (!sample || !content) return {};
+
+	const probeConstitution: ProjectConstitution = {
+		...MINIMAL_PROBE_CONSTITUTION,
+		technologyRules: { preferredStack: [], rejectedStack: [rule] },
+	};
+	const stub = (): string => content;
+
+	// Positive: in-scope file + matching content → rule MUST fire.
+	const positive = hasRejection(
+		{ changedFiles: [sample], constitution: probeConstitution },
+		[rule],
+		{ readContent: stub, readDiff: stub },
+	);
+	if (positive.length === 0) {
+		return { outOfScope: { file: sample } };
+	}
+
+	// Negative: out-of-scope file + matching content → rule MUST NOT fire.
+	// `test/` is outside every current pathGuards scope (src/**, scripts/**,
+	// src/agentlab-*.ts); scopedFiles filters it out before the regex runs.
+	const outOfScope = "test/__path_guards_gate_probe__.ts";
+	const negative = hasRejection(
+		{ changedFiles: [outOfScope], constitution: probeConstitution },
+		[rule],
+		{ readContent: stub, readDiff: stub },
+	);
+	if (negative.length > 0) {
+		return { outOfScope: { file: outOfScope } };
+	}
+	return {};
+}
+
+export function runPathGuardsGate(
+	proposedStack: ReadonlyArray<RejectedRule | string>,
+	projectPath: string,
+	options: GateOptions,
+): GateReport {
+	const violations: PathGuardViolation[] = [];
+
+	// ----- Phase 1: Shape validation (always runs; pure, no I/O) -----
+	const rulesSeen = new Map<string, RejectedRule["detection"]>();
+	for (const entry of proposedStack) {
+		if (typeof entry === "string") continue;
+		const rule = entry;
+
+		// behaviorPattern + pathGuards → HARD ERROR (owner decision).
+		if (isBehaviorPatternWithGuards(rule)) {
+			violations.push({
+				ruleId: rule.id,
+				kind: "behavior-pattern-with-guards",
+			});
+		}
+
+		const guards = extractGuards(rule.detection);
+
+		// Empty pathGuards array (defense in depth — U1 validator also catches).
+		if (guards && guards.length === 0) {
+			violations.push({ ruleId: rule.id, kind: "empty-guards" });
+		}
+
+		// Invalid glob: absolute POSIX path, Windows drive prefix, or backslash.
+		if (guards) {
+			for (const g of guards) {
+				if (
+					g.startsWith("/") ||
+					g.includes("\\") ||
+					/^[A-Za-z]:[\\/]/u.test(g)
+				) {
+					violations.push({
+						ruleId: rule.id,
+						kind: "invalid-glob",
+						context: g,
+					});
+				}
+			}
+		}
+
+		// Duplicate rule ID with divergent pathGuards.
+		const prevDet = rulesSeen.get(rule.id);
+		if (prevDet !== undefined) {
+			if (!equalPathGuards(prevDet, rule.detection)) {
+				violations.push({ ruleId: rule.id, kind: "duplicate-id" });
+			}
+		} else {
+			rulesSeen.set(rule.id, rule.detection);
+		}
+	}
+
+	// ----- Phase 2 & 3 skipped on verify (re-reads already-applied data) -----
+	if (options.mode === "verify") {
+		return { violations, ok: violations.length === 0 };
+	}
+
+	const rulesToCheck = proposedStack.filter(
+		(e): e is RejectedRule => typeof e !== "string",
+	);
+
+	// ----- Phase 2: Filesystem verification -----
+	// Each glob must match at least one real file. Catches typos like `srcc/**`
+	// that pass U1's syntactic validator but match nothing on disk.
+	for (const rule of rulesToCheck) {
+		const guards = extractGuards(rule.detection);
+		if (!guards) continue;
+		for (const g of guards) {
+			if (!globMatchesAnyFile(g, projectPath)) {
+				violations.push({
+					ruleId: rule.id,
+					kind: "glob-matches-no-files",
+					context: g,
+				});
+			}
+		}
+	}
+
+	// ----- Phase 3: Functional validation -----
+	// For each pathGuarded rule, run the real hasRejection() with synthetic
+	// in-scope (must fire) and out-of-scope (must not fire) probes.
+	for (const rule of rulesToCheck) {
+		if (!hasPathGuards(rule)) continue;
+		const result = functionalCheck(rule, projectPath);
+		if (result.outOfScope) {
+			violations.push({
+				ruleId: rule.id,
+				kind: "rule-fires-outside-scope",
+				context: result.outOfScope.file,
+			});
+		}
+	}
+
+	return { violations, ok: violations.length === 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -759,6 +1102,53 @@ function main(): void {
 	process.stdout.write(
 		`\n(${PROPOSED_REJECTED_RULES.length} RejectedRule objects + 1 trailing string (item 6))\n`,
 	);
+
+	// Path guards gate (U3 of #288). Runs before any write. In --dry-run the
+	// gate prints PASS / FAIL and continues; in --apply a FAIL blocks the
+	// write with exit 4 BEFORE writeAtomic; in --verify the gate runs Phase 1
+	// only (Phase 2 / 3 skipped inside runPathGuardsGate) and stays silent.
+	//
+	// DEVIATION from design obs 3558 / spec obs 3557 MS-PGG-002: the gate
+	// verifies pathGuards against `process.cwd()` (the project source root),
+	// NOT `args.stateRoot` (the constitution storage location). The pathGuards
+	// describe the project's source files (`src/**`, `scripts/**`,
+	// `src/agentlab-*.ts`), which live at the project root — where the script
+	// is invoked from. In production stateRoot defaults to cwd, so the two
+	// coincide; in tests the stateRoot is a temp fixture dir without source
+	// files, but the spawned process's cwd is still the real repo root, so
+	// Phase 2 correctly finds `src/`, `scripts/`, etc. Using stateRoot would
+	// break every existing --apply test (temp dirs have no src/).
+	const gateReport = runPathGuardsGate(
+		PROPOSED_REJECTED_STACK,
+		process.cwd(),
+		{
+			mode: args.dryRun ? "dry-run" : args.apply ? "apply" : "verify",
+		},
+	);
+	if (args.dryRun) {
+		if (gateReport.ok) {
+			process.stdout.write("\nPath guards gate: PASS\n");
+		} else {
+			process.stdout.write(
+				`\nPath guards gate: FAIL with ${gateReport.violations.length} violations\n`,
+			);
+			for (const v of gateReport.violations) {
+				process.stdout.write(
+					`  - ${v.ruleId}: ${v.kind}${v.context ? ` (${v.context})` : ""}\n`,
+				);
+			}
+		}
+	} else if (args.apply && !gateReport.ok) {
+		process.stderr.write(
+			`\nPath guards gate FAILED: ${gateReport.violations.length} violations\n`,
+		);
+		for (const v of gateReport.violations) {
+			process.stderr.write(
+				`  - ${v.ruleId}: ${v.kind}${v.context ? ` (${v.context})` : ""}\n`,
+			);
+		}
+		process.exit(4);
+	}
 
 	if (args.dryRun) {
 		process.stdout.write("\n--dry-run mode: no files written, exit 0.\n");
