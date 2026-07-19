@@ -16,6 +16,8 @@ import {
 	PROPOSED_REJECTED_RULES,
 	PROPOSED_REJECTED_STACK,
 	addPathGuards,
+	hasPathGuardsApplied,
+	processLayout,
 	replaceRejectedStack,
 	runPathGuardsGate,
 } from "../scripts/migrate-rejected-stack.js";
@@ -821,6 +823,357 @@ describe("U3 gate integration — compiled CLI (TST-PGG-004 / TST-PGG-005)", () 
 			result.stdout,
 			/mcp-write-shell-exec: glob-matches-no-files \(src\/\*\*\)/u,
 			"stdout must list the glob-matches-no-files violation for mcp-write-shell-exec src/**",
+		);
+	});
+});
+
+// =========================================================================
+// processLayout pathGuards fix (TST-FIX-001..005).
+//
+// Bug: when the constitution is in R3.4 predicate form (all rules migrated
+// to objects with recognized IDs) but lacks pathGuards on the 3 target
+// rules, the OLD processLayout returned early with `proposedRaw: currentRaw`
+// as soon as isAlreadyMigrated(raw) was true — reporting "already migrated"
+// and never applying U2 pathGuards (false positive).
+//
+// Fix: AND-gate the no-op branch on BOTH isAlreadyMigrated AND
+// hasPathGuardsApplied. If the predicate form is present but guards are
+// missing, run addPathGuards and emit a differing proposedRaw so --apply
+// writes the patch.
+// =========================================================================
+
+// Build a predicate-form RejectedRule[] by stripping pathGuards/pathGuardMode
+// from the 3 target rules of PROPOSED_REJECTED_RULES. Models a constitution
+// that passed R3.4 but not U2 (the bug condition).
+function stripGuardsFromTargets(rules: RejectedRule[]): RejectedRule[] {
+	return rules.map((r) => {
+		if (!TARGET_RULE_IDS.includes(r.id as (typeof TARGET_RULE_IDS)[number])) return r;
+		const det = r.detection as Record<string, unknown> | null;
+		if (!det || typeof det !== "object" || Array.isArray(det)) return r;
+		const next: Record<string, unknown> = { ...det };
+		delete next.pathGuards;
+		delete next.pathGuardMode;
+		return { ...r, detection: next as RejectedRule["detection"] };
+	});
+}
+
+// Write a constitution to <root>/.idu/config (Layout A) with the given
+// rejectedStack. Generalizes writeLegacyConstitution to any stack shape.
+function writeConstitutionWithStack(
+	root: string,
+	stack: Array<RejectedRule | string>,
+): string {
+	const dir = join(root, ".idu", "config");
+	mkdirSync(dir, { recursive: true });
+	const path = join(dir, "project-constitution.json");
+	const doc = {
+		version: "1.0.0",
+		projectName: "idu-pi",
+		sourceCoreStatus: "confirmed",
+		principles: ["p"],
+		forbiddenPractices: ["f"],
+		requiredPractices: ["r"],
+		technologyRules: { preferredStack: ["TypeScript"], rejectedStack: stack },
+		securityRules: ["s"],
+		dataRules: ["d"],
+		approvalRules: ["a"],
+		validationGates: [
+			{ id: "project_core_not_confirmed", severity: "blocker", description: "x" },
+		],
+		specialistRoles: ["security"],
+		createdAt: "2026-01-01T00:00:00.000Z",
+		updatedAt: "2026-01-01T00:00:00.000Z",
+		status: "active",
+	};
+	writeFileSync(path, JSON.stringify(doc, null, 2) + "\n", "utf8");
+	return path;
+}
+
+// -------------------------------------------------------------------------
+// TST-FIX-001 — hasPathGuardsApplied unit tests.
+// Pinpoints the exact shape the gate checks: 3 target rules present AND each
+// carries a non-empty pathGuards array on its detection.
+// -------------------------------------------------------------------------
+
+describe("U2 pathGuards fix — hasPathGuardsApplied (TST-FIX-001)", () => {
+	test("hasPathGuardsApplied: empty string → false", () => {
+		assert.equal(hasPathGuardsApplied(""), false);
+	});
+
+	test("hasPathGuardsApplied: invalid JSON → false (defensive)", () => {
+		assert.equal(hasPathGuardsApplied("{not valid json"), false);
+	});
+
+	test("hasPathGuardsApplied: legacy prose form (R3.4 not done) → false", () => {
+		const doc = JSON.stringify({
+			technologyRules: {
+				rejectedStack: ["Unbounded daemons", "Repo writes outside flows"],
+			},
+		});
+		assert.equal(hasPathGuardsApplied(doc), false);
+	});
+
+	test("hasPathGuardsApplied: predicate form, all 3 targets missing guards → false", () => {
+		const stripped = stripGuardsFromTargets(PROPOSED_REJECTED_RULES);
+		const doc = JSON.stringify({
+			technologyRules: { rejectedStack: [...stripped, ITEM_6_STRING] },
+		});
+		assert.equal(hasPathGuardsApplied(doc), false);
+	});
+
+	test("hasPathGuardsApplied: predicate form, 2 of 3 targets guarded → false", () => {
+		// Start from fully-guarded PROPOSED, strip guards from exactly ONE target.
+		const oneStripped = PROPOSED_REJECTED_RULES.map((r) => {
+			if (r.id !== "uncontrolled-search-imports") return r;
+			const det = { ...(r.detection as Record<string, unknown>) };
+			delete det.pathGuards;
+			delete det.pathGuardMode;
+			return { ...r, detection: det as RejectedRule["detection"] };
+		});
+		const doc = JSON.stringify({
+			technologyRules: { rejectedStack: [...oneStripped, ITEM_6_STRING] },
+		});
+		assert.equal(hasPathGuardsApplied(doc), false);
+	});
+
+	test("hasPathGuardsApplied: predicate form with empty pathGuards:[] → false", () => {
+		// A present-but-empty array must NOT count as guarded.
+		const emptyGuarded = PROPOSED_REJECTED_RULES.map((r) => {
+			if (!TARGET_RULE_IDS.includes(r.id as (typeof TARGET_RULE_IDS)[number])) return r;
+			const det = r.detection as Record<string, unknown>;
+			const nextDet = {
+				...det,
+				pathGuards: [] as string[],
+				pathGuardMode: "any",
+			};
+			return { ...r, detection: nextDet as unknown as RejectedRule["detection"] };
+		});
+		const doc = JSON.stringify({
+			technologyRules: { rejectedStack: [...emptyGuarded, ITEM_6_STRING] },
+		});
+		assert.equal(hasPathGuardsApplied(doc), false);
+	});
+
+	test("hasPathGuardsApplied: predicate form, all 3 targets guarded → true", () => {
+		const doc = JSON.stringify({
+			technologyRules: { rejectedStack: [...PROPOSED_REJECTED_RULES, ITEM_6_STRING] },
+		});
+		assert.equal(hasPathGuardsApplied(doc), true);
+	});
+});
+
+// -------------------------------------------------------------------------
+// TST-FIX-002 / 003 / 004 — processLayout behavior across the 3 input
+// shapes. These are the regression tests for the false-positive bug.
+// -------------------------------------------------------------------------
+
+describe("U2 pathGuards fix — processLayout (TST-FIX-002/003/004)", () => {
+	test("TST-FIX-002: predicate form WITHOUT pathGuards → proposes guards (no false positive)", () => {
+		const root = makeStateRoot();
+		const stack: Array<RejectedRule | string> = [
+			...stripGuardsFromTargets(PROPOSED_REJECTED_RULES),
+			ITEM_6_STRING,
+		];
+		const path = writeConstitutionWithStack(root, stack);
+		const before = readFileSync(path, "utf8");
+
+		const result = processLayout("A", path);
+
+		// Core regression assertions — the bug produced the opposite of all three.
+		assert.notEqual(
+			result.proposedRaw,
+			result.currentRaw,
+			"proposed MUST differ from current (bug returned equal — false positive)",
+		);
+		assert.equal(
+			result.alreadyMigrated,
+			false,
+			"alreadyMigrated MUST be false — a change is proposed",
+		);
+		assert.ok(
+			result.proposedRaw.length > result.currentRaw.length,
+			"proposed must be larger (pathGuards arrays added)",
+		);
+		assert.equal(
+			result.nonTargetBytesEqual,
+			true,
+			"non-target bytes must remain equal by construction",
+		);
+
+		// The 3 target rules in proposedRaw must carry the expected guards.
+		const proposedParsed = JSON.parse(result.proposedRaw) as {
+			technologyRules: { rejectedStack: Array<RejectedRule | string> };
+		};
+		for (const id of TARGET_RULE_IDS) {
+			const rule = proposedParsed.technologyRules.rejectedStack.find(
+				(e): e is RejectedRule => typeof e === "object" && e !== null && e.id === id,
+			);
+			assert.ok(rule, `${id} must be present in proposed stack`);
+			const det = rule!.detection as { pathGuards?: string[]; pathGuardMode?: string };
+			assert.deepEqual(
+				det.pathGuards,
+				EXPECTED_PATH_GUARDS[id],
+				`${id} must gain the expected pathGuards`,
+			);
+			assert.equal(
+				det.pathGuardMode,
+				"any",
+				`${id} must gain pathGuardMode "any"`,
+			);
+		}
+
+		// processLayout must NOT mutate the file — it only computes proposedRaw.
+		assert.equal(
+			readFileSync(path, "utf8"),
+			before,
+			"processLayout must not write to disk",
+		);
+	});
+
+	test("TST-FIX-003: fully migrated (predicate + guards) → true no-op (delta = 0)", () => {
+		const root = makeStateRoot();
+		const stack: Array<RejectedRule | string> = [
+			...PROPOSED_REJECTED_RULES,
+			ITEM_6_STRING,
+		];
+		const path = writeConstitutionWithStack(root, stack);
+
+		const result = processLayout("A", path);
+
+		assert.equal(
+			result.proposedRaw,
+			result.currentRaw,
+			"proposed must equal current (genuine no-op)",
+		);
+		assert.equal(result.alreadyMigrated, true, "alreadyMigrated must be true");
+	});
+
+	test("TST-FIX-004: legacy prose form → proposes predicate migration AND pathGuards", () => {
+		const root = makeStateRoot();
+		const path = writeLegacyConstitution(root, "A");
+
+		const result = processLayout("A", path);
+
+		assert.notEqual(
+			result.proposedRaw,
+			result.currentRaw,
+			"proposed must differ from current",
+		);
+		assert.equal(result.alreadyMigrated, false, "alreadyMigrated must be false");
+
+		// Proposed must carry the full predicate migration (13 entries) AND
+		// pathGuards on the 3 targets.
+		const proposedParsed = JSON.parse(result.proposedRaw) as {
+			technologyRules: { rejectedStack: Array<RejectedRule | string> };
+		};
+		assert.equal(
+			proposedParsed.technologyRules.rejectedStack.length,
+			PROPOSED_REJECTED_STACK.length,
+			"proposed stack length must equal PROPOSED_REJECTED_STACK",
+		);
+		assert.equal(
+			proposedParsed.technologyRules.rejectedStack[proposedParsed.technologyRules.rejectedStack.length - 1],
+			ITEM_6_STRING,
+			"trailing item-6 string must be preserved",
+		);
+		for (const id of TARGET_RULE_IDS) {
+			const rule = proposedParsed.technologyRules.rejectedStack.find(
+				(e): e is RejectedRule => typeof e === "object" && e !== null && e.id === id,
+			);
+			assert.ok(rule, `${id} must be present`);
+			const det = rule!.detection as { pathGuards?: string[] };
+			assert.deepEqual(
+				det.pathGuards,
+				EXPECTED_PATH_GUARDS[id],
+				`${id} must have pathGuards`,
+			);
+		}
+	});
+});
+
+// -------------------------------------------------------------------------
+// TST-FIX-005 — end-to-end --apply integration.
+// Spawns the compiled script against a temp stateRoot whose constitution is
+// in predicate form WITHOUT pathGuards. The default cwd (real project root)
+// gives the pathGuards gate a tree with src/ + scripts/ so it PASSES and the
+// write proceeds. Verifies the patch is written, then a second --apply is a
+// true no-op (idempotency after the fix).
+// -------------------------------------------------------------------------
+
+describe("U2 pathGuards fix — --apply integration (TST-FIX-005)", () => {
+	test("TST-FIX-005: --apply on predicate-form-no-guards writes the guards patch, then idempotent", () => {
+		const root = makeStateRoot();
+		const stack: Array<RejectedRule | string> = [
+			...stripGuardsFromTargets(PROPOSED_REJECTED_RULES),
+			ITEM_6_STRING,
+		];
+		const path = writeConstitutionWithStack(root, stack);
+		const before = readFileSync(path, "utf8");
+
+		// Default cwd = real project root so the pathGuards gate finds src/
+		// and scripts/ and PASSES (else --apply exits 4 before writing).
+		const first = spawnSync(
+			"node",
+			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			{
+				encoding: "utf8",
+				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
+			},
+		);
+		assert.equal(
+			first.status,
+			0,
+			`--apply MUST exit 0 (no violations); got status=${first.status}; stderr: ${first.stderr}`,
+		);
+
+		const after = readFileSync(path, "utf8");
+		assert.notEqual(after, before, "file must change after --apply");
+
+		// The 3 target rules in the written file must carry pathGuards.
+		const parsed = JSON.parse(after) as {
+			technologyRules: { rejectedStack: Array<RejectedRule | string> };
+		};
+		for (const id of TARGET_RULE_IDS) {
+			const rule = parsed.technologyRules.rejectedStack.find(
+				(e): e is RejectedRule => typeof e === "object" && e !== null && e.id === id,
+			);
+			assert.ok(rule, `${id} must be present in the written stack`);
+			const det = rule!.detection as { pathGuards?: string[]; pathGuardMode?: string };
+			assert.deepEqual(
+				det.pathGuards,
+				EXPECTED_PATH_GUARDS[id],
+				`${id} must have the expected pathGuards after --apply`,
+			);
+			assert.equal(
+				det.pathGuardMode,
+				"any",
+				`${id} must have pathGuardMode "any" after --apply`,
+			);
+		}
+
+		// Second --apply must be a true no-op now that guards are in place.
+		const second = spawnSync(
+			"node",
+			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			{
+				encoding: "utf8",
+				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
+			},
+		);
+		assert.equal(
+			second.status,
+			0,
+			`second --apply must exit 0; stderr: ${second.stderr}`,
+		);
+		assert.match(
+			second.stdout,
+			/already migrated — skipping/u,
+			"second --apply must report a no-op (idempotency after fix)",
+		);
+		assert.equal(
+			readFileSync(path, "utf8"),
+			after,
+			"second --apply must produce zero byte diff",
 		);
 	});
 });
