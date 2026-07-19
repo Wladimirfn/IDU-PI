@@ -587,6 +587,161 @@ export function rejectedStackLen(raw: string): number {
 }
 
 // ---------------------------------------------------------------------------
+// U2 pathGuards idempotency probe.
+//
+// `isAlreadyMigrated` returns true as soon as the R3.4 predicate form is in
+// place (every entry has a recognized `id`). But U2 pathGuards are a SEPARATE
+// migration step applied on top of R3.4: a constitution can be in predicate
+// form and STILL lack `pathGuards` on the 3 importPattern target rules.
+// `hasPathGuardsApplied` answers the narrower question — are the U2 guards
+// present and non-empty on every target rule? `processLayout` AND-gates the
+// no-op branch on both checks so a predicate-form-but-unguarded constitution
+// is correctly reported as needing a change (bug fix for the false-positive
+// "already migrated" report).
+// ---------------------------------------------------------------------------
+
+const TARGET_RULE_IDS_FOR_PATH_GUARDS = [
+	"mcp-write-shell-exec",
+	"agentlabs-edit-shell-exec",
+	"uncontrolled-search-imports",
+] as const;
+
+/**
+ * Returns true iff every one of the 3 U2 target rules is present in the
+ * rejectedStack AND carries a non-empty `pathGuards` array on its detection.
+ * Returns false on any shape deviation or parse failure (defensive — a
+ * malformed file is treated as "not yet guarded").
+ */
+export function hasPathGuardsApplied(raw: string): boolean {
+	try {
+		const parsed = JSON.parse(raw) as {
+			technologyRules?: { rejectedStack?: unknown };
+		};
+		const stack = parsed.technologyRules?.rejectedStack;
+		if (!Array.isArray(stack)) return false;
+		for (const targetId of TARGET_RULE_IDS_FOR_PATH_GUARDS) {
+			const rule = stack.find(
+				(e): e is RejectedRule =>
+					typeof e === "object" &&
+					e !== null &&
+					"id" in e &&
+					(e as { id?: unknown }).id === targetId,
+			);
+			if (!rule) return false;
+			const det = rule.detection;
+			if (!det || typeof det !== "object" || Array.isArray(det)) return false;
+			const guards = (det as { pathGuards?: unknown }).pathGuards;
+			if (!Array.isArray(guards) || guards.length === 0) return false;
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Run `addPathGuards` over the rejectedStack in `raw` and re-serialize.
+ *
+ * Uses a depth-aware byte-level splice (see `findRejectedStackSpan`) so ONLY
+ * the rejectedStack array bytes change — every other field (version,
+ * principles, validationGates, …) is preserved verbatim, AND nested arrays
+ * inside detection objects (e.g. pre-existing `pathGuards`) do not confuse
+ * the span finder. This keeps the `nonTargetBytesEqual` invariant true by
+ * construction, identical to the legacy migration path.
+ *
+ * `addPathGuards` is a 1:1 order-preserving map on RejectedRule entries;
+ * string entries (item 6 trailing prose) pass through unchanged.
+ *
+ * NOTE: we cannot reuse `replaceRejectedStack` here because its regex
+ * (`/"rejectedStack"\s*:\s*\[[\s\S]*?\n(\s*)\]/`) is non-greedy and matches
+ * the FIRST `\n\s*\]` — fine for the flat legacy string array, but on the
+ * predicate form it would match a nested `pathGuards` `]` and corrupt the
+ * file. Depth-aware bracket tracking is required once nested arrays exist.
+ */
+function applyPathGuardsToRaw(raw: string): string {
+	const parsed = JSON.parse(raw) as {
+		technologyRules?: { rejectedStack?: Array<RejectedRule | string> };
+	};
+	const stack = parsed.technologyRules?.rejectedStack;
+	if (!Array.isArray(stack)) return raw;
+	const rulesOnly = stack.filter(
+		(e): e is RejectedRule => typeof e !== "string",
+	);
+	const guarded = addPathGuards(rulesOnly);
+	let ruleIdx = 0;
+	const newStack: Array<RejectedRule | string> = stack.map((entry) =>
+		typeof entry === "string" ? entry : guarded[ruleIdx++],
+	);
+	// If nothing changed (idempotent — all targets already guarded), skip
+	// the splice entirely and return the original bytes verbatim.
+	let changed = false;
+	let gi = 0;
+	for (const entry of stack) {
+		if (typeof entry !== "string") {
+			if (guarded[gi] !== entry) changed = true;
+			gi++;
+		}
+	}
+	if (!changed) return raw;
+
+	const span = findRejectedStackSpan(raw);
+	if (!span) return raw;
+	const [arrStart, arrEnd] = span;
+	// The array indent (indent before the closing `]`) equals the leading
+	// whitespace of the line containing the `"rejectedStack"` key, since
+	// canonical JSON puts the key and the closing bracket at the same column.
+	let lineStart = arrStart;
+	while (lineStart > 0 && raw[lineStart - 1] !== "\n") lineStart--;
+	const arrayIndent = raw.slice(lineStart).match(/^\s*/u)![0];
+	const newArrayText = serializeRejectedStack(newStack, arrayIndent);
+	return raw.slice(0, arrStart) + newArrayText + raw.slice(arrEnd);
+}
+
+/**
+ * Locate the byte span of the `rejectedStack` array VALUE in `raw`.
+ * Returns `[start, end]` indices covering the array from its opening `[` to
+ * its matching `]` (inclusive), or `undefined` if not found.
+ *
+ * Tracks bracket depth and JSON string state so nested arrays inside
+ * detection objects (e.g. `pathGuards: [...]`) and `]` characters appearing
+ * inside string literals do not prematurely terminate the match. This is the
+ * depth-aware counterpart to `replaceRejectedStack`'s flat regex — required
+ * once the array contains object entries that themselves contain arrays.
+ */
+function findRejectedStackSpan(raw: string): [number, number] | undefined {
+	const keyMatch = raw.match(/"rejectedStack"\s*:\s*/u);
+	if (!keyMatch || keyMatch.index === undefined) return undefined;
+	const arrStart = raw.indexOf("[", keyMatch.index + keyMatch[0].length);
+	if (arrStart === -1) return undefined;
+	let depth = 0;
+	let inString = false;
+	let escape = false;
+	for (let i = arrStart; i < raw.length; i++) {
+		const ch = raw[i];
+		if (escape) {
+			escape = false;
+			continue;
+		}
+		if (ch === "\\") {
+			escape = true;
+			continue;
+		}
+		if (ch === '"') {
+			inString = !inString;
+			continue;
+		}
+		if (inString) continue;
+		if (ch === "[") {
+			depth++;
+		} else if (ch === "]") {
+			depth--;
+			if (depth === 0) return [arrStart, i + 1];
+		}
+	}
+	return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Per-layout processing
 // ---------------------------------------------------------------------------
 
@@ -604,30 +759,45 @@ export interface LayoutResult {
 export function processLayout(layout: Layout, path: string): LayoutResult {
 	const currentRaw = readFileSync(path, "utf8");
 	const alreadyMigrated = isAlreadyMigrated(currentRaw);
+
+	let proposedRaw: string;
 	if (alreadyMigrated) {
-		return {
-			layout,
-			path,
-			currentRaw,
-			proposedRaw: currentRaw,
-			alreadyMigrated: true,
-			currentArrayLen: rejectedStackLen(currentRaw),
-			proposedArrayLen: PROPOSED_REJECTED_STACK.length,
-			nonTargetBytesEqual: true,
-		};
+		if (hasPathGuardsApplied(currentRaw)) {
+			// Fully up-to-date: R3.4 predicate form AND U2 pathGuards in place.
+			// Genuine no-op — `--apply` will report "already migrated".
+			proposedRaw = currentRaw;
+		} else {
+			// R3.4 predicate form present, but U2 pathGuards not yet applied.
+			// Re-run addPathGuards on the parsed stack and re-serialize byte-level.
+			// The resulting `proposedRaw` differs from `currentRaw` so `--apply`
+			// writes the patch instead of falsely skipping (false-positive fix).
+			proposedRaw = applyPathGuardsToRaw(currentRaw);
+		}
+	} else {
+		// Legacy prose form: migrate to predicate form first (PROPOSED_REJECTED_STACK
+		// already embeds pathGuards via addPathGuards at module init), then run
+		// applyPathGuardsToRaw for symmetry/auditability — a no-op on the freshly
+		// migrated stack since the guards are already present (idempotent).
+		const migrated = replaceRejectedStack(currentRaw, PROPOSED_REJECTED_STACK);
+		proposedRaw = applyPathGuardsToRaw(migrated);
 	}
-	const proposedRaw = replaceRejectedStack(currentRaw, PROPOSED_REJECTED_STACK);
+
 	return {
 		layout,
 		path,
 		currentRaw,
 		proposedRaw,
-		alreadyMigrated: false,
+		// `alreadyMigrated` reflects whether `--apply` is a no-op, i.e. whether
+		// proposed bytes equal current bytes. A predicate-form-but-unguarded
+		// constitution has isAlreadyMigrated(raw)===true but produces different
+		// proposed bytes, so this field is false here and the patch is written.
+		alreadyMigrated: proposedRaw === currentRaw,
 		currentArrayLen: rejectedStackLen(currentRaw),
 		proposedArrayLen: PROPOSED_REJECTED_STACK.length,
-		// The byte-level replace preserves everything outside the array; the
-		// only edit site is the rejectedStack array. By construction, all
-		// non-target bytes are equal between current and proposed.
+		// Every branch above uses byte-level `replaceRejectedStack` (or returns
+		// currentRaw verbatim). The only edit site is the rejectedStack array;
+		// all non-target bytes are equal between current and proposed by
+		// construction.
 		nonTargetBytesEqual: true,
 	};
 }
