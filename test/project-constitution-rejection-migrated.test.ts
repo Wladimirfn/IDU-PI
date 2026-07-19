@@ -614,4 +614,110 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 		const v = validateProjectConstitution(parsed);
 		assert.equal(v.ok, true, `errors: ${JSON.stringify(v.ok ? [] : v.errors)}`);
 	});
+
+	// -----------------------------------------------------------------------
+	// U4: pathGuards end-to-end verification — file OUTSIDE the pathGuards
+	// scope MUST NOT trigger the rule, even when the file content matches the
+	// importPattern/commandPattern regex. This is the inverse of T3a and the
+	// regression anchor for the bug #288 reported.
+	// -----------------------------------------------------------------------
+	it("U4a: mcp-write-shell-exec with pathGuards=['src/**','scripts/**'] does NOT fire on a test file containing writeFileSync (path guard blocks)", () => {
+		const constitution = buildConstitutionFromRejectedStack(
+			PROPOSED_REJECTED_RULES,
+		);
+		// test/probe.ts is OUTSIDE both src/** and scripts/** guards.
+		const probeFile = "test/probe.ts";
+		const map: Record<string, string> = {
+			[probeFile]:
+				'import { writeFileSync } from "node:fs";\nwriteFileSync("/tmp/x", "data");\n',
+		};
+		const readContent = (file: string): string | undefined => map[file];
+		const hits = hasRejection(
+			{
+				changedFiles: [probeFile],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		const ids = hits.map((h) => h.rule.id);
+		assert.ok(
+			!ids.includes("mcp-write-shell-exec"),
+			`mcp-write-shell-exec MUST NOT fire on test/probe.ts (pathGuards block it); got: ${ids.join(",")}`,
+		);
+	});
+
+	it("U4b: agentlabs-edit-shell-exec with pathGuards=['src/agentlab-*.ts'] does NOT fire on a test file containing execSync (path guard blocks)", () => {
+		const constitution = buildConstitutionFromRejectedStack(
+			PROPOSED_REJECTED_RULES,
+		);
+		const probeFile = "test/probe.ts";
+		const map: Record<string, string> = {
+			[probeFile]:
+				'import { execSync } from "node:child_process";\nexecSync("ls");\n',
+		};
+		const readContent = (file: string): string | undefined => map[file];
+		const hits = hasRejection(
+			{
+				changedFiles: [probeFile],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		const ids = hits.map((h) => h.rule.id);
+		assert.ok(
+			!ids.includes("agentlabs-edit-shell-exec"),
+			`agentlabs-edit-shell-exec MUST NOT fire on test/probe.ts (pathGuards block it); got: ${ids.join(",")}`,
+		);
+	});
+
+	it("U4c: uncontrolled-search-imports with pathGuards=['src/**','scripts/**'] does NOT fire on a test file importing puppeteer (path guard blocks)", () => {
+		const constitution = buildConstitutionFromRejectedStack(
+			PROPOSED_REJECTED_RULES,
+		);
+		const probeFile = "test/probe.ts";
+		const map: Record<string, string> = {
+			[probeFile]:
+				'import puppeteer from "puppeteer";\nconst browser = await puppeteer.launch();\n',
+		};
+		const readContent = (file: string): string | undefined => map[file];
+		const hits = hasRejection(
+			{
+				changedFiles: [probeFile],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		const ids = hits.map((h) => h.rule.id);
+		assert.ok(
+			!ids.includes("uncontrolled-search-imports"),
+			`uncontrolled-search-imports MUST NOT fire on test/probe.ts (pathGuards block it); got: ${ids.join(",")}`,
+		);
+	});
+
+	it("U4d: filePattern rules (mcp-write-entrypoint, agentlabs-edit-files) still fire on their exact path even when pathGuards unrelated rules are added (no regression)", () => {
+		const constitution = buildConstitutionFromRejectedStack(
+			PROPOSED_REJECTED_RULES,
+		);
+		const probeFile = "src/mcp-server.ts";
+		const map: Record<string, string> = {
+			[probeFile]: '// any content\n',
+		};
+		const readContent = (file: string): string | undefined => map[file];
+		const hits = hasRejection(
+			{
+				changedFiles: [probeFile],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent },
+		);
+		const ids = hits.map((h) => h.rule.id);
+		assert.ok(
+			ids.includes("mcp-write-entrypoint"),
+			`mcp-write-entrypoint MUST fire on src/mcp-server.ts (filePattern unchanged by U2); got: ${ids.join(",")}`,
+		);
+	});
 });
