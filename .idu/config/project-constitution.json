@@ -124,7 +124,12 @@
         "summary": "MCP tools that implement code or authorize changes — shell-exec / file-write imports",
         "category": "security",
         "detection": {
-          "importPattern": "writeFile|execSync|spawnSync"
+          "importPattern": "writeFile|execSync|spawnSync",
+          "pathGuards": [
+            "src/**",
+            "scripts/**"
+          ],
+          "pathGuardMode": "any"
         },
         "severity": "high",
         "rationale": "Catches shell-exec / file-write imports anywhere in changedFiles. LLM-discretion clause: orchestrator may whitelist legitimate uses of writeFile/execSync/spawnSync inside the MCP write surface (e.g. lab artifact paths, migration runners), flag additional entrypoint changes beyond src/mcp-server.ts / src/cli.ts, or flag handler changes outside src/mcp/** that add non-advisory tools.",
@@ -152,7 +157,11 @@
         "summary": "AgentLabs that edit the real repository — shell-exec / file-write imports",
         "category": "security",
         "detection": {
-          "importPattern": "execSync|spawnSync|writeFile"
+          "importPattern": "execSync|spawnSync|writeFile",
+          "pathGuards": [
+            "src/agentlab-*.ts"
+          ],
+          "pathGuardMode": "any"
         },
         "severity": "blocker",
         "rationale": "Catches execSync/spawnSync/writeFile imports inside any agentlabs file. Fully deterministic — these primitives are the write surface of AgentLabs and cannot be allowed in audit-only contexts.",
@@ -194,7 +203,12 @@
         "summary": "Uncontrolled web/news search — cheerio/puppeteer/playwright imports",
         "category": "process",
         "detection": {
-          "importPattern": "cheerio|puppeteer|playwright"
+          "importPattern": "cheerio|puppeteer|playwright",
+          "pathGuards": [
+            "src/**",
+            "scripts/**"
+          ],
+          "pathGuardMode": "any"
         },
         "severity": "high",
         "rationale": "Catches scraping imports (cheerio/puppeteer/playwright) anywhere in changedFiles. LLM-discretion clause: orchestrator may whitelist legitimate use of cheerio/puppeteer/playwright (e.g. consented tests, agentlab review sandboxes) or flag additional fetch patterns not covered by the commandPattern (e.g. axios.get, undici).",
