@@ -29,6 +29,24 @@ function makeStateRoot(): string {
 	return root;
 }
 
+// Build a temp workspace shaped like an idu-pi registry:
+//   <workspaceRoot>/projects/idu-pi/.idu/config/project-constitution.json
+// mirrors the real layout that resolveProjectStatePaths({workspaceRoot: W, projectId: "idu-pi"})
+// produces. Tests that spawn the script pass --workspace-root + --project-id so the
+// script's registered-stateRoot comparison matches <stateRoot>.
+function makeRegisteredStateRoot(): {
+	workspaceRoot: string;
+	projectId: string;
+	stateRoot: string;
+} {
+	const workspaceRoot = mkdtempSync(join(tmpdir(), "idu-pi-r3-4-ws-"));
+	tempRoots.push(workspaceRoot);
+	const projectId = "idu-pi";
+	const stateRoot = join(workspaceRoot, "projects", projectId);
+	mkdirSync(stateRoot, { recursive: true });
+	return { workspaceRoot, projectId, stateRoot };
+}
+
 function writeConstitution(
 	root: string,
 	layout: "A" | "B",
@@ -651,14 +669,16 @@ describe("R3.4 CLI binary smoke test (compiled script)", () => {
 	});
 
 	test("--dry-run on a fixture stateRoot exits 0 and prints the proposed array", () => {
-		const root = makeStateRoot();
-		fixtureBrain("A", root);
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		fixtureBrain("A", stateRoot);
 		const result = spawnSync(
 			"node",
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
 				"--dry-run",
-				`--state-root=${root}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{ encoding: "utf8" },
 		);
@@ -676,55 +696,53 @@ describe("R3.4 CLI binary smoke test (compiled script)", () => {
 	});
 
 	test("no flags: refuses to write and exits non-zero (slice is dry-run-only)", () => {
-		const root = makeStateRoot();
-		fixtureBrain("A", root);
-		const beforeRaw = readFileSync(join(root, ".idu", "config", "project-constitution.json"), "utf8");
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		fixtureBrain("A", stateRoot);
+		const beforeRaw = readFileSync(
+			join(stateRoot, ".idu", "config", "project-constitution.json"),
+			"utf8",
+		);
 		const result = spawnSync(
 			"node",
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
-				`--state-root=${root}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{ encoding: "utf8" },
 		);
 		assert.notEqual(result.status, 0);
 		// The file MUST be unchanged.
-		const afterRaw = readFileSync(join(root, ".idu", "config", "project-constitution.json"), "utf8");
+		const afterRaw = readFileSync(
+			join(stateRoot, ".idu", "config", "project-constitution.json"),
+			"utf8",
+		);
 		assert.equal(beforeRaw, afterRaw, "file must not be mutated in this slice");
-		// Stderr must explain the refusal.
+		// Stderr must explain the refusal: no --dry-run / --verify / --apply flag.
 		assert.match(result.stderr, /refusing to write/u);
 	});
 
 	test("--verify on a fixture whose proposedRaw was written to disk reports byte-equal and exits 0", () => {
-		const root = makeStateRoot();
-		const { path } = fixtureBrain("A", root);
-		// Compute proposedRaw and write it to a fresh path; run --verify against that.
-		const currentRaw = readFileSync(path, "utf8");
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		const migrated = fixtureBrain("A", stateRoot);
+		// Compute proposedRaw and write it to disk (simulating the post-migration state).
+		const currentRaw = readFileSync(migrated.path, "utf8");
 		const proposedRaw = replaceRejectedStack(currentRaw, PROPOSED_REJECTED_STACK);
-		const migratedPath = path + ".verify";
-		writeFileSync(migratedPath, proposedRaw, "utf8");
-
-		// Run --verify against the migrated file. The Layout A file still
-		// exists alongside, but we use --layout=A and write the migrated
-		// version over A for the verify path. Instead, simpler: run --verify
-		// against the original path AFTER we have replaced its content with
-		// the proposed (simulating the post-migration state).
-		const verifyRoot = makeStateRoot();
-		const migrated = fixtureBrain("A", verifyRoot);
 		writeFileSync(migrated.path, proposedRaw, "utf8");
 		const result = spawnSync(
 			"node",
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
 				"--verify",
-				`--state-root=${verifyRoot}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{ encoding: "utf8" },
 		);
 		assert.equal(result.status, 0, `stderr: ${result.stderr}`);
 		assert.match(result.stdout, /verify mode: all layouts byte-equal/u);
-
-		rmSync(migratedPath);
 	});
 });
 
@@ -744,8 +762,8 @@ describe("R3.4 --apply flag (write path)", () => {
 	});
 
 	test("--apply on a fixture writes the proposed array (12 rules + 1 string) and preserves non-target bytes", () => {
-		const root = makeStateRoot();
-		const { path } = fixtureBrain("A", root);
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		const { path } = fixtureBrain("A", stateRoot);
 		const beforeRaw = readFileSync(path, "utf8");
 
 		const result = spawnSync(
@@ -753,7 +771,9 @@ describe("R3.4 --apply flag (write path)", () => {
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
 				"--apply",
-				`--state-root=${root}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{
 				encoding: "utf8",
@@ -803,8 +823,8 @@ describe("R3.4 --apply flag (write path)", () => {
 	});
 
 	test("--apply on an already-migrated file is a no-op (idempotency at the write layer)", () => {
-		const root = makeStateRoot();
-		const { path } = fixtureBrain("A", root);
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		const { path } = fixtureBrain("A", stateRoot);
 		// Pre-migrate the file in-memory.
 		const currentRaw = readFileSync(path, "utf8");
 		const proposedRaw = replaceRejectedStack(currentRaw, PROPOSED_REJECTED_STACK);
@@ -815,7 +835,9 @@ describe("R3.4 --apply flag (write path)", () => {
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
 				"--apply",
-				`--state-root=${root}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{
 				encoding: "utf8",
@@ -834,15 +856,17 @@ describe("R3.4 --apply flag (write path)", () => {
 	});
 
 	test("--apply + --dry-run combined is rejected (modes are mutually exclusive)", () => {
-		const root = makeStateRoot();
-		fixtureBrain("A", root);
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		fixtureBrain("A", stateRoot);
 		const result = spawnSync(
 			"node",
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
 				"--apply",
 				"--dry-run",
-				`--state-root=${root}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{ encoding: "utf8" },
 		);
@@ -875,15 +899,17 @@ describe("R3.4 --apply flag (write path)", () => {
 	});
 
 	test("MIGRATE_APPLY_DELAY_MS=0 skips the warning sleep (test fast-path)", () => {
-		const root = makeStateRoot();
-		fixtureBrain("A", root);
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		fixtureBrain("A", stateRoot);
 		const start = Date.now();
 		const result = spawnSync(
 			"node",
 			[
 				join(SCRIPTS_DIR, "migrate-rejected-stack.js"),
 				"--apply",
-				`--state-root=${root}`,
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
 			],
 			{
 				encoding: "utf8",

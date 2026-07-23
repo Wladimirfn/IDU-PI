@@ -25,7 +25,8 @@
  *   0 in tests) before touching the file.
  *
  * USAGE
- *   node dist/scripts/migrate-rejected-stack.js [--dry-run|--verify|--apply] [--state-root=PATH]
+ *   node dist/scripts/migrate-rejected-stack.js [--dry-run|--verify|--apply]
+ *       [--state-root=PATH] [--workspace-root=PATH] [--project-id=ID]
  *
  *   --dry-run       Print the proposed `rejectedStack` block (as formatted JSON)
  *                   plus the current/proposed byte-equal check, then exit 0.
@@ -39,7 +40,13 @@
  *                   atomic (temp file + rename). After writing, the script
  *                   re-reads and asserts byte-equality with the proposedRaw
  *                   (same as --verify).
- *   --state-root    Override the stateRoot (default: cwd).
+ *   --state-root    Validate against the registered stateRoot. If given, MUST
+ *                   match the value resolved via --workspace-root + --project-id.
+ *                   If omitted, the registered stateRoot is used.
+ *   --workspace-root  The idu-pi workspace root (parent of projects/<id>/).
+ *                     Required (or set IDU_PI_WORKSPACE_ROOT).
+ *   --project-id      The registered project id (e.g. "idu-pi"). Required
+ *                     (or set IDU_PI_PROJECT_ID).
  *   --layout        Restrict to one layout: "A" (.idu/config) or "B" (config).
  *                   Default: process both (A first, then B if present).
  *
@@ -55,6 +62,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasRejection } from "../src/project-constitution.js";
 import type { ConstitutionGateInput, PathGuardMode, ProjectConstitution, RejectedRule } from "../src/project-constitution.js";
+import { resolveProjectStatePaths } from "../src/project-state.js";
 
 // ---------------------------------------------------------------------------
 // Proposed `RejectedRule[]` for items 1-5 + trailing string for item 6.
@@ -810,7 +818,9 @@ interface CliArgs {
 	dryRun: boolean;
 	verify: boolean;
 	apply: boolean;
-	stateRoot: string;
+	stateRoot: string | undefined;
+	workspaceRoot: string | undefined;
+	projectId: string | undefined;
 	layoutFilter: Layout | undefined;
 }
 
@@ -819,7 +829,9 @@ function parseArgs(argv: string[]): CliArgs {
 		dryRun: false,
 		verify: false,
 		apply: false,
-		stateRoot: process.cwd(),
+		stateRoot: undefined,
+		workspaceRoot: undefined,
+		projectId: undefined,
 		layoutFilter: undefined,
 	};
 	for (const raw of argv) {
@@ -828,6 +840,10 @@ function parseArgs(argv: string[]): CliArgs {
 		else if (raw === "--apply") args.apply = true;
 		else if (raw.startsWith("--state-root=")) {
 			args.stateRoot = raw.slice("--state-root=".length);
+		} else if (raw.startsWith("--workspace-root=")) {
+			args.workspaceRoot = raw.slice("--workspace-root=".length);
+		} else if (raw.startsWith("--project-id=")) {
+			args.projectId = raw.slice("--project-id=".length);
 		} else if (raw.startsWith("--layout=")) {
 			const v = raw.slice("--layout=".length).toUpperCase();
 			if (v !== "A" && v !== "B") {
@@ -840,6 +856,17 @@ function parseArgs(argv: string[]): CliArgs {
 		} else {
 			throw new Error(`unknown argument: ${raw}`);
 		}
+	}
+	// Env-var fallback for --workspace-root and --project-id. This lets CI
+	// set the registry identity once per environment rather than threading
+	// the flags through every shell invocation.
+	if (args.workspaceRoot === undefined) {
+		const env = process.env.IDU_PI_WORKSPACE_ROOT;
+		if (env && env.length > 0) args.workspaceRoot = env;
+	}
+	if (args.projectId === undefined) {
+		const env = process.env.IDU_PI_PROJECT_ID;
+		if (env && env.length > 0) args.projectId = env;
 	}
 	// Mutual exclusion: --dry-run, --verify, and --apply are all "modes" and
 	// at most one may be set. Combining them is a logic error (each one calls
@@ -861,20 +888,29 @@ function printHelp(): void {
 			"Usage: node dist/scripts/migrate-rejected-stack.js [options]",
 			"",
 			"Options:",
-			"  --dry-run              Print proposed rejectedStack + byte-equal check; do NOT write.",
-			"  --verify               Re-read file and assert non-target fields are byte-equal.",
-			"  --apply                ACTUALLY write the proposed content (5s warning, atomic).",
-			"  --state-root=PATH      Override the stateRoot (default: cwd).",
-			"  --layout=A|B           Restrict to one layout (default: process both A and B).",
-			"  --help, -h             Show this help.",
+			"  --dry-run                    Print proposed rejectedStack + byte-equal check; do NOT write.",
+			"  --verify                     Re-read file and assert non-target fields are byte-equal.",
+			"  --apply                      ACTUALLY write the proposed content (5s warning, atomic).",
+			"  --state-root=PATH            The stateRoot to migrate. If given, MUST match the",
+			"                               registered stateRoot (see --workspace-root + --project-id).",
+			"                               If omitted, the registered stateRoot is used.",
+			"  --workspace-root=PATH        The idu-pi workspace root (parent of projects/<id>/).",
+			"                               Required (or set IDU_PI_WORKSPACE_ROOT).",
+			"  --project-id=ID              The registered project id (e.g. 'idu-pi').",
+			"                               Required (or set IDU_PI_PROJECT_ID).",
+			"  --layout=A|B                 Restrict to one layout (default: process both A and B).",
+			"  --help, -h                   Show this help.",
 			"",
 			"NOTE: without --dry-run, --verify, or --apply, the script refuses to write",
 			"(default exit 3). The actual data migration is gated by the explicit --apply",
 			"flag (auditor + orchestrator sign-off required before running --apply).",
 			"",
-		"Env: MIGRATE_APPLY_DELAY_MS overrides the 5-second warning sleep (set to 0 in tests).",
-		"",
-	].join("\n"),
+			"Env:",
+			"  MIGRATE_APPLY_DELAY_MS        Overrides the 5-second warning sleep (set to 0 in tests).",
+			"  IDU_PI_WORKSPACE_ROOT         Fallback for --workspace-root.",
+			"  IDU_PI_PROJECT_ID             Fallback for --project-id.",
+			"",
+		].join("\n"),
 	);
 }
 
@@ -1224,6 +1260,77 @@ export function runPathGuardsGate(
 // Main
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve and validate `--state-root` against the registered idu-pi stateRoot.
+ *
+ * Behavior matrix (TST-310-001..005):
+ *   - Both --workspace-root + --project-id given + --state-root matches
+ *     registered → return the (resolved) stateRoot, no error.
+ *   - Both --workspace-root + --project-id given + --state-root disagrees
+ *     with registered → return failure ("does not match the registered
+ *     stateRoot"). The bug #310 was that the script silently used the
+ *     operator-supplied --state-root without checking.
+ *   - Both --workspace-root + --project-id given, --state-root omitted →
+ *     derive and return the registered stateRoot.
+ *   - Either --workspace-root or --project-id missing → return failure
+ *     mentioning both flags so the operator knows what to add.
+ *
+ * Env-var fallback: IDU_PI_WORKSPACE_ROOT and IDU_PI_PROJECT_ID are honored
+ * by parseArgs before this function runs, so the helper only sees the
+ * resolved string-or-undefined values.
+ */
+function resolveStateRoot(args: CliArgs): {
+	stateRoot: string;
+	failure: string | null;
+} {
+	const hasWorkspace =
+		typeof args.workspaceRoot === "string" && args.workspaceRoot.length > 0;
+	const hasProjectId =
+		typeof args.projectId === "string" && args.projectId.length > 0;
+	if (!hasWorkspace || !hasProjectId) {
+		return {
+			stateRoot: "",
+			failure:
+				"missing registry identity for --state-root resolution. " +
+				"Pass --workspace-root and --project-id (or set IDU_PI_WORKSPACE_ROOT and IDU_PI_PROJECT_ID) " +
+				"so the script can resolve --state-root against the registered project. " +
+				"--workspace-root and --project-id are required for every invocation.",
+		};
+	}
+	const registered = resolveProjectStatePaths({
+		workspaceRoot: args.workspaceRoot!,
+		projectId: args.projectId!,
+		projectPath: process.cwd(),
+	}).stateRoot;
+	if (args.stateRoot === undefined) {
+		return { stateRoot: registered, failure: null };
+	}
+	// Compare with the same case-insensitive semantics as the rest of the
+	// postflight-core layer (win32 filesystems are case-insensitive; the
+	// resolve helper already normalizes via path.resolve). If the operator
+	// supplied a stateRoot that disagrees with the registry, refuse to run.
+	const normalizedGiven = (args.stateRoot ?? "").replace(/[\\/]+$/u, "");
+	const normalizedRegistered = registered.replace(/[\\/]+$/u, "");
+	const same =
+		process.platform === "win32"
+			? normalizedGiven.toLowerCase() === normalizedRegistered.toLowerCase()
+			: normalizedGiven === normalizedRegistered;
+	if (!same) {
+		return {
+			stateRoot: "",
+			failure:
+				`--state-root does not match the registered stateRoot.\n` +
+				`  --state-root          : ${args.stateRoot}\n` +
+				`  registered stateRoot  : ${registered}\n` +
+				`  --workspace-root      : ${args.workspaceRoot}\n` +
+				`  --project-id          : ${args.projectId}\n` +
+				`Either drop --state-root to let the script derive the registered root, ` +
+				`or pass --state-root=<registered> to make the explicit choice intentional.`,
+		};
+	}
+	return { stateRoot: registered, failure: null };
+}
+
 function main(): void {
 	let args: CliArgs;
 	try {
@@ -1233,7 +1340,23 @@ function main(): void {
 		process.exit(2);
 	}
 
-	const layouts = layoutPaths(args.stateRoot).filter(
+	// #310 — resolve --state-root against the registered stateRoot (derived
+	// from --workspace-root + --project-id). The script refuses to run if
+	// the registry identity is missing, and it refuses to run with an
+	// --state-root that disagrees with the registered one. The pre-#310
+	// default of cwd was the bug: in production stateRoot and cwd happen to
+	// coincide, so the script silently operated on the wrong file when the
+	// operator ran it from anywhere else.
+	const {
+		stateRoot: resolvedStateRoot,
+		failure: stateRootFailure,
+	} = resolveStateRoot(args);
+	if (stateRootFailure) {
+		process.stderr.write(`error: ${stateRootFailure}\n`);
+		process.exit(2);
+	}
+
+	const layouts = layoutPaths(resolvedStateRoot).filter(
 		(entry) => !args.layoutFilter || entry.layout === args.layoutFilter,
 	);
 	if (layouts.length === 0) {
@@ -1280,14 +1403,18 @@ function main(): void {
 	//
 	// DEVIATION from design obs 3558 / spec obs 3557 MS-PGG-002: the gate
 	// verifies pathGuards against `process.cwd()` (the project source root),
-	// NOT `args.stateRoot` (the constitution storage location). The pathGuards
-	// describe the project's source files (`src/**`, `scripts/**`,
+	// NOT `resolvedStateRoot` (the constitution storage location). The
+	// pathGuards describe the project's source files (`src/**`, `scripts/**`,
 	// `src/agentlab-*.ts`), which live at the project root — where the script
-	// is invoked from. In production stateRoot defaults to cwd, so the two
-	// coincide; in tests the stateRoot is a temp fixture dir without source
-	// files, but the spawned process's cwd is still the real repo root, so
-	// Phase 2 correctly finds `src/`, `scripts/`, etc. Using stateRoot would
-	// break every existing --apply test (temp dirs have no src/).
+	// is invoked from. In production the operator runs the script from the
+	// repo root, so the two coincide; in tests the stateRoot is a temp
+	// fixture dir without source files, but the spawned process's cwd is
+	// still the real repo root, so Phase 2 correctly finds `src/`,
+	// `scripts/`, etc. Using stateRoot would break every existing --apply
+	// test (temp dirs have no src/).
+	//
+	// Post-#310: stateRoot is resolved via resolveProjectStatePaths against
+	// the registered (workspaceRoot, projectId) — no more cwd fallback.
 	const gateReport = runPathGuardsGate(
 		PROPOSED_REJECTED_STACK,
 		process.cwd(),
