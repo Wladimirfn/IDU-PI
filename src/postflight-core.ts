@@ -5,6 +5,17 @@ export type PostflightTaskTraceInput = {
 	expectedFiles: string[];
 	expectedChangeMode?: string;
 	ignoredFiles?: string[];
+	// Auto-ignore every changedFile that lives under `stateRoot`. Use this
+	// when the report's diff includes stateRoot writes (e.g. constitution
+	// re-saves, blueprint migrations) that must NOT be treated as unexpected
+	// area changes — those are the supervisor's bookkeeping, not the
+	// orchestrator's slice.
+	stateRoot?: string;
+	// Auto-ignore these exact changedFiles (typically the project
+	// constitution's Layout A and Layout B paths). Useful when the caller
+	// already knows the constitution files but does not want to recompute
+	// stateRoot scope, or when the constitution sits outside stateRoot.
+	constitutionPaths?: string[];
 	report: {
 		changedFiles: string[];
 		ignoredFiles?: string[];
@@ -38,8 +49,15 @@ export function buildPostflightTaskTrace(
 		input.report.changedFiles,
 		input.ignoredFiles ?? [],
 	);
+	const stateRootIgnoredFiles = stateRootExcludedFiles(
+		input.report.changedFiles,
+		input.stateRoot,
+		input.constitutionPaths,
+	);
 	const effectiveChangedFiles = input.report.changedFiles.filter(
-		(file) => !explicitIgnoredFiles.includes(file),
+		(file) =>
+			!explicitIgnoredFiles.includes(file) &&
+			!stateRootIgnoredFiles.includes(file),
 	);
 	const unexpectedAreas = input.expectedFiles.length
 		? effectiveChangedFiles.filter(
@@ -73,6 +91,7 @@ export function buildPostflightTaskTrace(
 		ignoredFiles: dedupe([
 			...(input.report.ignoredFiles ?? []),
 			...explicitIgnoredFiles,
+			...stateRootIgnoredFiles,
 		]),
 		expectedChangeMode: input.expectedChangeMode ?? null,
 		observedChangeMode,
@@ -113,6 +132,41 @@ function explicitIgnoredChangedFiles(
 			}
 			return normalizedChanged === ignoredFile;
 		});
+	});
+}
+
+/**
+ * Return the subset of `changedFiles` that should be auto-ignored because they
+ * live under `stateRoot` or match one of `constitutionPaths`. Comparison is
+ * case-insensitive on win32 (consistent with `normalizePath`) and uses posix
+ * separators internally so mixed `\` and `/` inputs still match.
+ *
+ * Empty or absent inputs return `[]`. The returned entries preserve the
+ * original `changedFiles` strings (no normalization) so they round-trip
+ * exactly into the report's `ignoredFiles` list.
+ */
+function stateRootExcludedFiles(
+	changedFiles: string[],
+	stateRoot: string | undefined,
+	constitutionPaths: string[] | undefined,
+): string[] {
+	const hasStateRoot = typeof stateRoot === "string" && stateRoot.length > 0;
+	const hasConstitutions =
+		Array.isArray(constitutionPaths) && constitutionPaths.length > 0;
+	if (!hasStateRoot && !hasConstitutions) return [];
+	const toPosix = (p: string): string => normalizePath(p).replace(/\\/g, "/");
+	const stateRootPrefix = hasStateRoot
+		? toPosix(stateRoot!).replace(/\/+$/, "") + "/"
+		: null;
+	const constitutionSet = new Set(
+		hasConstitutions ? constitutionPaths!.map((p) => toPosix(p)) : [],
+	);
+	return changedFiles.filter((changedFile) => {
+		const normalized = toPosix(changedFile);
+		if (stateRootPrefix && normalized.startsWith(stateRootPrefix)) {
+			return true;
+		}
+		return constitutionSet.has(normalized);
 	});
 }
 
