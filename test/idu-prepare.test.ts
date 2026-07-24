@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import type { ProjectConnectionReport } from "../src/project-connection.js";
 import type { ProjectFlows } from "../src/project-flows.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
@@ -96,7 +96,7 @@ test("runIduPrepare executes initProjectConfig when project-local configs are mi
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () =>
 			connection({
 				status: "needs_understanding",
@@ -150,7 +150,7 @@ test("runIduPrepare does not write or scan without valid connection", () => {
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () =>
 			connection({
 				status: "not_connected",
@@ -209,7 +209,7 @@ test("runIduPrepare does not initialize when project-local configs already exist
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			initCalls += 1;
@@ -245,7 +245,7 @@ test("runIduPrepare executes scan suggest draft and review in order", () => {
 	runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -291,7 +291,7 @@ test("runIduPrepare reports scan failure and continues with safe postflight", ()
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -342,7 +342,7 @@ test("runIduPrepare with suggested dataStores reports needs_review", () => {
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -387,9 +387,9 @@ test("runIduPrepare with suggested dataStores reports needs_review", () => {
 });
 
 test("runIduPrepare ignores scanner dataStore noise when evidence is filtered", () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-prepare-noise-"));
-	const stateRoot = mkdtempSync(join(tmpdir(), "idu-prepare-noise-state-"));
-	const reportsPath = mkdtempSync(join(tmpdir(), "idu-prepare-reports-"));
+	const projectPath = makeTempDir("idu-prepare-noise-");
+	const stateRoot = makeTempDir("idu-prepare-noise-state-");
+	const reportsPath = makeTempDir("idu-prepare-reports-");
 	mkdirSync(join(projectPath, "docs"));
 	mkdirSync(join(projectPath, "examples"));
 	writeFileSync(
@@ -448,7 +448,7 @@ test("runIduPrepare without suggestions and low postflight reports aligned_ready
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -485,7 +485,7 @@ test("runIduPrepare reports stale when local changes exist after prepare", () =>
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -519,7 +519,7 @@ test("formatIduPrepareResult includes alignment statuses and differences", () =>
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -555,7 +555,7 @@ test("formatIduPrepareResult includes project risk actions and no AgentLab execu
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection(),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -590,7 +590,7 @@ test("formatIduPrepareResult does not show ambiguous ready initial status", () =
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection({ status: "ready" }),
 		initProjectConfig: () => {
 			throw new Error("should not init");
@@ -618,7 +618,7 @@ test("formatIduPrepareResult separates initial connection and alignment status",
 	const result = runIduPrepare({
 		projectId: "demo",
 		projectPath: "/tmp/demo",
-		reportsPath: mkdtempSync(join(tmpdir(), "idu-prepare-")),
+		reportsPath: makeTempDir("idu-prepare-"),
 		inspectConnection: () => connection({ status: "ready" }),
 		initProjectConfig: () => {
 			throw new Error("should not init");
