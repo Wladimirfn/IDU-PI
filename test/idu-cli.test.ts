@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
 import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	activateIduSession,
 	configureIduSessionStore,
@@ -124,7 +123,7 @@ async function withRuntime(
 		paths: { projectPath: string; workspaceRoot: string },
 	) => void | Promise<void>,
 ): Promise<void> {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-"));
+	const root = makeTempDir("idu-cli-");
 	const projectPath = join(root, "project");
 	const workspaceRoot = join(root, "workspace");
 	try {
@@ -1692,7 +1691,7 @@ test("cli status muestra estado sin escribir archivos", async () => {
 });
 
 test("cli status sin runtime no crea registry faltante", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-status-readonly-"));
+	const root = makeTempDir("idu-cli-status-readonly-");
 	const registryPath = join(root, "data", "projects.json");
 	const previous = { ...process.env };
 	try {
@@ -3053,7 +3052,7 @@ test("CLI idu-task infiere bug desde texto libre", async () => {
 });
 
 test("createCliTask inactive encola sin needs_confirmation", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-task-inactive-"));
+	const root = makeTempDir("idu-cli-task-inactive-");
 	try {
 		const workspaceRoot = join(root, "workspace");
 		configureIduSessionStore({ workspaceRoot });
@@ -3077,7 +3076,7 @@ test("createCliTask inactive encola sin needs_confirmation", async () => {
 });
 
 test("createCliTask active bloquea login high con confirmación", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-task-active-"));
+	const root = makeTempDir("idu-cli-task-active-");
 	try {
 		const workspaceRoot = join(root, "workspace");
 		configureIduSessionStore({ workspaceRoot });
@@ -3107,7 +3106,7 @@ test("createCliTask active bloquea login high con confirmación", async () => {
 });
 
 test("createCliTask active usa intención humana aunque preflight sea low", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-task-intent-"));
+	const root = makeTempDir("idu-cli-task-intent-");
 	try {
 		const workspaceRoot = join(root, "workspace");
 		configureIduSessionStore({ workspaceRoot });
@@ -3242,7 +3241,7 @@ test("CLI queue-approve sin ID falla y no modifica cola", async () => {
 });
 
 test("CLI queue helpers aceptan prefijo de ID", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-queue-prefix-"));
+	const root = makeTempDir("idu-cli-queue-prefix-");
 	try {
 		const queue = new StructuredTaskQueue({ workspaceRoot: root });
 		const task = queue.enqueueTask({
