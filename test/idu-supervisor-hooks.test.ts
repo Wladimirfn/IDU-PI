@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	formatSupervisorHookResult,
 	maybeRunSupervisorAfterPostflight,
@@ -61,127 +60,116 @@ async function withHookRuntime(
 		) => IduSupervisorHookResult;
 	}) => void | Promise<void>,
 ): Promise<void> {
-	const root = mkdtempSync(join(tmpdir(), "idu-supervisor-hooks-"));
-	try {
-		const calls: IduSupervisorLoopInput[] = [];
-		const activity: SupervisorActivityRecordInput[] = [];
-		const queue = new StructuredTaskQueue({
-			filePath: join(root, "reports", "tasks.jsonl"),
-		});
-		const base = {
-			projectId: "pi-telegram-bridge",
-			projectPath: join(root, "project"),
-			workspaceRoot: root,
-			repository: {
-				getSemanticAuditStats: () => ({
-					projectId: "pi-telegram-bridge",
-					labRunCount: 0,
-					findingCount: 0,
-					proposalCount: 0,
-					taskCount: 0,
-					userSignalCount: 0,
-					memoryItemCount: 0,
-					criticalFindingCount: 0,
-					highFindingCount: 0,
-				}),
-				getSemanticAuditCheckpoint: () => ({
-					projectId: "pi-telegram-bridge",
-					lastLabRunCount: 0,
-					lastFindingCount: 0,
-					lastProposalCount: 0,
-					lastTaskCount: 0,
-					lastUserSignalCount: 0,
-					lastMemoryItemCount: 0,
-					lastCriticalFindingCount: 0,
-					lastHighFindingCount: 0,
-				}),
-				createSemanticAuditRun: () => undefined,
-				updateSemanticAuditCheckpoint: () => undefined,
-			},
-			queue,
-			isIduActive: () => true,
-			now: () => new Date("2026-05-24T21:00:00.000Z"),
-			runSupervisorLoop: (input: IduSupervisorLoopInput) => {
-				calls.push(input);
-				return fakeLoopResult(input);
-			},
-			recordSupervisorActivity: (event: SupervisorActivityRecordInput) => {
-				activity.push(event);
-			},
-		};
-		await fn({
-			root,
-			queue,
-			calls,
-			activity,
-			runTask: (patch = {}) =>
-				maybeRunSupervisorAfterTask({
-					...base,
-					...patch,
-				}),
-		});
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
+	const root = makeTempDir("idu-supervisor-hooks-");
+	const calls: IduSupervisorLoopInput[] = [];
+	const activity: SupervisorActivityRecordInput[] = [];
+	const queue = new StructuredTaskQueue({
+		filePath: join(root, "reports", "tasks.jsonl"),
+	});
+	const base = {
+		projectId: "pi-telegram-bridge",
+		projectPath: join(root, "project"),
+		workspaceRoot: root,
+		repository: {
+			getSemanticAuditStats: () => ({
+				projectId: "pi-telegram-bridge",
+				labRunCount: 0,
+				findingCount: 0,
+				proposalCount: 0,
+				taskCount: 0,
+				userSignalCount: 0,
+				memoryItemCount: 0,
+				criticalFindingCount: 0,
+				highFindingCount: 0,
+			}),
+			getSemanticAuditCheckpoint: () => ({
+				projectId: "pi-telegram-bridge",
+				lastLabRunCount: 0,
+				lastFindingCount: 0,
+				lastProposalCount: 0,
+				lastTaskCount: 0,
+				lastUserSignalCount: 0,
+				lastMemoryItemCount: 0,
+				lastCriticalFindingCount: 0,
+				lastHighFindingCount: 0,
+			}),
+			createSemanticAuditRun: () => undefined,
+			updateSemanticAuditCheckpoint: () => undefined,
+		},
+		queue,
+		isIduActive: () => true,
+		now: () => new Date("2026-05-24T21:00:00.000Z"),
+		runSupervisorLoop: (input: IduSupervisorLoopInput) => {
+			calls.push(input);
+			return fakeLoopResult(input);
+		},
+		recordSupervisorActivity: (event: SupervisorActivityRecordInput) => {
+			activity.push(event);
+		},
+	};
+	await fn({
+		root,
+		queue,
+		calls,
+		activity,
+		runTask: (patch = {}) =>
+			maybeRunSupervisorAfterTask({
+				...base,
+				...patch,
+			}),
+	});
 }
 
 test("supervisor activity default writer uses explicit stateRoot not workspaceRoot", async () => {
-	const workspaceRoot = mkdtempSync(
-		join(tmpdir(), "idu-supervisor-workspace-"),
+	const workspaceRoot = makeTempDir("idu-supervisor-workspace-");
+	const stateRoot = makeTempDir("idu-supervisor-state-");
+	const queue = new StructuredTaskQueue({
+		filePath: join(workspaceRoot, "reports", "tasks.jsonl"),
+	});
+	const result = maybeRunSupervisorAfterTask({
+		projectId: "idu-pi",
+		projectPath: join(workspaceRoot, "project"),
+		workspaceRoot,
+		supervisorActivityStateRoot: stateRoot,
+		repository: {
+			getSemanticAuditStats: () => ({
+				projectId: "idu-pi",
+				labRunCount: 0,
+				findingCount: 0,
+				proposalCount: 0,
+				taskCount: 0,
+				userSignalCount: 0,
+				memoryItemCount: 0,
+				criticalFindingCount: 0,
+				highFindingCount: 0,
+			}),
+			getSemanticAuditCheckpoint: () => ({
+				projectId: "idu-pi",
+				lastLabRunCount: 0,
+				lastFindingCount: 0,
+				lastProposalCount: 0,
+				lastTaskCount: 0,
+				lastUserSignalCount: 0,
+				lastMemoryItemCount: 0,
+				lastCriticalFindingCount: 0,
+				lastHighFindingCount: 0,
+			}),
+			createSemanticAuditRun: () => undefined,
+			updateSemanticAuditCheckpoint: () => undefined,
+		},
+		queue,
+		isIduActive: () => false,
+	});
+	assert.equal(result.status, "skipped");
+	await flushSupervisorActivityEvents();
+	assert.equal(
+		existsSync(supervisorActivityEventsPath(workspaceRoot)),
+		false,
 	);
-	const stateRoot = mkdtempSync(join(tmpdir(), "idu-supervisor-state-"));
-	try {
-		const queue = new StructuredTaskQueue({
-			filePath: join(workspaceRoot, "reports", "tasks.jsonl"),
-		});
-		const result = maybeRunSupervisorAfterTask({
-			projectId: "idu-pi",
-			projectPath: join(workspaceRoot, "project"),
-			workspaceRoot,
-			supervisorActivityStateRoot: stateRoot,
-			repository: {
-				getSemanticAuditStats: () => ({
-					projectId: "idu-pi",
-					labRunCount: 0,
-					findingCount: 0,
-					proposalCount: 0,
-					taskCount: 0,
-					userSignalCount: 0,
-					memoryItemCount: 0,
-					criticalFindingCount: 0,
-					highFindingCount: 0,
-				}),
-				getSemanticAuditCheckpoint: () => ({
-					projectId: "idu-pi",
-					lastLabRunCount: 0,
-					lastFindingCount: 0,
-					lastProposalCount: 0,
-					lastTaskCount: 0,
-					lastUserSignalCount: 0,
-					lastMemoryItemCount: 0,
-					lastCriticalFindingCount: 0,
-					lastHighFindingCount: 0,
-				}),
-				createSemanticAuditRun: () => undefined,
-				updateSemanticAuditCheckpoint: () => undefined,
-			},
-			queue,
-			isIduActive: () => false,
-		});
-		assert.equal(result.status, "skipped");
-		await flushSupervisorActivityEvents();
-		assert.equal(
-			existsSync(supervisorActivityEventsPath(workspaceRoot)),
-			false,
-		);
-		const events = readSupervisorActivityEvents(stateRoot);
-		assert.equal(events.length, 1);
-		assert.equal(events[0]?.origin, "supervisor_auto_hook");
-		assert.equal(events[0]?.reason, "idu_inactive");
-	} finally {
-		await rm(workspaceRoot, { recursive: true, force: true });
-		await rm(stateRoot, { recursive: true, force: true });
-	}
+	const events = readSupervisorActivityEvents(stateRoot);
+	assert.equal(events.length, 1);
+	assert.equal(events[0]?.origin, "supervisor_auto_hook");
+	assert.equal(events[0]?.reason, "idu_inactive");
 });
 
 test("supervisor activity records inactive hook skip", async () => {

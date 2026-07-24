@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	formatBlueprintForPrompt,
 	loadProjectBlueprint,
@@ -13,12 +12,8 @@ import {
 async function withTempProject(
 	fn: (projectPath: string) => void | Promise<void>,
 ): Promise<void> {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-blueprint-project-"));
-	try {
-		await fn(projectPath);
-	} finally {
-		await rm(projectPath, { recursive: true, force: true });
-	}
+	const projectPath = makeTempDir("idu-blueprint-project-");
+	await fn(projectPath);
 }
 
 async function withTempProjectAndStateRoot(
@@ -26,14 +21,9 @@ async function withTempProjectAndStateRoot(
 ): Promise<void> {
 	// Slice 2/5: projectPath and stateRoot are distinct temp dirs so we can
 	// assert that the loader resolves under stateRoot, not projectPath.
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-blueprint-project-"));
-	const stateRoot = mkdtempSync(join(tmpdir(), "idu-blueprint-stateroot-"));
-	try {
-		await fn(projectPath, stateRoot);
-	} finally {
-		await rm(projectPath, { recursive: true, force: true });
-		await rm(stateRoot, { recursive: true, force: true });
-	}
+	const projectPath = makeTempDir("idu-blueprint-project-");
+	const stateRoot = makeTempDir("idu-blueprint-stateroot-");
+	await fn(projectPath, stateRoot);
 }
 
 function validBlueprint(overrides: Record<string, unknown> = {}) {
