@@ -37,6 +37,7 @@ import {
 	workerBoundaryData,
 } from "../../mcp-server.js";
 import { buildPostflightTaskTrace } from "../../postflight-core.js";
+import { join } from "node:path";
 import {
 	buildPreflightOrchestratorAdvisory,
 	buildProjectAdvisoryForOrchestrator,
@@ -81,9 +82,7 @@ export async function handlePreflight(
 		advisory: alignmentAdvisory as unknown as JsonObject,
 		risks: [
 			String(report.risk),
-			...arrayField(report as unknown as JsonObject, "warnings").map(
-				String,
-			),
+			...arrayField(report as unknown as JsonObject, "warnings").map(String),
 		],
 		gates: [
 			"Preflight antes de delegar",
@@ -224,6 +223,13 @@ export async function handlePostflight(
 	const expectedFiles = stringListArg(args, "expectedFiles");
 	const ignoredFiles = stringListArg(args, "ignoredFiles");
 	const expectedChangeMode = stringArg(args, "expectedChangeMode");
+	// #309: auto-exclude stateRoot/** + the constitution paths (Layout A and
+	// Layout B) from changedFiles so the postflight does not flag supervisor
+	// bookkeeping writes as unexpected area changes in the orchestrator's slice.
+	const constitutionPaths = [
+		join(sensorStateRoot, ".idu", "config", "project-constitution.json"),
+		join(sensorStateRoot, "config", "project-constitution.json"),
+	];
 	const taskTrace = buildPostflightTaskTrace({
 		actionId,
 		taskPackageId,
@@ -231,6 +237,8 @@ export async function handlePostflight(
 		expectedFiles,
 		ignoredFiles,
 		expectedChangeMode,
+		stateRoot: sensorStateRoot,
+		constitutionPaths,
 		report,
 	});
 	const physicalGateways = buildPhysicalEvidenceGateways(
@@ -249,9 +257,7 @@ export async function handlePostflight(
 		evidenceGateways,
 		{
 			recommendation: taskTrace.matchesIntent ? "warn" : "needs_evidence",
-			severity: report.requiresHumanConfirmation
-				? "needs_approval"
-				: "warning",
+			severity: report.requiresHumanConfirmation ? "needs_approval" : "warning",
 			confidence: 0.76,
 			requiresHuman: report.requiresHumanConfirmation,
 			orchestratorDecisionRequired: true,
