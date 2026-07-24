@@ -1,20 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	buildMasterPlanObjectiveSnapshot,
 	getCachedMasterPlanObjectiveSnapshot,
 	resolveMasterPlanObjectiveCachePath,
 } from "../src/master-plan-objective-cache.js";
 
-function tempRoot(): string {
-	return mkdtempSync(join(tmpdir(), "idu-objective-cache-"));
-}
-
 test("objective cache path stays under stateRoot reports", () => {
-	const root = tempRoot();
+	const root = makeTempDir("idu-objective-cache-");
 	assert.equal(
 		resolveMasterPlanObjectiveCachePath(root),
 		join(root, "reports", "master-plan-objective-cache.json"),
@@ -60,7 +56,7 @@ test("buildMasterPlanObjectiveSnapshot blocks approved plan with missing objecti
 });
 
 test("getCachedMasterPlanObjectiveSnapshot reuses valid cache and writes stateRoot-only", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-objective-cache-");
 	let calls = 0;
 	const first = getCachedMasterPlanObjectiveSnapshot({
 		stateRoot,
@@ -102,7 +98,7 @@ test("getCachedMasterPlanObjectiveSnapshot reuses valid cache and writes stateRo
 });
 
 test("getCachedMasterPlanObjectiveSnapshot refreshes expired cache", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-objective-cache-");
 	let calls = 0;
 	getCachedMasterPlanObjectiveSnapshot({
 		stateRoot,

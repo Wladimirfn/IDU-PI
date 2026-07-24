@@ -6,9 +6,9 @@
 
 import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "./helpers/temp.js";
 import { recordSkillRating } from "../src/skill-rating.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
 import { applyMigrations } from "../src/lab-db/migrations/runner.js";
@@ -37,7 +37,7 @@ describe("skill-rating-record", () => {
 	let repo: LabDbRepository;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "skill-rating-record-"));
+		tempDir = makeTempDir("skill-rating-record-");
 		dbPath = join(tempDir, "lab.db");
 		// Run all migrations so the bibliotecario_proposals table is present
 		// and the score column exists.

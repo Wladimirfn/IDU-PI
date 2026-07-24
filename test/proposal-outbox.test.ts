@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	ProposalOutboxStore,
 	proposalOutboxPath,
 } from "../src/proposal-outbox.js";
-
-function tempRoot(): string {
-	return mkdtempSync(join(tmpdir(), "idu-proposal-outbox-"));
-}
 
 test("proposal outbox path is reports/proposals.jsonl under stateRoot", () => {
 	const path = proposalOutboxPath("/tmp/idu-state").replaceAll("\\", "/");
@@ -18,7 +13,7 @@ test("proposal outbox path is reports/proposals.jsonl under stateRoot", () => {
 });
 
 test("proposal outbox writes flow-bound proposals under stateRoot", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-proposal-outbox-");
 	const store = new ProposalOutboxStore({
 		stateRoot,
 		now: () => new Date("2026-06-07T00:00:00.000Z"),
@@ -66,7 +61,7 @@ test("proposal outbox writes flow-bound proposals under stateRoot", () => {
 });
 
 test("proposal outbox loads existing JSONL proposals", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-proposal-outbox-");
 	const store = new ProposalOutboxStore({
 		stateRoot,
 		now: () => new Date("2026-06-07T00:00:00.000Z"),
@@ -93,7 +88,7 @@ test("proposal outbox loads existing JSONL proposals", () => {
 });
 
 test("proposal outbox reuses unresolved proposals for identical evidence", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-proposal-outbox-");
 	const store = new ProposalOutboxStore({
 		stateRoot,
 		now: () => new Date("2026-06-07T00:00:00.000Z"),
@@ -138,7 +133,7 @@ test("proposal outbox reuses unresolved proposals for identical evidence", () =>
 
 test("proposal outbox keeps distinct unresolved proposals with different risk", () => {
 	const store = new ProposalOutboxStore({
-		stateRoot: tempRoot(),
+		stateRoot: makeTempDir("idu-proposal-outbox-"),
 		now: () => new Date("2026-06-07T00:00:00.000Z"),
 	});
 	const input = {
@@ -169,7 +164,7 @@ test("proposal outbox keeps distinct unresolved proposals with different risk", 
 
 test("proposal outbox keeps distinct unresolved proposals with different policy", () => {
 	const store = new ProposalOutboxStore({
-		stateRoot: tempRoot(),
+		stateRoot: makeTempDir("idu-proposal-outbox-"),
 		now: () => new Date("2026-06-07T00:00:00.000Z"),
 	});
 	const input = {
@@ -199,7 +194,7 @@ test("proposal outbox keeps distinct unresolved proposals with different policy"
 });
 
 test("proposal outbox rejects missing lifecycle binding", () => {
-	const store = new ProposalOutboxStore({ stateRoot: tempRoot() });
+	const store = new ProposalOutboxStore({ stateRoot: makeTempDir("idu-proposal-outbox-") });
 	assert.throws(
 		() =>
 			store.createProposal({
@@ -222,7 +217,7 @@ test("proposal outbox rejects missing lifecycle binding", () => {
 });
 
 test("proposal outbox rejects proposals without evidence refs", () => {
-	const store = new ProposalOutboxStore({ stateRoot: tempRoot() });
+	const store = new ProposalOutboxStore({ stateRoot: makeTempDir("idu-proposal-outbox-") });
 	assert.throws(
 		() =>
 			store.createProposal({
