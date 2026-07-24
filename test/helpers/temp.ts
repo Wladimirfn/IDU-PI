@@ -12,6 +12,7 @@
 // because the cross-file view is not visible from in-process state.
 
 import { mkdtempSync, rmSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -61,9 +62,9 @@ export function makeTempDir(prefix: string): string {
  * On EBUSY (Windows file lock), the dir stays in `tracked` so the exit
  * sweep retries it.
  */
-export function cleanupTempDir(dir: string): void {
+export async function cleanupTempDir(dir: string): Promise<void> {
 	try {
-		rmSync(dir, { recursive: true, force: true });
+		await rm(dir, { recursive: true, force: true });
 		tracked.delete(dir);
 	} catch {
 		// keep in set; sweep will retry on exit
@@ -83,13 +84,23 @@ export function getTrackedTempDirCount(): number {
  * the afterEach for the file that imported this module; each test file
  * runs in its own process so the Set is per-process.
  *
+ * Uses async `rm()` rather than sync `rmSync()`. On Windows, a sync remove
+ * called immediately after a test's own synchronous fs writes (e.g. a
+ * StructuredTaskQueue's writeFileSync calls) hits transient EBUSY far more
+ * often than an async remove: dispatching through libuv's thread pool adds
+ * just enough scheduling delay for the OS to finish releasing the handle.
+ * Measured on this repo: sync cleanup for idu-supervisor-hooks.test.ts
+ * leaked in ~50% of runs; switching this hook to async rm() reproduced 0
+ * leaks across repeated runs (matching the pre-migration `await rm()`
+ * behavior this hook replaces).
+ *
  * Successful removes delete from `tracked` so the exit sweep does not
  * re-run them. EBUSY survivors stay in the set for the exit sweep to retry.
  */
-test.afterEach(() => {
+test.afterEach(async () => {
 	for (const dir of tracked) {
 		try {
-			rmSync(dir, { recursive: true, force: true });
+			await rm(dir, { recursive: true, force: true });
 			tracked.delete(dir);
 		} catch {
 			// keep in set; exit sweep will retry
