@@ -9,10 +9,9 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { mkdtempSync } from "node:fs";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	AgentRouter,
 	ensureCloneWorkspace,
@@ -82,10 +81,6 @@ class FakeSession implements AgentSession {
 	}
 }
 
-function root(): string {
-	return mkdtempSync(join(tmpdir(), "agentlab-review-runner-"));
-}
-
 function profiles(): AgentProfile[] {
 	return [
 		{ id: "default", label: "Default", provider: "pi", piArgs: [] },
@@ -100,7 +95,7 @@ function request(specialty: AgentLabSpecialty = "security") {
 	return buildAgentLabReviewRequest({
 		id: `request-${specialty}`,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-runner-"),
 		specialty,
 		trigger: "manual",
 		objective: `Revisar ${specialty}`,
@@ -178,7 +173,7 @@ function routerWith(
 	ok = true,
 ) {
 	const sessions = new Map<string, FakeSession>();
-	const workspaceRoot = root();
+	const workspaceRoot = makeTempDir("agentlab-review-runner-");
 	mkdirSync(projectPath, { recursive: true });
 	const router = new AgentRouter({
 		piBin: "pi",
@@ -213,7 +208,7 @@ function git(args: string[], cwd: string): string {
 }
 
 function gitProject(): string {
-	const projectPath = root();
+	const projectPath = makeTempDir("agentlab-review-runner-");
 	git(["init"], projectPath);
 	git(["config", "user.email", "test@example.com"], projectPath);
 	git(["config", "user.name", "Test"], projectPath);
@@ -262,7 +257,7 @@ test("snapshot repo real con archivo normal detecta cambios", () => {
 test("clone sandbox configura core.longpaths", () => {
 	const projectPath = gitProject();
 	const workspace = ensureCloneWorkspace(
-		root(),
+		makeTempDir("agentlab-review-runner-"),
 		"pi-telegram-bridge",
 		projectPath,
 		"security",
@@ -610,7 +605,7 @@ test("status latest rechaza run current viejo para request current nuevo", async
 });
 
 test("ruta fuera de reports falla", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-runner-");
 	const status = getAgentLabReviewStatus(
 		join(temp, "agentlab-review-run-20260525-100100.json"),
 		join(temp, "reports"),
@@ -620,7 +615,7 @@ test("ruta fuera de reports falla", () => {
 });
 
 test("nombre inválido falla", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-runner-"), "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	writeFileSync(join(reportsPath, "bad.json"), "{}\n", "utf8");
 	const status = getAgentLabReviewStatus("bad.json", reportsPath);
@@ -1135,7 +1130,7 @@ test("status current resolves the same run as current.json", async () => {
 });
 
 test("status current missing reports current.json candidate", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-runner-"), "reports");
 
 	const status = getAgentLabReviewStatus("current", reportsPath);
 
@@ -1152,7 +1147,7 @@ test("status latest resuelve archivo legacy en reports sin agentlabs/runs", () =
 	// isAgentLabRunFilename, the helper ALSO accepts current.json and the
 	// new run-<unix>-<hex>.json format, so this test pins that the LEGACY
 	// format specifically still resolves when reports/ is the only source.
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-runner-");
 	const reportsPath = join(temp, "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	// Deliberately do NOT create temp/agentlabs/runs/ — the fallback must
@@ -1215,7 +1210,7 @@ test("format run muestra resumen", async () => {
 // removal of stub seam.
 
 function dispatchFixture() {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-runner-"), "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	const projectPath = gitProject();
 	return {
@@ -1621,7 +1616,7 @@ test("Issue #246 status poll for runId with neither .json nor .dispatch.json ret
 	// error message that mentions BOTH filenames (so the operator can tell whether
 	// the dispatch was lost or the run never executed). The pre-fix code falls into
 	// the generic path-resolution error and does NOT mention the dispatch file.
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-runner-"), "reports");
 	mkdirSync(reportsPath, { recursive: true });
 
 	const status = getAgentLabReviewStatus("run-9999999999-zzzzzz", reportsPath);
