@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	configureIduSessionStore,
 	deactivateIduSession,
@@ -1075,7 +1076,7 @@ function fakeRuntime(projectPath = "C:/projects/sistema"): CliRuntime {
 	return runtime;
 }
 
-const fakeStateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-fake-state-"));
+const fakeStateRoot = makeTempDir("idu-mcp-fake-state-");
 
 function registered(
 	projectPath = "C:/projects/sistema",
@@ -1181,7 +1182,7 @@ test("mcp server lists Idu-pi tools", async () => {
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {
-	const stateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-general-spec-derive-"));
+	const stateRoot = makeTempDir("idu-mcp-general-spec-derive-");
 	seedMcpBirthPrerequisites(stateRoot);
 	writeFileSync(
 		join(stateRoot, "birth", "general-spec.json"),
@@ -1266,7 +1267,7 @@ test("idu_birth_general_spec_derive MCP tool returns clear error without enrolle
 });
 
 test("idu_birth_general_spec MCP tool approves spec on enrolled stateRoot", async () => {
-	const stateRoot = mkdtempSync(join(tmpdir(), "idu-mcp-general-spec-"));
+	const stateRoot = makeTempDir("idu-mcp-general-spec-");
 	seedMcpBirthPrerequisites(stateRoot);
 	const result = await callIduMcpTool(
 		"idu_birth_general_spec",
@@ -1392,7 +1393,7 @@ test("execution director MCP tick saves proposals and outbox reads them", async 
 });
 
 test("idu_supervisor_context_pack compone visión plan y gates compactos", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-project-"));
+	const projectPath = makeTempDir("idu-context-pack-project-");
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1505,7 +1506,7 @@ test("idu_supervisor_context_pack compone visión plan y gates compactos", async
 });
 
 test("idu_supervisor_context_pack includes bounded Source Library evidence refs", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-sources-"));
+	const projectPath = makeTempDir("idu-context-pack-sources-");
 	writeFileSync(
 		join(projectPath, "README.md"),
 		"# Idu-pi\n\nIdu-pi es un cerebelo supervisor compacto.",
@@ -1618,7 +1619,7 @@ test("idu_supervisor_context_pack includes bounded Source Library evidence refs"
 });
 
 test("idu_supervisor_context_pack records context quality without raw prompt text", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-context-quality-mcp-"));
+	const root = makeTempDir("idu-context-quality-mcp-");
 	const projectPath = join(root, "project");
 	const stateRoot = join(root, "state");
 	mkdirSync(projectPath, { recursive: true });
@@ -1655,9 +1656,7 @@ test("idu_supervisor_context_pack records context quality without raw prompt tex
 });
 
 test("idu_supervisor_context_pack compacts README human vision before budgeting", async () => {
-	const projectPath = mkdtempSync(
-		join(tmpdir(), "idu-context-pack-readme-diet-"),
-	);
+	const projectPath = makeTempDir("idu-context-pack-readme-diet-");
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1696,9 +1695,7 @@ test("idu_supervisor_context_pack compacts README human vision before budgeting"
 });
 
 test("idu_supervisor_context_pack preserves all priority README section hints", async () => {
-	const projectPath = mkdtempSync(
-		join(tmpdir(), "idu-context-pack-readme-priority-"),
-	);
+	const projectPath = makeTempDir("idu-context-pack-readme-priority-");
 	writeFileSync(
 		join(projectPath, "README.md"),
 		[
@@ -1746,7 +1743,7 @@ test("idu_supervisor_context_pack preserves all priority README section hints", 
 });
 
 test("idu_supervisor_context_pack limita README y request gigantes sin redistribuir prompt crudo", async () => {
-	const projectPath = mkdtempSync(join(tmpdir(), "idu-context-pack-large-"));
+	const projectPath = makeTempDir("idu-context-pack-large-");
 	writeFileSync(
 		join(projectPath, "README.md"),
 		`# Idu-pi\n\n${"texto enorme ".repeat(3000)}`,
@@ -1892,274 +1889,250 @@ test("idu_status works with mocked active project", async () => {
 });
 
 test("idu_status exposes trigger engine persisted status", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-trigger-status-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		saveTriggerEngineConfig(stateRoot, {
-			enabled: true,
-			updatedAt: "2026-06-11T18:10:00.000Z",
-			source: "cli",
-		});
+	const root = makeTempDir("idu-mcp-trigger-status-");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	saveTriggerEngineConfig(stateRoot, {
+		enabled: true,
+		updatedAt: "2026-06-11T18:10:00.000Z",
+		source: "cli",
+	});
 
-		const result = await callIduMcpTool(
-			"idu_status",
-			{},
-			{
-				runtimeFactory: factory(),
-				projectResolver: () => ({
-					...registered("C:/projects/sistema"),
-					stateRoot,
-				}),
-			},
-		);
+	const result = await callIduMcpTool(
+		"idu_status",
+		{},
+		{
+			runtimeFactory: factory(),
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		},
+	);
 
-		assert.equal(result.ok, true);
-		assert.deepEqual(result.data.triggerEngine, {
-			path: join(stateRoot, "trigger-engine-config.json"),
-			exists: true,
-			enabled: true,
-			updatedAt: "2026-06-11T18:10:00.000Z",
-			source: "cli",
-		});
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, true);
+	assert.deepEqual(result.data.triggerEngine, {
+		path: join(stateRoot, "trigger-engine-config.json"),
+		exists: true,
+		enabled: true,
+		updatedAt: "2026-06-11T18:10:00.000Z",
+		source: "cli",
+	});
 });
 
 test("idu_trigger_engine MCP tool toggles persisted config", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-trigger-toggle-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		const options = {
-			runtimeFactory: factory(),
-			projectResolver: () => ({
-				...registered("C:/projects/sistema"),
-				stateRoot,
-			}),
-		};
+	const root = makeTempDir("idu-mcp-trigger-toggle-");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	const options = {
+		runtimeFactory: factory(),
+		projectResolver: () => ({
+			...registered("C:/projects/sistema"),
+			stateRoot,
+		}),
+	};
 
-		const status = await callIduMcpTool(
-			"idu_trigger_engine",
-			{ action: "status" },
-			options,
-		);
-		assert.equal(status.ok, true);
-		assert.equal((status.data.status as { enabled?: boolean }).enabled, false);
+	const status = await callIduMcpTool(
+		"idu_trigger_engine",
+		{ action: "status" },
+		options,
+	);
+	assert.equal(status.ok, true);
+	assert.equal((status.data.status as { enabled?: boolean }).enabled, false);
 
-		const enabled = await callIduMcpTool(
-			"idu_trigger_engine",
-			{ action: "enable" },
-			options,
-		);
-		assert.equal(enabled.ok, true);
-		assert.equal(readTriggerEngineConfig(stateRoot).enabled, true);
+	const enabled = await callIduMcpTool(
+		"idu_trigger_engine",
+		{ action: "enable" },
+		options,
+	);
+	assert.equal(enabled.ok, true);
+	assert.equal(readTriggerEngineConfig(stateRoot).enabled, true);
 
-		const disabled = await callIduMcpTool(
-			"idu_trigger_engine",
-			{ action: "disable" },
-			options,
-		);
-		assert.equal(disabled.ok, true);
-		assert.equal(readTriggerEngineConfig(stateRoot).enabled, false);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const disabled = await callIduMcpTool(
+		"idu_trigger_engine",
+		{ action: "disable" },
+		options,
+	);
+	assert.equal(disabled.ok, true);
+	assert.equal(readTriggerEngineConfig(stateRoot).enabled, false);
 });
 
 test("idu_role_engine MCP tools expose status and toggle persisted config", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-role-engine-toggle-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		const options = {
-			runtimeFactory: factory(),
+	const root = makeTempDir("idu-mcp-role-engine-toggle-");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	const options = {
+		runtimeFactory: factory(),
+		projectResolver: () => ({
+			...registered("C:/projects/sistema"),
+			stateRoot,
+		}),
+	};
+
+	const status = await callIduMcpTool("idu_role_engine_status", {}, options);
+	assert.equal(status.ok, true);
+	assert.equal((status.data.status as { enabled?: boolean }).enabled, false);
+
+	const enabled = await callIduMcpTool(
+		"idu_role_engine_control",
+		{ action: "enable" },
+		options,
+	);
+	assert.equal(enabled.ok, true);
+	assert.equal(resolveRoleEngineConfig(stateRoot).enabled, true);
+
+	const roleEnabled = await callIduMcpTool(
+		"idu_role_engine_control",
+		{ action: "enable", role: "supervisor-main" },
+		options,
+	);
+	assert.equal(roleEnabled.ok, true);
+	assert.equal(
+		resolveRoleEngineConfig(stateRoot).roleEnabled["supervisor-main"],
+		true,
+	);
+
+	const disabled = await callIduMcpTool(
+		"idu_role_engine_control",
+		{ action: "disable" },
+		options,
+	);
+	assert.equal(disabled.ok, true);
+	assert.equal(resolveRoleEngineConfig(stateRoot).enabled, false);
+});
+
+test("MCP usage recording is visible when tool call resolves", async () => {
+	const root = makeTempDir("idu-mcp-usage-visible-");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	const runtime = fakeRuntime("C:/projects/sistema");
+	await callIduMcpTool(
+		"idu_status",
+		{},
+		{
+			runtimeFactory: () => runtime,
 			projectResolver: () => ({
 				...registered("C:/projects/sistema"),
 				stateRoot,
 			}),
-		};
+		},
+	);
 
-		const status = await callIduMcpTool("idu_role_engine_status", {}, options);
-		assert.equal(status.ok, true);
-		assert.equal((status.data.status as { enabled?: boolean }).enabled, false);
-
-		const enabled = await callIduMcpTool(
-			"idu_role_engine_control",
-			{ action: "enable" },
-			options,
-		);
-		assert.equal(enabled.ok, true);
-		assert.equal(resolveRoleEngineConfig(stateRoot).enabled, true);
-
-		const roleEnabled = await callIduMcpTool(
-			"idu_role_engine_control",
-			{ action: "enable", role: "supervisor-main" },
-			options,
-		);
-		assert.equal(roleEnabled.ok, true);
-		assert.equal(
-			resolveRoleEngineConfig(stateRoot).roleEnabled["supervisor-main"],
-			true,
-		);
-
-		const disabled = await callIduMcpTool(
-			"idu_role_engine_control",
-			{ action: "disable" },
-			options,
-		);
-		assert.equal(disabled.ok, true);
-		assert.equal(resolveRoleEngineConfig(stateRoot).enabled, false);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
-});
-
-test("MCP usage recording is visible when tool call resolves", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-usage-visible-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		const runtime = fakeRuntime("C:/projects/sistema");
-		await callIduMcpTool(
-			"idu_status",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered("C:/projects/sistema"),
-					stateRoot,
-				}),
-			},
-		);
-
-		const usagePath = join(stateRoot, "reports", "idu-usage-events.jsonl");
-		assert.equal(existsSync(usagePath), true);
-		const event = JSON.parse(readFileSync(usagePath, "utf8").trim()) as {
-			surface?: string;
-			action?: string;
-		};
-		assert.equal(event.surface, "mcp");
-		assert.equal(event.action, "idu_status");
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const usagePath = join(stateRoot, "reports", "idu-usage-events.jsonl");
+	assert.equal(existsSync(usagePath), true);
+	const event = JSON.parse(readFileSync(usagePath, "utf8").trim()) as {
+		surface?: string;
+		action?: string;
+	};
+	assert.equal(event.surface, "mcp");
+	assert.equal(event.action, "idu_status");
 });
 
 test("MCP usage recording does not write outside stateRoot", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-usage-"));
-	try {
-		const runtime = fakeRuntime("C:/projects/sistema");
-		runtime.workspaceRoot = join(root, "workspace");
-		await callIduMcpTool(
-			"idu_status",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => registered("C:/projects/sistema"),
-			},
-		);
-		assert.equal(
-			existsSync(
-				join(runtime.workspaceRoot, "reports", "idu-usage-events.jsonl"),
-			),
-			false,
-		);
+	const root = makeTempDir("idu-mcp-usage-");
+	const runtime = fakeRuntime("C:/projects/sistema");
+	runtime.workspaceRoot = join(root, "workspace");
+	await callIduMcpTool(
+		"idu_status",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => registered("C:/projects/sistema"),
+		},
+	);
+	assert.equal(
+		existsSync(
+			join(runtime.workspaceRoot, "reports", "idu-usage-events.jsonl"),
+		),
+		false,
+	);
 
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		await callIduMcpTool(
-			"idu_status",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered("C:/projects/sistema"),
-					stateRoot,
-				}),
-			},
-		);
-		await flushIduUsageEvents();
-		const usagePath = join(stateRoot, "reports", "idu-usage-events.jsonl");
-		assert.equal(existsSync(usagePath), true);
-		const event = JSON.parse(readFileSync(usagePath, "utf8").trim()) as {
-			surface?: string;
-			action?: string;
-		};
-		assert.equal(event.surface, "mcp");
-		assert.equal(event.action, "idu_status");
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	await callIduMcpTool(
+		"idu_status",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		},
+	);
+	await flushIduUsageEvents();
+	const usagePath = join(stateRoot, "reports", "idu-usage-events.jsonl");
+	assert.equal(existsSync(usagePath), true);
+	const event = JSON.parse(readFileSync(usagePath, "utf8").trim()) as {
+		surface?: string;
+		action?: string;
+	};
+	assert.equal(event.surface, "mcp");
+	assert.equal(event.action, "idu_status");
 });
 
 test("MCP AgentLab tools record local effectiveness events without raw text", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-agentlab-effectiveness-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		const runtime = fakeRuntime("C:/projects/sistema");
-		await callIduMcpTool(
-			"idu_agentlab_request_create",
-			{ source: "postflight", selector: "latest" },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered("C:/projects/sistema"),
-					stateRoot,
-				}),
-			},
-		);
-		await flushAgentLabEffectivenessEvents();
-		let events = readAgentLabEffectivenessEvents(stateRoot);
-		let report = buildAgentLabEffectivenessReport(events);
-		assert.equal(report.requestsCreated, 1);
-		assert.equal(report.reviewRuns, 0);
+	const root = makeTempDir("idu-mcp-agentlab-effectiveness-");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	const runtime = fakeRuntime("C:/projects/sistema");
+	await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{ source: "postflight", selector: "latest" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		},
+	);
+	await flushAgentLabEffectivenessEvents();
+	let events = readAgentLabEffectivenessEvents(stateRoot);
+	let report = buildAgentLabEffectivenessReport(events);
+	assert.equal(report.requestsCreated, 1);
+	assert.equal(report.reviewRuns, 0);
 
-		await callIduMcpTool(
-			"idu_agentlab_review_run",
-			{ selector: "latest" },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered("C:/projects/sistema"),
-					stateRoot,
-				}),
-			},
-		);
-		await callIduMcpTool(
-			"idu_agentlab_review_status",
-			{ selector: "latest" },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered("C:/projects/sistema"),
-					stateRoot,
-				}),
-			},
-		);
-		await flushAgentLabEffectivenessEvents();
-		events = readAgentLabEffectivenessEvents(stateRoot);
-		report = buildAgentLabEffectivenessReport(events);
-		assert.equal(report.requestsCreated, 1);
-		assert.equal(report.reviewRuns, 1);
-		assert.equal(report.statusChecks, 1);
-		assert.equal(report.remoteAnalytics, false);
-		const serialized = JSON.stringify(events);
-		for (const forbidden of [
-			"prompt",
-			"rawUserText",
-			"env",
-			"headers",
-			"tokens",
-			"cost",
-			"contextPercent",
-			"rawSummary",
-		]) {
-			assert.equal(serialized.includes(forbidden), false, forbidden);
-		}
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+	await callIduMcpTool(
+		"idu_agentlab_review_run",
+		{ selector: "latest" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		},
+	);
+	await callIduMcpTool(
+		"idu_agentlab_review_status",
+		{ selector: "latest" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered("C:/projects/sistema"),
+				stateRoot,
+			}),
+		},
+	);
+	await flushAgentLabEffectivenessEvents();
+	events = readAgentLabEffectivenessEvents(stateRoot);
+	report = buildAgentLabEffectivenessReport(events);
+	assert.equal(report.requestsCreated, 1);
+	assert.equal(report.reviewRuns, 1);
+	assert.equal(report.statusChecks, 1);
+	assert.equal(report.remoteAnalytics, false);
+	const serialized = JSON.stringify(events);
+	for (const forbidden of [
+		"prompt",
+		"rawUserText",
+		"env",
+		"headers",
+		"tokens",
+		"cost",
+		"contextPercent",
+		"rawSummary",
+	]) {
+		assert.equal(serialized.includes(forbidden), false, forbidden);
 	}
 });
 
 test("idu_activate and idu_deactivate change session state", async () => {
-	const sessionRoot = mkdtempSync(join(tmpdir(), "idu-mcp-session-"));
+	const sessionRoot = makeTempDir("idu-mcp-session-");
 	configureIduSessionStore({
 		workspaceRoot: sessionRoot,
 		filePath: join(sessionRoot, "test-session-state.json"),
@@ -3365,70 +3338,66 @@ test("idu_skill_draft_from_lessons creates advisory learning artifacts", async (
 });
 
 test("idu_context_pruning_advisory is read-only and advisory-only", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-context-pruning-mcp-"));
-	try {
-		const projectPath = join(root, "project");
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		mkdirSync(projectPath, { recursive: true });
-		mkdirSync(join(projectPath, "docs", "superpowers", "plans"), {
-			recursive: true,
-		});
-		writeFileSync(
-			join(projectPath, "docs", "superpowers", "plans", "2026-01-01-old.md"),
-			"# Raw task prompt that must not be copied\n- [ ] open\n",
-			"utf8",
-		);
-		const runtime = fakeRuntime(projectPath);
-		runtime.workspaceRoot = stateRoot;
-		const result = await callIduMcpTool(
-			"idu_context_pruning_advisory",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered(projectPath),
-					stateRoot,
-				}),
-			},
-		);
+	const root = makeTempDir("idu-context-pruning-mcp-");
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	mkdirSync(projectPath, { recursive: true });
+	mkdirSync(join(projectPath, "docs", "superpowers", "plans"), {
+		recursive: true,
+	});
+	writeFileSync(
+		join(projectPath, "docs", "superpowers", "plans", "2026-01-01-old.md"),
+		"# Raw task prompt that must not be copied\n- [ ] open\n",
+		"utf8",
+	);
+	const runtime = fakeRuntime(projectPath);
+	runtime.workspaceRoot = stateRoot;
+	const result = await callIduMcpTool(
+		"idu_context_pruning_advisory",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered(projectPath),
+				stateRoot,
+			}),
+		},
+	);
 
-		assert.equal(result.ok, true);
-		const report = result.data.report as {
-			mode: string;
-			noDeletion: boolean;
-			noAutoDelete: boolean;
-			noContractPromotion: boolean;
-			rawPromptsStored: boolean;
-			rawDocsStored: boolean;
-			remoteAnalytics: boolean;
-			signals: unknown[];
-		};
-		assert.equal(report.mode, "advisory_only");
-		assert.equal(report.noDeletion, true);
-		assert.equal(report.noAutoDelete, true);
-		assert.equal(report.noContractPromotion, true);
-		assert.equal(report.rawPromptsStored, false);
-		assert.equal(report.rawDocsStored, false);
-		assert.equal(report.remoteAnalytics, false);
-		assert.ok(report.signals.length > 0);
-		assert.equal(
-			(result.data.decisionEnvelope as DecisionEnvelope).authority,
-			"advisory",
-		);
-		assert.equal(
-			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
-			false,
-		);
-		const serialized = JSON.stringify(result);
-		assert.equal(
-			serialized.includes("Raw task prompt that must not be copied"),
-			false,
-		);
-		assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
-		assert.match(result.safeNotes.join("\n"), /No promoví contratos/u);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		mode: string;
+		noDeletion: boolean;
+		noAutoDelete: boolean;
+		noContractPromotion: boolean;
+		rawPromptsStored: boolean;
+		rawDocsStored: boolean;
+		remoteAnalytics: boolean;
+		signals: unknown[];
+	};
+	assert.equal(report.mode, "advisory_only");
+	assert.equal(report.noDeletion, true);
+	assert.equal(report.noAutoDelete, true);
+	assert.equal(report.noContractPromotion, true);
+	assert.equal(report.rawPromptsStored, false);
+	assert.equal(report.rawDocsStored, false);
+	assert.equal(report.remoteAnalytics, false);
+	assert.ok(report.signals.length > 0);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		false,
+	);
+	const serialized = JSON.stringify(result);
+	assert.equal(
+		serialized.includes("Raw task prompt that must not be copied"),
+		false,
+	);
+	assert.match(result.safeNotes.join("\n"), /no borré archivos/u);
+	assert.match(result.safeNotes.join("\n"), /No promoví contratos/u);
 });
 
 test("autonomous alert MCP tools are listed", () => {
@@ -3440,339 +3409,307 @@ test("autonomous alert MCP tools are listed", () => {
 });
 
 test("idu_automaticov1_cycle blocks when execution readiness is missing", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-automaticov1-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		const runtime = fakeRuntime();
-		runtime.supervisorOnIduActivation();
-		await callIduMcpTool(
-			"idu_activate",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
-		const result = await callIduMcpTool(
-			"idu_automaticov1_cycle",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
+	const root = makeTempDir("idu-automaticov1-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	const runtime = fakeRuntime();
+	runtime.supervisorOnIduActivation();
+	await callIduMcpTool(
+		"idu_activate",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	const result = await callIduMcpTool(
+		"idu_automaticov1_cycle",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
 
-		assert.equal(result.ok, true);
-		const envelope = result.data.decisionEnvelope as DecisionEnvelope;
-		assert.equal(envelope.authority, "advisory");
-		assert.equal(envelope.allowedToProceed, false);
-		assert.equal(envelope.orchestratorDecisionRequired, true);
-		const cycle = result.data.result as {
-			status: string;
-			allowedToProceed: boolean;
-			externalFetchExecuted: boolean;
-			skillProposalExecuted: boolean;
-			alertScheduledTick: { status: string; tasksCreated: unknown[] };
-			executionReadiness?: { status: string };
-		};
-		assert.equal(cycle.status, "blocked_readiness");
-		assert.equal(cycle.allowedToProceed, false);
-		assert.equal(cycle.externalFetchExecuted, false);
-		assert.equal(cycle.skillProposalExecuted, false);
-		// With PR-104 bypass-by-capas, the cycle returns blocked_readiness
-		// when readiness is missing (no rails → bypass unavailable). The
-		// scheduler's status is independent of the cycle's block — it
-		// reports whether it ran. We verify no tasks were created.
-		assert.equal(cycle.alertScheduledTick.tasksCreated.length, 0);
-		assert.ok(cycle.executionReadiness);
-		assert.notEqual(cycle.executionReadiness.status, "execution_ready");
-		await flushSupervisorActivityEvents();
-		const supervisorEvents = readSupervisorActivityEvents(stateRoot);
-		assert.equal(supervisorEvents.length, 1);
-		assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
-		assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
-		assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
-		assert.equal(supervisorEvents[0]?.status, "skipped");
-		assert.equal(supervisorEvents[0]?.active, true);
-		assert.match(result.safeNotes.join("\n"), /no autoriza implementación/u);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, true);
+	const envelope = result.data.decisionEnvelope as DecisionEnvelope;
+	assert.equal(envelope.authority, "advisory");
+	assert.equal(envelope.allowedToProceed, false);
+	assert.equal(envelope.orchestratorDecisionRequired, true);
+	const cycle = result.data.result as {
+		status: string;
+		allowedToProceed: boolean;
+		externalFetchExecuted: boolean;
+		skillProposalExecuted: boolean;
+		alertScheduledTick: { status: string; tasksCreated: unknown[] };
+		executionReadiness?: { status: string };
+	};
+	assert.equal(cycle.status, "blocked_readiness");
+	assert.equal(cycle.allowedToProceed, false);
+	assert.equal(cycle.externalFetchExecuted, false);
+	assert.equal(cycle.skillProposalExecuted, false);
+	// With PR-104 bypass-by-capas, the cycle returns blocked_readiness
+	// when readiness is missing (no rails → bypass unavailable). The
+	// scheduler's status is independent of the cycle's block — it
+	// reports whether it ran. We verify no tasks were created.
+	assert.equal(cycle.alertScheduledTick.tasksCreated.length, 0);
+	assert.ok(cycle.executionReadiness);
+	assert.notEqual(cycle.executionReadiness.status, "execution_ready");
+	await flushSupervisorActivityEvents();
+	const supervisorEvents = readSupervisorActivityEvents(stateRoot);
+	assert.equal(supervisorEvents.length, 1);
+	assert.equal(supervisorEvents[0]?.eventType, "supervisor_tick");
+	assert.equal(supervisorEvents[0]?.origin, "orchestrator_requested");
+	assert.equal(supervisorEvents[0]?.trigger, "cron_planning");
+	assert.equal(supervisorEvents[0]?.status, "skipped");
+	assert.equal(supervisorEvents[0]?.active, true);
+	assert.match(result.safeNotes.join("\n"), /no autoriza implementación/u);
 });
 
 test("idu_automaticov1_cycle exposes context-pack recovery action in decision envelope", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-automaticov1-stale-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		mkdirSync(join(stateRoot, "reports"), { recursive: true });
-		writeFileSync(
-			join(stateRoot, "reports", "idu-usage-events.jsonl"),
-			[
-				JSON.stringify({
-					version: 1,
-					id: "context-pack-old",
-					timestamp: "2026-06-04T23:45:00.000Z",
-					projectId: "sistema_de_mantencion",
-					surface: "mcp",
-					action: "idu_supervisor_context_pack",
-				}),
-				JSON.stringify({
-					version: 1,
-					id: "recent-automaticov1",
-					timestamp: "2026-06-04T23:59:00.000Z",
-					projectId: "sistema_de_mantencion",
-					surface: "mcp",
-					action: "idu_automaticov1_cycle",
-				}),
-			].join("\n") + "\n",
-			"utf8",
-		);
-		const runtime = fakeRuntime(process.cwd());
-		runtime.supervisorOnIduActivation();
-		await callIduMcpTool(
-			"idu_activate",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(process.cwd()), stateRoot }),
-			},
-		);
-		const result = await callIduMcpTool(
-			"idu_automaticov1_cycle",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(process.cwd()), stateRoot }),
-			},
-		);
+	const root = makeTempDir("idu-automaticov1-stale-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	mkdirSync(join(stateRoot, "reports"), { recursive: true });
+	writeFileSync(
+		join(stateRoot, "reports", "idu-usage-events.jsonl"),
+		[
+			JSON.stringify({
+				version: 1,
+				id: "context-pack-old",
+				timestamp: "2026-06-04T23:45:00.000Z",
+				projectId: "sistema_de_mantencion",
+				surface: "mcp",
+				action: "idu_supervisor_context_pack",
+			}),
+			JSON.stringify({
+				version: 1,
+				id: "recent-automaticov1",
+				timestamp: "2026-06-04T23:59:00.000Z",
+				projectId: "sistema_de_mantencion",
+				surface: "mcp",
+				action: "idu_automaticov1_cycle",
+			}),
+		].join("\n") + "\n",
+		"utf8",
+	);
+	const runtime = fakeRuntime(process.cwd());
+	runtime.supervisorOnIduActivation();
+	await callIduMcpTool(
+		"idu_activate",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(process.cwd()), stateRoot }),
+		},
+	);
+	const result = await callIduMcpTool(
+		"idu_automaticov1_cycle",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(process.cwd()), stateRoot }),
+		},
+	);
 
-		assert.equal(result.ok, true);
-		const envelope = result.data.decisionEnvelope as DecisionEnvelope;
-		assert.ok(
-			envelope.requiredActions.some(
-				(action) =>
-					action.id === "refresh-mcp-supervisor-context-pack" &&
-					action.data?.tool === "idu_supervisor_context_pack" &&
-					action.data?.cliCommand ===
-						"corepack pnpm cli -- idu-supervisor-context-pack" &&
-					action.blocking === true,
-			),
-		);
-		const cycle = result.data.result as {
-			status: string;
-			recoveryActions: unknown[];
-		};
-		assert.equal(cycle.status, "blocked_readiness");
-		assert.equal(cycle.recoveryActions.length, 1);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, true);
+	const envelope = result.data.decisionEnvelope as DecisionEnvelope;
+	assert.ok(
+		envelope.requiredActions.some(
+			(action) =>
+				action.id === "refresh-mcp-supervisor-context-pack" &&
+				action.data?.tool === "idu_supervisor_context_pack" &&
+				action.data?.cliCommand ===
+					"corepack pnpm cli -- idu-supervisor-context-pack" &&
+				action.blocking === true,
+		),
+	);
+	const cycle = result.data.result as {
+		status: string;
+		recoveryActions: unknown[];
+	};
+	assert.equal(cycle.status, "blocked_readiness");
+	assert.equal(cycle.recoveryActions.length, 1);
 });
 
 test("autonomous alert status is read-only and raw honest", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-alert-status-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		const runtime = fakeRuntime();
-		const result = await callIduMcpTool(
-			"idu_autonomous_alerts_status",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
-		assert.equal(result.ok, true);
-		const report = result.data.report as {
-			rawHonesty: boolean;
-			noImplementation: boolean;
-			agentLabsExecuted: boolean;
-		};
-		assert.equal(report.rawHonesty, true);
-		assert.equal(report.noImplementation, true);
-		assert.equal(report.agentLabsExecuted, false);
-		assert.equal(existsSync(stateRoot), false);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const root = makeTempDir("idu-alert-status-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	const runtime = fakeRuntime();
+	const result = await callIduMcpTool(
+		"idu_autonomous_alerts_status",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		rawHonesty: boolean;
+		noImplementation: boolean;
+		agentLabsExecuted: boolean;
+	};
+	assert.equal(report.rawHonesty, true);
+	assert.equal(report.noImplementation, true);
+	assert.equal(report.agentLabsExecuted, false);
+	assert.equal(existsSync(stateRoot), false);
 });
 
 test("autonomous alert control writes only alert control state", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-alert-control-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		const runtime = fakeRuntime();
-		const result = await callIduMcpTool(
-			"idu_autonomous_alerts_control",
-			{ action: "disable", reason: "user stop" },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
-		assert.equal(result.ok, true);
-		const state = result.data.state as {
-			control: { active: boolean; reason?: string };
-		};
-		assert.equal(state.control.active, false);
-		assert.equal(state.control.reason, "user stop");
-		assert.equal(
-			existsSync(
-				join(stateRoot, "reports", "autonomous-alert-engine-state.json"),
-			),
-			true,
-		);
-		assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	const root = makeTempDir("idu-alert-control-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	const runtime = fakeRuntime();
+	const result = await callIduMcpTool(
+		"idu_autonomous_alerts_control",
+		{ action: "disable", reason: "user stop" },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	assert.equal(result.ok, true);
+	const state = result.data.state as {
+		control: { active: boolean; reason?: string };
+	};
+	assert.equal(state.control.active, false);
+	assert.equal(state.control.reason, "user stop");
+	assert.equal(
+		existsSync(
+			join(stateRoot, "reports", "autonomous-alert-engine-state.json"),
+		),
+		true,
+	);
+	assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
 });
 
 test("idu_autonomous_alerts_tick creates capped routine repeated bug tasks", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		const runtime = fakeRuntime();
-		for (let index = 0; index < 4; index += 1) {
-			runtime.createTask("bug", `telegram bug repeated ${index}`);
-		}
-		const result = await callIduMcpTool(
-			"idu_autonomous_alerts_tick",
-			{ allowTaskCreation: true },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
-		assert.equal(result.ok, true);
-		const report = result.data.report as {
-			tasksCreated: Array<{ taskId: string; alertId: string }>;
-		};
-		assert.ok(report.tasksCreated.length >= 1);
-		assert.ok(report.tasksCreated.length <= 3);
-		assert.equal(
-			(runtime.listTasks?.() ?? []).some((task) =>
-				/regression test/u.test(task.text),
-			),
-			true,
-		);
-		const ledger = readFileSync(
-			join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
-			"utf8",
-		);
-		assert.match(ledger, /alert-repeated_bug:telegram/u);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+	const root = makeTempDir("idu-alert-tick-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	const runtime = fakeRuntime();
+	for (let index = 0; index < 4; index += 1) {
+		runtime.createTask("bug", `telegram bug repeated ${index}`);
 	}
+	const result = await callIduMcpTool(
+		"idu_autonomous_alerts_tick",
+		{ allowTaskCreation: true },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		tasksCreated: Array<{ taskId: string; alertId: string }>;
+	};
+	assert.ok(report.tasksCreated.length >= 1);
+	assert.ok(report.tasksCreated.length <= 3);
+	assert.equal(
+		(runtime.listTasks?.() ?? []).some((task) =>
+			/regression test/u.test(task.text),
+		),
+		true,
+	);
+	const ledger = readFileSync(
+		join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
+		"utf8",
+	);
+	assert.match(ledger, /alert-repeated_bug:telegram/u);
 });
 
 test("idu_autonomous_alerts_tick is read-only by default for human escalations", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-read-only-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		const runtime = fakeRuntime();
-		for (let index = 0; index < 4; index += 1) {
-			runtime.createTask("bug", `security db auth bug repeated ${index}`);
-		}
-		const result = await callIduMcpTool(
-			"idu_autonomous_alerts_tick",
-			{},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
-		assert.equal(result.ok, true);
-		assert.equal(existsSync(join(stateRoot, "reports")), false);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+	const root = makeTempDir("idu-alert-tick-read-only-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	const runtime = fakeRuntime();
+	for (let index = 0; index < 4; index += 1) {
+		runtime.createTask("bug", `security db auth bug repeated ${index}`);
 	}
+	const result = await callIduMcpTool(
+		"idu_autonomous_alerts_tick",
+		{},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	assert.equal(result.ok, true);
+	assert.equal(existsSync(join(stateRoot, "reports")), false);
 });
 
 test("idu_autonomous_alerts_tick escalates high-risk repeated bug without task", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-alert-tick-high-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		const runtime = fakeRuntime();
-		for (let index = 0; index < 4; index += 1) {
-			runtime.createTask("bug", `security db auth bug repeated ${index}`);
-		}
-		const before = runtime.listTasks?.().length ?? 0;
-		const result = await callIduMcpTool(
-			"idu_autonomous_alerts_tick",
-			{ allowTaskCreation: true },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
-		);
-		assert.equal(result.ok, true);
-		const report = result.data.report as {
-			humanEscalations: unknown[];
-			tasksCreated: unknown[];
-		};
-		assert.ok(report.humanEscalations.length >= 1);
-		assert.equal(report.tasksCreated.length, 0);
-		assert.equal(runtime.listTasks?.().length ?? 0, before);
-		const ledger = readFileSync(
-			join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
-			"utf8",
-		);
-		assert.match(ledger, /alert-repeated_bug:/u);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+	const root = makeTempDir("idu-alert-tick-high-mcp-");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	const runtime = fakeRuntime();
+	for (let index = 0; index < 4; index += 1) {
+		runtime.createTask("bug", `security db auth bug repeated ${index}`);
 	}
+	const before = runtime.listTasks?.().length ?? 0;
+	const result = await callIduMcpTool(
+		"idu_autonomous_alerts_tick",
+		{ allowTaskCreation: true },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		humanEscalations: unknown[];
+		tasksCreated: unknown[];
+	};
+	assert.ok(report.humanEscalations.length >= 1);
+	assert.equal(report.tasksCreated.length, 0);
+	assert.equal(runtime.listTasks?.().length ?? 0, before);
+	const ledger = readFileSync(
+		join(stateRoot, "reports", "autonomous-alert-decisions.jsonl"),
+		"utf8",
+	);
+	assert.match(ledger, /alert-repeated_bug:/u);
 });
 
 test("idu_autonomous_alerts_tick converts self-maintenance backlog into maintenance task", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-alert-self-maintenance-mcp-"));
-	try {
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		const runtime = fakeRuntime();
-		for (let index = 0; index < 10; index += 1) {
-			const task = runtime.createTask(
-				"feature",
-				`routine backlog item ${index}`,
-			);
-			task.id = `backlog-${index}`;
-		}
-		const result = await callIduMcpTool(
-			"idu_autonomous_alerts_tick",
-			{ allowTaskCreation: true },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({ ...registered(), stateRoot }),
-			},
+	const root = makeTempDir("idu-alert-self-maintenance-mcp-");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	const runtime = fakeRuntime();
+	for (let index = 0; index < 10; index += 1) {
+		const task = runtime.createTask(
+			"feature",
+			`routine backlog item ${index}`,
 		);
-		assert.equal(result.ok, true);
-		const report = result.data.report as {
-			decisions: Array<{ domain: string; recommendedAction: string }>;
-			tasksCreated: Array<{ taskId: string; alertId: string }>;
-		};
-		assert.ok(
-			report.decisions.some(
-				(decision) =>
-					decision.domain === "backlog" &&
-					decision.recommendedAction === "create_task",
-			),
-		);
-		assert.ok(
-			report.tasksCreated.some((created) =>
-				created.alertId.includes("backlog-pressure"),
-			),
-		);
-		assert.ok(
-			(runtime.listTasks?.() ?? []).some((task) =>
-				/Structured task queue has backlog pressure/u.test(task.text),
-			),
-		);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
+		task.id = `backlog-${index}`;
 	}
+	const result = await callIduMcpTool(
+		"idu_autonomous_alerts_tick",
+		{ allowTaskCreation: true },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({ ...registered(), stateRoot }),
+		},
+	);
+	assert.equal(result.ok, true);
+	const report = result.data.report as {
+		decisions: Array<{ domain: string; recommendedAction: string }>;
+		tasksCreated: Array<{ taskId: string; alertId: string }>;
+	};
+	assert.ok(
+		report.decisions.some(
+			(decision) =>
+				decision.domain === "backlog" &&
+				decision.recommendedAction === "create_task",
+		),
+	);
+	assert.ok(
+		report.tasksCreated.some((created) =>
+			created.alertId.includes("backlog-pressure"),
+		),
+	);
+	assert.ok(
+		(runtime.listTasks?.() ?? []).some((task) =>
+			/Structured task queue has backlog pressure/u.test(task.text),
+		),
+	);
 });
 
 test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-only report", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-mcp-"));
+	const root = makeTempDir("idu-self-maintenance-mcp-");
 	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
 	mkdirSync(join(stateRoot, "reports"), { recursive: true });
 	const recentTelemetryTimestamp = new Date().toISOString();
@@ -3920,11 +3857,10 @@ test("idu_supervisor_self_maintenance_advisory returns self-maintenance read-onl
 	assert.match(result.safeNotes.join("\n"), /No creé tareas/u);
 	assert.match(result.safeNotes.join("\n"), /no toqué AgentLabs/u);
 	assert.equal(existsSync(join(stateRoot, "unexpected-output.json")), false);
-	rmSync(root, { recursive: true, force: true });
 });
 
 test("idu_supervisor_self_maintenance_advisory ignores resolved historical AgentLab pressure", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-self-maintenance-resolved-"));
+	const root = makeTempDir("idu-self-maintenance-resolved-");
 	const stateRoot = join(root, "state", "projects", "idu-pi");
 	mkdirSync(join(stateRoot, "reports"), { recursive: true });
 	const failedAt = new Date(Date.now() - 10 * 60_000).toISOString();
@@ -4031,165 +3967,150 @@ test("idu_supervisor_self_maintenance_advisory ignores resolved historical Agent
 			(ref) => ref === "agentlab-review-requests:stale=0",
 		),
 	);
-	rmSync(root, { recursive: true, force: true });
 });
 
 test("idu_external_intelligence_report is allowlisted and advisory-only", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-external-intelligence-mcp-"));
-	try {
-		const projectPath = join(root, "project");
-		const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
-		mkdirSync(projectPath, { recursive: true });
-		const runtime = fakeRuntime(projectPath);
-		runtime.workspaceRoot = stateRoot;
-		const result = await callIduMcpTool(
-			"idu_external_intelligence_report",
-			{ sourceIds: ["npm-advisories"] },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered(projectPath),
-					stateRoot,
-				}),
-			},
-		);
+	const root = makeTempDir("idu-external-intelligence-mcp-");
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state", "projects", "sistema_de_mantencion");
+	mkdirSync(projectPath, { recursive: true });
+	const runtime = fakeRuntime(projectPath);
+	runtime.workspaceRoot = stateRoot;
+	const result = await callIduMcpTool(
+		"idu_external_intelligence_report",
+		{ sourceIds: ["npm-advisories"] },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered(projectPath),
+				stateRoot,
+			}),
+		},
+	);
 
-		assert.equal(result.ok, true);
-		const report = result.data.report as ExternalIntelligenceReport;
-		assert.equal(report.mode, "advisory_only");
-		assert.equal(report.stateRootOnly, true);
-		assert.equal(report.rawContentStored, false);
-		assert.equal(report.autoDependencyUpdatesAllowed, false);
-		assert.equal(report.agentLabAutoRunAllowed, false);
-		assert.equal(report.remoteAnalyticsAllowed, false);
-		assert.equal(report.contractPromotionAllowed, false);
-		assert.equal(report.sourcesQueried[0]?.status, "skipped");
-		assert.equal(
-			(result.data.decisionEnvelope as DecisionEnvelope).authority,
-			"advisory",
-		);
-		assert.equal(
-			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
-			false,
-		);
-		const paths = result.data.paths as {
-			currentPath: string;
-			historyPath: string;
-		};
-		assert.ok(paths.currentPath.startsWith(stateRoot));
-		assert.ok(paths.historyPath.startsWith(stateRoot));
-		assert.equal(existsSync(paths.currentPath), true);
-		const serialized = JSON.stringify(result);
-		assert.equal(serialized.includes("RAW"), false);
-		assert.match(result.safeNotes.join("\n"), /allowlist/u);
-		assert.match(result.safeNotes.join("\n"), /No actualicé dependencias/u);
-		assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/u);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, true);
+	const report = result.data.report as ExternalIntelligenceReport;
+	assert.equal(report.mode, "advisory_only");
+	assert.equal(report.stateRootOnly, true);
+	assert.equal(report.rawContentStored, false);
+	assert.equal(report.autoDependencyUpdatesAllowed, false);
+	assert.equal(report.agentLabAutoRunAllowed, false);
+	assert.equal(report.remoteAnalyticsAllowed, false);
+	assert.equal(report.contractPromotionAllowed, false);
+	assert.equal(report.sourcesQueried[0]?.status, "skipped");
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		false,
+	);
+	const paths = result.data.paths as {
+		currentPath: string;
+		historyPath: string;
+	};
+	assert.ok(paths.currentPath.startsWith(stateRoot));
+	assert.ok(paths.historyPath.startsWith(stateRoot));
+	assert.equal(existsSync(paths.currentPath), true);
+	const serialized = JSON.stringify(result);
+	assert.equal(serialized.includes("RAW"), false);
+	assert.match(result.safeNotes.join("\n"), /allowlist/u);
+	assert.match(result.safeNotes.join("\n"), /No actualicé dependencias/u);
+	assert.match(result.safeNotes.join("\n"), /No ejecuté AgentLabs/u);
 });
 
 test("idu_external_intelligence_report refuses workspace fallback without stateRoot", async () => {
-	const root = mkdtempSync(
-		join(tmpdir(), "idu-external-intelligence-no-state-"),
+	const root = makeTempDir("idu-external-intelligence-no-state-");
+	const projectPath = join(root, "project");
+	mkdirSync(projectPath, { recursive: true });
+	const runtime = fakeRuntime(projectPath);
+	const result = await callIduMcpTool(
+		"idu_external_intelligence_report",
+		{ sourceIds: ["npm-advisories"] },
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				status: "registered_project",
+				projectId: "sistema_de_mantencion",
+				projectPath,
+				safeNotes: [],
+				errors: [],
+			}),
+		},
 	);
-	try {
-		const projectPath = join(root, "project");
-		mkdirSync(projectPath, { recursive: true });
-		const runtime = fakeRuntime(projectPath);
-		const result = await callIduMcpTool(
-			"idu_external_intelligence_report",
-			{ sourceIds: ["npm-advisories"] },
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					status: "registered_project",
-					projectId: "sistema_de_mantencion",
-					projectPath,
-					safeNotes: [],
-					errors: [],
-				}),
-			},
-		);
 
-		assert.equal(result.ok, false);
-		assert.equal(result.errors.includes("missing_state_root"), true);
-		assert.equal(result.data.stateRootRequired, true);
-		assert.equal(result.data.workspaceFallbackAllowed, false);
-		assert.equal(existsSync(join(projectPath, "reports")), false);
-		assert.match(
-			result.safeNotes.join("\n"),
-			/no usa workspaceRoot como fallback/u,
-		);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, false);
+	assert.equal(result.errors.includes("missing_state_root"), true);
+	assert.equal(result.data.stateRootRequired, true);
+	assert.equal(result.data.workspaceFallbackAllowed, false);
+	assert.equal(existsSync(join(projectPath, "reports")), false);
+	assert.match(
+		result.safeNotes.join("\n"),
+		/no usa workspaceRoot como fallback/u,
+	);
 });
 
 test("idu_external_source_recommend is registry-only and advisory", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-external-source-registry-mcp-"));
-	try {
-		const projectPath = join(root, "project");
-		const stateRoot = join(root, "state", "projects", "idu-pi");
-		mkdirSync(projectPath, { recursive: true });
-		const runtime = fakeRuntime(projectPath);
-		const result = await callIduMcpTool(
-			"idu_external_source_recommend",
-			{
-				request: "HTML sin JS embebido y estructura Next.js TypeScript",
-				domains: ["web", "programming_structure", "separation_of_concerns"],
-				language: "html",
-				framework: "nextjs",
-				maxMatches: 6,
-			},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => ({
-					...registered(projectPath),
-					stateRoot,
-				}),
-			},
-		);
+	const root = makeTempDir("idu-external-source-registry-mcp-");
+	const projectPath = join(root, "project");
+	const stateRoot = join(root, "state", "projects", "idu-pi");
+	mkdirSync(projectPath, { recursive: true });
+	const runtime = fakeRuntime(projectPath);
+	const result = await callIduMcpTool(
+		"idu_external_source_recommend",
+		{
+			request: "HTML sin JS embebido y estructura Next.js TypeScript",
+			domains: ["web", "programming_structure", "separation_of_concerns"],
+			language: "html",
+			framework: "nextjs",
+			maxMatches: 6,
+		},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => ({
+				...registered(projectPath),
+				stateRoot,
+			}),
+		},
+	);
 
-		assert.equal(result.ok, true);
-		const report = result.data.report as ExternalSourceRecommendationReport;
-		assert.equal(report.fetchAllowed, false);
-		assert.equal(report.rawDocsStored, false);
-		assert.equal(report.promotionAllowed, false);
-		assert.equal(report.agentLabAutoRunAllowed, false);
-		assert.equal(report.evidencePolicy.rawHonesty, true);
-		assert.equal(report.evidencePolicy.webFetchAllowed, false);
-		assert.equal(report.evidencePolicy.rawContentIncluded, false);
-		assert.equal(report.evidencePolicy.contractPromotionAllowed, false);
-		assert.ok(Array.isArray(report.matches));
-		assert.ok(report.matches.length > 0);
-		assert.ok(
-			report.matches.every(
-				(match) =>
-					Boolean(match.claimType) &&
-					Boolean(match.evidenceRole) &&
-					Boolean(match.canonicality) &&
-					typeof match.requiresCorroboration === "boolean" &&
-					typeof match.forbiddenAsSoleAuthority === "boolean",
-			),
-		);
-		assert.equal(
-			(result.data.decisionEnvelope as DecisionEnvelope).authority,
-			"advisory",
-		);
-		assert.equal(
-			(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
-			false,
-		);
-		const safeNotes = result.safeNotes.join("\n");
-		assert.match(safeNotes, /no hice web\/live fetch/u);
-		assert.match(safeNotes, /no guardé raw docs/u);
-		assert.match(safeNotes, /No importé Source Library/u);
-		assert.match(safeNotes, /No promoví contratos/u);
-		assert.match(safeNotes, /No ejecuté AgentLabs/u);
-	} finally {
-		rmSync(root, { recursive: true, force: true });
-	}
+	assert.equal(result.ok, true);
+	const report = result.data.report as ExternalSourceRecommendationReport;
+	assert.equal(report.fetchAllowed, false);
+	assert.equal(report.rawDocsStored, false);
+	assert.equal(report.promotionAllowed, false);
+	assert.equal(report.agentLabAutoRunAllowed, false);
+	assert.equal(report.evidencePolicy.rawHonesty, true);
+	assert.equal(report.evidencePolicy.webFetchAllowed, false);
+	assert.equal(report.evidencePolicy.rawContentIncluded, false);
+	assert.equal(report.evidencePolicy.contractPromotionAllowed, false);
+	assert.ok(Array.isArray(report.matches));
+	assert.ok(report.matches.length > 0);
+	assert.ok(
+		report.matches.every(
+			(match) =>
+				Boolean(match.claimType) &&
+				Boolean(match.evidenceRole) &&
+				Boolean(match.canonicality) &&
+				typeof match.requiresCorroboration === "boolean" &&
+				typeof match.forbiddenAsSoleAuthority === "boolean",
+		),
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).authority,
+		"advisory",
+	);
+	assert.equal(
+		(result.data.decisionEnvelope as DecisionEnvelope).allowedToProceed,
+		false,
+	);
+	const safeNotes = result.safeNotes.join("\n");
+	assert.match(safeNotes, /no hice web\/live fetch/u);
+	assert.match(safeNotes, /no guardé raw docs/u);
+	assert.match(safeNotes, /No importé Source Library/u);
+	assert.match(safeNotes, /No promoví contratos/u);
+	assert.match(safeNotes, /No ejecuté AgentLabs/u);
 });
 
 test("idu_queue_complete marks a task done with evidence", async () => {
@@ -4381,7 +4302,7 @@ function setMcpEnv(root: string, projectPath: string): string {
 }
 
 test("idu_project_status does not write files for unregistered project", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-status-"));
+	const root = makeTempDir("idu-mcp-status-");
 	const projectPath = join(root, "project");
 	mkdirSync(projectPath, { recursive: true });
 	const previous = snapshotEnv();
@@ -4393,12 +4314,11 @@ test("idu_project_status does not write files for unregistered project", async (
 		assert.equal(existsSync(registryPath), false);
 	} finally {
 		restoreEnv(previous);
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
 test("idu_project_enroll registers project and creates isolated state only", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-enroll-"));
+	const root = makeTempDir("idu-mcp-enroll-");
 	const projectPath = join(root, "project");
 	mkdirSync(projectPath, { recursive: true });
 	const previous = snapshotEnv();
@@ -4425,12 +4345,11 @@ test("idu_project_enroll registers project and creates isolated state only", asy
 		);
 	} finally {
 		restoreEnv(previous);
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
 test("idu_project_status reports registered project after enroll", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-status-registered-"));
+	const root = makeTempDir("idu-mcp-status-registered-");
 	const projectPath = join(root, "project");
 	mkdirSync(projectPath, { recursive: true });
 	const previous = snapshotEnv();
@@ -4442,13 +4361,12 @@ test("idu_project_status reports registered project after enroll", async () => {
 		assert.equal(result.data.registered, true);
 	} finally {
 		restoreEnv(previous);
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
 test("idu_project_enroll rejects paths outside allowed roots", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-enroll-deny-"));
-	const outside = mkdtempSync(join(tmpdir(), "idu-mcp-outside-"));
+	const root = makeTempDir("idu-mcp-enroll-deny-");
+	const outside = makeTempDir("idu-mcp-outside-");
 	const previous = snapshotEnv();
 	setMcpEnv(root, root);
 	try {
@@ -4459,13 +4377,11 @@ test("idu_project_enroll rejects paths outside allowed roots", async () => {
 		assert.match(result.summary, /ALLOWED_ROOTS/u);
 	} finally {
 		restoreEnv(previous);
-		rmSync(root, { recursive: true, force: true });
-		rmSync(outside, { recursive: true, force: true });
 	}
 });
 
 test("idu_bootstrap_project creates drafts only when explicitly allowed and activates when requested", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-bootstrap-"));
+	const root = makeTempDir("idu-mcp-bootstrap-");
 	const noDraftsPath = join(root, "no-drafts");
 	const draftsPath = join(root, "drafts");
 	mkdirSync(noDraftsPath, { recursive: true });
@@ -4544,7 +4460,6 @@ test("idu_bootstrap_project creates drafts only when explicitly allowed and acti
 		);
 	} finally {
 		restoreEnv(previous);
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
@@ -4611,7 +4526,7 @@ test("idu_start does not enroll unregistered projects and activates registered p
 });
 
 test("idu_activate remains activate-only and does not bootstrap unregistered projects", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-mcp-activate-only-"));
+	const root = makeTempDir("idu-mcp-activate-only-");
 	const projectPath = join(root, "project");
 	mkdirSync(projectPath, { recursive: true });
 	const previous = snapshotEnv();
@@ -4626,7 +4541,6 @@ test("idu_activate remains activate-only and does not bootstrap unregistered pro
 		);
 	} finally {
 		restoreEnv(previous);
-		rmSync(root, { recursive: true, force: true });
 	}
 });
 
@@ -4932,7 +4846,7 @@ test("postflight request create remains request-only and review-run reports sand
 		createAgentLabReviewRequests({
 			source: "external_source_intelligence",
 			reportsPath: join(
-				mkdtempSync(join(tmpdir(), "idu-mcp-source-evidence-")),
+				makeTempDir("idu-mcp-source-evidence-"),
 				"reports",
 			),
 			projectId: "sistema_de_mantencion",
@@ -4976,7 +4890,7 @@ test("postflight request create remains request-only and review-run reports sand
 		createAgentLabReviewRequests({
 			source: "specialist_audit_plan",
 			reportsPath: join(
-				mkdtempSync(join(tmpdir(), "idu-mcp-specialist-")),
+				makeTempDir("idu-mcp-specialist-"),
 				"reports",
 			),
 			projectId: "sistema_de_mantencion",
@@ -5153,69 +5067,65 @@ test("postflight request create remains request-only and review-run reports sand
 });
 
 test("MCP idu_agentlab_request_create threads the model arg through to the runtime and persists it on every request", async () => {
-	const reportsPath = mkdtempSync(join(tmpdir(), "idu-mcp-model-"));
-	try {
-		const runtime = fakeRuntime();
-		let capturedOptions:
-			| {
-					model?: string;
-					stateRoot?: string;
-					objective?: string;
-					context?: string;
-			  }
-			| undefined;
-		runtime.agentLabRequestCreate = (_source, _selector, options) => {
-			capturedOptions = options;
-			// Build a real plan via the production helper so we exercise
-			// the same persistence path the CLI takes (model flows into
-			// every request).
-			return createAgentLabReviewRequests({
-				source: "postflight",
-				reportsPath,
-				projectId: "sistema_de_mantencion",
-				projectPath: "C:/projects/sistema",
-				postflightReport: {
-					risk: "high",
-					changedFiles: ["src/auth.ts"],
-					impactedAreas: ["seguridad"],
-					warnings: [],
-					recommendedNext: "Revisar cambios.",
-					shouldRunAgentLab: true,
-					suggestedAgentLabs: ["security"],
-					requiresHumanConfirmation: false,
-					physicalGates: [],
-				},
-				model: options?.model,
-				stateRoot: options?.stateRoot,
-			});
-		};
-		const response = await callIduMcpTool(
-			"idu_agentlab_request_create",
-			{
-				source: "postflight",
-				selector: "latest",
-				model: "opencode-go/deepseek-v4-pro",
+	const reportsPath = makeTempDir("idu-mcp-model-");
+	const runtime = fakeRuntime();
+	let capturedOptions:
+		| {
+				model?: string;
+				stateRoot?: string;
+				objective?: string;
+				context?: string;
+		  }
+		| undefined;
+	runtime.agentLabRequestCreate = (_source, _selector, options) => {
+		capturedOptions = options;
+		// Build a real plan via the production helper so we exercise
+		// the same persistence path the CLI takes (model flows into
+		// every request).
+		return createAgentLabReviewRequests({
+			source: "postflight",
+			reportsPath,
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			postflightReport: {
+				risk: "high",
+				changedFiles: ["src/auth.ts"],
+				impactedAreas: ["seguridad"],
+				warnings: [],
+				recommendedNext: "Revisar cambios.",
+				shouldRunAgentLab: true,
+				suggestedAgentLabs: ["security"],
+				requiresHumanConfirmation: false,
+				physicalGates: [],
 			},
-			{
-				runtimeFactory: () => runtime,
-				projectResolver: () => registered(),
-			},
+			model: options?.model,
+			stateRoot: options?.stateRoot,
+		});
+	};
+	const response = await callIduMcpTool(
+		"idu_agentlab_request_create",
+		{
+			source: "postflight",
+			selector: "latest",
+			model: "opencode-go/deepseek-v4-pro",
+		},
+		{
+			runtimeFactory: () => runtime,
+			projectResolver: () => registered(),
+		},
+	);
+	assert.equal(response.ok, true, `errors: ${response.errors.join("\n")}`);
+	assert.equal(capturedOptions?.model, "opencode-go/deepseek-v4-pro");
+	const plan = response.data.plan as {
+		requests: Array<{ model?: string; specialty: string }>;
+	};
+	assert.ok(plan.requests.length > 0, "expected at least one request");
+	for (const request of plan.requests) {
+		assert.equal(
+			request.model,
+			"opencode-go/deepseek-v4-pro",
+			`request ${request.specialty} must carry the model`,
 		);
-		assert.equal(response.ok, true, `errors: ${response.errors.join("\n")}`);
-		assert.equal(capturedOptions?.model, "opencode-go/deepseek-v4-pro");
-		const plan = response.data.plan as {
-			requests: Array<{ model?: string; specialty: string }>;
-		};
-		assert.ok(plan.requests.length > 0, "expected at least one request");
-		for (const request of plan.requests) {
-			assert.equal(
-				request.model,
-				"opencode-go/deepseek-v4-pro",
-				`request ${request.specialty} must carry the model`,
-			);
-		}
-	} finally {
-		rmSync(reportsPath, { recursive: true, force: true });
 	}
 });
 
@@ -5243,4 +5153,12 @@ test("buildNextAdvisoryAction omits agent contract when no keyword matches (#255
 		`contractsAffected must not include the unconditional "agent": ${JSON.stringify(candidateAction.contractsAffected)}`,
 	);
 	assert.deepEqual(candidateAction.contractsAffected, []);
+});
+
+after(() => {
+	try {
+		rmSync(hermeticMcpRoot, { recursive: true, force: true });
+	} catch {
+		// best-effort; ignore EBUSY on Windows during shutdown
+	}
 });
