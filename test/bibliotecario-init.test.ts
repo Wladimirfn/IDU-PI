@@ -1,8 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempDir } from "./helpers/temp.js";
 import { seedBootstrapSkillIfMissing } from "../src/bibliotecario-init.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
 
@@ -12,7 +11,7 @@ describe("T2.3 — seedBootstrapSkillIfMissing", () => {
 	let repo: LabDbRepository;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "bibliotecario-init-"));
+		tempDir = makeTempDir("bibliotecario-init-");
 		dbPath = join(tempDir, "lab.db");
 		repo = new LabDbRepository(dbPath, {
 			bibliotecarioProjectId: "test-project",
@@ -28,7 +27,7 @@ describe("T2.3 — seedBootstrapSkillIfMissing", () => {
 
 	it("returns null when lab.db does not exist in stateRoot", () => {
 		// Use a completely fresh directory without any lab.db
-		const freshDir = mkdtempSync(join(tmpdir(), "bibliotecario-init-empty-"));
+		const freshDir = makeTempDir("bibliotecario-init-empty-");
 		const result = seedBootstrapSkillIfMissing(freshDir);
 		assert.equal(result, null);
 	});

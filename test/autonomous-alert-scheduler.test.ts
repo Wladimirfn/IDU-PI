@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import { updateAutonomousAlertControlState } from "../src/autonomous-alert-engine-state.js";
 import {
 	acquireAutonomousAlertSchedulerLock,
@@ -14,10 +13,6 @@ import {
 } from "../src/autonomous-alert-scheduler.js";
 import type { StructuredTask } from "../src/structured-task-queue.js";
 import type { SupervisorSelfMaintenanceSignal } from "../src/supervisor-self-maintenance-advisory.js";
-
-function tempRoot(): string {
-	return mkdtempSync(join(tmpdir(), "idu-alert-executor-"));
-}
 
 function task(id: string, text = "bug context failure"): StructuredTask {
 	return {
@@ -56,7 +51,7 @@ function defaultInput(
 }
 
 test("scheduled executor skips when Idu-pi is inactive", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	let planLoads = 0;
 	const result = runAutonomousAlertScheduledTick(
 		defaultInput(stateRoot, {
@@ -73,7 +68,7 @@ test("scheduled executor skips when Idu-pi is inactive", () => {
 });
 
 test("scheduled executor skips when alert control is inactive", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	updateAutonomousAlertControlState(
 		stateRoot,
 		{ active: false, reason: "test-off" },
@@ -86,7 +81,7 @@ test("scheduled executor skips when alert control is inactive", () => {
 });
 
 test("scheduled executor skips when another owner holds the lock", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	acquireAutonomousAlertSchedulerLock(stateRoot, {
 		ownerId: "other-owner",
 		now: new Date("2026-06-05T00:00:00.000Z"),
@@ -103,7 +98,7 @@ test("scheduled executor skips when another owner holds the lock", () => {
 });
 
 test("scheduled executor blocks on unapproved objective before decisions", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	let tasksLoaded = 0;
 	const result = runAutonomousAlertScheduledTick(
 		defaultInput(stateRoot, {
@@ -121,7 +116,7 @@ test("scheduled executor blocks on unapproved objective before decisions", () =>
 });
 
 test("scheduled executor is read-only by default", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	let created = 0;
 	const result = runAutonomousAlertScheduledTick(
 		defaultInput(stateRoot, {
@@ -140,7 +135,7 @@ test("scheduled executor is read-only by default", () => {
 });
 
 test("scheduled executor creates capped routine tasks only when explicitly allowed", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	let created = 0;
 	const signals: SupervisorSelfMaintenanceSignal[] = [1, 2, 3, 4].map(
 		(index) => ({
@@ -175,7 +170,7 @@ test("scheduled executor creates capped routine tasks only when explicitly allow
 });
 
 test("scheduled executor does not create duplicates for already materialized decisions", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	const signal: SupervisorSelfMaintenanceSignal = {
 		id: "backlog-1",
 		category: "backlog_pressure",
@@ -211,7 +206,7 @@ test("scheduled executor does not create duplicates for already materialized dec
 });
 
 test("scheduled executor blocks routine creation when protected human escalations exist", () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-alert-executor-");
 	let created = 0;
 	const signals: SupervisorSelfMaintenanceSignal[] = [
 		{

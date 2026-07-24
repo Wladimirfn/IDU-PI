@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	runAutomaticov1AdvisoryCycle,
 	type Automaticov1CycleInput,
@@ -10,10 +10,6 @@ import {
 import type { IduUsageEvent } from "../src/usage-events.js";
 import type { StructuredTask } from "../src/structured-task-queue.js";
 import type { SupervisorSelfMaintenanceSignal } from "../src/supervisor-self-maintenance-advisory.js";
-
-function tempRoot(): string {
-	return mkdtempSync(join(tmpdir(), "idu-automaticov1-cycle-"));
-}
 
 function seedRailsWithTokensAvailable(stateRoot: string): void {
 	mkdirSync(stateRoot, { recursive: true });
@@ -111,7 +107,7 @@ function input(
 }
 
 test("automaticov1 cycle skips optional engines when Idu-pi is inactive", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let bibliotecarioCalls = 0;
 	let externalCalls = 0;
 	let skillCalls = 0;
@@ -142,7 +138,7 @@ test("automaticov1 cycle skips optional engines when Idu-pi is inactive", async 
 });
 
 test("automaticov1 cycle is advisory and no-fetch/no-skill-writes by default", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let externalCalls = 0;
 	let skillCalls = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
@@ -182,7 +178,7 @@ test("automaticov1 cycle is advisory and no-fetch/no-skill-writes by default", a
 });
 
 test("automaticov1 cycle injects stale MCP context pack refresh advisory", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	const usageEvents: IduUsageEvent[] = [
 		{
 			version: 1,
@@ -223,7 +219,7 @@ test("automaticov1 cycle injects stale MCP context pack refresh advisory", async
 });
 
 test("automaticov1 cycle blocks when execution readiness supplier is missing", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -245,7 +241,7 @@ test("automaticov1 cycle blocks when execution readiness supplier is missing", a
 });
 
 test("automaticov1 cycle blocks when execution readiness is not satisfied", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -281,7 +277,7 @@ test("automaticov1 cycle blocks when execution readiness is not satisfied", asyn
 });
 
 test("automaticov1 cycle exposes context-pack recovery action when readiness is stale", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
 			loadExecutionReadiness: () => ({
@@ -314,7 +310,7 @@ test("automaticov1 cycle exposes context-pack recovery action when readiness is 
 });
 
 test("automaticov1 cycle blocks when Master Plan task tree is not ready", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -344,7 +340,7 @@ test("automaticov1 cycle blocks when Master Plan task tree is not ready", async 
 });
 
 test("automaticov1 cycle blocks when hard supervisor friction requires systemic repair", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -392,7 +388,7 @@ for (const hardEvidenceRef of [
 	"agentlab-review-requests:stale=1",
 ]) {
 	test(`automaticov1 cycle blocks supervisor pressure with ${hardEvidenceRef}`, async () => {
-		const stateRoot = tempRoot();
+		const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 		const result = await runAutomaticov1AdvisoryCycle(
 			input(stateRoot, {
 				allowTaskCreation: true,
@@ -428,7 +424,7 @@ for (const hardSignal of [
 	},
 ]) {
 	test(`automaticov1 cycle preserves hard block for ${hardSignal.category}`, async () => {
-		const stateRoot = tempRoot();
+		const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 		const result = await runAutomaticov1AdvisoryCycle(
 			input(stateRoot, {
 				allowTaskCreation: true,
@@ -454,7 +450,7 @@ for (const hardSignal of [
 }
 
 test("automaticov1 cycle does not block on advisory-only supervisor pressure", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -505,7 +501,7 @@ test("automaticov1 cycle does not block on advisory-only supervisor pressure", a
 });
 
 test("automaticov1 cycle does not hard-block on pending open tasks alone", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
 			allowTaskCreation: true,
@@ -544,7 +540,7 @@ test("automaticov1 cycle does not hard-block on pending open tasks alone", async
 });
 
 test("automaticov1 cycle delegates bounded task creation to scheduled alert executor", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	seedRailsWithTokensAvailable(stateRoot);
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
@@ -570,7 +566,7 @@ test("automaticov1 cycle delegates bounded task creation to scheduled alert exec
 });
 
 test("automaticov1 cycle: self-repair bypass fires when systemicBlock + rails have tokens", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	seedRailsWithTokensAvailable(stateRoot);
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -594,7 +590,7 @@ test("automaticov1 cycle: self-repair bypass fires when systemicBlock + rails ha
 });
 
 test("automaticov1 cycle: self-repair BLOCKED when rails have NO tokens (no_rail_tokens)", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	// Do NOT seed rails → anyRailHasTokensAvailable returns false
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -618,7 +614,7 @@ test("automaticov1 cycle: self-repair BLOCKED when rails have NO tokens (no_rail
 });
 
 test("automaticov1 cycle preserves protected human escalations", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let created = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -644,7 +640,7 @@ test("automaticov1 cycle preserves protected human escalations", async () => {
 });
 
 test("automaticov1 cycle runs exact-allowlist external intelligence only when explicitly enabled", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let externalCalls = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
@@ -668,7 +664,7 @@ test("automaticov1 cycle runs exact-allowlist external intelligence only when ex
 });
 
 test("automaticov1 cycle runs skill proposal pipeline only when explicitly enabled", async () => {
-	const stateRoot = tempRoot();
+	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	let skillCalls = 0;
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
