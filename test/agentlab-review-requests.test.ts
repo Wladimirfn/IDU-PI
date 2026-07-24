@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdtempSync } from "node:fs";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	createAgentLabReviewRequests,
 	formatAgentLabReviewRequestPlan,
@@ -13,10 +12,6 @@ import {
 import { formatAgentLabReviewRequestForPrompt } from "../src/agentlab-supervisor-contract.js";
 import { generateMasterPlanDraft } from "../src/master-plan.js";
 import type { ProjectPostflightReport } from "../src/project-postflight.js";
-
-function root(): string {
-	return mkdtempSync(join(tmpdir(), "agentlab-review-requests-"));
-}
 
 function now(): Date {
 	return new Date("2026-05-25T12:34:56.000Z");
@@ -110,12 +105,12 @@ function writeSkillDraft(reportsPath: string): void {
 }
 
 test("specialist audit plan crea requests y workload por especialidad sin ejecutar labs", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	const plan = createAgentLabReviewRequests({
 		source: "specialist_audit_plan",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		manualObjective: "Audit MCP and AgentLab governance",
 		manualContext: "Check advisory-only boundaries.",
 		specialties: ["security", "architecture", "database"],
@@ -158,12 +153,12 @@ test("specialist audit plan crea requests y workload por especialidad sin ejecut
 });
 
 test("postflight high crea request security/database según impacto", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	const security = createAgentLabReviewRequests({
 		source: "postflight",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		postflightReport: postflight(["src/auth/login.ts"]),
 		now,
 	});
@@ -171,7 +166,7 @@ test("postflight high crea request security/database según impacto", () => {
 		source: "postflight",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		postflightReport: postflight(["src/db/schema.ts"]),
 		now: () => new Date("2026-05-25T12:35:56.000Z"),
 	});
@@ -206,7 +201,7 @@ test("postflight high crea request security/database según impacto", () => {
 });
 
 test("master-plan deep_required crea requests desde Plan Maestro", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-requests-");
 	const projectPath = join(temp, "project");
 	const stateRoot = join(temp, "state");
 	writeLargeProject(projectPath);
@@ -270,7 +265,7 @@ test("master-plan deep_required crea requests desde Plan Maestro", () => {
 });
 
 test("master-plan incompatible no crea requests", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-requests-");
 	const stateRoot = join(temp, "state");
 	const reportsPath = join(stateRoot, "reports");
 	mkdirSync(reportsPath, { recursive: true });
@@ -310,12 +305,12 @@ test("master-plan incompatible no crea requests", () => {
 });
 
 test("skill-draft sin draft válido falla visible", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	const result = createAgentLabReviewRequests({
 		source: "skill_draft",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		skillDraftPathOrLatest: "latest",
 		now,
 	});
@@ -324,13 +319,13 @@ test("skill-draft sin draft válido falla visible", () => {
 });
 
 test("skill-draft crea request skill_review", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	writeSkillDraft(reportsPath);
 	const result = createAgentLabReviewRequests({
 		source: "skill_draft",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		skillDraftPathOrLatest: "latest",
 		now,
 	});
@@ -343,13 +338,13 @@ test("skill-draft crea request skill_review", () => {
 });
 
 test("skill-draft request usa JSON de reports como fuente temporal", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	writeSkillDraft(reportsPath);
 	const result = createAgentLabReviewRequests({
 		source: "skill_draft",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		skillDraftPathOrLatest: "latest",
 		now,
 	});
@@ -381,9 +376,9 @@ test("skill-draft request usa JSON de reports como fuente temporal", () => {
 test("request siempre incluye forbiddenActions obligatorias", () => {
 	const result = createAgentLabReviewRequests({
 		source: "manual",
-		reportsPath: join(root(), "reports"),
+		reportsPath: join(makeTempDir("agentlab-review-requests-"), "reports"),
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		manualObjective: "revisar seguridad",
 		manualContext: "auth login",
 		now,
@@ -397,17 +392,17 @@ test("request siempre incluye forbiddenActions obligatorias", () => {
 test("security/database fuerza requiresHumanApproval", () => {
 	const security = createAgentLabReviewRequests({
 		source: "postflight",
-		reportsPath: join(root(), "reports"),
+		reportsPath: join(makeTempDir("agentlab-review-requests-"), "reports"),
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		postflightReport: postflight(["src/auth/login.ts"]),
 		now,
 	});
 	const database = createAgentLabReviewRequests({
 		source: "postflight",
-		reportsPath: join(root(), "reports"),
+		reportsPath: join(makeTempDir("agentlab-review-requests-"), "reports"),
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		postflightReport: postflight(["src/db/schema.ts"]),
 		now,
 	});
@@ -422,7 +417,7 @@ test("security/database fuerza requiresHumanApproval", () => {
 });
 
 test("review latest rechaza current.json directorio sin EISDIR crudo", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	const currentDir = join(
 		reportsPath,
 		"..",
@@ -438,12 +433,12 @@ test("review latest rechaza current.json directorio sin EISDIR crudo", () => {
 });
 
 test("review latest valida request", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	createAgentLabReviewRequests({
 		source: "manual",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		manualObjective: "revisar UI html components",
 		manualContext: "UI html components",
 		now,
@@ -455,12 +450,12 @@ test("review latest valida request", () => {
 });
 
 test("review current resolves the same request as current.json", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	createAgentLabReviewRequests({
 		source: "manual",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		manualObjective: "revisar UI html components",
 		manualContext: "UI html components",
 		now,
@@ -476,7 +471,7 @@ test("review current resolves the same request as current.json", () => {
 });
 
 test("review current missing reports current.json candidate", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 
 	const review = reviewAgentLabReviewRequest("current", reportsPath);
 
@@ -486,13 +481,13 @@ test("review current missing reports current.json candidate", () => {
 });
 
 test("review ruta legacy relativa busca en reports", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	const created = createAgentLabReviewRequests({
 		source: "manual",
 		reportsPath,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		manualObjective: "revisar UI html components",
 		manualContext: "UI html components",
 		now,
@@ -509,7 +504,7 @@ test("review ruta legacy relativa busca en reports", () => {
 });
 
 test("ruta fuera de reports falla", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-requests-");
 	const outside = join(temp, "agentlab-review-request-20260525-123456.json");
 	writeFileSync(outside, "{}\n", "utf8");
 	const review = reviewAgentLabReviewRequest(outside, join(temp, "reports"));
@@ -518,7 +513,7 @@ test("ruta fuera de reports falla", () => {
 });
 
 test("nombre inválido falla", () => {
-	const reportsPath = join(root(), "reports");
+	const reportsPath = join(makeTempDir("agentlab-review-requests-"), "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	writeFileSync(join(reportsPath, "bad.json"), "{}\n", "utf8");
 	const review = reviewAgentLabReviewRequest("bad.json", reportsPath);
@@ -527,7 +522,7 @@ test("nombre inválido falla", () => {
 });
 
 test("no modifica .agents ni .atl", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-requests-");
 	mkdirSync(join(temp, ".agents"));
 	mkdirSync(join(temp, ".atl"));
 	const result = createAgentLabReviewRequests({
@@ -548,7 +543,7 @@ test("no modifica .agents ni .atl", () => {
 });
 
 test("external source intelligence crea request librarian audit-only", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-requests-");
 	const reportsPath = join(temp, "reports");
 	const plan = createAgentLabReviewRequests({
 		source: "external_source_intelligence",
@@ -584,7 +579,7 @@ test("external source intelligence crea request librarian audit-only", () => {
 });
 
 test("external source intelligence usa evidencia compacta de Source Library", () => {
-	const temp = root();
+	const temp = makeTempDir("agentlab-review-requests-");
 	const rawChunk = "RAW CHUNK TEXT THAT MUST NOT BE REDISTRIBUTED";
 	const plan = createAgentLabReviewRequests({
 		source: "external_source_intelligence",
@@ -630,9 +625,9 @@ test("external source intelligence usa evidencia compacta de Source Library", ()
 test("format plan confirma que no ejecuta AgentLabs", () => {
 	const plan = createAgentLabReviewRequests({
 		source: "manual",
-		reportsPath: join(root(), "reports"),
+		reportsPath: join(makeTempDir("agentlab-review-requests-"), "reports"),
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-review-requests-"),
 		manualObjective: "revisar token cost context bloat",
 		manualContext: "context bloat",
 		now,

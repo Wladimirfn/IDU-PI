@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	consolidateAgentLabReviewRun,
 	formatAgentLabConsolidationResult,
@@ -11,12 +10,8 @@ import {
 	getAgentLabConsolidationStatus,
 } from "../src/agentlab-report-consolidation.js";
 
-function root(): string {
-	return mkdtempSync(join(tmpdir(), "agentlab-consolidation-"));
-}
-
 function reportsRoot(): string {
-	const reports = join(root(), "reports");
+	const reports = join(makeTempDir("agentlab-consolidation-"), "reports");
 	mkdirSync(reports, { recursive: true });
 	return reports;
 }
@@ -161,7 +156,7 @@ test("lee latest agentlab-review-run válido y guarda consolidación", () => {
 
 test("ruta fuera de reports falla", () => {
 	const reports = reportsRoot();
-	const outside = join(root(), "agentlab-review-run-20260525-000000.json");
+	const outside = join(makeTempDir("agentlab-consolidation-"), "agentlab-review-run-20260525-000000.json");
 	writeFileSync(outside, "{}\n", "utf8");
 	const result = consolidateAgentLabReviewRun(outside, reports);
 	assert.equal(result.valid, false);
@@ -418,7 +413,7 @@ test("consolidate latest resuelve run legacy en reports sin agentlabs/runs", () 
 	// the fallback uses the strict legacy regex
 	// /^agentlab-review-run-\d{8}-\d{6}\.json$/u — pinning that the LEGACY
 	// format specifically still resolves when reports/ is the only source.
-	const temp = root();
+	const temp = makeTempDir("agentlab-consolidation-");
 	const reportsPath = join(temp, "reports");
 	mkdirSync(reportsPath, { recursive: true });
 	// Deliberately do NOT create temp/agentlabs/ — the fallback must resolve
