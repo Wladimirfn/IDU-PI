@@ -237,6 +237,23 @@ function makeStateRoot(): string {
 	return root;
 }
 
+// Build a temp workspace shaped like an idu-pi registry:
+//   <workspaceRoot>/projects/<projectId>/.idu/config/project-constitution.json
+// mirrors the real layout that resolveProjectStatePaths({workspaceRoot, projectId})
+// produces, so the script's registered-stateRoot comparison matches the test root.
+function makeRegisteredStateRoot(): {
+	workspaceRoot: string;
+	projectId: string;
+	stateRoot: string;
+} {
+	const workspaceRoot = mkdtempSync(join(tmpdir(), "idu-pi-u2-ws-"));
+	tempRoots.push(workspaceRoot);
+	const projectId = "idu-pi";
+	const stateRoot = join(workspaceRoot, "projects", projectId);
+	mkdirSync(stateRoot, { recursive: true });
+	return { workspaceRoot, projectId, stateRoot };
+}
+
 function writeLegacyConstitution(root: string, layout: "A" | "B"): string {
 	const dir = layout === "A" ? join(root, ".idu", "config") : join(root, "config");
 	mkdirSync(dir, { recursive: true });
@@ -288,12 +305,18 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 	});
 
 	test("TST-RSP-002: --dry-run prints the proposed stack with the 3 pathGuards additions", () => {
-		const root = makeStateRoot();
-		writeLegacyConstitution(root, "A");
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		writeLegacyConstitution(stateRoot, "A");
 
 		const result = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--dry-run", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--dry-run",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{ encoding: "utf8" },
 		);
 		assert.equal(result.status, 0, `stderr: ${result.stderr}`);
@@ -319,13 +342,19 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 	});
 
 	test("TST-RSP-003: --apply writes proposed bytes; re-read is byte-equal and contains pathGuards", () => {
-		const root = makeStateRoot();
-		const path = writeLegacyConstitution(root, "A");
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		const path = writeLegacyConstitution(stateRoot, "A");
 		const before = readFileSync(path, "utf8");
 
 		const result = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--apply",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
 				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
@@ -365,13 +394,19 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 	});
 
 	test("TST-RSP-004: idempotency — second --apply produces zero diff", () => {
-		const root = makeStateRoot();
-		const path = writeLegacyConstitution(root, "A");
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		const path = writeLegacyConstitution(stateRoot, "A");
 
 		// First apply: legacy → migrated (with pathGuards).
 		const first = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--apply",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
 				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
@@ -384,7 +419,13 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 		// Second apply: must be a no-op (file already migrated).
 		const second = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--apply",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
 				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
@@ -407,7 +448,13 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 		// delta bytes: 0 and already migrated: true.
 		const dry = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--dry-run", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--dry-run",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{ encoding: "utf8" },
 		);
 		assert.equal(dry.status, 0, `dry-run stderr: ${dry.stderr}`);
@@ -757,21 +804,22 @@ describe("U3 gate integration — compiled CLI (TST-PGG-004 / TST-PGG-005)", () 
 	}
 
 	test("TST-PGG-004: --apply blocks on gate violations (exit 4, file NOT written)", () => {
-		const root = makeEmptyStateRoot();
-		const constitutionPath = join(
-			root,
-			".idu",
-			"config",
-			"project-constitution.json",
-		);
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		const constitutionPath = writeLegacyConstitution(stateRoot, "A");
 		const before = readFileSync(constitutionPath, "utf8");
 
 		const result = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--apply",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
-				cwd: root,
+				cwd: stateRoot,
 				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
 			},
 		);
@@ -796,14 +844,21 @@ describe("U3 gate integration — compiled CLI (TST-PGG-004 / TST-PGG-005)", () 
 	});
 
 	test("TST-PGG-005: --dry-run reports gate violations (exit 0, FAIL summary on stdout)", () => {
-		const root = makeEmptyStateRoot();
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		writeLegacyConstitution(stateRoot, "A");
 
 		const result = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--dry-run", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--dry-run",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
-				cwd: root,
+				cwd: stateRoot,
 			},
 		);
 
@@ -1102,19 +1157,25 @@ describe("U2 pathGuards fix — processLayout (TST-FIX-002/003/004)", () => {
 
 describe("U2 pathGuards fix — --apply integration (TST-FIX-005)", () => {
 	test("TST-FIX-005: --apply on predicate-form-no-guards writes the guards patch, then idempotent", () => {
-		const root = makeStateRoot();
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
 		const stack: Array<RejectedRule | string> = [
 			...stripGuardsFromTargets(PROPOSED_REJECTED_RULES),
 			ITEM_6_STRING,
 		];
-		const path = writeConstitutionWithStack(root, stack);
+		const path = writeConstitutionWithStack(stateRoot, stack);
 		const before = readFileSync(path, "utf8");
 
 		// Default cwd = real project root so the pathGuards gate finds src/
 		// and scripts/ and PASSES (else --apply exits 4 before writing).
 		const first = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--apply",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
 				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
@@ -1154,7 +1215,13 @@ describe("U2 pathGuards fix — --apply integration (TST-FIX-005)", () => {
 		// Second --apply must be a true no-op now that guards are in place.
 		const second = spawnSync(
 			"node",
-			[SCRIPT_PATH, "--apply", `--state-root=${root}`],
+			[
+				SCRIPT_PATH,
+				"--apply",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
 			{
 				encoding: "utf8",
 				env: { ...process.env, MIGRATE_APPLY_DELAY_MS: "0" },
@@ -1174,6 +1241,176 @@ describe("U2 pathGuards fix — --apply integration (TST-FIX-005)", () => {
 			readFileSync(path, "utf8"),
 			after,
 			"second --apply must produce zero byte diff",
+		);
+	});
+});
+
+// =========================================================================
+// #310 — --apply must validate --state-root against the registered stateRoot
+// derived from --workspace-root + --project-id (the idu-pi registry). Without
+// these flags, the script must NOT silently default to cwd.
+//
+// TST-310-001: --state-root explicit + workspace/projectId + matching path → uses it
+// TST-310-002: --state-root explicit + workspace/projectId + MISMATCH → fails (exit 2)
+// TST-310-003: --state-root omitted + workspace/projectId → derives and uses
+// TST-310-004: --state-root explicit + missing workspace/projectId → fails with clear error
+// TST-310-005: --state-root omitted + missing workspace/projectId → fails with clear error
+//
+// All these tests run the COMPILED script via spawnSync because the
+// validation lives in main() (after parseArgs + before layoutPaths).
+// =========================================================================
+
+describe("#310 — --state-root resolves against registered stateRoot (TST-310-001..005)", () => {
+	before(() => {
+		if (!existsSync(SCRIPT_PATH)) {
+			throw new Error(
+				`migrate-rejected-stack.js not compiled at ${SCRIPTS_DIR}. Run \`pnpm run build\` first.`,
+			);
+		}
+	});
+
+	// Build a temp workspace shaped like an idu-pi registry:
+	//   <workspaceRoot>/projects/<projectId>/.idu/config/project-constitution.json
+	// This mirrors the real layout that resolveProjectStatePaths({workspaceRoot, projectId})
+	// produces, so the script's registered-stateRoot comparison matches the test root.
+	// (Helper defined at top-level: makeRegisteredStateRoot.)
+
+	test("TST-310-001: --state-root matching registry stateRoot is accepted", () => {
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		writeLegacyConstitution(stateRoot, "A");
+
+		const result = spawnSync(
+			"node",
+			[
+				SCRIPT_PATH,
+				"--dry-run",
+				`--state-root=${stateRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
+			{ encoding: "utf8" },
+		);
+		assert.equal(
+			result.status,
+			0,
+			`--dry-run with matching --state-root MUST exit 0; got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		assert.match(
+			result.stdout,
+			/migrate-rejected-stack \(R3\.4 dry-run\)/u,
+			"stdout must show the dry-run header (proving the script proceeded past validation)",
+		);
+	});
+
+	test("TST-310-002: --state-root MISMATCHED against registry stateRoot is rejected", () => {
+		const { workspaceRoot, projectId } = makeRegisteredStateRoot();
+		// Build a separate, DIFFERENT stateRoot containing a legacy constitution.
+		const mismatchRoot = makeStateRoot();
+		writeLegacyConstitution(mismatchRoot, "A");
+
+		const result = spawnSync(
+			"node",
+			[
+				SCRIPT_PATH,
+				"--dry-run",
+				`--state-root=${mismatchRoot}`,
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
+			{ encoding: "utf8" },
+		);
+		assert.equal(
+			result.status,
+			2,
+			`--state-root mismatch MUST exit 2 (arg validation); got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		assert.match(
+			result.stderr,
+			/--state-root does not match the registered stateRoot/u,
+			"stderr must explain the mismatch in terms of registered stateRoot",
+		);
+	});
+
+	test("TST-310-003: --state-root omitted + --workspace-root + --project-id derives the registered stateRoot", () => {
+		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
+		writeLegacyConstitution(stateRoot, "A");
+
+		const result = spawnSync(
+			"node",
+			[
+				SCRIPT_PATH,
+				"--dry-run",
+				`--workspace-root=${workspaceRoot}`,
+				`--project-id=${projectId}`,
+			],
+			{ encoding: "utf8" },
+		);
+		assert.equal(
+			result.status,
+			0,
+			`derivation MUST succeed when --workspace-root + --project-id point to a real root; got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		// The resolved stateRoot must be reported in the dry-run header so the
+		// operator can confirm which constitution got touched. We assert the
+		// expected Layout A path substring (the unique trailing portion). The
+		// script prints the platform-native path (backslashes on win32) so the
+		// regex accepts both separators.
+		assert.match(
+			result.stdout,
+			/\[Layout A\] .*\.idu[\\\/]config[\\\/]project-constitution\.json/u,
+			"derived --state-root must resolve to the registered project root (Layout A)",
+		);
+	});
+
+	test("TST-310-004: --state-root explicit + missing --workspace-root/--project-id is rejected", () => {
+		const root = makeStateRoot();
+		writeLegacyConstitution(root, "A");
+
+		// NO --workspace-root, NO --project-id, but --state-root is given.
+		// The script cannot validate the stateRoot against the registry, so it
+		// must fail loudly rather than silently fall back to cwd.
+		const result = spawnSync(
+			"node",
+			[SCRIPT_PATH, "--dry-run", `--state-root=${root}`],
+			{ encoding: "utf8" },
+		);
+		assert.equal(
+			result.status,
+			2,
+			`--state-root without workspace/projectId MUST exit 2; got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		assert.match(
+			result.stderr,
+			/--workspace-root/u,
+			"stderr must mention --workspace-root so the operator knows what to add",
+		);
+		assert.match(
+			result.stderr,
+			/--project-id/u,
+			"stderr must mention --project-id so the operator knows what to add",
+		);
+	});
+
+	test("TST-310-005: --state-root omitted + missing --workspace-root/--project-id is rejected", () => {
+		const result = spawnSync(
+			"node",
+			[SCRIPT_PATH, "--dry-run"],
+			{ encoding: "utf8" },
+		);
+		assert.equal(
+			result.status,
+			2,
+			`no flags at all MUST exit 2 (validation); got status=${result.status}; stderr: ${result.stderr}`,
+		);
+		assert.match(
+			result.stderr,
+			/--workspace-root/u,
+			"stderr must mention --workspace-root",
+		);
+		assert.match(
+			result.stderr,
+			/--project-id/u,
+			"stderr must mention --project-id",
 		);
 	});
 });
