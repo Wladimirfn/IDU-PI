@@ -1,8 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "./helpers/temp.js";
 import { runBibliotecarioInit } from "../src/cli-bibliotecario-init.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
 
@@ -10,7 +10,7 @@ describe("T3.1 — runBibliotecarioInit", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "cli-bibliotecario-init-"));
+		tempDir = makeTempDir("cli-bibliotecario-init-");
 	});
 
 	it("creates lab.db, applies migration, seeds bootstrap skill, and emits lab_write event", () => {
