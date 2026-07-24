@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	acquireAutonomousAlertSchedulerLock,
 	finishAutonomousAlertSchedulerRun,
@@ -11,12 +11,8 @@ import {
 	resolveAutonomousAlertSchedulerStatePath,
 } from "../src/autonomous-alert-scheduler-state.js";
 
-function tempRoot(): string {
-	return mkdtempSync(join(tmpdir(), "idu-alert-scheduler-"));
-}
-
 test("scheduler state path stays under stateRoot reports", () => {
-	const root = tempRoot();
+	const root = makeTempDir("idu-alert-scheduler-");
 	assert.equal(
 		resolveAutonomousAlertSchedulerStatePath(root),
 		join(root, "reports", "autonomous-alert-scheduler-state.json"),
@@ -24,7 +20,7 @@ test("scheduler state path stays under stateRoot reports", () => {
 });
 
 test("scheduler lock skips second owner until lease expires", () => {
-	const root = tempRoot();
+	const root = makeTempDir("idu-alert-scheduler-");
 	const first = acquireAutonomousAlertSchedulerLock(root, {
 		ownerId: "one",
 		now: new Date("2026-06-05T00:00:00.000Z"),
@@ -49,7 +45,7 @@ test("scheduler lock skips second owner until lease expires", () => {
 });
 
 test("scheduler records decision to task idempotency under stateRoot reports", () => {
-	const root = tempRoot();
+	const root = makeTempDir("idu-alert-scheduler-");
 	markAutonomousAlertDecisionTaskCreated(
 		root,
 		"decision-1",
@@ -67,7 +63,7 @@ test("scheduler records decision to task idempotency under stateRoot reports", (
 });
 
 test("finish run releases only its own lock", () => {
-	const root = tempRoot();
+	const root = makeTempDir("idu-alert-scheduler-");
 	acquireAutonomousAlertSchedulerLock(root, {
 		ownerId: "owner-a",
 		now: new Date("2026-06-05T00:00:00.000Z"),

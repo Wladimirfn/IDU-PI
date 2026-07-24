@@ -1,8 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { makeTempDir } from "./helpers/temp.js";
 import { LabDbRepository } from "../src/lab-db-repository.js";
 import type {
 	SkillInsert,
@@ -18,7 +18,7 @@ describe("T2.2 — LabDbRepository B0 methods", () => {
 	let repo: LabDbRepository;
 
 	beforeEach(() => {
-		tempDir = mkdtempSync(join(tmpdir(), "bibliotecario-repo-"));
+		tempDir = makeTempDir("bibliotecario-repo-");
 		dbPath = join(tempDir, "lab.db");
 		repo = new LabDbRepository(dbPath, {
 			bibliotecarioProjectId: "test-project",
