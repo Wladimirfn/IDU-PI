@@ -92,10 +92,14 @@ const suiteFailed = result.status !== 0;
 const after = snapshotTmpdir();
 const newEntries = [...after].filter((e) => !before.has(e));
 const removedEntries = [...before].filter((e) => !after.has(e));
-const delta = newEntries.length - removedEntries.length;
+// We use the absolute count of new entries, not net delta. The current
+// suite (pre-migration) does not clean previously-leaked temp dirs from
+// older runs, so `removed` is always 0; a net-delta formula would silently
+// cancel new leaks against unrelated cleanup and produce false negatives.
+const delta = newEntries.length;
 
 console.log(
-	`[leak-guard] entries after suite: ${after.size} (new ${newEntries.length}, removed ${removedEntries.length}, net ${delta >= 0 ? "+" : ""}${delta})`,
+	`[leak-guard] entries after suite: ${after.size} (new ${newEntries.length}, removed ${removedEntries.length})`,
 );
 
 if (suiteFailed) {
