@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // scripts/run-tests-with-leak-guard.mjs
 //
-// Wrapper that runs the test suite once, measures the temp-dir delta in
-// $TMPDIR around it, and exits non-zero on regression.
+// Wrapper that runs the test suite once, snapshots the set of entries in
+// $TMPDIR before and after, computes the set difference, and exits non-zero
+// when the new entries exceed the threshold.
 //
 // Why a wrapper, not a meta-test:
 //   The repo's test suite runs via `node --test dist/test/*.test.js ...`.
@@ -14,15 +15,22 @@
 //   delta is always zero; (b) the other files run in parallel, so they
 //   may write between the two samples and flake the gate randomly.
 //
-//   This wrapper counts around the whole `node --test` invocation, so the
-//   delta is the actual cross-process count of leaked temp dirs produced
-//   by the full suite run. It also catches temp dirs that the suite's
-//   spawned child processes (e.g. CLI smoke tests) create, which an
-//   in-process helper could never see.
+// Why set-difference, not an allowlist of prefixes:
+//   The repo has 296+ unique mkdtempSync prefixes across 354 call sites.
+//   An allowlist (the previous design) covered ~62% of the universe and was
+//   blind to the rest — and gets stale the day someone writes a new test
+//   with a fresh prefix. Set-difference captures 100% of the suite's
+//   temp-dir output without any per-prefix knowledge.
+//
+//   The external noise in $TMPDIR is small (~3 unrelated entries on a
+//   typical Windows box: Docker updater, VSCode setup, GUID-style files).
+//   We filter those out with a small denylist of well-known non-test
+//   patterns, not an allowlist.
 //
 // Usage:
 //   node scripts/run-tests-with-leak-guard.mjs
 //   LEAK_GUARD_THRESHOLD=5 node scripts/run-tests-with-leak-guard.mjs
+//   LEAK_GUARD_DENYLIST_REGEX='^(vscode-|docker-)' node ...  (optional override)
 //
 // The threshold env var lets CI tolerate a small number of "expected"
 // leaks during a partial migration. Default is 0 (any leak fails the gate).
@@ -31,26 +39,39 @@ import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
-const TRACKED_PREFIXES = [
-	"idu-",
-	"agentlab-",
-	"agentlab-review-",
-	"bibliotecario-",
-	// Add more repo-specific prefixes here as the migration discovers them.
+const DENYLIST_PATTERNS = [
+	// Docker Desktop updater leaves these around.
+	/^docker/i,
+	/^DockerDesktop/i,
+	// VSCode installer / updater.
+	/^vscode-/i,
+	/^CodeSetup-/i,
+	// Windows Setup / installer logs.
+	/^Setup Log/i,
+	// System-level GUID-style temp files (rare, but seen on some Windows boxes).
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\./i,
 ];
 
-function countTrackedInTmpdir() {
-	let count = 0;
+// Optional override: user can supply their own denylist regex via env.
+// Use this to add project-specific noise patterns without editing this file.
+const denylistFromEnv = process.env.LEAK_GUARD_DENYLIST_REGEX;
+const extraDenylist = denylistFromEnv ? [new RegExp(denylistFromEnv)] : [];
+const allDenylist = [...DENYLIST_PATTERNS, ...extraDenylist];
+
+function isNoise(entry) {
+	return allDenylist.some((re) => re.test(entry));
+}
+
+function snapshotTmpdir() {
+	const set = new Set();
 	let entries;
 	try {
 		entries = readdirSync(tmpdir());
 	} catch {
-		return 0;
+		return set;
 	}
-	for (const entry of entries) {
-		if (TRACKED_PREFIXES.some((p) => entry.startsWith(p))) count++;
-	}
-	return count;
+	for (const entry of entries) isNoise(entry) ? null : set.add(entry);
+	return set;
 }
 
 const THRESHOLD = parseInt(process.env.LEAK_GUARD_THRESHOLD ?? "0", 10);
@@ -58,26 +79,23 @@ const TEST_GLOB =
 	process.env.LEAK_GUARD_TEST_GLOB ??
 	"dist/test/*.test.js dist/test/**/*.test.js";
 
-const before = countTrackedInTmpdir();
-console.log(
-	`[leak-guard] tracked-prefix entries in ${tmpdir()} before suite: ${before}`,
-);
+const before = snapshotTmpdir();
+console.log(`[leak-guard] entries in ${tmpdir()} before suite: ${before.size}`);
 
 const result = spawnSync(
 	process.execPath,
 	["--test", ...TEST_GLOB.split(" ")],
-	{
-		stdio: "inherit",
-	},
+	{ stdio: "inherit" },
 );
 const suiteFailed = result.status !== 0;
 
-const after = countTrackedInTmpdir();
-const delta = after - before;
+const after = snapshotTmpdir();
+const newEntries = [...after].filter((e) => !before.has(e));
+const removedEntries = [...before].filter((e) => !after.has(e));
+const delta = newEntries.length - removedEntries.length;
+
 console.log(
-	`[leak-guard] tracked-prefix entries after suite: ${after} (delta ${
-		delta >= 0 ? "+" : ""
-	}${delta})`,
+	`[leak-guard] entries after suite: ${after.size} (new ${newEntries.length}, removed ${removedEntries.length}, net ${delta >= 0 ? "+" : ""}${delta})`,
 );
 
 if (suiteFailed) {
@@ -91,8 +109,12 @@ if (suiteFailed) {
 
 if (delta > THRESHOLD) {
 	console.error(
-		`[leak-guard] LEAK DETECTED: ${delta} new entries in ${tmpdir()} matching tracked prefixes (threshold ${THRESHOLD}).`,
+		`[leak-guard] LEAK DETECTED: ${delta} new entries in ${tmpdir()} (threshold ${THRESHOLD}).`,
 	);
+	console.error(
+		`[leak-guard] First ${Math.min(newEntries.length, 10)} new entries (sample):`,
+	);
+	for (const e of newEntries.slice(0, 10)) console.error(`  ${e}`);
 	console.error(
 		`[leak-guard] Inspect recent test changes; new mkdtemp calls must go through test/helpers/temp.ts.`,
 	);
