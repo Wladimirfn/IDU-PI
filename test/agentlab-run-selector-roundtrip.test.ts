@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	dispatchAgentLabReviewRun,
 	getAgentLabReviewStatus,
@@ -19,12 +18,8 @@ import type { AgentLabSpecialty } from "../src/agentlab-supervisor-contract.js";
 // minted run-<unix>-<hex> filenames, so the post-dispatch status lookup was
 // broken. This test pins the fix.
 
-function root(): string {
-	return mkdtempSync(join(tmpdir(), "agentlab-run-selector-roundtrip-"));
-}
-
 function reportsPath(): string {
-	const dir = root();
+	const dir = makeTempDir("agentlab-run-selector-roundtrip-");
 	const reports = join(dir, "reports");
 	mkdirSync(reports, { recursive: true });
 	// dispatchAgentLabReviewRun computes runDir as resolve(reportsPath)/../agentlabs/runs.
@@ -37,7 +32,7 @@ function dispatchInput(reports: string) {
 	return {
 		reportsPath: reports,
 		projectId: "pi-telegram-bridge",
-		projectPath: root(),
+		projectPath: makeTempDir("agentlab-run-selector-roundtrip-"),
 		maxMinutes: 1,
 		requestId: "agentlab-pi-telegram-bridge-roundtrip-01",
 	};

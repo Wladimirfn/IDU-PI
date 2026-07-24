@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import { buildAgentLabReviewRequest } from "../src/agentlab-supervisor-contract.js";
 import {
 	createAgentLabReviewRequests,
 	reviewAgentLabReviewRequest,
 } from "../src/agentlab-review-requests.js";
-
-function tempRoot(): string {
-	return mkdtempSync(join(tmpdir(), "agentlab-model-selection-"));
-}
 
 function writeAssignments(
 	root: string,
@@ -30,8 +26,8 @@ function now(): Date {
 }
 
 test("AgentLab request with explicit model round-trips through create + read", () => {
-	const reportsPath = join(tempRoot(), "reports");
-	const projectPath = tempRoot();
+	const reportsPath = join(makeTempDir("agentlab-model-selection-"), "reports");
+	const projectPath = makeTempDir("agentlab-model-selection-");
 
 	const plan = createAgentLabReviewRequests({
 		source: "manual",
@@ -85,7 +81,7 @@ test("AgentLab buildAgentLabReviewRequest omits the model field when not set", (
 });
 
 test("AgentLab request auto-picks the model when the role has a direct-model assignment", () => {
-	const temp = tempRoot();
+	const temp = makeTempDir("agentlab-model-selection-");
 	const stateRoot = join(temp, "state");
 	const projectPath = join(temp, "project");
 	const reportsPath = join(stateRoot, "reports");
@@ -114,7 +110,7 @@ test("AgentLab request auto-picks the model when the role has a direct-model ass
 });
 
 test("AgentLab request does not auto-pick when the role has a profile assignment and emits a structured error", () => {
-	const temp = tempRoot();
+	const temp = makeTempDir("agentlab-model-selection-");
 	const stateRoot = join(temp, "state");
 	const projectPath = join(temp, "project");
 	const reportsPath = join(stateRoot, "reports");
@@ -149,7 +145,7 @@ test("AgentLab request does not auto-pick when the role has a profile assignment
 });
 
 test("AgentLab request does not auto-pick when there is no model-assignments.json and emits a structured error", () => {
-	const temp = tempRoot();
+	const temp = makeTempDir("agentlab-model-selection-");
 	const stateRoot = join(temp, "state");
 	const projectPath = join(temp, "project");
 	const reportsPath = join(stateRoot, "reports");
@@ -179,8 +175,8 @@ test("AgentLab request does not auto-pick when there is no model-assignments.jso
 });
 
 test("AgentLab request without model field is back-compat: existing callers keep model undefined", () => {
-	const reportsPath = join(tempRoot(), "reports");
-	const projectPath = tempRoot();
+	const reportsPath = join(makeTempDir("agentlab-model-selection-"), "reports");
+	const projectPath = makeTempDir("agentlab-model-selection-");
 
 	const plan = createAgentLabReviewRequests({
 		source: "manual",
