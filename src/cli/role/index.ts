@@ -31,4 +31,5 @@ export {
 	handleOrchestratorAdvisory,
 	handleRoleEngine,
 	handleRoleEngineStatus,
+	handleSupervisorResponses,
 } from "./handlers.js";

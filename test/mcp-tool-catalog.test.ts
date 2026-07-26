@@ -81,16 +81,17 @@ function getRequired(schema: { required?: unknown }): string[] {
 	return schema.required.filter((r): r is string => typeof r === "string");
 }
 
-test("mcp-server.ts tool catalog: 88 tools registered, names frozen", () => {
-	const actual = listIduMcpTools();
-	const names = actual.map((t) => t.name).sort();
-	assert.strictEqual(
-		names.length,
-		88,
-		`Expected 88 tools registered (87 legacy + 1 PR-drift fix for ` +
-			`idu_objective_status). Got ${names.length}.\n` +
-			`Names: ${names.join(", ")}`,
-	);
+test("mcp-server.ts tool catalog: 89 tools registered, names frozen", () => {
+    	const actual = listIduMcpTools();
+    	const names = actual.map((t) => t.name).sort();
+    	assert.strictEqual(
+    		names.length,
+    		89,
+    		`Expected 89 tools registered (87 legacy + 1 PR-drift fix for ` +
+    		`idu_objective_status + 1 PR 3 follow-up for idu_supervisor_responses). ` +
+    		`Got ${names.length}.\n` +
+    		`Names: ${names.join(", ")}`,
+    	);
 	// Uniqueness.
 	const uniqueNames = new Set(names);
 	assert.strictEqual(

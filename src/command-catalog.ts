@@ -941,6 +941,14 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 			"corepack pnpm cli -- idu-model-invocation-status agentlab-security 20",
 	},
 	{
+		label: "Supervisor responses",
+		command: "corepack pnpm cli -- idu-supervisor-responses",
+	},
+	{
+		label: "Supervisor responses (limit)",
+		command: "corepack pnpm cli -- idu-supervisor-responses --limit 20",
+	},
+	{
 		label: "Orchestrator advisory",
 		command: "corepack pnpm cli -- idu-orchestrator-advisory",
 	},

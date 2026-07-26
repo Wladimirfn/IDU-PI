@@ -38,6 +38,10 @@ import {
 import { loadRoleProfile } from "./roles/profile-loader.js";
 import type { IduModelRoleId } from "./model-assignments.js";
 import type { PromptForRoleResult } from "./agent-router.js";
+import {
+	recordSupervisorResponseDeferred,
+	type SupervisorResponseRecordInput,
+} from "./supervisor-response-history.js";
 
 export type ConsultInput = {
 	stateRoot: string;
@@ -116,10 +120,47 @@ export async function consultSupervisor(
 
 	const prompt = buildConsultPrompt(input, rail);
 	const promptChars = prompt.length;
-	const result = await input.promptForRole(input.role, prompt, {
-		projectId: input.stateRoot,
-		stateRoot: input.stateRoot,
-	});
+
+	// PR 3 (PRs #275, #277, #279 follow-up, spec #3098 rev4): every successful
+	// OR failed model consult MUST be persisted to the supervisor response history
+	// (JSONL under stateRoot/reports). `promptForRole` rethrows on model failure
+	// (agent-router.ts rethrows), so the catch block records the error path and
+	// then rethrows to preserve the existing throw contract. The early returns
+	// above (role_not_enabled / cooldown_active) are config checks and are NOT
+	// recorded — they never reach a real model invocation.
+	let result: PromptForRoleResult;
+	try {
+		result = await input.promptForRole(input.role, prompt, {
+			projectId: input.stateRoot,
+			stateRoot: input.stateRoot,
+		});
+	} catch (error) {
+		const errorMessage =
+			error instanceof Error ? error.message : String(error);
+		const errorElapsedMs = Date.now() - start;
+		// The history builder prefers `reason` over `response` for error
+		// entries, so compose the classification code with the actual error
+		// message into the reason field. `boundErrorMessage` trims to 240
+		// chars inside the builder so the full message stays readable.
+		const reason = `prompt_error: ${errorMessage}`;
+		recordSupervisorResponseDeferred(input.stateRoot, {
+			stateRoot: input.stateRoot,
+			role: input.role,
+			question: input.question,
+			result: {
+				ok: false,
+				role: input.role,
+				response: "",
+				model: "",
+				provider: "",
+				promptChars,
+				elapsedMs: errorElapsedMs,
+				reason,
+			},
+			now,
+		});
+		throw error;
+	}
 
 	// Record the wake (increments wakeCount, updates lastWakeAt)
 	recordRoleWake(input.stateRoot, input.role, now);
@@ -130,7 +171,7 @@ export async function consultSupervisor(
 	// Re-read the rail to get the post-wake + post-tune state
 	const updatedRail = getRoleRail(input.stateRoot, input.role, now);
 
-	return {
+	const consultResult: ConsultResult = {
 		ok: result.ok,
 		role: input.role,
 		response: result.output,
@@ -141,6 +182,30 @@ export async function consultSupervisor(
 		promptChars,
 		elapsedMs: Date.now() - start,
 	};
+
+	// PR 3: persist every consult (success or model-reported failure) to the
+	// supervisor response history. The deferred writer serializes in-process
+	// writes and uses the cross-process file lock; persistence failures are
+	// surfaced via the deferred-failure log (not propagated to the caller).
+	const recordInput: SupervisorResponseRecordInput = {
+		stateRoot: input.stateRoot,
+		role: input.role,
+		question: input.question,
+		result: {
+			ok: consultResult.ok,
+			role: consultResult.role,
+			response: consultResult.response,
+			model: consultResult.model,
+			provider: consultResult.provider,
+			promptChars: consultResult.promptChars,
+			elapsedMs: consultResult.elapsedMs,
+			...(consultResult.reason ? { reason: consultResult.reason } : {}),
+		},
+		now,
+	};
+	recordSupervisorResponseDeferred(input.stateRoot, recordInput);
+
+	return consultResult;
 }
 
 function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {

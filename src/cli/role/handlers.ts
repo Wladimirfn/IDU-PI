@@ -30,6 +30,11 @@ import {
 	parseModelInvocationStatusArgs,
 } from "../../cli-model-invocation-status.js";
 import {
+	buildSupervisorResponsesReport,
+	formatSupervisorResponses,
+	parseSupervisorResponsesArgs,
+} from "../../cli-supervisor-responses.js";
+import {
 	runIdOrchestratorAdvisoryCommand,
 	runIdRoleEngineCommand,
 	runIdRoleEngineStatusCommand,
@@ -65,6 +70,33 @@ export function handleModelInvocationStatus(
 		`lab.db path: ${labDbPath}\n` +
 			runtime.formatModelInvocationStatus(result.report),
 	);
+}
+
+/**
+ * PR 3 (PRs #275, #277, #279 follow-up): read surface for the supervisor
+ * response history JSONL. The history lives under stateRoot/reports/, so
+ * the runtime's workspaceRoot is the canonical stateRoot (mirrors the
+ * model-invocation-status path above). A missing/empty file is a normal
+ * "no consults yet" state, not an error.
+ */
+export function handleSupervisorResponses(
+	runtime: CliRuntime,
+	rest: string[],
+): CliResult {
+	let parsed: ReturnType<typeof parseSupervisorResponsesArgs>;
+	try {
+		parsed = parseSupervisorResponsesArgs(rest);
+	} catch (error) {
+		return fail(
+			error instanceof Error ? error.message : String(error),
+		);
+	}
+	const stateRoot = parsed.stateRootOverride ?? runtime.workspaceRoot;
+	const report = buildSupervisorResponsesReport({
+		stateRoot,
+		options: parsed.options,
+	});
+	return ok(formatSupervisorResponses(report));
 }
 
 export function handleOrchestratorAdvisory(
