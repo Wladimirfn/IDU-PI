@@ -502,6 +502,7 @@ export class AgentRouter {
 			piArgs: [...this.options.basePiArgs, ...piArgs],
 			cwd: workspace.cwd,
 			modePrefix: "",
+			noSession: true,
 		});
 	}
 }

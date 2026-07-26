@@ -293,6 +293,7 @@ test("promptForRole stops the direct-model runtime once on success", async () =>
 	assert.equal(result.ok, true);
 	assert.equal(created.length, 1);
 	assert.equal(created[0]?.session.stopCalls, 1);
+	assert.equal(created[0]?.options.noSession, true);
 	assert.deepEqual(created[0]?.options.piArgs, [
 		"pi-cli.js",
 		"--provider",
@@ -356,6 +357,7 @@ test("promptForRole reuses the profile runtime and never stops it (regression fo
 		assert.equal(entry.session.stopCalls, 0);
 	}
 	const codexEntry = created[beforeCount - 1];
+	assert.equal(codexEntry?.options.noSession, undefined);
 	assert.equal(codexEntry?.session.prompts.at(-1), "audit");
 	assert.equal(
 		router.activeRuntime().session,
