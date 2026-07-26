@@ -125,4 +125,14 @@ if (delta > THRESHOLD) {
 	process.exit(1);
 }
 
+// When the guard passes but there are new entries, log their names so the
+// migration campaign has a directed map instead of blind churn. Set
+// LEAK_GUARD_VERBOSE=0 to suppress.
+if (newEntries.length > 0 && process.env.LEAK_GUARD_VERBOSE !== "0") {
+	console.log(
+		`[leak-guard] ${newEntries.length} new entries (names for migration targeting):`,
+	);
+	for (const e of newEntries) console.log(`  ${e}`);
+}
+
 process.exit(0);
