@@ -1,20 +1,30 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runSensorImpulses } from "../src/sensor-impulses.js";
 import { roleEngineConfigPath } from "../src/role-engine-config.js";
+import { flushSupervisorResponseHistory } from "../src/supervisor-response-history.js";
 import type { PromptForRoleResult } from "../src/agent-router.js";
+import { makeTempDir } from "./helpers/temp.js";
 
-function makeRoot(): { root: string; stateRoot: string; cleanup: () => void } {
-	const root = mkdtempSync(join(tmpdir(), "idu-sensor-impulse-"));
+function makeRoot(): {
+	root: string;
+	stateRoot: string;
+	cleanup: () => Promise<void>;
+} {
+	const root = makeTempDir("idu-sensor-impulse-");
 	const stateRoot = join(root, "state");
 	mkdirSync(stateRoot, { recursive: true });
 	return {
 		root,
 		stateRoot,
-		cleanup: () => rmSync(root, { recursive: true, force: true }),
+		// Await the deferred supervisor response writes before cleanup.
+		// Without this, the fire-and-forget write from consultSupervisor
+		// races with dir removal → ENOTEMPTY on Windows (issue #342).
+		cleanup: async () => {
+			await flushSupervisorResponseHistory(stateRoot);
+		},
 	};
 }
 
@@ -70,7 +80,7 @@ test("runSensorImpulses: returns empty array when no files match sensors", async
 		});
 		assert.deepEqual(result, []);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -91,7 +101,7 @@ test("runSensorImpulses: returns one impulse per sensor match", async () => {
 		assert.equal(roles.filter((r) => r === "agentlab-ui-ux").length, 2);
 		assert.equal(roles.filter((r) => r === "agentlab-architecture").length, 1);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -130,7 +140,7 @@ test("runSensorImpulses: file content is read from projectRoot and passed as con
 			"file content should include Button",
 		);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -148,7 +158,7 @@ test("runSensorImpulses: missing file produces fileContent=undefined but still r
 		assert.equal(result[0]?.fileContent, undefined);
 		assert.equal(result[0]?.consult.ok, true);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -166,7 +176,7 @@ test("runSensorImpulses: failing model returns ok=false but still produces a res
 		assert.equal(result[0]?.consult.ok, false);
 		assert.equal(result[0]?.consult.response, "model error");
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -184,6 +194,6 @@ test("runSensorImpulses: role not enabled returns reason=role_not_enabled in res
 		assert.equal(result[0]?.consult.ok, false);
 		assert.equal(result[0]?.consult.reason, "role_not_enabled");
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
