@@ -159,6 +159,18 @@ export async function consultSupervisor(
 			},
 			now,
 		});
+		// Record the wake on the throw path so the cooldown applies even
+		// when `promptForRole` rethrows. Without this, a throw-path failure
+		// can rapid-fire consults because the rail never sees the wake and
+		// `lastWakeAt` stays at its pre-throw value.
+		recordRoleWake(input.stateRoot, input.role, now);
+		// Note: `autoTuneRoleRail` is intentionally NOT called here. Throws
+		// from `promptForRole` are treated as infrastructure failures
+		// (process crash, RPC error, timeout) rather than model quality
+		// failures. The model did not produce a bad response — the
+		// plumbing broke. Expanding the token budget for infra failures
+		// would be wrong, because the budget exists to bound model
+		// output, not to compensate for upstream transport problems.
 		throw error;
 	}
 
