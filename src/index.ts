@@ -231,6 +231,11 @@ import {
 	getAgentLabConsolidationStatus,
 } from "./agentlab-report-consolidation.js";
 import {
+	buildSupervisorResponsesReport,
+	formatSupervisorResponses,
+	DEFAULT_SUPERVISOR_RESPONSES_LIMIT,
+} from "./cli-supervisor-responses.js";
+import {
 	createSkillDraftsFromApprovedProposals,
 	formatSkillDraftCreationResult,
 	formatSkillDraftReview,
@@ -1604,6 +1609,19 @@ function parsePauseMinutes(text: string | undefined): number {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 
+// Parses the optional integer limit for /supervisor_responses. Returns
+// `null` on invalid input so the caller can surface a usage hint instead
+// of throwing. Accepts >= 0 (matching the CLI's parseLimit rule).
+function parseSupervisorResponsesLimit(
+	text: string | undefined,
+): number | null {
+	const raw = (text ?? "").trim();
+	if (raw === "") return DEFAULT_SUPERVISOR_RESPONSES_LIMIT;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isInteger(parsed) || parsed < 0) return null;
+	return parsed;
+}
+
 function semanticCompactionProjectContext(
 	projectPath: string,
 	stateRoot: string,
@@ -2006,6 +2024,27 @@ bot.command("agentlab_report_status", async (ctx) => {
 		ctx,
 		formatAgentLabConsolidationStatus(
 			getAgentLabConsolidationStatus(pathOrLatest, reportsPath()),
+		),
+	);
+});
+
+bot.command("supervisor_responses", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const limit = parseSupervisorResponsesLimit(ctx.match);
+	if (limit === null) {
+		await replyLong(
+			ctx,
+			"Uso: /supervisor_responses [límite entero ≥ 0]. Ejemplos: /supervisor_responses, /supervisor_responses 20.",
+		);
+		return;
+	}
+	await replyLong(
+		ctx,
+		formatSupervisorResponses(
+			buildSupervisorResponsesReport({
+				stateRoot: activeProjectStateRoot(),
+				options: { limit },
+			}),
 		),
 	);
 });
