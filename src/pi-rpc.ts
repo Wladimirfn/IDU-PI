@@ -7,6 +7,7 @@ export type PiRpcOptions = {
 	cwd: string;
 	modePrefix?: string;
 	sessionPath?: string;
+	noSession?: boolean;
 };
 
 export type PiRpcPromptResult = {
@@ -165,9 +166,11 @@ export class PiRpcSession {
 		this.starting = true;
 
 		const generation = ++this.generation;
-		const sessionArgs = this.options.sessionPath
-			? ["--session", this.options.sessionPath]
-			: [];
+		const sessionArgs = this.options.noSession
+			? ["--no-session"]
+			: this.options.sessionPath
+				? ["--session", this.options.sessionPath]
+				: [];
 		const child = spawn(
 			this.options.piBin,
 			[...(this.options.piArgs ?? []), ...sessionArgs, "--mode", "rpc"],
