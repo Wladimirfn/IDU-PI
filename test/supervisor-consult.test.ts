@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	existsSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -11,12 +12,16 @@ import { test } from "node:test";
 import {
 	consultSupervisor,
 	type ConsultInput,
-	type ConsultResult,
 } from "../src/supervisor-consult.js";
 import {
 	roleEngineConfigPath,
 } from "../src/role-engine-config.js";
 import { roleRailsPath } from "../src/role-rails.js";
+import {
+	flushSupervisorResponseHistory,
+	readSupervisorResponseHistory,
+	supervisorResponseHistoryPath,
+} from "../src/supervisor-response-history.js";
 import type { PromptForRoleResult } from "../src/agent-router.js";
 
 function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
@@ -241,6 +246,99 @@ test("consultSupervisor: build prompt with token budget instruction", async () =
 		assert.ok(
 			captured.includes("token budget") || captured.includes("Token budget"),
 			"prompt mentions budget",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// PR 3 (PRs #275, #277, #279 follow-up): consultSupervisor writes to the
+// supervisor response history JSONL on every successful OR failed model
+// consult. The early returns (role_not_enabled / cooldown_active) are config
+// checks and are NOT recorded — only the model consult path is.
+// ---------------------------------------------------------------------------
+
+test("consultSupervisor records a success entry in the supervisor response history JSONL", async () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		await consultSupervisor({
+			stateRoot,
+			role: "supervisor-main",
+			question: "Should I proceed with the refactor?",
+			context: "PR-101 about to be merged",
+			promptForRole: mockSuccess("Yes, proceed with caution."),
+		});
+		// Flush before reading so any in-flight deferred write settles.
+		await flushSupervisorResponseHistory(stateRoot);
+		const path = supervisorResponseHistoryPath(stateRoot);
+		assert.equal(existsSync(path), true, "history file must exist");
+		const entries = readSupervisorResponseHistory(stateRoot);
+		assert.equal(entries.length, 1);
+		const entry = entries[0]!;
+		assert.equal(entry.status, "success");
+		assert.equal(entry.role, "supervisor-main");
+		assert.equal(entry.questionSummary.includes("refactor"), true);
+		assert.ok(entry.response && entry.response.includes("proceed"));
+		assert.equal(entry.error, undefined);
+	} finally {
+		cleanup();
+	}
+});
+
+test("consultSupervisor records an error entry in the supervisor response history when promptForRole throws, and rethrows", async () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		const boom = new Error("model invocation exploded");
+		const throwingPrompt: ConsultInput["promptForRole"] = async () => {
+			throw boom;
+		};
+		await assert.rejects(
+			consultSupervisor({
+				stateRoot,
+				role: "supervisor-main",
+				question: "Will the rollback work?",
+				promptForRole: throwingPrompt,
+			}),
+			/exploded/u,
+		);
+		await flushSupervisorResponseHistory(stateRoot);
+		const path = supervisorResponseHistoryPath(stateRoot);
+		assert.equal(existsSync(path), true, "history file must exist");
+		const entries = readSupervisorResponseHistory(stateRoot);
+		assert.equal(entries.length, 1);
+		const entry = entries[0]!;
+		assert.equal(entry.status, "error");
+		assert.equal(entry.role, "supervisor-main");
+		// The catch path composes `prompt_error: <message>` into the reason
+		// field so the classification AND the actual error message survive.
+		assert.match(
+			entry.error ?? "",
+			/^prompt_error: model invocation exploded$/u,
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("consultSupervisor: role_not_enabled early return does NOT write to the history", async () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		// role-engine.json absent → role_not_enabled
+		await consultSupervisor({
+			stateRoot,
+			role: "supervisor-main",
+			question: "anything",
+			promptForRole: mockSuccess(),
+		});
+		await flushSupervisorResponseHistory(stateRoot);
+		const path = supervisorResponseHistoryPath(stateRoot);
+		assert.equal(
+			existsSync(path),
+			false,
+			"config-check early returns must not create the history file",
 		);
 	} finally {
 		cleanup();

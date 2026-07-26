@@ -53,6 +53,7 @@ export function helpText(): string {
 		"  idu-pi idu-birth-general-spec-derive --ui-file src/App.tsx",
 		"  idu-pi idu-supervisor-tick (Telegram: /idu_supervisor_tick)",
 		"  idu-pi idu-supervisor-trigger enable|disable|status  # opt-in para el tick programado",
+		"  idu-pi idu-supervisor-responses [--limit N] [--state-root PATH]  # lee historial de respuestas del supervisor (JSONL)",
 		"  idu-pi idu-trigger-engine enable|disable|status      # opt-in persistente del trigger engine",
 		"  idu-pi idu-supervisor-improvements-review latest",
 		"  idu-pi idu-supervisor-improvements-create latest",

@@ -130,3 +130,6 @@ tmp-mcp-probe.mjs
 
 # Worker outputMode noise directory
 outputMode/
+
+# Pi subagent session artifacts (local runtime, not source)
+.pi-subagents/

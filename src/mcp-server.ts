@@ -244,6 +244,7 @@ import {
 	handleProposalOutbox,
 	handleSupervisorConsult,
 	handleSupervisorCronPlan,
+	handleSupervisorResponses,
 	handleSupervisorTick,
 } from "./mcp/supervisor-tick/index.js";
 import {
@@ -748,6 +749,17 @@ const TOOLS: IduMcpToolDefinition[] = [
 				"Rol del role engine (default: supervisor-main). El rol debe estar habilitado en role-engine.json.",
 			),
 			context: optionalString("Contexto adicional para la pregunta."),
+		},
+	),
+	tool(
+		"idu_supervisor_responses",
+		"Lectura read-only del historial de respuestas del supervisor (stateRoot/reports/idu-supervisor-responses.jsonl). Espejo MCP del CLI `idu-supervisor-responses`.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			limit: {
+				type: "number",
+				description: "Límite opcional de entradas a devolver (default 10).",
+			},
 		},
 	),
 	tool(
@@ -2127,6 +2139,8 @@ async function dispatchTool(
 			return await handleSupervisorConsult(name, args, runtime, resolution);
 		case "idu_supervisor_cron_plan":
 			return await handleSupervisorCronPlan(name, args, runtime, resolution);
+		case "idu_supervisor_responses":
+			return await handleSupervisorResponses(name, args, runtime, resolution);
 		case "idu_architectural_pruning_plan":
 			return await handleArchitecturalPruningPlan(name, args, runtime, resolution);
 		case "idu_context_pruning_advisory":

@@ -34,8 +34,14 @@ import {
 } from "../../mcp-server.js";
 import { decisionEnvelopeFromAdvisory } from "../../decision-envelope.js";
 import {
+	readSupervisorResponseHistory,
+	supervisorResponseHistoryPath,
+	type SupervisorResponseHistoryEntry,
+} from "../../supervisor-response-history.js";
+import {
 	booleanArg,
 	envelope,
+	positiveIntegerArg,
 	requiredText,
 	stringArg,
 } from "../_shared/index.js";
@@ -387,6 +393,75 @@ export async function handleSupervisorCronPlan(
 			...resolution.safeNotes,
 			"Cron plan es advisory-only: no escribe auditorías, drafts ni tareas.",
 			"No ejecuta AgentLabs ni aprueba acciones automáticamente.",
+		],
+	});
+}
+
+/**
+ * idu_supervisor_responses — read the supervisor response history
+ * JSONL (stateRoot/reports/idu-supervisor-responses.jsonl). Pure
+ * read-only; mirrors `idu supervisor-responses` CLI surface. PR 3
+ * follow-up for PRs #275, #277, #279.
+ *
+ * The history is written by `consultSupervisor` via
+ * `recordSupervisorResponseDeferred`; this tool is the mirror read.
+ * A missing or empty file is a normal "no consults yet" state, not
+ * an error.
+ */
+export async function handleSupervisorResponses(
+	name: IduMcpToolName,
+	args: JsonObject,
+	_runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+): Promise<IduMcpToolResult> {
+	const limit = positiveIntegerArg(args, "limit");
+	if (args.limit !== undefined && limit === undefined) {
+		return envelope({
+			stateRoot: resolution.stateRoot ?? null,
+			ok: false,
+			tool: name,
+			projectId: resolution.projectId,
+			projectPath: resolution.projectPath,
+			summary: "limit must be a positive integer",
+			data: { limit: args.limit },
+			safeNotes: resolution.safeNotes,
+			errors: ["limit must be a positive integer"],
+		});
+	}
+	const stateRoot = resolution.stateRoot;
+	if (!stateRoot) {
+		return envelope({
+			stateRoot: null,
+			ok: false,
+			tool: name,
+			projectId: resolution.projectId,
+			projectPath: resolution.projectPath,
+			summary: "stateRoot required to read supervisor response history",
+			data: {},
+			safeNotes: resolution.safeNotes,
+			errors: ["stateRoot required to read supervisor response history"],
+		});
+	}
+	const effectiveLimit = limit ?? 10;
+	const entries: SupervisorResponseHistoryEntry[] =
+		readSupervisorResponseHistory(stateRoot, effectiveLimit);
+	return envelope({
+		stateRoot,
+		ok: true,
+		tool: name,
+		projectId: resolution.projectId,
+		projectPath: resolution.projectPath,
+		summary: `Supervisor responses: ${entries.length} entr${entries.length === 1 ? "y" : "ies"} (limit ${effectiveLimit})`,
+		data: {
+			limit: effectiveLimit,
+			returnedCount: entries.length,
+			path: supervisorResponseHistoryPath(stateRoot),
+			entries,
+		},
+		safeNotes: [
+			...resolution.safeNotes,
+			"Read supervisor response history from stateRoot only; no repo files were touched.",
+			"A missing or empty history is a normal state, not an error.",
 		],
 	});
 }

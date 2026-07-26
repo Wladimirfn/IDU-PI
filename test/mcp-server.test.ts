@@ -1150,6 +1150,7 @@ test("mcp server lists Idu-pi tools", async () => {
 	assert.ok(tools.some((tool) => tool.name === "idu_role_engine_status"));
 	assert.ok(tools.some((tool) => tool.name === "idu_queue_complete"));
 	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_cron_plan"));
+	assert.ok(tools.some((tool) => tool.name === "idu_supervisor_responses"));
 	assert.ok(tools.some((tool) => tool.name === "idu_execution_director_tick"));
 	assert.ok(tools.some((tool) => tool.name === "idu_proposal_outbox"));
 	assert.ok(tools.some((tool) => tool.name === "idu_proposal_detail"));
@@ -1178,7 +1179,9 @@ test("mcp server lists Idu-pi tools", async () => {
 	// + 1 for idu_objective_status (PR-drift fix: it was dispatched at L3599
 	//   but missing from the catalog. Fixed in the same PR that adds the
 	//   dispatch↔TOOLS consistency freeze test.)
-	assert.equal(tools.length, 88);
+	// + 1 for idu_supervisor_responses (PR 3 follow-up for PRs #275, #277, #279:
+	//   read surface for the supervisor response history JSONL).
+	assert.equal(tools.length, 89);
 });
 
 test("idu_birth_general_spec_derive MCP tool updates visual fields on enrolled stateRoot", async () => {

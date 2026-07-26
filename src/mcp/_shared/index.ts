@@ -63,6 +63,7 @@ export type IduMcpToolName =
 	| "idu_supervisor_tick"
 	| "idu_supervisor_cron_plan"
 	| "idu_supervisor_consult"
+	| "idu_supervisor_responses"
 	| "idu_execution_director_tick"
 	| "idu_proposal_outbox"
 	| "idu_proposal_detail"

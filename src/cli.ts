@@ -579,6 +579,7 @@ import {
 	handleOrchestratorAdvisory,
 	handleRoleEngine,
 	handleRoleEngineStatus,
+	handleSupervisorResponses,
 } from "./cli/role/index.js";
 
 // PR 6 (Item 4): cluster L (TUI) internal imports (NOT public surface).
@@ -2164,6 +2165,9 @@ export async function runCliCommand(
 			case "idu-model-invocation-status":
 			case "model-invocation-status":
 				return handleModelInvocationStatus(activeRuntime, rest);
+			case "idu-supervisor-responses":
+			case "supervisor-responses":
+				return handleSupervisorResponses(activeRuntime, rest);
 			case "idu-orchestrator-advisory":
 			case "orchestrator-advisory":
 				return handleOrchestratorAdvisory(activeRuntime, rest);
