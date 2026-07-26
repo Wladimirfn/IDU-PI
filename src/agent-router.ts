@@ -369,6 +369,10 @@ export class AgentRouter {
 				errorMessage,
 			});
 			throw error;
+		} finally {
+			if (resolved.ephemeral) {
+				resolved.runtime.session.stop("role consult finished");
+			}
 		}
 	}
 
@@ -519,6 +523,12 @@ type ResolvedRoleSession = {
 	runtime: AgentRuntime;
 	provider: string;
 	model: string;
+	/**
+	 * `true` means the runtime was spawned solely for this call and is not
+	 * tracked in `AgentRouter.runtimes`; the caller owns it and must stop it.
+	 * `false` means the runtime is shared and must outlive this call.
+	 */
+	ephemeral: boolean;
 };
 
 type AssignedResolution = {
@@ -543,6 +553,7 @@ function resolveSessionForRole(
 			runtime: createDirectModelRuntime(router, parsed.provider, parsed.model),
 			provider: parsed.provider,
 			model: parsed.model,
+			ephemeral: true,
 		};
 	}
 	// source === "assigned": reuse the existing profile runtime.
@@ -550,6 +561,7 @@ function resolveSessionForRole(
 		runtime: router.runtimeForProfile(resolution.profile.id),
 		provider: resolution.profile.provider,
 		model: profileModelLabel(resolution.profile),
+		ephemeral: false,
 	};
 }
 

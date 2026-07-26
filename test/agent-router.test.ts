@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
 	AgentRouter,
 	formatAgentProfiles,
 	type AgentSession,
 } from "../src/agent-router.js";
+import { runAgentLabReviewRequest } from "../src/agentlab-review-runner.js";
+import { buildAgentLabReviewRequest } from "../src/agentlab-supervisor-contract.js";
+import type { ModelInvocationRecord } from "../src/model-invocation-log.js";
 import type { PiRpcOptions, PiRpcPromptResult } from "../src/pi-rpc.js";
+import { makeTempDir } from "./helpers/temp.js";
 
 class FakeSession implements AgentSession {
 	running = false;
@@ -13,9 +20,14 @@ class FakeSession implements AgentSession {
 	prompts: string[] = [];
 	cancelled = false;
 	stopped = false;
+	stopCalls = 0;
 	uiAnswers: unknown[] = [];
 
-	constructor(public cwd: string) {}
+	constructor(
+		public cwd: string,
+		private readonly promptError?: Error,
+		private readonly promptOutput?: string,
+	) {}
 
 	start(): void {
 		this.running = true;
@@ -24,7 +36,8 @@ class FakeSession implements AgentSession {
 	async prompt(message: string): Promise<PiRpcPromptResult> {
 		this.running = true;
 		this.prompts.push(message);
-		return { ok: true, output: `ok:${message}` };
+		if (this.promptError) throw this.promptError;
+		return { ok: true, output: this.promptOutput ?? `ok:${message}` };
 	}
 
 	answerUiRequest(value: unknown): boolean {
@@ -38,9 +51,47 @@ class FakeSession implements AgentSession {
 	}
 
 	stop(): void {
+		this.stopCalls++;
 		this.stopped = true;
 		this.running = false;
 	}
+}
+
+function writeModelAssignments(
+	stateRoot: string,
+	assignments: Record<string, string>,
+): void {
+	writeFileSync(
+		join(stateRoot, "model-assignments.json"),
+		`${JSON.stringify({ version: 1, assignments }, null, 2)}\n`,
+		"utf8",
+	);
+}
+
+function createRoleRouter(promptError?: Error) {
+	const created: Array<{ options: PiRpcOptions; session: FakeSession }> = [];
+	const router = new AgentRouter({
+		piBin: "node",
+		basePiArgs: ["pi-cli.js"],
+		profiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{
+				id: "codex",
+				label: "GPT Codex",
+				provider: "pi",
+				piArgs: ["--model", "codex"],
+			},
+		],
+		defaultProjectId: "project-a",
+		defaultCwd: "C:/project-a",
+		workspaceMode: "direct",
+		createSession: (options) => {
+			const session = new FakeSession(options.cwd, promptError);
+			created.push({ options, session });
+			return session;
+		},
+	});
+	return { router, created };
 }
 
 function createRouter(workspaceMode: "direct" | "clone" = "direct") {
@@ -223,4 +274,197 @@ test("answers UI requests on the runtime that created them", async () => {
 	);
 	assert.deepEqual(created[0].session.uiAnswers, [{ confirmed: true }]);
 	assert.deepEqual(created[1].session.uiAnswers, []);
+});
+
+test("promptForRole stops the direct-model runtime once on success", async () => {
+	const stateRoot = makeTempDir("agent-router-direct-model-success-");
+	writeModelAssignments(stateRoot, {
+		"supervisor-main": "opencode-go/deepseek-v4-pro",
+	});
+	const { router, created } = createRoleRouter();
+	const sink: ModelInvocationRecord[] = [];
+
+	const result = await router.promptForRole("supervisor-main", "hello", {
+		projectId: "project-a",
+		stateRoot,
+		invocationSink: (record) => sink.push(record),
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(created.length, 1);
+	assert.equal(created[0]?.session.stopCalls, 1);
+	assert.deepEqual(created[0]?.options.piArgs, [
+		"pi-cli.js",
+		"--provider",
+		"opencode-go",
+		"--model",
+		"deepseek-v4-pro",
+	]);
+	assert.equal(sink.length, 1);
+	assert.equal(sink[0]?.status, "success");
+});
+
+test("promptForRole still stops the direct-model runtime when the prompt throws", async () => {
+	const stateRoot = makeTempDir("agent-router-direct-model-throws-");
+	writeModelAssignments(stateRoot, {
+		"supervisor-main": "opencode-go/deepseek-v4-pro",
+	});
+	const promptError = new Error("Pi crashed during prompt");
+	const { router, created } = createRoleRouter(promptError);
+	const sink: ModelInvocationRecord[] = [];
+
+	await assert.rejects(
+		router.promptForRole("supervisor-main", "boom", {
+			projectId: "project-a",
+			stateRoot,
+			invocationSink: (record) => sink.push(record),
+		}),
+		(error: unknown) => {
+			assert.equal(error, promptError);
+			return true;
+		},
+	);
+
+	assert.equal(created.length, 1);
+	assert.equal(created[0]?.session.stopCalls, 1);
+	assert.equal(sink.length, 1);
+	assert.equal(sink[0]?.status, "failure");
+	assert.equal(sink[0]?.errorMessage, "Pi crashed during prompt");
+});
+
+test("promptForRole reuses the profile runtime and never stops it (regression for assigned-profile trap)", async () => {
+	const stateRoot = makeTempDir("agent-router-assigned-profile-");
+	writeModelAssignments(stateRoot, {
+		"supervisor-main": "codex",
+	});
+	const { router, created } = createRoleRouter();
+
+	router.select("codex");
+	router.activeRuntime();
+	const beforeCount = created.length;
+
+	const result = await router.promptForRole("supervisor-main", "audit", {
+		projectId: "project-a",
+		stateRoot,
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(result.provider, "pi");
+	assert.equal(result.model, "codex");
+	assert.equal(created.length, beforeCount);
+	for (const entry of created) {
+		assert.equal(entry.session.stopCalls, 0);
+	}
+	const codexEntry = created[beforeCount - 1];
+	assert.equal(codexEntry?.session.prompts.at(-1), "audit");
+	assert.equal(
+		router.activeRuntime().session,
+		codexEntry?.session,
+		"shared profile runtime must still be reachable after the role call",
+	);
+});
+
+test("promptForRole spawns and stops one session per direct-model call", async () => {
+	const stateRoot = makeTempDir("agent-router-repeated-direct-model-");
+	writeModelAssignments(stateRoot, {
+		"supervisor-main": "opencode-go/deepseek-v4-pro",
+	});
+	const { router, created } = createRoleRouter();
+
+	const calls = 3;
+	for (let index = 0; index < calls; index++) {
+		await router.promptForRole("supervisor-main", `call-${index}`, {
+			projectId: "project-a",
+			stateRoot,
+		});
+	}
+
+	assert.equal(created.length, calls);
+	for (const entry of created) {
+		assert.equal(entry.session.stopCalls, 1);
+	}
+});
+
+test("AgentLab promptForRole path stops both its outer runtime and inner direct-model runtime", async () => {
+	const projectPath = makeTempDir("agent-router-agentlab-project-");
+	const runGit = (args: string[]) =>
+		execFileSync("git", args, { cwd: projectPath, encoding: "utf8" });
+	runGit(["init"]);
+	runGit(["config", "user.email", "test@example.com"]);
+	runGit(["config", "user.name", "Test"]);
+	runGit(["config", "core.autocrlf", "false"]);
+	writeFileSync(join(projectPath, "tracked.txt"), "base\n", "utf8");
+	runGit(["add", "tracked.txt"]);
+	runGit(["commit", "-m", "init"]);
+
+	const stateRoot = makeTempDir("agent-router-agentlab-state-");
+	writeModelAssignments(stateRoot, {
+		"agentlab-security": "opencode-go/deepseek-v4-pro",
+	});
+	const workspaceRoot = makeTempDir("agent-router-agentlab-workspace-");
+	const created: Array<{ options: PiRpcOptions; session: FakeSession }> = [];
+	const profiles = [
+		{ id: "default", label: "Default", provider: "pi" as const, piArgs: [] },
+		{ id: "security", label: "Security", provider: "pi" as const, piArgs: [] },
+	];
+	const router = new AgentRouter({
+		piBin: "node",
+		basePiArgs: ["pi-cli.js"],
+		profiles,
+		defaultProjectId: "project-a",
+		defaultCwd: projectPath,
+		workspaceRoot,
+		workspaceMode: "clone",
+		syncWorkspace: (_root, _projectId, _targetCwd, profileId) => {
+			const workspace = join(workspaceRoot, profileId);
+			mkdirSync(workspace, { recursive: true });
+			return workspace;
+		},
+		createSession: (options) => {
+			const session = new FakeSession(options.cwd, undefined, "{}");
+			created.push({ options, session });
+			return session;
+		},
+	});
+	const invocationRecords: ModelInvocationRecord[] = [];
+	const request = buildAgentLabReviewRequest({
+		id: "request-security",
+		projectId: "project-a",
+		projectPath,
+		specialty: "security",
+		trigger: "manual",
+		objective: "Review security",
+		contextSummary: "Direct-model lifetime regression proof",
+		evidence: ["tracked.txt"],
+		filesToInspect: ["tracked.txt"],
+		flowsToCheck: [],
+		rulesToCheck: ["review-only"],
+		constraints: ["review-only"],
+		maxCommands: 1,
+		maxMinutes: 1,
+		tokenBudgetHint: "bounded",
+		expectedOutputs: ["report"],
+		createdAt: "2026-05-25T00:00:00.000Z",
+		model: "opencode-go/deepseek-v4-pro",
+	});
+
+	await runAgentLabReviewRequest({
+		request,
+		projectPath,
+		router,
+		profile: profiles[1],
+		stateRoot,
+		invocationSink: (record) => invocationRecords.push(record),
+	});
+
+	assert.equal(created.length, 2);
+	const inner = created.find((entry) =>
+		entry.options.piArgs?.includes("--provider"),
+	);
+	const outer = created.find((entry) => entry !== inner);
+	assert.ok(inner, "AgentLab must route the model invocation through promptForRole");
+	assert.equal(inner.session.stopCalls, 1);
+	assert.equal(outer?.session.stopCalls, 1);
+	assert.equal(invocationRecords.length, 1);
+	assert.equal(invocationRecords[0]?.status, "success");
 });
