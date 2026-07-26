@@ -392,3 +392,49 @@ test("CLI_COMMANDS exposes the model invocation status entries for the new REQ-B
 		"expected a role-filter idu-model-invocation-status command with a role + limit",
 	);
 });
+
+test("telegramCommandsForApi exposes the supervisor_responses read surface", () => {
+	const commands = telegramCommandsForApi();
+	const entry = commands.find((item) => item.command === "supervisor_responses");
+	assert.ok(
+		entry,
+		"expected telegramCommandsForApi to expose supervisor_responses",
+	);
+	assert.ok(
+		entry?.description.length && entry.description.length <= 80,
+		"supervisor_responses description must be a non-empty string ≤ 80 chars",
+	);
+});
+
+test("telegram supervisor_responses handler is registered and routes through replyLong", () => {
+	const source = readFileSync("src/index.ts", "utf8");
+	assert.match(
+		source,
+		/bot\.command\(\s*"supervisor_responses"/u,
+		"expected a bot.command(\"supervisor_responses\", ...) registration in src/index.ts",
+	);
+	const start = source.indexOf('bot.command("supervisor_responses"');
+	assert.notEqual(start, -1);
+	const next = source.indexOf("bot.command(", start + 1);
+	const block = source.slice(start, next === -1 ? undefined : next);
+	assert.match(
+		block,
+		/buildSupervisorResponsesReport\(/u,
+		"supervisor_responses handler must call buildSupervisorResponsesReport",
+	);
+	assert.match(
+		block,
+		/formatSupervisorResponses\(/u,
+		"supervisor_responses handler must call formatSupervisorResponses",
+	);
+	assert.match(
+		block,
+		/replyLong\(/u,
+		"supervisor_responses handler must route the formatted output through replyLong",
+	);
+	assert.match(
+		block,
+		/activeProjectStateRoot\(\)/u,
+		"supervisor_responses handler must resolve stateRoot via activeProjectStateRoot()",
+	);
+});

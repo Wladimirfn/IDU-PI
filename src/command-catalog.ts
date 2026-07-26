@@ -191,6 +191,12 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/agentlab_report_status latest", "/agentlab_report_status <ruta>"],
 	},
 	{
+		command: "supervisor_responses",
+		description: "Ver respuestas del supervisor",
+		help: "/supervisor_responses [límite] - ver historial de respuestas del supervisor (stateRoot/reports/idu-supervisor-responses.jsonl) sin aplicar reglas",
+		usage: ["/supervisor_responses", "/supervisor_responses 20"],
+	},
+	{
 		command: "semantic_audit_status",
 		description: "Ver auditoría semántica",
 		help: "/semantic_audit_status - revisar conteos, checkpoint y decisión de auditoría semántica sin IA",
