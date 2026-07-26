@@ -23,6 +23,7 @@ import {
 	supervisorResponseHistoryPath,
 } from "../src/supervisor-response-history.js";
 import type { PromptForRoleResult } from "../src/agent-router.js";
+import { makeTempDir } from "./helpers/temp.js";
 
 function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
 	const root = mkdtempSync(join(tmpdir(), "idu-consult-"));
@@ -342,5 +343,114 @@ test("consultSupervisor: role_not_enabled early return does NOT write to the his
 		);
 	} finally {
 		cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Issue #338 fix: the catch path must record the wake so the cooldown applies
+// even when `promptForRole` rethrows. Without it, a throw-path failure can
+// rapid-fire consults because the rail never sees the wake and `lastWakeAt`
+// stays at its pre-throw value.
+// ---------------------------------------------------------------------------
+
+test("consultSupervisor: records the wake on the throw path so the cooldown applies", async () => {
+	const stateRoot = makeTempDir("idu-consult-throw-wake-");
+	const now = new Date("2026-06-15T12:00:00Z");
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		// Pre-populate the rail so we can assert that `wakeCount` increments
+		// from 1 → 2 and `lastWakeAt` moves to the `now` we pass to consult.
+		writeFileSync(
+			roleRailsPath(stateRoot),
+			JSON.stringify({
+				rails: {
+					"supervisor-main": {
+						role: "supervisor-main",
+						enabled: true,
+						tokenBudget: 800,
+						minTokenBudget: 100,
+						maxTokenBudget: 2000,
+						cooldownMs: 30_000,
+						cooldownRemainingMs: 0,
+						lastWakeAt: new Date(now.getTime() - 60_000).toISOString(),
+						wakeCount: 1,
+						successStreak: 0,
+						failureStreak: 0,
+						emergencyTimeoutMs: 600_000,
+					},
+				},
+			}),
+			"utf8",
+		);
+		const throwingPrompt: ConsultInput["promptForRole"] = async () => {
+			throw new Error("model invocation exploded");
+		};
+		await assert.rejects(
+			consultSupervisor({
+				stateRoot,
+				role: "supervisor-main",
+				question: "Will the rollback work?",
+				promptForRole: throwingPrompt,
+				now,
+			}),
+			/exploded/u,
+		);
+		// Per the on-disk contract, the wake must have been recorded even
+		// though the consult threw. We read the persisted JSON directly so we
+		// observe exactly what the rail layer wrote to disk.
+		const persisted = JSON.parse(
+			readFileSync(roleRailsPath(stateRoot), "utf8"),
+		) as { rails: Record<string, { wakeCount: number; lastWakeAt: string }> };
+		assert.equal(
+			persisted.rails["supervisor-main"].wakeCount,
+			2,
+			"wakeCount must increment on the throw path",
+		);
+		assert.equal(
+			persisted.rails["supervisor-main"].lastWakeAt,
+			now.toISOString(),
+			"lastWakeAt must be updated to the consult `now` on the throw path",
+		);
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
+
+test("consultSupervisor: a follow-up consult after a throw hits the cooldown (rail saw the wake)", async () => {
+	const stateRoot = makeTempDir("idu-consult-throw-cooldown-");
+	const now = new Date("2026-06-15T12:00:00Z");
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		const throwingPrompt: ConsultInput["promptForRole"] = async () => {
+			throw new Error("first call blew up");
+		};
+		await assert.rejects(
+			consultSupervisor({
+				stateRoot,
+				role: "supervisor-main",
+				question: "first attempt",
+				promptForRole: throwingPrompt,
+				now,
+			}),
+			/blew up/u,
+		);
+		// Now ask again with a prompt that would succeed, but the rail should
+		// still be in cooldown because the first throw recorded the wake.
+		const result = await consultSupervisor({
+			stateRoot,
+			role: "supervisor-main",
+			question: "second attempt",
+			promptForRole: mockSuccess("ok"),
+			now: new Date(now.getTime() + 1_000),
+		});
+		assert.equal(result.ok, false);
+		assert.equal(
+			result.reason,
+			"cooldown_active",
+			"second consult must be blocked by the cooldown that the throw path recorded",
+		);
+		assert.ok((result.cooldownRemainingMs ?? 0) > 0);
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
 	}
 });
