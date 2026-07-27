@@ -346,6 +346,7 @@ import {
 	readSupervisorActivityEvents,
 	summarizeSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
+import { drainPendingSupervisorResponseWrites } from "./supervisor-response-history.js";
 import {
 	buildIduUsageReport,
 	filterRecentIduUsageEvents,
@@ -3772,14 +3773,22 @@ function shutdown(): void {
 	agentRouter.stopAll("Bridge detenido.");
 }
 
-process.once("SIGINT", () => {
+/**
+ * Graceful shutdown: stop runtimes, drain pending supervisor response writes
+ * (fire-and-forget from consultSupervisor), then exit. The 5s timeout prevents
+ * a hung flush (lock contention) from blocking shutdown indefinitely (issue #344).
+ */
+async function gracefulShutdown(): Promise<void> {
 	shutdown();
+	await Promise.race([
+		drainPendingSupervisorResponseWrites(),
+		new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+	]);
 	process.exit(0);
-});
-process.once("SIGTERM", () => {
-	shutdown();
-	process.exit(0);
-});
+}
+
+process.once("SIGINT", () => void gracefulShutdown());
+process.once("SIGTERM", () => void gracefulShutdown());
 process.once("exit", shutdown);
 
 console.log(
