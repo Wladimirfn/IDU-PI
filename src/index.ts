@@ -346,7 +346,7 @@ import {
 	readSupervisorActivityEvents,
 	summarizeSupervisorActivityEvents,
 } from "./supervisor-activity-events.js";
-import { drainPendingSupervisorResponseWrites } from "./supervisor-response-history.js";
+import { drainAllShutdownQueues } from "./graceful-shutdown-registry.js";
 import {
 	buildIduUsageReport,
 	filterRecentIduUsageEvents,
@@ -3774,14 +3774,18 @@ function shutdown(): void {
 }
 
 /**
- * Graceful shutdown: stop runtimes, drain pending supervisor response writes
- * (fire-and-forget from consultSupervisor), then exit. The 5s timeout prevents
- * a hung flush (lock contention) from blocking shutdown indefinitely (issue #344).
+ * Graceful shutdown: stop runtimes, drain every fire-and-forget write queue
+ * registered with the shutdown registry, then exit. The 5s timeout is a single
+ * budget shared across all drains, so a hung flush (lock contention) cannot
+ * block shutdown indefinitely no matter how many queues exist (issue #344).
+ *
+ * Only queues whose module was loaded in this process are registered, which is
+ * exactly right: an unloaded module has no pending writes to drain.
  */
 async function gracefulShutdown(): Promise<void> {
 	shutdown();
 	await Promise.race([
-		drainPendingSupervisorResponseWrites(),
+		drainAllShutdownQueues(),
 		new Promise<void>((resolve) => setTimeout(resolve, 5000)),
 	]);
 	process.exit(0);
