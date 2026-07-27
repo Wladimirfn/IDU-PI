@@ -412,6 +412,11 @@ test("consultSupervisor: records the wake on the throw path so the cooldown appl
 			"lastWakeAt must be updated to the consult `now` on the throw path",
 		);
 	} finally {
+		// The throw path records the response history via
+		// recordSupervisorResponseDeferred, which is fire-and-forget. Settle it
+		// before removing the tree or the write recreates it after rmSync
+		// succeeds — the same race #342 fixed in sensor-impulses.test.ts.
+		await flushSupervisorResponseHistory(stateRoot);
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
 });
@@ -451,6 +456,9 @@ test("consultSupervisor: a follow-up consult after a throw hits the cooldown (ra
 		);
 		assert.ok((result.cooldownRemainingMs ?? 0) > 0);
 	} finally {
+		// Same reason as the sibling throw test above: settle the deferred
+		// history write before rmSync so it cannot recreate the tree.
+		await flushSupervisorResponseHistory(stateRoot);
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
 });

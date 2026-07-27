@@ -1,16 +1,22 @@
 // src/graceful-shutdown-registry.ts
 //
-// Shared registry for fire-and-forget write queues that must be drained
-// before process.exit(0). Each event-recording module registers its flush
-// function at module load; the bridge's gracefulShutdown calls
-// drainAllShutdownQueues once with a single timeout budget.
+// Shared registry for fire-and-forget write queues. Each event-recording
+// module registers its flush function at module load. Two consumers call
+// drainAllShutdownQueues:
+//
+//   1. The bridge's gracefulShutdown (src/index.ts) — drains before
+//      process.exit(0), with a 5s timeout (losing a log line is better
+//      than an unkillable process).
+//   2. runCliCommand (src/cli.ts) — drains after every command returns,
+//      without a timeout. Contract: when the command returns, all writes
+//      have settled. If a write hangs, the command hangs.
 //
 // Why a registry instead of an explicit list: the fire-and-forget pattern
 // (Set<Promise> + void write.finally + flush export) was duplicated five
 // times across the codebase. The first shutdown drain (#348) covered only
 // one of the five — the other four were invisible because the defect was
 // in the files the diff didn't touch. A registry makes the next queue
-// impossible to forget: the module self-registers, the shutdown discovers
+// impossible to forget: the module self-registers, the consumer discovers
 // all registered drains automatically.
 
 type DrainFn = () => Promise<unknown>;
