@@ -115,10 +115,8 @@ if (delta > THRESHOLD) {
 	console.error(
 		`[leak-guard] LEAK DETECTED: ${delta} new entries in ${tmpdir()} (threshold ${THRESHOLD}).`,
 	);
-	console.error(
-		`[leak-guard] First ${Math.min(newEntries.length, 10)} new entries (sample):`,
-	);
-	for (const e of newEntries.slice(0, 10)) console.error(`  ${e}`);
+	console.error(`[leak-guard] All ${newEntries.length} new entries:`);
+	for (const e of newEntries) console.error(`  ${e}`);
 	console.error(
 		`[leak-guard] Inspect recent test changes; new mkdtemp calls must go through test/helpers/temp.ts.`,
 	);
