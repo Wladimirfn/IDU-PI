@@ -36,7 +36,7 @@ jobs:
 
       - name: Test
         env:
-          LEAK_GUARD_THRESHOLD: '63'
+          LEAK_GUARD_THRESHOLD: '62'
         run: corepack pnpm test:guarded
 
       - name: Check diff whitespace
