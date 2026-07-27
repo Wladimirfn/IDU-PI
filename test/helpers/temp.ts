@@ -18,6 +18,37 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 
 /**
+ * Report a cleanup failure to stderr with the errno code. The code
+ * distinguishes the two failure classes:
+ *
+ * - ENOTEMPTY — something recreated content (fire-and-forget write after
+ *   teardown, the #342 shape).
+ * - EBUSY — handle still open (OS/timing issue).
+ *
+ * Warns (does not throw) because the leak guard is the enforcement layer;
+ * this function is diagnosis. The `[temp-cleanup]` prefix cross-references
+ * with `[leak-guard]` entry names in CI logs (issue #346).
+ *
+ * Reports each dir at most once per context. A dir that fails to unlink stays
+ * in `tracked`, so every later afterEach retries it — without this guard one
+ * stuck directory would emit one line per remaining test in the file (77 in
+ * test/idu-cli.test.ts), making a single failure look like dozens.
+ */
+const reportedCleanupFailures = new Set<string>();
+
+function reportCleanupError(
+	dir: string,
+	error: unknown,
+	context: string,
+): void {
+	const key = `${context}:${dir}`;
+	if (reportedCleanupFailures.has(key)) return;
+	reportedCleanupFailures.add(key);
+	const code = (error as NodeJS.ErrnoException)?.code ?? "UNKNOWN";
+	process.stderr.write(`[temp-cleanup] ${context} ${code}: ${dir}\n`);
+}
+
+/**
  * Tracks every temp directory created via makeTempDir so they can be cleaned
  * up automatically. The set is process-wide for the duration of the test
  * file that imported this module.
@@ -35,8 +66,8 @@ function installExitSweep(): void {
 		for (const dir of tracked) {
 			try {
 				rmSync(dir, { recursive: true, force: true });
-			} catch {
-				// best-effort; ignore EBUSY on Windows during shutdown
+			} catch (error) {
+				reportCleanupError(dir, error, "exit-sweep");
 			}
 		}
 	});
@@ -53,30 +84,6 @@ export function makeTempDir(prefix: string): string {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
 	tracked.add(dir);
 	return dir;
-}
-
-/**
- * Eagerly remove a tracked temp dir. Mostly for tests that want to free disk
- * space during a long suite; the afterEach sweep would clean them anyway.
- *
- * On EBUSY (Windows file lock), the dir stays in `tracked` so the exit
- * sweep retries it.
- */
-export async function cleanupTempDir(dir: string): Promise<void> {
-	try {
-		await rm(dir, { recursive: true, force: true });
-		tracked.delete(dir);
-	} catch {
-		// keep in set; sweep will retry on exit
-	}
-}
-
-/**
- * Count of currently tracked (un-cleaned) temp dirs. Exported for diagnostics
- * and the script-level leak guard wrapper.
- */
-export function getTrackedTempDirCount(): number {
-	return tracked.size;
 }
 
 /**
@@ -102,8 +109,8 @@ test.afterEach(async () => {
 		try {
 			await rm(dir, { recursive: true, force: true });
 			tracked.delete(dir);
-		} catch {
-			// keep in set; exit sweep will retry
+		} catch (error) {
+			reportCleanupError(dir, error, "afterEach");
 		}
 	}
 });
