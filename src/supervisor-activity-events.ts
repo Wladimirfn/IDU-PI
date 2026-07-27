@@ -519,3 +519,6 @@ function isReason(value: unknown): value is SupervisorActivityReason {
 		value === "not_enough_data"
 	);
 }
+
+import { registerShutdownDrain } from "./graceful-shutdown-registry.js";
+registerShutdownDrain(flushSupervisorActivityEvents);

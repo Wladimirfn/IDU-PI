@@ -589,3 +589,10 @@ function sanitizeLabel(value: string): string {
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+import { registerShutdownDrain } from "./graceful-shutdown-registry.js";
+// The narrow drain, not flushSupervisorResponseHistory: flush also reads and
+// consumes the deferred-failure log when given a stateRoot, and shutdown must
+// not do file reads (issue #344). Registering the purpose-built function keeps
+// shutdown decoupled from how flush evolves.
+registerShutdownDrain(drainPendingSupervisorResponseWrites);

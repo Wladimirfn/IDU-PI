@@ -590,3 +590,6 @@ function isCompleteness(value: unknown): value is AgentLabEvidenceCompleteness {
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+import { registerShutdownDrain } from "./graceful-shutdown-registry.js";
+registerShutdownDrain(flushAgentLabEffectivenessEvents);
