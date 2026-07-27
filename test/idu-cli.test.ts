@@ -3479,3 +3479,18 @@ function validGeneralSpecSections(): Record<string, string[]> {
 		performanceCriteria: ["TTI under 3s"],
 	};
 }
+
+test("runCliCommand contract: usage events settled before return", async () => {
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		await runCliCommand(["idu-prepare"], runtime);
+
+		// Contract (Option B): runCliCommand drains all fire-and-forget
+		// writes before returning. The usage JSONL must contain the
+		// entry immediately — no explicit flush needed.
+		const events = readIduUsageEvents(workspaceRoot);
+		assert.ok(
+			events.length > 0,
+			"usage events must be persisted before runCliCommand returns",
+		);
+	});
+});

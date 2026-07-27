@@ -590,6 +590,7 @@ import {
 
 // PR 5 (Item 4): cluster I (queue) internal imports + types.
 import { semanticCompactionProjectContext } from "./cli/queue/index.js";
+import { drainAllShutdownQueues } from "./graceful-shutdown-registry.js";
 import type {
 	TaskQueuePanelDispatchRuntime,
 	TaskQueuePanelDispatchResult,
@@ -1937,7 +1938,24 @@ export function parseAgentLabRequestCreateArgs(rawArgs: readonly string[]): {
 	};
 }
 
+/**
+ * Contract: when runCliCommand returns, all fire-and-forget writes
+ * triggered by the command have settled. No timeout — if a write
+ * hangs, the command hangs. That is the correct failure mode:
+ * returning with a write in flight reopens the race between
+ * "command returned" and "command stopped writing" that the drain
+ * exists to close. Tests and callers rely on this guarantee.
+ */
 export async function runCliCommand(
+	args: string[],
+	runtime?: CliRuntime,
+): Promise<CliResult> {
+	const result = await runCliCommandInner(args, runtime);
+	await drainAllShutdownQueues();
+	return result;
+}
+
+async function runCliCommandInner(
 	args: string[],
 	runtime?: CliRuntime,
 ): Promise<CliResult> {
@@ -2492,6 +2510,9 @@ async function main(): Promise<void> {
 	// can drop stderr (e.g. the L946 "No hay proyecto activo" error
 	// from createCliRuntime), which breaks subprocess-stdout-capture
 	// assertions like test/idu-supervisor-tick-resolves-project.test.ts.
+	// Note: deferred event writes are now drained explicitly inside
+	// runCliCommand (via drainAllShutdownQueues), so process.exitCode's
+	// role here is solely about stdout/stderr flushing, not write drainage.
 	process.exitCode = result.exitCode;
 }
 
