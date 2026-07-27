@@ -13,6 +13,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import {
+	drainPendingSupervisorResponseWrites,
 	flushSupervisorResponseHistory,
 	readSupervisorResponseHistory,
 	recordSupervisorResponse,
@@ -24,6 +25,7 @@ import {
 	SUPERVISOR_RESPONSE_HISTORY_RESPONSE_MAX,
 	type SupervisorResponseHistoryEntry,
 } from "../src/supervisor-response-history.js";
+import { makeTempDir } from "./helpers/temp.js";
 
 function tempDir(prefix = "idu-sup-resp-"): string {
 	return mkdtempSync(join(tmpdir(), prefix));
@@ -822,4 +824,29 @@ test("flushSupervisorResponseHistory does NOT consume the deferred log on a FLUS
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("drainPendingSupervisorResponseWrites settles in-flight writes", async () => {
+	const stateRoot = makeTempDir("drain-pending-writes-");
+
+	recordSupervisorResponseDeferred(stateRoot, {
+		stateRoot,
+		role: "supervisor-main",
+		question: "shutdown flush test",
+		result: {
+			ok: true,
+			role: "supervisor-main",
+			response: "persisted before exit",
+			model: "test-model",
+			provider: "test-provider",
+			promptChars: 42,
+			elapsedMs: 7,
+		},
+	});
+
+	await drainPendingSupervisorResponseWrites();
+
+	const entries = readSupervisorResponseHistory(stateRoot, 10);
+	assert.equal(entries.length, 1);
+	assert.equal(entries[0]?.response, "persisted before exit");
 });

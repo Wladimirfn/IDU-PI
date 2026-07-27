@@ -316,6 +316,21 @@ function buildDeferredEntryId(entry: SupervisorResponseHistoryEntry): string {
 }
 
 /**
+ * Drain all pending supervisor response writes without reading the deferred
+ * log. Used by the bridge's graceful shutdown to ensure fire-and-forget
+ * writes complete before `process.exit(0)` (issue #344).
+ *
+ * Lightweight: does not process deferred failures or read any files. For
+ * the full flush (including deferred-log aggregation), use
+ * `flushSupervisorResponseHistory`.
+ */
+export async function drainPendingSupervisorResponseWrites(): Promise<void> {
+	const pending = [...pendingSupervisorResponseWrites];
+	if (pending.length === 0) return;
+	await Promise.allSettled(pending);
+}
+
+/**
  * Flush the deferred supervisor-response write queue and aggregate any deferred
  * persistence failures. TOTAL: never throws (spec #3098 rev4, design #3099 rev3,
  * tasks #3100 rev7 WU-2 Phase 3).
