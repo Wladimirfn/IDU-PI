@@ -16,6 +16,8 @@ import type { AgentProfile } from "./config.js";
 import type { AgentRouter } from "./agent-router.js";
 import { loadLabProjectContext } from "./lab-context.js";
 import type { ModelInvocationRecord } from "./model-invocation-log.js";
+import type { FindingWithProposalInput } from "./lab-db.js";
+import type { LabRunRecord } from "./lab-reports.js";
 import {
 	buildAgentLabWorkloadEnvelope,
 	formatAgentLabReviewRequestForPrompt,
@@ -1938,6 +1940,16 @@ export type DispatchAgentLabReviewRunInput = {
 	// returns synchronously with no background work — backward compatible.
 	runLab?: () => Promise<AgentLabReviewRunResult | undefined>;
 	onActivity?: (event: { kind: "dispatch_started" | "dispatch_completed" | "dispatch_failed"; runId: string; error?: string }) => void;
+	// Required: when a run finishes with consolidatedFindings (even partial),
+	// each finding is persisted to `bug_findings` via this recorder. The
+	// recorder is required — a silent skip here is the same anti-pattern that
+	// left the table empty for weeks. Test fixtures and CLI/MCP callers must
+	// wire a recorder (a no-op stub is fine for tests that don't assert on
+	// persistence).
+	labRunRecorder: {
+		recordLabRun(record: LabRunRecord): void;
+		recordFindingWithProposal?(input: FindingWithProposalInput): void;
+	};
 };
 
 export type DispatchAgentLabReviewRunResult = {
@@ -1993,6 +2005,79 @@ export function writeAgentLabReviewRunAtomic(
 	return finalPath;
 }
 
+/**
+ * Convert an `AgentLabFinding` (LLM output shape) into the DB-shaped
+ * `BugFindingInput` that `bug_findings` expects.
+ *
+ * `dedupe_key` is `v1:<sha256>` of normalized `{files, title-words}` so the
+ * same defect across reformulations collapses to one row (partial index on
+ * `bug_findings_dedupe_idx`). Severity is NOT part of the key: it is the
+ * most volatile field, and the supervisor-categorize.ts audit showed it can
+ * be guessed wrong when the input is truncated to 300 chars. A wrong
+ * severity inside an identity key would split the same defect into two rows
+ * when the model changes its mind. Use NULL when there is no file to anchor
+ * on — the unique partial index skips NULL/empty, so a missing key is a
+ * legal state and can be backfilled later.
+ */
+function agentLabFindingToBugFinding(
+	finding: AgentLabFinding,
+	input: {
+		projectId: string;
+		runId: string;
+		index: number;
+	},
+): { finding: FindingWithProposalInput["finding"] } {
+	const dedupeKey = computeFindingDedupeKey(finding);
+	// When dedupeKey exists, the id IS the dedupeKey: same defect across
+	// ticks collapses to the same row and `ON CONFLICT(id) DO UPDATE`
+	// (src/lab-db.ts:366) becomes a noop instead of a constraint
+	// violation. When dedupeKey is absent, we fall back to a per-run
+	// composite id so the row can still be inserted.
+	const id = dedupeKey
+		? `bf-${input.projectId}-${dedupeKey}`
+		: `bf-${input.runId}-${input.index.toString().padStart(4, "0")}`;
+	const affectedFiles = finding.affectedFiles ?? [];
+	const suspectedCause =
+		affectedFiles[0] !== undefined
+			? `${affectedFiles[0]}: ${finding.title}`
+			: finding.title;
+	return {
+		finding: {
+			id,
+			projectId: input.projectId,
+			title: finding.title,
+			description: finding.description,
+			severity: finding.severity,
+			confidence: finding.confidence,
+			evidence: finding.evidence,
+			suspectedCause,
+			affectedFiles,
+			dedupeKey,
+		},
+	};
+}
+
+function computeFindingDedupeKey(finding: AgentLabFinding): string | undefined {
+	const files = (finding.affectedFiles ?? [])
+		.map((f) => f.trim().toLowerCase())
+		.filter((f) => f.length > 0)
+		.sort();
+	const titleWords = finding.title
+		.toLowerCase()
+		.split(/[^a-z0-9]+/u)
+		.filter((w) => w.length >= 4)
+		.sort();
+	if (files.length === 0 && titleWords.length === 0) return undefined;
+	// Payload does NOT carry the `v1:` label — the label goes on the
+	// output only. Mixing them means a v2 with the same formula would
+	// still change the hash, conflating "label bumped" with "formula
+	// bumped". The output label is the single source of which version
+	// produced the key.
+	const payload = `${files.join("|")}|${titleWords.join("|")}`;
+	const hash = createHash("sha256").update(payload).digest("hex").slice(0, 16);
+	return `v1:${hash}`;
+}
+
 // PR2 production body: mints runId, writes dispatch placeholder synchronously,
 // returns the dispatched envelope, then kicks off the lab pipeline as a
 // detached promise (NO spawn, NO Worker — design D1 in-process detached).
@@ -2012,27 +2097,57 @@ export function dispatchAgentLabReviewRun(
 
 	if (input.onActivity) input.onActivity({ kind: "dispatch_started", runId });
 
-	if (input.runLab) {
-		void input
-			.runLab()
-			.then((summary) => {
-				const artifact =
-					summary ?? ({
-						generatedAt: new Date().toISOString(),
-						sourceRequestFile: input.requestId,
-						warning: "Revisión AgentLab. No aplica cambios." as const,
-						projectId: input.projectId,
-						runs: [],
-						consolidatedSummary: "completed",
-						consolidatedFindings: [],
-						recommendedNext: "none",
-						requiresHumanApproval: false,
-						safeNotes: [],
-					} satisfies AgentLabReviewRunResult);
-				writeAgentLabReviewRunAtomic(runId, input.reportsPath, artifact);
-				if (input.onActivity) input.onActivity({ kind: "dispatch_completed", runId });
-			})
-			.catch((err: unknown) => {
+		if (input.runLab) {
+			void input
+				.runLab()
+				.then((summary) => {
+					const artifact =
+						summary ?? ({
+							generatedAt: new Date().toISOString(),
+							sourceRequestFile: input.requestId,
+							warning: "Revisión AgentLab. No aplica cambios." as const,
+							projectId: input.projectId,
+							runs: [],
+							consolidatedSummary: "completed",
+							consolidatedFindings: [],
+							recommendedNext: "none",
+							requiresHumanApproval: false,
+							safeNotes: [],
+						} satisfies AgentLabReviewRunResult);
+					writeAgentLabReviewRunAtomic(runId, input.reportsPath, artifact);
+					if (input.onActivity) input.onActivity({ kind: "dispatch_completed", runId });
+
+					// Persist findings to bug_findings. We do this on EVERY
+					// result shape — partial runs included — because the
+					// 3-jul audit showed partial runs produce findings
+					// too. A skipped write on partial is precisely the
+					// "AgentLab ran out of budget at step 3" case we can't
+					// afford to lose.
+					const findings = artifact.consolidatedFindings ?? [];
+					if (findings.length > 0) {
+						const persist =
+							input.labRunRecorder.recordFindingWithProposal;
+						if (typeof persist !== "function") {
+							// recorder is REQUIRED on the input. If a
+							// caller strips recordFindingWithProposal at
+							// runtime, log and continue rather than throw
+							// (the dispatch has already committed to JSONL).
+							console.error(
+								`[agentlab] recorder missing recordFindingWithProposal; ${findings.length} findings dropped for run ${runId}`,
+							);
+						} else {
+							findings.forEach((finding, index) => {
+								const converted = agentLabFindingToBugFinding(finding, {
+									projectId: input.projectId,
+									runId,
+									index,
+								});
+								persist({ finding: converted.finding });
+							});
+						}
+					}
+				})
+				.catch((err: unknown) => {
 				const error = err instanceof Error ? err.message : String(err);
 				const failed: AgentLabReviewRunResult = {
 					generatedAt: new Date().toISOString(),
