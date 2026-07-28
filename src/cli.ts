@@ -1736,6 +1736,10 @@ export function createCliRuntime(
 				projectPath: activeProject.path,
 				maxMinutes: 15,
 				requestId: `agentlab-review-run-${Date.now()}`,
+				// C1 (issue #356): persist findings to bug_findings when the
+				// dispatch completes. LabDbRepository implements the
+				// LabRunRecorder contract (recordLabRun + recordFindingWithProposal).
+				labRunRecorder: labDbRepository,
 				runLab: () =>
 					runAgentLabReviewRequestFile({
 						pathOrLatest,
