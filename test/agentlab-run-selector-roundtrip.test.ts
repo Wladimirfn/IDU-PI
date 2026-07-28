@@ -35,6 +35,10 @@ function dispatchInput(reports: string) {
 		projectPath: makeTempDir("agentlab-run-selector-roundtrip-"),
 		maxMinutes: 1,
 		requestId: "agentlab-pi-telegram-bridge-roundtrip-01",
+		labRunRecorder: {
+			recordLabRun: () => {},
+			recordFindingWithProposal: () => {},
+		},
 	};
 }
 

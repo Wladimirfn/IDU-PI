@@ -40,7 +40,8 @@ import {
 import type { AgentProfile } from "../src/config.js";
 import type { PiRpcProgressEvent, PiRpcPromptResult } from "../src/pi-rpc.js";
 import type { AgentLabFinding } from "../src/agentlab-supervisor-contract.js";
-import type { AgentLabReviewRunResult, AgentLabReviewStatus } from "../src/agentlab-review-runner.js";
+import type { AgentLabReviewRunResult, AgentLabReviewStatus, DispatchAgentLabReviewRunInput } from "../src/agentlab-review-runner.js";
+import { initLabDb, recordBugFinding, recordFindingWithProposal, listOpenFindings, type BugFindingInput } from "../src/lab-db.js";
 
 class FakeSession implements AgentSession {
 	readonly cwd: string;
@@ -1215,7 +1216,38 @@ function dispatchFixture() {
 	const projectPath = gitProject();
 	return {
 		reportsPath,
-		input: { reportsPath, projectId: "pi-telegram-bridge", projectPath, maxMinutes: 1, requestId: "agentlab-pi-telegram-bridge-manual-security-01" },
+		input: {
+			reportsPath,
+			projectId: "pi-telegram-bridge",
+			projectPath,
+			maxMinutes: 1,
+			requestId: "agentlab-pi-telegram-bridge-manual-security-01",
+			// PR2 wiring: tests that don't assert on persistence get a
+			// no-op recorder. Tests that do assert pass an in-memory one
+			// via `recordingRecorderFixture()`.
+			labRunRecorder: {
+				recordLabRun: () => {},
+				recordFindingWithProposal: () => {},
+			},
+		},
+	};
+}
+
+function recordingRecorderFixture() {
+	const recorded: { findings: unknown[]; runs: unknown[] } = {
+		findings: [],
+		runs: [],
+	};
+	return {
+		recorder: {
+			recordLabRun: (record: unknown) => {
+				recorded.runs.push(record);
+			},
+			recordFindingWithProposal: (input: unknown) => {
+				recorded.findings.push(input);
+			},
+		},
+		recorded,
 	};
 }
 
@@ -1663,4 +1695,344 @@ test("Issue #246 formatter surfaces running state with explicit banner + Recomme
 		/agentlab_review_status/u,
 		`Recommended next line must point at agentlab_review_status; got:\n${formatted}`,
 	);
+});
+
+test("C1: dispatch persists consolidatedFindings to labRunRecorder.recordFindingWithProposal", async () => {
+	const { input } = dispatchFixture();
+	const { recorder, recorded } = recordingRecorderFixture();
+	const dispatchInput: DispatchAgentLabReviewRunInput = {
+		...input,
+		labRunRecorder: recorder,
+	};
+
+	const findings: AgentLabFinding[] = [
+		{
+			title: "SQL injection in user input handler",
+			description: "Untrusted input flows into a SQL query without parameter binding.",
+			severity: "critical",
+			confidence: "high",
+			evidence: "src/handler.ts:42 builds SQL by concatenation.",
+			category: "security",
+			affectedFiles: ["src/handler.ts"],
+			affectedFlows: [],
+			relatedRules: [],
+			controlPillars: [],
+		},
+		{
+			title: "Missing error boundary in worker pool",
+			description: "Unhandled rejections escape to the event loop.",
+			severity: "medium",
+			confidence: "medium",
+			evidence: "src/worker-pool.ts:88 — promise without .catch.",
+			category: "code_quality",
+			affectedFiles: ["src/worker-pool.ts"],
+			affectedFlows: [],
+			relatedRules: [],
+			controlPillars: [],
+		},
+	];
+	const summary: AgentLabReviewRunResult = {
+		generatedAt: new Date().toISOString(),
+		sourceRequestFile: input.requestId,
+		warning: "Revisión AgentLab. No aplica cambios." as const,
+		projectId: input.projectId,
+		runs: [
+			{
+				requestId: input.requestId,
+				specialty: "security",
+				status: "completed",
+				commandsExecuted: [],
+				rawSummary: "ok",
+				contractValidation: { valid: true, errors: [] },
+				findings,
+				recommendations: [],
+				testsSuggested: [],
+				requiresHumanApproval: true,
+			},
+		],
+		consolidatedSummary: "completed",
+		consolidatedFindings: findings,
+		recommendedNext: "none",
+		requiresHumanApproval: true,
+		safeNotes: [],
+	};
+
+	const result = dispatchAgentLabReviewRun(
+		{ ...dispatchInput, runLab: async () => summary },
+		"security",
+	);
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `run artifact must be written: ${runFile}`);
+	// Wait for the detached .then() to settle and call the recorder.
+	await new Promise((resolve) => setTimeout(resolve, 50));
+
+	assert.equal(
+		recorded.findings.length,
+		findings.length,
+		`all consolidatedFindings must be persisted; got ${recorded.findings.length}, expected ${findings.length}`,
+	);
+	for (let i = 0; i < findings.length; i++) {
+		const persisted = (recorded.findings[i] as { finding: { title: string; dedupeKey?: string; projectId: string; id: string } })
+			.finding;
+		assert.equal(persisted.title, findings[i]!.title, `finding ${i} title`);
+		assert.equal(persisted.projectId, input.projectId, `finding ${i} projectId`);
+		assert.match(persisted.id, /^bf-[a-z0-9._-]+-v1:[a-f0-9]{16}$/u, `finding ${i} id format (dedupeKey-derived)`);
+		assert.ok(typeof persisted.dedupeKey === "string" && persisted.dedupeKey.startsWith("v1:"), `finding ${i} dedupeKey must start with v1:`);
+	}
+});
+
+test("C1: dispatch persists findings even on partial status", async () => {
+	const { input } = dispatchFixture();
+	const { recorder, recorded } = recordingRecorderFixture();
+
+	const findings: AgentLabFinding[] = [
+		{
+			title: "Partial run produced this finding",
+			description: "AgentLab hit budget at step 3 but already produced one finding.",
+			severity: "low",
+			confidence: "medium",
+			evidence: "Step 2 emitted it.",
+			category: "code_quality",
+			affectedFiles: ["src/foo.ts"],
+			affectedFlows: [],
+			relatedRules: [],
+			controlPillars: [],
+		},
+	];
+	const summary: AgentLabReviewRunResult = {
+		generatedAt: new Date().toISOString(),
+		sourceRequestFile: input.requestId,
+		warning: "Revisión AgentLab. No aplica cambios." as const,
+		projectId: input.projectId,
+		runs: [
+			{
+				requestId: input.requestId,
+				specialty: "security",
+				status: "partial",
+				commandsExecuted: [],
+				rawSummary: "partial",
+				contractValidation: { valid: true, errors: [] },
+				findings,
+				recommendations: [],
+				testsSuggested: [],
+				requiresHumanApproval: true,
+			},
+		],
+		consolidatedSummary: "partial",
+		consolidatedFindings: findings,
+		recommendedNext: "none",
+		requiresHumanApproval: true,
+		safeNotes: [],
+	};
+
+	const result = dispatchAgentLabReviewRun(
+		{ ...input, labRunRecorder: recorder, runLab: async () => summary },
+		"security",
+	);
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	const arrived = await waitFor(() => existsSync(runFile), 2000);
+	assert.ok(arrived, `run artifact must be written: ${runFile}`);
+	await new Promise((resolve) => setTimeout(resolve, 50));
+
+	assert.equal(
+		recorded.findings.length,
+		1,
+		`partial runs MUST persist their findings — this is the "ran out of budget" case`,
+	);
+});
+
+test("C1: dispatch persists NULL dedupeKey when finding has no file and no useful title", async () => {
+	const { input } = dispatchFixture();
+	const { recorder, recorded } = recordingRecorderFixture();
+
+	const finding: AgentLabFinding = {
+		title: "x",  // too short to yield a keyword
+		description: "y",
+		severity: "info",
+		confidence: "low",
+		evidence: "",
+		category: "",
+		affectedFiles: [],
+		affectedFlows: [],
+		relatedRules: [],
+		controlPillars: [],
+	};
+	const summary: AgentLabReviewRunResult = {
+		generatedAt: new Date().toISOString(),
+		sourceRequestFile: input.requestId,
+		warning: "Revisión AgentLab. No aplica cambios." as const,
+		projectId: input.projectId,
+		runs: [{
+			requestId: input.requestId, specialty: "security", status: "completed",
+			commandsExecuted: [], rawSummary: "ok",
+			contractValidation: { valid: true, errors: [] },
+			findings: [finding],
+			recommendations: [], testsSuggested: [],
+			requiresHumanApproval: false,
+		}],
+		consolidatedSummary: "completed",
+		consolidatedFindings: [finding],
+		recommendedNext: "none",
+		requiresHumanApproval: false,
+		safeNotes: [],
+	};
+
+	const result = dispatchAgentLabReviewRun(
+		{ ...input, labRunRecorder: recorder, runLab: async () => summary },
+		"security",
+	);
+
+	const runFile = result.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	await waitFor(() => existsSync(runFile), 2000);
+	await new Promise((resolve) => setTimeout(resolve, 50));
+
+	assert.equal(recorded.findings.length, 1, "the finding MUST still be persisted");
+	const persisted = (recorded.findings[0] as { finding: { dedupeKey?: string } })
+		.finding;
+	assert.equal(
+		persisted.dedupeKey,
+		undefined,
+		"dedupeKey must be NULL (undefined) when no file and no useful title",
+	);
+});
+
+test("C1: recordFindingWithProposal against real DB is idempotent on dedupeKey collision", () => {
+	const tempDir = makeTempDir("c1-double-persist-db-");
+	const dbPath = join(tempDir, "lab.db");
+	initLabDb(dbPath);
+
+	const projectId = "idu-pi";
+	const dedupeKey = "v1:abc123def456";
+
+	const finding: BugFindingInput = {
+		id: `bf-${projectId}-${dedupeKey}`,
+		projectId,
+		title: "first write",
+		description: "original description",
+		severity: "high",
+		confidence: "high",
+		evidence: "",
+		suspectedCause: "",
+		affectedFiles: [],
+		dedupeKey,
+	};
+
+	// First write — should succeed without throwing.
+	recordFindingWithProposal(dbPath, { finding });
+
+	// Second write with same dedupeKey but different title — the id
+	// matches (because id is derived from dedupeKey), so ON CONFLICT(id)
+	// DO UPDATE fires. Title gets updated, no exception.
+	const finding2: BugFindingInput = {
+		...finding,
+		title: "second write updates title",
+	};
+	recordFindingWithProposal(dbPath, { finding: finding2 });
+
+	// Verify: one row, title is the latest.
+	const rows = listOpenFindings(dbPath, projectId);
+	assert.equal(rows.length, 1, "second write must update in place, not insert a duplicate");
+	assert.equal(rows[0]!.title, "second write updates title", "row must reflect the latest title");
+	assert.equal(rows[0]!.dedupeKey, dedupeKey, "dedupe_key must survive the update");
+});
+
+test("C1: dispatch with real DB recorder does not trigger .catch() on the second run with same findings", async () => {
+	const tempDir = makeTempDir("c1-double-persist-dispatch-");
+	const dbPath = join(tempDir, "lab.db");
+	const reportsPath = join(tempDir, "reports");
+	mkdirSync(reportsPath, { recursive: true });
+	initLabDb(dbPath);
+
+	// Use a recorder backed by the real DB.
+	const recorder = {
+		recordLabRun: () => {},
+		recordFindingWithProposal: (input: { finding: BugFindingInput }) =>
+			recordBugFinding(dbPath, input.finding),
+	};
+
+	const finding: AgentLabFinding = {
+		title: "Idempotent dispatch",
+		description: "Same finding, second run, same dedupeKey.",
+		severity: "medium",
+		confidence: "high",
+		evidence: "",
+		category: "",
+		affectedFiles: ["src/x.ts"],
+		affectedFlows: [],
+		relatedRules: [],
+		controlPillars: [],
+	};
+	const summary: AgentLabReviewRunResult = {
+		generatedAt: new Date().toISOString(),
+		sourceRequestFile: "req-1",
+		warning: "Revisión AgentLab. No aplica cambios." as const,
+		projectId: "idu-pi",
+		runs: [{
+			requestId: "req-1", specialty: "security", status: "completed",
+			commandsExecuted: [], rawSummary: "ok",
+			contractValidation: { valid: true, errors: [] },
+			findings: [finding],
+			recommendations: [], testsSuggested: [],
+			requiresHumanApproval: false,
+		}],
+		consolidatedSummary: "completed",
+		consolidatedFindings: [finding],
+		recommendedNext: "none",
+		requiresHumanApproval: false,
+		safeNotes: [],
+	};
+
+	const projectPath = gitProject();
+	const baseInput: DispatchAgentLabReviewRunInput = {
+		reportsPath,
+		projectId: "idu-pi",
+		projectPath,
+		maxMinutes: 1,
+		requestId: "req-1",
+		labRunRecorder: recorder,
+	};
+
+	// Run 1
+	const r1 = dispatchAgentLabReviewRun(
+		{ ...baseInput, runLab: async () => summary },
+		"security",
+	);
+	const jsonlPath1 = r1.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	await waitFor(() => existsSync(jsonlPath1), 2000);
+	await new Promise((resolve) => setTimeout(resolve, 50));
+
+	// Run 2 — same findings, different requestId (simulating a new tick).
+	const r2 = dispatchAgentLabReviewRun(
+		{ ...baseInput, requestId: "req-2", runLab: async () => summary },
+		"security",
+	);
+	const jsonlPath2 = r2.dispatchPath.replace(/\.dispatch\.json$/u, ".json");
+	await waitFor(() => existsSync(jsonlPath2), 2000);
+	await new Promise((resolve) => setTimeout(resolve, 50));
+
+	// Verify: BOTH JSONLs exist (run 2 did NOT clobber run 1).
+	assert.ok(existsSync(jsonlPath1), "run 1 JSONL must survive — .catch() must not have executed");
+	assert.ok(existsSync(jsonlPath2), "run 2 JSONL must be written");
+
+	// Verify the JSONL content: run 2 must be a COMPLETED run, NOT a failed
+	// run. If the recorder threw, .catch() would have written
+	// consolidatedSummary: "failed".
+	const jsonl2 = JSON.parse(readFileSync(jsonlPath2, "utf8")) as {
+		runs: Array<{ status: string }>;
+		consolidatedSummary: string;
+		consolidatedFindings: unknown[];
+	};
+	assert.equal(jsonl2.consolidatedSummary, "completed", "run 2 must remain completed; UNIQUE constraint on dedupe_key must not have aborted the .then()");
+	assert.notEqual(
+		jsonl2.consolidatedSummary,
+		"failed",
+		"run 2 must NOT be marked failed — that would mean the .catch() fired because the recorder threw UNIQUE constraint failure",
+	);
+
+	// Verify: bug_findings has exactly one row (dedup worked).
+	const rows = listOpenFindings(dbPath, "idu-pi");
+	assert.equal(rows.length, 1, "second dispatch must update in place, not insert a duplicate row");
 });
