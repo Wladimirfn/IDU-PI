@@ -19,11 +19,33 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir 'supervisor-tick.log'
 
 function Log($Message) {
+	# Bounded retry for Add-Content failures. The five "Log ocupado"
+	# messages in a single forced tick on 2026-07-27 had no content —
+	# the operator learned *that* a line was dropped, never *which* or
+	# *why*. The retry absorbs the transient case (AV scan, FS slow,
+	# brief file contention); the fallback carries the line content
+	# + the exception message so a structural failure is still
+	# diagnosable.
 	$line = (Get-Date -Format o) + ' ' + $Message
-	try {
-		Add-Content -Path $LogFile -Value $line -ErrorAction Stop
-	} catch {
-		Write-Host 'Log ocupado; continuo sin escribir esta linea' -ForegroundColor DarkYellow
+	$delays = @(0, 50, 200)
+	$written = $false
+	$lastError = $null
+	foreach ($delay in $delays) {
+		if ($delay -gt 0) { Start-Sleep -Milliseconds $delay }
+		try {
+			Add-Content -Path $LogFile -Value $line -ErrorAction Stop
+			$written = $true
+			break
+		} catch {
+			$lastError = $_
+		}
+	}
+	if (-not $written) {
+		# Fallback must carry the content. Log to host so the operator
+		# at the terminal sees WHAT was lost; the exception message
+		# explains WHY so the next investigation starts with a direction.
+		$reason = if ($lastError.Exception) { $lastError.Exception.Message } else { [string]$lastError }
+		Write-Host ('Log ocupado tras retry; mensaje perdido: ' + $line + ' | reason: ' + $reason) -ForegroundColor DarkYellow
 	}
 }
 
@@ -192,8 +214,21 @@ try {
 	}
 	$env:IDU_PI_TRIGGER_ENGINE = $EnvTriggerEngine
 	$preflightArgs = @('idu-run-cron-preflight') + $changedFiles
-	$preflightOutput = & node $cliPath @preflightArgs 2>&1
-	$preflightExit = $LASTEXITCODE
+	# Scope $ErrorActionPreference = 'Continue' around the node call only:
+	# a deprecation warning on stderr (e.g. DEP0190 from codegraph's
+	# shell: true launch) would otherwise be reclassified as a terminating
+	# error under the script-wide Stop preference and abort the try
+	# before the watermark write. Keeping stderr in $preflightOutput
+	# preserves operator visibility; relaxing the preference only inside
+	# the call keeps the script-wide Stop behavior everywhere else.
+	$prevEAP = $ErrorActionPreference
+	$ErrorActionPreference = 'Continue'
+	try {
+		$preflightOutput = & node $cliPath @preflightArgs 2>&1
+		$preflightExit = $LASTEXITCODE
+	} finally {
+		$ErrorActionPreference = $prevEAP
+	}
 	Log ('cron_preflight_exit=' + $preflightExit + ' changed_files=' + $changedFiles.Count)
 	Log ('cron_preflight_output: ' + ($preflightOutput -join ' | '))
 	Write-Host $preflightOutput
