@@ -183,8 +183,9 @@ export async function handlePostflight(
 ): Promise<IduMcpToolResult> {
 	const report = runtime.postflight();
 	const sensorStateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
-	const sensorImpulses = await runSensorImpulses({
+	const sensorImpulseRun = await runSensorImpulses({
 		stateRoot: sensorStateRoot,
+		projectId: runtime.projectId,
 		projectRoot: runtime.projectPath,
 		changedFiles: report.changedFiles,
 		promptForRole: (role, message, options) => {
@@ -198,6 +199,7 @@ export async function handlePostflight(
 			});
 		},
 	});
+	const sensorImpulses = sensorImpulseRun.impulses;
 	const supervisorAdvisory = await categorizeFindings({
 		stateRoot: sensorStateRoot,
 		findings: sensorImpulses
@@ -341,7 +343,9 @@ export async function handlePostflight(
 					cooldownRemainingMs: s.consult.rail.cooldownRemainingMs,
 				},
 				fileContentTruncated: !!s.fileContent,
+				review: s.review,
 			})),
+			sensorImpulseMetrics: sensorImpulseRun.metrics,
 			supervisorAdvisory: supervisorAdvisory
 				? {
 						ok: supervisorAdvisory.ok,

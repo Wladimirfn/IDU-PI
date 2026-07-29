@@ -54,6 +54,7 @@ import type { PromptForRoleResult } from "./agent-router.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
 
 export type CronPreflightInput = {
+	projectId?: string;
 	projectPath: string;
 	stateRoot: string;
 	changedFiles: readonly string[];
@@ -73,6 +74,7 @@ export type CronPreflightInput = {
 export type CronPreflightResult = {
 	report: ProjectPostflightReport | null;
 	sensorImpulses: SensorImpulseResult[];
+	sensorImpulseMetrics: import("./sensor-impulses.js").SensorImpulseMetrics;
 	supervisorAdvisory: CategorizeResult | null;
 	changedFiles: readonly string[];
 };
@@ -98,12 +100,14 @@ export async function runCronPreflight(
 	input: CronPreflightInput,
 ): Promise<CronPreflightResult> {
 	// Step 1: sensor impulses
-	const sensorImpulses = await runSensorImpulses({
+	const sensorImpulseRun = await runSensorImpulses({
 		stateRoot: input.stateRoot,
+		projectId: input.projectId ?? input.projectPath,
 		projectRoot: input.projectPath,
 		changedFiles: input.changedFiles,
 		promptForRole: input.promptForRole,
 	});
+	const sensorImpulses = sensorImpulseRun.impulses;
 
 	// Step 2: supervisor categorizes the findings
 	const findings = sensorImpulses
@@ -116,6 +120,7 @@ export async function runCronPreflight(
 	const supervisorAdvisory = await categorizeFindings({
 		stateRoot: input.stateRoot,
 		findings,
+		discards: sensorImpulseRun.discards,
 		promptForRole: input.promptForRole,
 		now: input.now,
 	});
@@ -216,6 +221,7 @@ export async function runCronPreflight(
 	return {
 		report: null, // postflight report is owned by the MCP/CLI caller; cron doesn't need it
 		sensorImpulses,
+		sensorImpulseMetrics: sensorImpulseRun.metrics,
 		supervisorAdvisory,
 		changedFiles: input.changedFiles,
 	};
