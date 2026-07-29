@@ -1371,6 +1371,7 @@ export function createCliRuntime(
 		runCronPreflight: async (preflightInput) => {
 			const { runCronPreflight } = await import("./cron-preflight.js");
 			return runCronPreflight({
+				projectId: activeProject.id,
 				projectPath: activeProject.path,
 				stateRoot: runtimeStateRoot,
 				changedFiles: preflightInput.changedFiles,
