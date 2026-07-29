@@ -11,6 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { runCronPreflight } from "../src/cron-preflight.js";
+import type { CronPreflightResult } from "../src/cron-preflight.js";
+import { handleRunCronPreflight } from "../src/cli/supervisor/handlers.js";
+import type { CliRuntime } from "../src/cli.js";
 import { roleEngineConfigPath } from "../src/role-engine-config.js";
 import type { PromptForRoleResult } from "../src/agent-router.js";
 
@@ -276,4 +279,146 @@ test("INVARIANT: every injection in injections.jsonl has a matching `emitted` li
 	} finally {
 		cleanup();
 	}
+});
+
+// =========================================================================
+// handleRunCronPreflight --json: surface structured metrics that the
+// default one-line human summary discards. Opt-in and additive; the
+// default path stays byte-identical.
+// =========================================================================
+
+// Minimal fake runtime: the handler only touches `runCronPreflight`, so we
+// stub it to capture the changedFiles it received and return a controlled
+// CronPreflightResult. Cast through unknown to satisfy the full CliRuntime
+// type (the codebase convention for handler unit tests).
+function makeStubRuntime(capture: { changedFiles?: string[] }, result: CronPreflightResult): CliRuntime {
+	return {
+		runCronPreflight: async (input: { changedFiles: readonly string[] }) => {
+			capture.changedFiles = [...input.changedFiles];
+			return result;
+		},
+	} as unknown as CliRuntime;
+}
+
+const STUB_METRICS = {
+	totalMatches: 3,
+	selectedMatches: 2,
+	cappedOutMatches: 1,
+	discardedByDepth: 1,
+	discardedBySafetyCeiling: 0,
+	completedCalls: 2,
+	jsonValidCalls: 2,
+	reportValidCalls: 2,
+	totalValidatedFindings: 4,
+	findingsRoutedByPillar: 3,
+	findingsRoutedByFallback: 1,
+	discards: [],
+	perCall: [],
+};
+
+test("handleRunCronPreflight: default (no --json) emits the existing human line unchanged", async () => {
+	const capture: { changedFiles?: string[] } = {};
+	const runtime = makeStubRuntime(capture, {
+		report: null,
+		sensorImpulses: [
+			{ match: {} } as never,
+			{ match: {} } as never,
+		],
+		sensorImpulseMetrics: STUB_METRICS as never,
+		supervisorAdvisory: {
+			ok: true,
+			counts: { critical: 1, medium: 0, low: 0 },
+			advisory: {
+				ts: "2026-01-01T00:00:00.000Z",
+				kind: "supervisor_advisory",
+				summary: "1 critical, 0 medium, 0 low",
+				counts: { critical: 1, medium: 0, low: 0 },
+				advisoryId: "adv-1",
+				discardsCount: 0,
+				discardsSummary: "",
+			},
+		},
+		changedFiles: ["src/Button.tsx"],
+	});
+	const res = await handleRunCronPreflight(runtime, ["src/Button.tsx"]);
+	assert.equal(res.exitCode, 0);
+	assert.equal(
+		res.stdout,
+		"Cron preflight: sensorImpulses=2 supervisorAdvisory=1 critical, 0 medium, 0 low\n",
+	);
+	// No filtering: changedFiles passed through verbatim.
+	assert.deepEqual(capture.changedFiles, ["src/Button.tsx"]);
+});
+
+test("handleRunCronPreflight: --json emits valid JSON with sensorImpulseMetrics routing fields", async () => {
+	const capture: { changedFiles?: string[] } = {};
+	const runtime = makeStubRuntime(capture, {
+		report: null,
+		sensorImpulses: [{ match: {} } as never],
+		sensorImpulseMetrics: STUB_METRICS as never,
+		supervisorAdvisory: {
+			ok: true,
+			counts: { critical: 1, medium: 0, low: 0 },
+			advisory: {
+				ts: "2026-01-01T00:00:00.000Z",
+				kind: "supervisor_advisory",
+				summary: "1 critical, 0 medium, 0 low",
+				counts: { critical: 1, medium: 0, low: 0 },
+				advisoryId: "adv-1",
+				discardsCount: 2,
+				discardsSummary: "2 discarded (depth_cap: agentlab-ui-ux=2)",
+			},
+		},
+		changedFiles: ["src/Button.tsx"],
+	});
+	const res = await handleRunCronPreflight(runtime, ["--json", "src/Button.tsx"]);
+	assert.equal(res.exitCode, 0);
+	// Strip the trailing newline before parsing.
+	const parsed = JSON.parse(res.stdout.replace(/\n$/, "")) as Record<string, unknown>;
+	assert.equal(parsed.sensorImpulses, 1);
+	const metrics = parsed.sensorImpulseMetrics as Record<string, unknown>;
+	assert.equal(metrics.totalValidatedFindings, 4);
+	assert.equal(metrics.findingsRoutedByPillar, 3);
+	assert.equal(metrics.findingsRoutedByFallback, 1);
+	const advisory = parsed.supervisorAdvisory as Record<string, unknown>;
+	assert.equal(advisory.ok, true);
+	assert.equal(advisory.summary, "1 critical, 0 medium, 0 low");
+	assert.deepEqual(advisory.counts, { critical: 1, medium: 0, low: 0 });
+	assert.equal(advisory.discardsCount, 2);
+	assert.equal(advisory.discardsSummary, "2 discarded (depth_cap: agentlab-ui-ux=2)");
+});
+
+test("handleRunCronPreflight: --json is filtered out of changedFiles (not passed to runCronPreflight)", async () => {
+	const capture: { changedFiles?: string[] } = {};
+	const runtime = makeStubRuntime(capture, {
+		report: null,
+		sensorImpulses: [],
+		sensorImpulseMetrics: STUB_METRICS as never,
+		supervisorAdvisory: null,
+		changedFiles: [],
+	});
+	await handleRunCronPreflight(runtime, ["--json", "src/A.ts", "src/B.ts"]);
+	// --json must NOT appear in changedFiles; only the real file args.
+	assert.deepEqual(capture.changedFiles, ["src/A.ts", "src/B.ts"]);
+	assert.ok(
+		!capture.changedFiles?.includes("--json"),
+		"--json leaked into changedFiles",
+	);
+});
+
+test("handleRunCronPreflight: --json with null supervisorAdvisory emits null", async () => {
+	const runtime = makeStubRuntime(
+		{},
+		{
+			report: null,
+			sensorImpulses: [],
+			sensorImpulseMetrics: STUB_METRICS as never,
+			supervisorAdvisory: null,
+			changedFiles: [],
+		},
+	);
+	const res = await handleRunCronPreflight(runtime, ["--json"]);
+	const parsed = JSON.parse(res.stdout.replace(/\n$/, "")) as Record<string, unknown>;
+	assert.equal(parsed.supervisorAdvisory, null);
+	assert.equal(parsed.sensorImpulses, 0);
 });

@@ -56,11 +56,41 @@ export async function handleRunCronPreflight(
 	// supervisor chain and writes a supervisor_advisory to
 	// injections.jsonl. Reuses the same promptForRole as the
 	// MCP path so role-rails and cooldowns are shared.
+	//
+	// Opt-in `--json` flag: emit the full structured metrics
+	// (sensorImpulseMetrics + supervisorAdvisory) instead of the
+	// one-line human summary. The flag is filtered out of
+	// `changedFiles` so it is never treated as a filename by the
+	// sensor matcher. Default output is byte-identical when absent.
+	const jsonMode = rest.includes("--json");
+	const changedFiles = jsonMode ? rest.filter((arg) => arg !== "--json") : rest;
 	const result = await runtime.runCronPreflight?.({
-		changedFiles: rest,
+		changedFiles,
 	});
 	if (!result) {
 		return ok("Cron preflight: not available in this runtime\n");
+	}
+	if (jsonMode) {
+		// Pretty-printed (2-space) JSON so a human or a pipe can consume it.
+		// supervisorAdvisory fields are pulled from result.supervisorAdvisory.advisory;
+		// when the advisory sub-object is absent (e.g. reason=role_not_enabled),
+		// summary/counts fall back to null and the discard fields to their
+		// documented empty-state defaults (0 / "").
+		const advisory = result.supervisorAdvisory;
+		const payload = {
+			sensorImpulses: result.sensorImpulses.length,
+			sensorImpulseMetrics: result.sensorImpulseMetrics,
+			supervisorAdvisory: advisory
+				? {
+						ok: advisory.ok,
+						summary: advisory.advisory?.summary ?? null,
+						counts: advisory.advisory?.counts ?? null,
+						discardsCount: advisory.advisory?.discardsCount ?? 0,
+						discardsSummary: advisory.advisory?.discardsSummary ?? "",
+					}
+				: null,
+		};
+		return ok(`${JSON.stringify(payload, null, 2)}\n`);
 	}
 	const advisoryLine = result.supervisorAdvisory
 		? (result.supervisorAdvisory.advisory?.summary ??
