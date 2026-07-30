@@ -510,6 +510,15 @@ export function summarizeTaskQueueRow(
 	return `${details.slice(0, sliceLength)}...`;
 }
 
+/**
+ * Width budget for the task content column inside `formatTaskListTable`.
+ * Chosen so that "content · P{n} · {age}" fits the ~70-char scan line of
+ * the "Lista de tareas" sub-panel: the content leads (so it is never
+ * pushed past the metadata again) and the compressed tail stays visible
+ * instead of being clipped by the box.
+ */
+const TASK_LIST_TABLE_SUMMARY_MAX = 50;
+
 export function formatTaskListTable(
 	tasks: StructuredTask[],
 	options: TareasYColaRowOptions & { maxSummaryLength?: number } = {},
@@ -518,12 +527,24 @@ export function formatTaskListTable(
 		return "Lista de tareas (0):\n  (sin tareas)";
 	}
 	const header = `Lista de tareas (${tasks.length}):`;
+	const now = options.now ? options.now() : new Date();
 	const rows = tasks.map((task) => {
-		const baseRow = formatTaskQueueRow(task, options);
 		const summary = summarizeTaskQueueRow(task, {
-			maxLength: options.maxSummaryLength,
+			maxLength: options.maxSummaryLength ?? TASK_LIST_TABLE_SUMMARY_MAX,
 		});
-		return `${baseRow} | ${summary}`;
+		const priority = `P${task.priority}`;
+		const age = formatTaskAge(task.createdAt, now);
+		const status = statusLabel(task);
+		// Content first, compressed metadata last. The default "proposed"
+		// status carries no scan value, so it is omitted; non-default
+		// statuses (done/blocked/paused/in_progress) are surfaced. The
+		// truncated id, guard and category are dropped from the scan line
+		// (low signal) and remain available in the detail view.
+		const tail =
+			status === "proposed"
+				? `${priority} · ${age}`
+				: `${status} · ${priority} · ${age}`;
+		return `${summary} · ${tail}`;
 	});
 	return `${header}\n${rows.join("\n")}`;
 }
@@ -897,8 +918,11 @@ export function renderTaskQueuePanel(
 	// task plus page navigation and back to the main menu. The body
 	// is split into two sub-panels:
 	//   1. "Lista de tareas" — read-only, shows ALL tasks (including
-	//      done and skipped) with id | status | guard | priority |
-	//      age | category | summary.
+	//      done and skipped) as `summary · [status ·] P{n} · age`:
+	//      content leads, metadata is compressed to the tail, and the
+	//      id/guard/category live in the detail view. Acting on a task
+	//      goes through sub-panel 2 and the menu, which carry the id —
+	//      this one is for scanning, not for addressing.
 	//   2. "Cola de acciones" — actionable only, paginated, drives
 	//      the menu options.
 	const actionableTasks = state.tasks.filter(isActionableTask);

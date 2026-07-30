@@ -265,9 +265,16 @@ test("readColaDeAccionesFeed includes supervisor activity events", async () => {
 			supervisorEvents.length >= 1,
 			`expected >=1 supervisor event, got ${supervisorEvents.length}`,
 		);
+		// A1c: the summary now renders the RESULT, not the type label.
+		// A completed tick with no products is reported honestly.
+		assert.match(supervisorEvents[0].summary, /supervisor/u);
 		assert.match(
 			supervisorEvents[0].summary,
-			/supervisor supervisor_tick/u,
+			/after_task_registered/u,
+		);
+		assert.match(
+			supervisorEvents[0].summary,
+			/ejecutado sin productos/u,
 		);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });
@@ -292,10 +299,96 @@ test("readColaDeAccionesFeed includes idu usage events as trigger fires", async 
 			triggerEvents.length >= 1,
 			`expected >=1 trigger event, got ${triggerEvents.length}`,
 		);
+		// A1c: the summary now renders the OUTCOME ("procedió"), not the
+		// "trigger fire: surface/action" type label.
 		assert.match(
 			triggerEvents[0].summary,
-			/trigger fire: cli\/idu-supervisor-tick/u,
+			/idu-supervisor-tick/u,
 		);
+		assert.match(triggerEvents[0].summary, /procedió/u);
+	} finally {
+		rmSync(stateRoot, { recursive: true, force: true });
+	}
+});
+
+// Test 11b (A1c regression): the cola feed summary renders the RESULT
+// carried in the event's own data — not the type label. Supervisor
+// events surface why they were skipped or what they produced; usage
+// events surface the recommendation/outcome flags.
+test("readColaDeAccionesFeed summaries surface the event result, not the type label", async () => {
+	const stateRoot = tempDir();
+	try {
+		// supervisor: skipped with a reason
+		await recordSupervisorActivityEvent(stateRoot, {
+			projectId: "test-project",
+			eventType: "supervisor_tick",
+			origin: "supervisor_auto_hook",
+			trigger: "after_postflight",
+			status: "skipped",
+			reason: "not_enough_data",
+		});
+		// supervisor: completed, produced concrete artifacts + step counts
+		await recordSupervisorActivityEvent(stateRoot, {
+			projectId: "test-project",
+			eventType: "supervisor_tick",
+			origin: "supervisor_auto_hook",
+			trigger: "after_postflight",
+			status: "completed",
+			createdTasks: 2,
+			auditRunRecorded: true,
+			semanticDraftCreated: true,
+			agentTaskPlanBuilt: true,
+			stepCounts: { completed: 1, skipped: 3, active: 1, inactive: 0, warning: 0 },
+		});
+		// usage: warn + blocked + requires human
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "test-project",
+			surface: "cli",
+			action: "idu-automaticov1",
+			recommendation: "warn",
+			allowedToProceed: false,
+			requiresHuman: true,
+			ok: true,
+		});
+		// usage: long advisory recommendation string (cleaned up)
+		await recordIduUsageEvent(stateRoot, {
+			projectId: "test-project",
+			surface: "mcp",
+			action: "idu_preflight",
+			recommendation: "Detener_merge_y_revisar_archivos_sensibles.",
+		});
+
+		const events = readColaDeAccionesFeed(stateRoot);
+		const supervisorEvents = events.filter((e) => e.kind === "supervisor");
+		const skipped = supervisorEvents.find((e) => e.summary.includes("omitido"));
+		const completed = supervisorEvents.find((e) => e.summary.includes("2 tarea"));
+		const triggers = events.filter((e) => e.kind === "trigger");
+
+		assert.ok(skipped, "expected a skipped supervisor summary");
+		assert.match(skipped.summary, /sin datos suficientes/u);
+		// no raw type label leak
+		assert.doesNotMatch(skipped.summary, /status=skipped/u);
+
+		assert.ok(completed, "expected a completed supervisor with products");
+		assert.match(completed.summary, /2 tareas/u);
+		assert.match(completed.summary, /audit registrada/u);
+		assert.match(completed.summary, /draft/u);
+		assert.match(completed.summary, /plan/u);
+		// step counts rendered, inactive omitted
+		assert.match(completed.summary, /1 ok · 3 skip · 1 activa/u);
+		assert.doesNotMatch(completed.summary, /inactive/u);
+
+		const warn = triggers.find((e) => e.summary.startsWith("idu-automaticov1"));
+		assert.ok(warn, "expected the warn usage event");
+		assert.match(warn.summary, /advertencia/u);
+		assert.match(warn.summary, /pide humano/u);
+		assert.match(warn.summary, /bloqueado/u);
+
+		const advisory = triggers.find((e) => e.summary.startsWith("idu_preflight"));
+		assert.ok(advisory, "expected the advisory usage event");
+		// the long recommendation is cleaned (underscores → spaces)
+		assert.match(advisory.summary, /Detener merge y revisar archivos sensibles/u);
+		assert.doesNotMatch(advisory.summary, /Detener_merge/u);
 	} finally {
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
