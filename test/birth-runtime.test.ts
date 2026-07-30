@@ -306,3 +306,103 @@ test("F-Item3a RED→GREEN: handleBirthRepoPlan unblocks when .idu/config/projec
 	}
 });
 
+// =========================================================================
+// REGRESSION: Constitution path-mismatch bug (Directive C3)
+//
+// loadConstitutionStatus (src/birth-runtime.ts:264) used to hardcode
+// Layout B (`<stateRoot>/config/project-constitution.json`) only. On
+// projects that had migrated to Layout A
+// (`<stateRoot>/.idu/config/project-constitution.json`) the hardcoded
+// Layout B path was absent, so the gate reported "missing" and blocked
+// the birth pipeline even though the real constitution was "active".
+//
+// The fix aligns loadConstitutionStatus to its sister
+// loadProjectCoreSnapshot: route through readIdPathWithMigration which
+// prefers Layout A and one-time renames legacy Layout B to A on first
+// read. The birth-status fallback is intentionally left unchanged.
+//
+// These tests observe loadConstitutionStatus via handleBirthStatus:
+// the constitution gate (src/birth-pipeline.ts) pushes
+// `Constitution must be active; current=${status}.` into blockingReasons
+// when status !== "active". So the reason is absent when the loader
+// resolves the constitution to "active", and present when it resolves
+// to "missing".
+// =========================================================================
+
+test("Directive C3: handleBirthStatus reports constitution=active when .idu/config/project-constitution.json (Layout A) exists with status=active AND Layout B is absent", () => {
+	const ctx = makeProject();
+	try {
+		// Layout A: <stateRoot>/.idu/config/project-constitution.json (canonical)
+		mkdirSync(join(ctx.stateRoot, ".idu", "config"), { recursive: true });
+		writeFileSync(
+			join(ctx.stateRoot, ".idu", "config", "project-constitution.json"),
+			`${JSON.stringify({ status: "active" })}\n`,
+			"utf8",
+		);
+		// Layout B intentionally ABSENT — this is the exact bug: pre-fix
+		// hardcoded Layout B only and returned "missing".
+		const result = handleBirthStatus({
+			projectId: "demo",
+			stateRoot: ctx.stateRoot,
+		});
+		const missingReason = result.blockingReasons.find((r) =>
+			/Constitution must be active; current=missing\./u.test(r),
+		);
+		assert.equal(
+			missingReason,
+			undefined,
+			`handleBirthStatus should NOT report constitution=missing when Layout A has status=active. Got blockingReasons: ${JSON.stringify(result.blockingReasons)}`,
+		);
+	} finally {
+		ctx.cleanup();
+	}
+});
+
+test("Directive C3 backward-compat: handleBirthStatus reports constitution=active when only Layout B (config/project-constitution.json) exists", () => {
+	const ctx = makeProject();
+	try {
+		// Layout B: <stateRoot>/config/project-constitution.json (legacy)
+		// readIdPathWithMigration migrates B -> A on first read.
+		mkdirSync(join(ctx.stateRoot, "config"), { recursive: true });
+		writeFileSync(
+			join(ctx.stateRoot, "config", "project-constitution.json"),
+			`${JSON.stringify({ status: "active" })}\n`,
+			"utf8",
+		);
+		const result = handleBirthStatus({
+			projectId: "demo",
+			stateRoot: ctx.stateRoot,
+		});
+		const missingReason = result.blockingReasons.find((r) =>
+			/Constitution must be active; current=missing\./u.test(r),
+		);
+		assert.equal(
+			missingReason,
+			undefined,
+			`handleBirthStatus should NOT report constitution=missing when Layout B has status=active (backward-compat with non-migrated projects). Got blockingReasons: ${JSON.stringify(result.blockingReasons)}`,
+		);
+	} finally {
+		ctx.cleanup();
+	}
+});
+
+test("Directive C3 negative: handleBirthStatus reports constitution=missing when neither Layout A nor Layout B exists and birth status is not advanced", () => {
+	const ctx = makeProject();
+	try {
+		// No constitution at either layout; no advanced birth status.
+		const result = handleBirthStatus({
+			projectId: "demo",
+			stateRoot: ctx.stateRoot,
+		});
+		const missingReason = result.blockingReasons.find((r) =>
+			/Constitution must be active; current=missing\./u.test(r),
+		);
+		assert.ok(
+			missingReason,
+			`handleBirthStatus SHOULD report constitution=missing when no constitution exists. Got blockingReasons: ${JSON.stringify(result.blockingReasons)}`,
+		);
+	} finally {
+		ctx.cleanup();
+	}
+});
+
