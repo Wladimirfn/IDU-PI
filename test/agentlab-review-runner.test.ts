@@ -1774,12 +1774,16 @@ test("C1: dispatch persists consolidatedFindings to labRunRecorder.recordFinding
 		`all consolidatedFindings must be persisted; got ${recorded.findings.length}, expected ${findings.length}`,
 	);
 	for (let i = 0; i < findings.length; i++) {
-		const persisted = (recorded.findings[i] as { finding: { title: string; dedupeKey?: string; projectId: string; id: string } })
+		const persisted = (recorded.findings[i] as { finding: { title: string; dedupeKey?: string; specialty?: string; projectId: string; id: string } })
 			.finding;
 		assert.equal(persisted.title, findings[i]!.title, `finding ${i} title`);
 		assert.equal(persisted.projectId, input.projectId, `finding ${i} projectId`);
-		assert.match(persisted.id, /^bf-[a-z0-9._-]+-v1:[a-f0-9]{16}$/u, `finding ${i} id format (dedupeKey-derived)`);
-		assert.ok(typeof persisted.dedupeKey === "string" && persisted.dedupeKey.startsWith("v1:"), `finding ${i} dedupeKey must start with v1:`);
+		// specialty is threaded through the dispatch (Block-1 pt 3+4), so the
+		// dedupe key is v2 (specialty-appended payload) and the finding carries
+		// its specialty. Two specialists on the same defect must stay distinct.
+		assert.match(persisted.id, /^bf-[a-z0-9._-]+-v2:[a-f0-9]{16}$/u, `finding ${i} id format (v2 dedupeKey-derived, specialty-aware)`);
+		assert.ok(typeof persisted.dedupeKey === "string" && persisted.dedupeKey.startsWith("v2:"), `finding ${i} dedupeKey must start with v2: (specialty-aware)`);
+		assert.equal(persisted.specialty, "security", `finding ${i} specialty must be carried through the dispatch`);
 	}
 });
 

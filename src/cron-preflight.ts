@@ -20,9 +20,11 @@
  *   - Git working directory (read; changedFiles is provided by caller)
  */
 
+import { join } from "node:path";
 import {
 	runSensorImpulses,
 	flattenReportFindings,
+	agentLabSpecialtyForSensorRole,
 	type SensorImpulseResult,
 } from "./sensor-impulses.js";
 import {
@@ -50,6 +52,8 @@ import {
 	readPendingAdvisories,
 	recordLifecycleEvent,
 } from "./telemetry-lifecycle.js";
+import { recordBugFinding } from "./lab-db.js";
+import { agentLabFindingToBugFinding } from "./agentlab-review-runner.js";
 import type { IduModelRoleId } from "./model-assignments.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { ProjectPostflightReport } from "./project-postflight.js";
@@ -109,6 +113,66 @@ export async function runCronPreflight(
 		promptForRole: input.promptForRole,
 	});
 	const sensorImpulses = sensorImpulseRun.impulses;
+
+	// Step 1.5: persist structured findings to bug_findings so they SURVIVE
+	// across ticks. Before this step the cron path fed findings to the
+	// supervisor categorizer but never wrote them to the DB — every tick's
+	// findings evaporated. Now each validated sensor report is flattened
+	// and recorded with its SENSOR specialty (agentLabSpecialtyForSensorRole)
+	// so:
+	//   - two specialists reporting the same defect land on two rows (the
+	//     v2 dedupe key carries specialty), and
+	//   - a re-report of the same finding increments recurrence_count and
+	//     preserves any human-set status (the upsert no longer overwrites
+	//     status — see src/lab-db.ts).
+	// Best-effort: a persistence failure must not break the cron pipeline
+	// (matches the graph-drift / hygiene steps). The DB lives at
+	// {stateRoot}/lab.db; recordBugFinding lazily creates it via initLabDb.
+	try {
+		const cronProjectId = input.projectId ?? input.projectPath;
+		const labDbPath = join(input.stateRoot, "lab.db");
+		// The no-dedupe-key fallback id is `bf-{runId}-{index}`, so runId must
+		// be unique PER TICK. The AgentLab path satisfies this with
+		// mintAgentLabReviewRunId(). A constant "cron" would make tick N+1's
+		// finding #0 collide with tick N's finding #0 — two unrelated defects
+		// on one row, with recurrence_count counting them as the same one.
+		const cronRunId = `cron-${(input.now ?? new Date()).toISOString()}`;
+		let fallbackIndex = 0;
+		for (const impulse of sensorImpulses) {
+			if (impulse.review.status !== "valid" || !impulse.review.report) {
+				continue;
+			}
+			const specialty = agentLabSpecialtyForSensorRole(impulse.match.role);
+			const reportFindings = flattenReportFindings(impulse.review.report);
+			for (const finding of reportFindings) {
+				// fallbackIndex keeps no-dedupe-key findings unique within a
+				// tick (the converter only consumes `index` on that path).
+				const converted = agentLabFindingToBugFinding(finding, {
+					projectId: cronProjectId,
+					runId: cronRunId,
+					index: fallbackIndex++,
+					specialty,
+				});
+				recordBugFinding(labDbPath, converted.finding);
+			}
+		}
+	} catch (error) {
+		// Non-fatal: cron robustness over persistence. A missed tick's
+		// findings re-report on the next tick — same v2 dedupe key collapses
+		// to the same row and increments recurrence_count.
+		//
+		// But it is NOT silent. A swallowed catch here reproduces the exact
+		// failure this step exists to end: findings produced, nothing stored,
+		// pipeline green. That state lasted 735 invocations. If the failure
+		// is permanent (bad path, locked DB, schema drift) the "it re-reports
+		// next tick" consolation is false, and the only way to know is a
+		// message in the tick log.
+		console.error(
+			`[cron-preflight] bug_findings persistence FAILED (findings not stored this tick): ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		);
+	}
 
 	// Step 2: supervisor categorizes the findings. Pass the structured,
 	// pillar-routed AgentLabFindings from each sensor's validated review

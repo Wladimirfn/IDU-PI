@@ -2019,20 +2019,23 @@ export function writeAgentLabReviewRunAtomic(
  * on — the unique partial index skips NULL/empty, so a missing key is a
  * legal state and can be backfilled later.
  */
-function agentLabFindingToBugFinding(
+export function agentLabFindingToBugFinding(
 	finding: AgentLabFinding,
 	input: {
 		projectId: string;
 		runId: string;
 		index: number;
+		specialty?: string;
 	},
 ): { finding: FindingWithProposalInput["finding"] } {
-	const dedupeKey = computeFindingDedupeKey(finding);
+	const dedupeKey = computeFindingDedupeKey(finding, input.specialty);
 	// When dedupeKey exists, the id IS the dedupeKey: same defect across
 	// ticks collapses to the same row and `ON CONFLICT(id) DO UPDATE`
-	// (src/lab-db.ts:366) becomes a noop instead of a constraint
-	// violation. When dedupeKey is absent, we fall back to a per-run
-	// composite id so the row can still be inserted.
+	// (src/lab-db.ts) becomes a noop instead of a constraint
+	// violation. With a specialty, the dedupeKey is v2, so two specialists
+	// reporting the same defect land on DIFFERENT rows instead of one
+	// erasing the other. When dedupeKey is absent, we fall back to a
+	// per-run composite id so the row can still be inserted.
 	const id = dedupeKey
 		? `bf-${input.projectId}-${dedupeKey}`
 		: `bf-${input.runId}-${input.index.toString().padStart(4, "0")}`;
@@ -2053,11 +2056,15 @@ function agentLabFindingToBugFinding(
 			suspectedCause,
 			affectedFiles,
 			dedupeKey,
+			...(input.specialty ? { specialty: input.specialty } : {}),
 		},
 	};
 }
 
-function computeFindingDedupeKey(finding: AgentLabFinding): string | undefined {
+export function computeFindingDedupeKey(
+	finding: AgentLabFinding,
+	specialty?: string,
+): string | undefined {
 	const files = (finding.affectedFiles ?? [])
 		.map((f) => f.trim().toLowerCase())
 		.filter((f) => f.length > 0)
@@ -2068,14 +2075,22 @@ function computeFindingDedupeKey(finding: AgentLabFinding): string | undefined {
 		.filter((w) => w.length >= 4)
 		.sort();
 	if (files.length === 0 && titleWords.length === 0) return undefined;
-	// Payload does NOT carry the `v1:` label — the label goes on the
+	// Payload does NOT carry the version label — the label goes on the
 	// output only. Mixing them means a v2 with the same formula would
 	// still change the hash, conflating "label bumped" with "formula
 	// bumped". The output label is the single source of which version
 	// produced the key.
-	const payload = `${files.join("|")}|${titleWords.join("|")}`;
+	//
+	// v2 = specialty appended to the payload. The same defect reported by
+	// two different specialists (e.g. security vs database) must NOT
+	// collapse to one row — collapsing silently erases one specialist's
+	// finding. Specialty in the payload keeps them distinct. Callers with
+	// no specialty keep the v1 formula verbatim, so existing rows do not
+	// shift (back-compat).
+	const specialtySegment = specialty ? `|${specialty}` : "";
+	const payload = `${files.join("|")}|${titleWords.join("|")}${specialtySegment}`;
 	const hash = createHash("sha256").update(payload).digest("hex").slice(0, 16);
-	return `v1:${hash}`;
+	return specialty ? `v2:${hash}` : `v1:${hash}`;
 }
 
 // PR2 production body: mints runId, writes dispatch placeholder synchronously,
@@ -2087,7 +2102,7 @@ function computeFindingDedupeKey(finding: AgentLabFinding): string | undefined {
 // no background work runs — preserves the PR1 stub contract.
 export function dispatchAgentLabReviewRun(
 	input: DispatchAgentLabReviewRunInput,
-	_specialty: string,
+	specialty: string,
 ): DispatchAgentLabReviewRunResult {
 	const runId = mintAgentLabReviewRunId();
 	const startedAt = new Date().toISOString();
@@ -2141,6 +2156,7 @@ export function dispatchAgentLabReviewRun(
 									projectId: input.projectId,
 									runId,
 									index,
+									specialty,
 								});
 								persist({ finding: converted.finding });
 							});

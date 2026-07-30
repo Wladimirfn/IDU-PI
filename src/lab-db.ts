@@ -27,6 +27,12 @@ export type BugFindingInput = {
 	suspectedCause?: string;
 	affectedFiles?: string[];
 	dedupeKey?: string;
+	/**
+	 * The AgentLab specialty that produced this finding (e.g. "security",
+	 * "database"). Nullable in the DB; participates in the v2 dedupe key
+	 * so two specialists reporting the same defect stay as two rows.
+	 */
+	specialty?: string;
 };
 
 export type BugFinding = Required<
@@ -40,6 +46,8 @@ export type BugFinding = Required<
 	suspectedCause: string;
 	affectedFiles: string[];
 	dedupeKey: string;
+	specialty: string;
+	recurrenceCount: number;
 };
 
 export type ProposalType = "fix" | "test" | "investigation" | "docs" | "memory";
@@ -108,6 +116,8 @@ CREATE TABLE IF NOT EXISTS bug_findings (
   suspected_cause TEXT,
   affected_files TEXT NOT NULL DEFAULT '[]',
   dedupe_key TEXT,
+  specialty TEXT,
+  recurrence_count INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -269,6 +279,17 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 		"last_high_finding_count",
 		"INTEGER NOT NULL DEFAULT 0",
 	);
+	// Block-1 pt 3: specialty + recurrence_count on bug_findings. SQLite has
+	// no ADD COLUMN IF NOT EXISTS, so ensureColumn guards with PRAGMA
+	// table_info. Idempotent — a no-op when the CREATE TABLE already added
+	// the columns (new DBs) or a prior init already migrated (existing DBs).
+	ensureColumn(dbPath, "bug_findings", "specialty", "TEXT");
+	ensureColumn(
+		dbPath,
+		"bug_findings",
+		"recurrence_count",
+		"INTEGER NOT NULL DEFAULT 1",
+	);
 	// B5 PR1: apply pending SQL migrations (model_invocation_log + future
 	// tables). applyMigrations is idempotent and reads the SQL files
 	// from src/lab-db/migrations at runtime.
@@ -345,10 +366,14 @@ export function recordFindingWithProposal(
 	initLabDb(dbPath);
 	const status = input.finding.status ?? "new";
 	const affectedFiles = JSON.stringify(input.finding.affectedFiles ?? []);
+	// status is human-controlled: set on INSERT (default 'new'), changed
+	// only by triage. Re-reports MUST NOT overwrite it — the previous
+	// `status = excluded.status` was the eraser. recurrence_count bumps on
+	// every re-report so repeat defects are visible.
 	const sql = `
 INSERT INTO bug_findings (
   id, project_id, title, description, severity, confidence, status,
-  evidence, suspected_cause, affected_files, dedupe_key, updated_at
+  evidence, suspected_cause, affected_files, dedupe_key, specialty, updated_at
 ) VALUES (
   ${sqlString(input.finding.id)},
   ${sqlString(input.finding.projectId)},
@@ -361,6 +386,7 @@ INSERT INTO bug_findings (
   ${sqlString(input.finding.suspectedCause)},
   ${sqlString(affectedFiles)},
   ${sqlString(input.finding.dedupeKey)},
+  ${sqlOptionalString(input.finding.specialty)},
   datetime('now')
 )
 ON CONFLICT(id) DO UPDATE SET
@@ -368,21 +394,23 @@ ON CONFLICT(id) DO UPDATE SET
   description = excluded.description,
   severity = excluded.severity,
   confidence = excluded.confidence,
-  status = excluded.status,
+  specialty = excluded.specialty,
   evidence = excluded.evidence,
   suspected_cause = excluded.suspected_cause,
   affected_files = excluded.affected_files,
   dedupe_key = excluded.dedupe_key,
+  recurrence_count = recurrence_count + 1,
   updated_at = datetime('now')
 ON CONFLICT(project_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key != '' DO UPDATE SET
   title = excluded.title,
   description = excluded.description,
   severity = excluded.severity,
   confidence = excluded.confidence,
-  status = excluded.status,
+  specialty = excluded.specialty,
   evidence = excluded.evidence,
   suspected_cause = excluded.suspected_cause,
   affected_files = excluded.affected_files,
+  recurrence_count = recurrence_count + 1,
   updated_at = datetime('now');
 `;
 	runSql(dbPath, sql);
@@ -453,10 +481,14 @@ export function recordBugFinding(dbPath: string, input: BugFindingInput): void {
 	initLabDb(dbPath);
 	const status = input.status ?? "new";
 	const affectedFiles = JSON.stringify(input.affectedFiles ?? []);
+	// status is human-controlled: set on INSERT (default 'new'), changed
+	// only by triage. Re-reports MUST NOT overwrite it — the previous
+	// `status = excluded.status` was the eraser. recurrence_count bumps on
+	// every re-report so repeat defects are visible.
 	const sql = `
 INSERT INTO bug_findings (
   id, project_id, title, description, severity, confidence, status,
-  evidence, suspected_cause, affected_files, dedupe_key, updated_at
+  evidence, suspected_cause, affected_files, dedupe_key, specialty, updated_at
 ) VALUES (
   ${sqlString(input.id)},
   ${sqlString(input.projectId)},
@@ -469,6 +501,7 @@ INSERT INTO bug_findings (
   ${sqlString(input.suspectedCause)},
   ${sqlString(affectedFiles)},
   ${sqlString(input.dedupeKey)},
+  ${sqlOptionalString(input.specialty)},
   datetime('now')
 )
 ON CONFLICT(id) DO UPDATE SET
@@ -476,18 +509,45 @@ ON CONFLICT(id) DO UPDATE SET
   description = excluded.description,
   severity = excluded.severity,
   confidence = excluded.confidence,
-  status = excluded.status,
+  specialty = excluded.specialty,
   evidence = excluded.evidence,
   suspected_cause = excluded.suspected_cause,
   affected_files = excluded.affected_files,
   dedupe_key = excluded.dedupe_key,
+  recurrence_count = recurrence_count + 1,
   updated_at = datetime('now');
 `;
+	// Whether this id already existed decides if a status event is honest.
+	// Read BEFORE the upsert: afterwards the row exists either way.
+	const priorStatus = readFindingStatus(dbPath, input.id);
 	runSql(dbPath, sql);
-	runSql(
+	// Log a status event only for a genuine first insert. Since the upsert no
+	// longer touches `status`, a re-report changes nothing — and writing
+	// "new_status = new, actor = orchestrator" every tick would fabricate a
+	// transition that never happened, in the one table you would consult to
+	// ask "was this ack ever undone?". At 12 findings an hour that is ~288
+	// invented events a day burying the real ones.
+	if (priorStatus === undefined) {
+		runSql(
+			dbPath,
+			`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note) VALUES (${sqlString(input.id)}, NULL, ${sqlString(status)}, 'orchestrator', 'recorded from bridge');`,
+		);
+	}
+}
+
+/**
+ * Current status of a finding, or undefined when the row does not exist.
+ * Used to tell a first insert from a re-report so the audit trail only
+ * records transitions that actually occurred.
+ */
+function readFindingStatus(dbPath: string, id: string): string | undefined {
+	const output = runSql(
 		dbPath,
-		`INSERT INTO finding_status_events (finding_id, new_status, actor, note) VALUES (${sqlString(input.id)}, ${sqlString(status)}, 'orchestrator', 'recorded from bridge');`,
-	);
+		`SELECT status FROM bug_findings WHERE id = ${sqlString(id)} LIMIT 1;`,
+	).trim();
+	if (!output) return undefined;
+	const rows = JSON.parse(output) as Array<{ status: string }>;
+	return rows[0]?.status;
 }
 
 export function listOpenFindings(
@@ -497,7 +557,7 @@ export function listOpenFindings(
 	initLabDb(dbPath);
 	const output = runSql(
 		dbPath,
-		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey FROM bug_findings WHERE project_id = ${sqlString(projectId)} AND status NOT IN ('fixed','ignored','duplicate') ORDER BY severity, updated_at DESC;`,
+		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey, COALESCE(specialty, '') AS specialty, COALESCE(recurrence_count, 1) AS recurrenceCount FROM bug_findings WHERE project_id = ${sqlString(projectId)} AND status NOT IN ('fixed','ignored','duplicate') ORDER BY severity, updated_at DESC;`,
 	).trim();
 	if (!output) return [];
 	const rows = JSON.parse(output) as Array<{
@@ -512,6 +572,8 @@ export function listOpenFindings(
 		suspectedCause: string;
 		affectedFiles: string;
 		dedupeKey: string;
+		specialty: string;
+		recurrenceCount: number;
 	}>;
 	return rows.map((row) => ({
 		id: row.id,
@@ -525,5 +587,7 @@ export function listOpenFindings(
 		suspectedCause: row.suspectedCause,
 		affectedFiles: JSON.parse(row.affectedFiles) as string[],
 		dedupeKey: row.dedupeKey,
+		specialty: row.specialty,
+		recurrenceCount: row.recurrenceCount,
 	}));
 }
