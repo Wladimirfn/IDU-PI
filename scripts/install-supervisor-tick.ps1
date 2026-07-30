@@ -79,7 +79,7 @@ Write-Host "Tarea instalada: $TaskName" -ForegroundColor Green
 Write-Host "Script: $TickScript"
 Write-Host "Intervalo: cada 1 hora"
 Write-Host "stateRoot: $StateRoot"
-Write-Host "Trigger engine opt-in: IDU_PI_TRIGGER_ENGINE=1 (default)"
+Write-Host "Trigger engine opt-in: IDU_PI_TRIGGER_ENGINE (unset by default -> disabled; set =1 to enable)"
 Write-Host ""
 Write-Host "Para verificar: Get-ScheduledTask -TaskName '$TaskName'"
 Write-Host "Para correr ahora: Start-ScheduledTask -TaskName '$TaskName'"
