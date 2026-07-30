@@ -37,6 +37,56 @@ function seedRailsWithTokensAvailable(stateRoot: string): void {
 	);
 }
 
+// Simulates "rails exist and are enabled but have NO tokens to spend":
+// every role is enabled with tokenBudget === minTokenBudget. This is
+// exactly the condition anyRailHasTokensAvailable rejects
+// (rail.enabled && rail.tokenBudget > rail.minTokenBudget). loadRoleRails
+// default-fills ALL known roles, so a single role at floor is NOT enough
+// — the other roles would still carry tokens and the function would
+// return true. Every enabled role must be at the floor for "no tokens".
+// This is deliberately NOT enabled:false (now means "user disabled",
+// which blocks for the wrong reason) and NOT an active cooldown (a
+// temporal gate, a different mechanism).
+function seedRailsAtBudgetFloor(stateRoot: string): void {
+	mkdirSync(stateRoot, { recursive: true });
+	const roles = [
+		"supervisor-main",
+		"supervisor-semantic",
+		"supervisor-compaction",
+		"agentlab-general",
+		"agentlab-project-understanding",
+		"agentlab-security",
+		"agentlab-architecture",
+		"agentlab-database",
+		"agentlab-ui-ux",
+		"agentlab-performance",
+		"agentlab-code-quality",
+		"agentlab-docs",
+		"agentlab-librarian",
+	];
+	const rails: Record<string, unknown> = {};
+	for (const role of roles) {
+		rails[role] = {
+			role,
+			enabled: true,
+			tokenBudget: 100,
+			minTokenBudget: 100,
+			maxTokenBudget: 2000,
+			cooldownMs: 30_000,
+			cooldownRemainingMs: 0,
+			wakeCount: 0,
+			successStreak: 0,
+			failureStreak: 0,
+			emergencyTimeoutMs: 600_000,
+		};
+	}
+	writeFileSync(
+		join(stateRoot, "role-rails.json"),
+		JSON.stringify({ rails }),
+		"utf8",
+	);
+}
+
 function task(id: string): StructuredTask {
 	return {
 		id,
@@ -566,6 +616,21 @@ test("automaticov1 cycle delegates bounded task creation to scheduled alert exec
 });
 
 test("automaticov1 cycle: self-repair bypass fires when systemicBlock + rails have tokens", async () => {
+	// WHY backlog_pressure: this test preserves the original INTENT
+	// ("the self-repair bypass fires for SOME bypassable systemic
+	// block when rails have tokens"). It previously used
+	// repeated_failure_patterns, which the category-aware bypass gate
+	// now CORRECTLY blocks: repeated_failure_patterns is an unmapped
+	// category (mapSignalDomain returns undefined), so it produces no
+	// create_task alert — bypassing it would drop the hard stop with
+	// zero remediation queued. That made this the THIRD place (alongside
+	// the 7 hard-block tests) where the old category-blind bypass bug
+	// was baked into the suite. Switching the signal to backlog_pressure
+	// keeps the test meaningful WITHOUT making repeated_failure_patterns
+	// bypassable — which would be moving the conclusion to fit the test.
+	// backlog_pressure maps to the non-protected "backlog" domain, and
+	// with severity "warning" it produces a concrete create_task, so the
+	// bypass is legitimately eligible (canCreateTask && !protected).
 	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
 	seedRailsWithTokensAvailable(stateRoot);
 	const result = await runAutomaticov1AdvisoryCycle(
@@ -574,12 +639,29 @@ test("automaticov1 cycle: self-repair bypass fires when systemicBlock + rails ha
 			loadSelfMaintenanceSignals: () => [
 				{
 					id: "s1",
-					category: "repeated_failure_patterns",
-					severity: "high",
+					category: "backlog_pressure",
+					// severity MUST stay "warning" (not "high"): the bypass
+					// gate is severity-based (systemicBypassEligibility only
+					// grants canCreateTask when signal.severity !== "high"),
+					// so "high" would make this signal non-task-able and the
+					// bypass would not fire.
+					severity: "warning",
 					confidence: 0.9,
 					evidenceRefs: ["signal:s1"],
-					summary: "Repeated failure pattern",
-					recommendedActions: ["Fix"],
+					// WHY benign text: the bypass decision on the
+					// self-maintenance path is NOT text-based today — it is
+					// severity-based at autonomous-alert-engine.ts:442
+					// (systemicBypassEligibility). The HIGH_RISK_WORDS regex
+					// (autonomous-alert-engine.ts:131) only governs the
+					// repeated_bug path (used at line 233 in
+					// repeatedBugDecision), which this test does NOT
+					// exercise. So the signal text is NOT load-bearing for
+					// the bypass decision right now. The benign wording here
+					// is belt-and-suspenders only: if a future change routes
+					// self-maintenance signals through a text-based risk
+					// check, this test stays on the eligible side.
+					summary: "Backlog pressure needs a bounded maintenance item.",
+					recommendedActions: ["Create a bounded maintenance task."],
 				},
 			],
 			createTask: () => ({ id: "t1" }),
@@ -591,7 +673,12 @@ test("automaticov1 cycle: self-repair bypass fires when systemicBlock + rails ha
 
 test("automaticov1 cycle: self-repair BLOCKED when rails have NO tokens (no_rail_tokens)", async () => {
 	const stateRoot = makeTempDir("idu-automaticov1-cycle-");
-	// Do NOT seed rails → anyRailHasTokensAvailable returns false
+	// "No tokens" = budget exhausted: rails exist and are enabled but
+	// every role's tokenBudget === minTokenBudget, so
+	// anyRailHasTokensAvailable returns false. This is NOT enabled:false
+	// (that now means "user disabled" and blocks for the wrong reason)
+	// and NOT an active cooldown (a temporal gate, a different mechanism).
+	seedRailsAtBudgetFloor(stateRoot);
 	const result = await runAutomaticov1AdvisoryCycle(
 		input(stateRoot, {
 			allowTaskCreation: true,
@@ -609,7 +696,8 @@ test("automaticov1 cycle: self-repair BLOCKED when rails have NO tokens (no_rail
 			createTask: () => ({ id: "t1" }),
 		}),
 	);
-	// Without rails, the bypass is blocked
+	// Rails enabled but budget at floor → railTokensAvailable false →
+	// Layer 2 returns no_rail_tokens → bypass blocked.
 	assert.equal(result.alertScheduledTick.allowTaskCreation, false);
 });
 

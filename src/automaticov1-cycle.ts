@@ -5,6 +5,7 @@ import {
 } from "./autonomous-alert-scheduler.js";
 import { decideAllowTaskCreation } from "./allow-task-creation.js";
 import { anyRailHasTokensAvailable } from "./role-rails.js";
+import { systemicBypassEligibility } from "./autonomous-alert-engine.js";
 import type { ExternalIntelligenceReport } from "./external-intelligence.js";
 import type { IduSupervisorCronPlanResult } from "./idu-supervisor-cron.js";
 import {
@@ -125,8 +126,12 @@ export async function runAutomaticov1AdvisoryCycle(
 	// Bypass-by-capas (PR-104): the original flat-AND deadlock
 	// becomes a 3-layer decision. Self-repair tasks can bypass
 	// normal blocks if rails have tokens; emergency cap (10 min)
-	// still blocks everything.
+	// still blocks everything. The Layer 2 bypass is gated by the
+	// systemic signals' task-ability and protected-domain floor
+	// (see systemicBypassEligibility) so it never fires for signals
+	// that produce no repair task or sit in a protected domain.
 	const railTokensAvailable = anyRailHasTokensAvailable(input.stateRoot);
+	const bypassEligible = systemicBypassEligibility(selfMaintenanceSignals);
 	const emergencyCapReached = now.getTime() - cycleStart >= EMERGENCY_CAP_MS;
 	const taskDecision = decideAllowTaskCreation({
 		allowTaskCreation,
@@ -136,6 +141,8 @@ export async function runAutomaticov1AdvisoryCycle(
 		systemicBlock,
 		taskTreeBlock,
 		readinessBlock,
+		anySystemicSignalCanCreateTask: bypassEligible.canCreateTask,
+		anySystemicSignalProtected: bypassEligible.protectedDomainPresent,
 	});
 
 	const alertScheduledTick = runAutonomousAlertScheduledTick({
