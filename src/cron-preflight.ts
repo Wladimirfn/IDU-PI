@@ -22,6 +22,7 @@
 
 import {
 	runSensorImpulses,
+	flattenReportFindings,
 	type SensorImpulseResult,
 } from "./sensor-impulses.js";
 import {
@@ -109,13 +110,19 @@ export async function runCronPreflight(
 	});
 	const sensorImpulses = sensorImpulseRun.impulses;
 
-	// Step 2: supervisor categorizes the findings
+	// Step 2: supervisor categorizes the findings. Pass the structured,
+	// pillar-routed AgentLabFindings from each sensor's validated review
+	// report (flattened across the 6 buckets) instead of raw truncated prose.
+	// A sensor whose review was invalid contributes an empty findings array.
 	const findings = sensorImpulses
 		.filter((s) => s.consult.ok)
 		.map((s) => ({
 			match: s.match,
 			ok: s.consult.ok,
-			response: s.consult.response.slice(0, 500),
+			findings:
+				s.review.status === "valid" && s.review.report
+					? flattenReportFindings(s.review.report)
+					: [],
 		}));
 	const supervisorAdvisory = await categorizeFindings({
 		stateRoot: input.stateRoot,

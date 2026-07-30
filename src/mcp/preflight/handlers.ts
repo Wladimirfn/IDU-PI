@@ -42,7 +42,7 @@ import {
 	buildPreflightOrchestratorAdvisory,
 	buildProjectAdvisoryForOrchestrator,
 } from "../../orchestrator-advisory.js";
-import { runSensorImpulses } from "../../sensor-impulses.js";
+import { runSensorImpulses, flattenReportFindings } from "../../sensor-impulses.js";
 import { categorizeFindings } from "../../supervisor-categorize.js";
 import {
 	envelope,
@@ -207,7 +207,10 @@ export async function handlePostflight(
 			.map((s) => ({
 				match: s.match,
 				ok: s.consult.ok,
-				response: s.consult.response.slice(0, 500),
+				findings:
+					s.review.status === "valid" && s.review.report
+						? flattenReportFindings(s.review.report)
+						: [],
 			})),
 		promptForRole: (role, message, _options) => {
 			if (!runtime.promptForRole) {

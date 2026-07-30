@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import { runCronPreflight } from "../src/cron-preflight.js";
 import type { CronPreflightResult } from "../src/cron-preflight.js";
 import { handleRunCronPreflight } from "../src/cli/supervisor/handlers.js";
@@ -22,13 +21,31 @@ function makeRoot(): {
 	stateRoot: string;
 	cleanup: () => void;
 } {
-	const projectRoot = mkdtempSync(join(tmpdir(), "idu-cron-preflight-"));
+	const projectRoot = makeTempDir("idu-cron-preflight-");
 	const stateRoot = join(projectRoot, "state");
 	mkdirSync(stateRoot, { recursive: true });
 	return {
 		projectRoot,
 		stateRoot,
-		cleanup: () => rmSync(projectRoot, { recursive: true, force: true }),
+		// Same contract as test/supervisor-categorize.test.ts: best-effort
+		// immediate removal, with `makeTempDir` tracking the directory for the
+		// helper's async afterEach and its exit sweep. A raw sync rmSync on
+		// Windows hits transient ENOTEMPTY right after the test's own writes
+		// (see the measurement in test/helpers/temp.ts), and these calls sit in
+		// `finally` blocks, so the throw would replace a passing result with a
+		// teardown failure.
+		cleanup: () => {
+			try {
+				rmSync(projectRoot, {
+					recursive: true,
+					force: true,
+					maxRetries: 5,
+					retryDelay: 50,
+				});
+			} catch {
+				// Tracked by makeTempDir; afterEach and the exit sweep finish it.
+			}
+		},
 	};
 }
 
@@ -51,14 +68,38 @@ function enableRole(stateRoot: string, role: string): void {
 	writeFileSync(path, JSON.stringify(raw), "utf8");
 }
 
+// A valid JSON array of one AgentLabFinding. Sensors must return this shape
+// (per the sensor prompt contract) for the review to be "valid" and findings
+// to reach the categorizer via the structured pipeline.
+const VALID_SENSOR_FINDINGS_JSON = JSON.stringify([
+	{
+		title: "Missing aria-label",
+		description: "The button element lacks an accessible label.",
+		evidence: "src/Button.tsx:1",
+		severity: "critical",
+		confidence: "high",
+		category: "ui_ux",
+		affectedFiles: ["src/Button.tsx"],
+		affectedFlows: [],
+		relatedRules: [],
+		controlPillars: ["quality"],
+	},
+]);
+
 function successPrompt(output = "ok") {
 	return async (
-		_role: string,
+		role: string,
 		_message: string,
 		_options: unknown,
 	): Promise<PromptForRoleResult> => ({
 		ok: true,
-		output,
+		// Sensor roles must return a valid JSON findings array so the review
+		// is "valid" and structured findings flow to the categorizer. The
+		// supervisor-main role returns the categorization count string.
+		output:
+			role === "supervisor-main"
+				? output
+				: VALID_SENSOR_FINDINGS_JSON,
 		provider: "test-provider",
 		model: "test-model",
 		role: "agentlab-ui-ux" as never,

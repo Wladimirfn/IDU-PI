@@ -548,9 +548,11 @@ function buildSensorImpulseReview(
 /**
  * Flatten a validated report's 6 finding buckets into one array. Mirrors the
  * private allFindings helpers in agentlab-supervisor-contract.ts and
- * agentlab-effectiveness-events.ts, kept local so this module owns its metric.
+ * agentlab-effectiveness-events.ts. Exported so the categorizer connectors
+ * (cron-preflight, mcp/preflight/handlers) can feed structured findings to the
+ * supervisor without each duplicating the 6-bucket spread.
  */
-function flattenReportFindings(report: AgentLabReviewReport): AgentLabFinding[] {
+export function flattenReportFindings(report: AgentLabReviewReport): AgentLabFinding[] {
 	return [
 		...report.qualityFindings,
 		...report.safetyFindings,
