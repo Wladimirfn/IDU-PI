@@ -379,7 +379,7 @@ function decisionFromSelfMaintenanceSignal(
 	};
 }
 
-function mapSignalDomain(
+export function mapSignalDomain(
 	category: SupervisorSelfMaintenanceSignal["category"],
 ): AutonomousAlertDomain | undefined {
 	if (category === "backlog_pressure") return "backlog";
@@ -395,8 +395,58 @@ function mapSignalDomain(
 	return undefined;
 }
 
-function isProtectedDomain(domain: AutonomousAlertDomain): boolean {
+export function isProtectedDomain(domain: AutonomousAlertDomain): boolean {
 	return domain === "security" || domain === "db";
+}
+
+/**
+ * Derives self-repair bypass eligibility from the systemic
+ * self-maintenance signals, WITHOUT re-running the full alert
+ * decision. Reuses mapSignalDomain + isProtectedDomain (single
+ * source of truth for domain mapping and protection).
+ *
+ * Used by the automaticov1 cycle to gate the Layer 2 self-repair
+ * bypass in decideAllowTaskCreation so the bypass fires only when:
+ *   - canCreateTask: at least one signal would produce a concrete
+ *     create_task (a repair to queue), AND
+ *   - protectedDomainPresent is false: NONE of the signals is in a
+ *     protected domain (security / db).
+ *
+ * The task-ability test mirrors the create_task branch of
+ * decisionFromSelfMaintenanceSignal: a signal produces create_task
+ * when its domain is not protected and its severity is not "high".
+ * This MUST stay in sync with that branch — if that branch changes
+ * (e.g. a new severity threshold or an extra gate), update the
+ * condition here or the bypass gate will drift.
+ *
+ * The protectedDomainPresent floor is INTENTIONALLY REDUNDANT with
+ * canCreateTask: a protected domain also fails the task-ability test
+ * today (protected → ask_human, never create_task), so the floor
+ * never changes the current outcome. The redundancy is the point —
+ * if someone later adds a taskDraft to a protected signal, the floor
+ * still blocks the bypass, and removing security protection becomes a
+ * visible diff rather than a silent behavior change.
+ */
+export function systemicBypassEligibility(
+	signals: readonly SupervisorSelfMaintenanceSignal[],
+): { canCreateTask: boolean; protectedDomainPresent: boolean } {
+	let canCreateTask = false;
+	let protectedDomainPresent = false;
+	for (const signal of signals) {
+		const domain = mapSignalDomain(signal.category);
+		// Unmapped categories (e.g. repeated_failure_patterns) produce
+		// no alert at all: they can neither create a task nor be a
+		// protected floor. Mirrors decisionFromSelfMaintenanceSignal's
+		// `if (!domain) return undefined` guard.
+		if (!domain) continue;
+		if (!isProtectedDomain(domain) && signal.severity !== "high") {
+			canCreateTask = true;
+		}
+		if (isProtectedDomain(domain)) {
+			protectedDomainPresent = true;
+		}
+	}
+	return { canCreateTask, protectedDomainPresent };
 }
 
 function impactForDomain(domain: AutonomousAlertDomain): string {

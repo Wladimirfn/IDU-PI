@@ -43,6 +43,8 @@ export type AllowTaskCreationReason =
 	| "blocked"
 	| "self_repair_bypass"
 	| "no_rail_tokens"
+	| "no_repairable_signal"
+	| "protected_domain_floor"
 	| "emergency_cap_reached";
 
 export type AllowTaskCreationInput = {
@@ -53,6 +55,18 @@ export type AllowTaskCreationInput = {
 	systemicBlock: boolean;
 	taskTreeBlock: boolean;
 	readinessBlock: boolean;
+	// Layer 2 gate inputs, derived from the systemic self-maintenance
+	// signals by the caller (see systemicBypassEligibility). Both are
+	// OPTIONAL for backward-compat with older callers/tests, but the
+	// fail-closed default below means an absent field does NOT grant
+	// the bypass. Pass them explicitly to opt into the bypass.
+	//   anySystemicSignalCanCreateTask: at least one systemic signal
+	//     would produce a concrete create_task (a repair to queue).
+	//   anySystemicSignalProtected: true when AT LEAST ONE systemic
+	//     signal is in a protected domain (security / db). False means
+	//     none is. Absent defaults to true, so an old caller is denied.
+	anySystemicSignalCanCreateTask?: boolean;
+	anySystemicSignalProtected?: boolean;
 };
 
 export type AllowTaskCreationDecision = {
@@ -78,18 +92,56 @@ export function decideAllowTaskCreation(
 		};
 	}
 
-	// Layer 2: self-repair bypass via rails
+	// Layer 2: self-repair bypass via rails (gated).
+	// The bypass is NO LONGER category-blind. It fires only when the
+	// systemic signals would actually queue a repair AND none of them
+	// is in a protected domain. This prevents the bypass from silently
+	// suppressing a hard stop for signals that map to ask_human /
+	// unmapped domains (repeated_failure_patterns, hard supervisor
+	// pressure) or protected domains (security, db) — those produce
+	// ZERO repair tasks, so bypassing them only drops the hard stop
+	// without any remediation.
+	//
+	// Fail-closed defaults: an absent canCreateTask is treated as
+	// false and an absent protected is treated as TRUE, so an old
+	// caller that does not pass these fields does NOT get the bypass.
 	if (input.isSelfRepairDomain) {
-		if (input.railTokensAvailable) {
+		// Budget gate first: no tokens to spend → bypass unavailable,
+		// regardless of signal task-ability or protection.
+		if (!input.railTokensAvailable) {
 			return {
-				allow: true,
-				reason: "self_repair_bypass",
+				allow: false,
+				reason: "no_rail_tokens",
+				layer: "layer2",
+			};
+		}
+		// Fail-closed: undefined protected defaults to true (block),
+		// undefined canCreateTask defaults to false (block).
+		const protectedDomainPresent =
+			input.anySystemicSignalProtected !== false;
+		const canCreateTask = input.anySystemicSignalCanCreateTask === true;
+		// Protected-domain floor (intentionally redundant with
+		// canCreateTask): a protected domain never bypasses, even if a
+		// future change made its signal task-able.
+		if (protectedDomainPresent) {
+			return {
+				allow: false,
+				reason: "protected_domain_floor",
+				layer: "layer2",
+			};
+		}
+		// Task-ability gate: there is a systemic block but nothing
+		// concrete to queue (signals map to ask_human / unmapped).
+		if (!canCreateTask) {
+			return {
+				allow: false,
+				reason: "no_repairable_signal",
 				layer: "layer2",
 			};
 		}
 		return {
-			allow: false,
-			reason: "no_rail_tokens",
+			allow: true,
+			reason: "self_repair_bypass",
 			layer: "layer2",
 		};
 	}
