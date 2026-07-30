@@ -47,17 +47,135 @@ function safeReadDirNames(dirPath: string): string[] {
 	}
 }
 
+/**
+ * Short Spanish labels for the supervisor step-status counts. Only the
+ * statuses that carry a result signal are rendered; "inactive" (a step
+ * that never ran) is intentionally omitted because it adds no signal.
+ */
+const STEP_LABEL_ES: Record<string, string> = {
+	completed: "ok",
+	skipped: "skip",
+	active: "activa",
+	warning: "alerta",
+};
+
+const SKIP_REASON_ES: Record<string, string> = {
+	idu_inactive: "idu inactivo",
+	no_new_events: "sin eventos nuevos",
+	not_enough_data: "sin datos suficientes",
+	throttled: "throttled",
+	supervisor_failed: "falló el supervisor",
+};
+
+const USAGE_RECOMMENDATION_ES: Record<string, string> = {
+	allow: "permitido",
+	proceed: "procedió",
+	warn: "advertencia",
+	block: "bloqueado",
+	ask_human: "pide humano",
+	needs_evidence: "pide evidencia",
+	needs_deeper_audit: "pide auditoría profunda",
+};
+
+function renderStepCounts(
+	stepCounts: Record<string, number> | undefined,
+): string {
+	if (!stepCounts) return "";
+	const parts: string[] = [];
+	for (const key of ["completed", "skipped", "active", "warning"]) {
+		const count = stepCounts[key];
+		if (typeof count === "number" && count > 0) {
+			parts.push(`${count} ${STEP_LABEL_ES[key]}`);
+		}
+	}
+	return parts.join(" · ");
+}
+
+function recommendationEs(
+	recommendation: string | undefined,
+): string | undefined {
+	if (!recommendation) return undefined;
+	const mapped = USAGE_RECOMMENDATION_ES[recommendation];
+	if (mapped) return mapped;
+	// Unknown recommendation strings (e.g. long advisory sentences stored
+	// verbatim) are themselves the outcome; surface them cleaned up.
+	return recommendation.replace(/_/gu, " ").trim();
+}
+
+/**
+ * Build a human-readable RESULT summary for a supervisor activity event
+ * from the event's own data — not its type labels. The panel already
+ * renders the timestamp; this string answers "¿qué pasó?".
+ */
+function summarizeSupervisorResult(event: SupervisorActivityEvent): string {
+	const triggerLabel = event.trigger ? ` (${event.trigger})` : "";
+	if (event.status === "skipped") {
+		if (event.reason) {
+			const reason = SKIP_REASON_ES[event.reason] ?? event.reason;
+			return `supervisor omitido${triggerLabel}: ${reason}`;
+		}
+		return `supervisor omitido${triggerLabel}`;
+	}
+	const products: string[] = [];
+	if (typeof event.createdTasks === "number" && event.createdTasks > 0) {
+		products.push(
+			`${event.createdTasks} tarea${event.createdTasks === 1 ? "" : "s"}`,
+		);
+	}
+	if (event.auditRunRecorded) products.push("audit registrada");
+	if (event.semanticDraftCreated) products.push("draft");
+	if (event.agentTaskPlanBuilt) products.push("plan");
+	const steps = renderStepCounts(event.stepCounts);
+	if (products.length === 0) {
+		const lead =
+			event.status === "planned"
+				? "planificado sin escrituras"
+				: event.reason === "not_enough_data"
+					? "sin hallazgos accionables"
+					: "ejecutado sin productos";
+		return `supervisor${triggerLabel}: ${lead}${steps ? ` · ${steps}` : ""}`;
+	}
+	return `supervisor${triggerLabel}: ${products.join(" · ")}${steps ? ` · ${steps}` : ""}`;
+}
+
+/**
+ * Build a human-readable OUTCOME summary for an idu usage event from the
+ * event's own data (recommendation / allowedToProceed / requiresHuman /
+ * ok), instead of the raw "trigger fire: surface/action" type label.
+ */
+function summarizeUsageResult(event: IduUsageEvent): string {
+	const parts: string[] = [];
+	const rec = recommendationEs(event.recommendation);
+	if (rec) parts.push(rec);
+	const flags = [
+		event.requiresHuman === true ? "pide humano" : null,
+		event.allowedToProceed === false ? "bloqueado" : null,
+	];
+	for (const flag of flags) {
+		// Avoid duplicating a flag the recommendation already states
+		// (e.g. recommendation "block" + allowedToProceed=false).
+		if (flag && !parts.includes(flag)) parts.push(flag);
+	}
+	if (event.ok === false) parts.push("error");
+	let outcome: string;
+	if (parts.length > 0) {
+		outcome = parts.join(" · ");
+	} else if (event.ok === true) {
+		outcome = "ok";
+	} else {
+		outcome = "sin resultado registrado";
+	}
+	return `${event.action} → ${outcome}`;
+}
+
 function normalizeSupervisorEvents(
 	events: readonly SupervisorActivityEvent[],
 ): ColaDeAccionesEvent[] {
 	const out: ColaDeAccionesEvent[] = [];
 	for (const event of events) {
-		const triggerLabel = event.trigger ? ` (${event.trigger})` : "";
-		const reasonLabel = event.reason ? ` reason=${event.reason}` : "";
-		const summary = `supervisor ${event.eventType}/${event.origin} status=${event.status}${triggerLabel}${reasonLabel}`;
 		out.push({
 			kind: "supervisor",
-			summary,
+			summary: summarizeSupervisorResult(event),
 			ts: event.timestamp,
 			source: "idu-supervisor-activity-events.jsonl",
 		});
@@ -77,13 +195,9 @@ function normalizeIduUsageEvents(
 			// activity.
 			continue;
 		}
-		const recommendation = event.recommendation
-			? ` recommendation=${event.recommendation}`
-			: "";
-		const summary = `trigger fire: ${event.surface}/${event.action}${recommendation}`;
 		out.push({
 			kind: "trigger",
-			summary,
+			summary: summarizeUsageResult(event),
 			ts: event.timestamp,
 			source: "idu-usage-events.jsonl",
 		});

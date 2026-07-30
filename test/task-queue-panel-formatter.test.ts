@@ -715,9 +715,10 @@ test("summarizeTaskQueueRow normalizes whitespace before measuring", () => {
 	assert.ok(summary.endsWith("..."));
 });
 
-// Test 18: formatTaskListTable renders ALL tasks (including done)
-// with the "Lista de tareas" header and an extra summary column.
-test("formatTaskListTable renders all tasks including done with a summary column", () => {
+// Test 18: formatTaskListTable renders ALL tasks (including done) with
+// the "Lista de tareas" header. A1b: content leads the row and metadata
+// is compressed to the tail (P{n} · age, plus status when non-default).
+test("formatTaskListTable renders all tasks with content first and compressed metadata", () => {
 	const now = new Date("2026-06-10T12:00:00.000Z");
 	const doneTask = makeTask({
 		id: "task-done001x",
@@ -739,15 +740,6 @@ test("formatTaskListTable renders all tasks including done with a summary column
 
 	assert.match(output, /Lista de tareas \(2\)/u);
 	// both tasks must be present, even though one is done
-	assert.ok(output.includes("task-done001"));
-	assert.ok(output.includes("task-active0"));
-	// the done task line should still appear in the top sub-panel
-	const doneLine = output
-		.split("\n")
-		.find((line: string) => line.includes("task-done001"));
-	assert.ok(doneLine, "done task line should be present in Lista de tareas");
-	assert.ok(doneLine.includes("done"), "done task line should contain 'done'");
-	// summary column appended to each row
 	assert.ok(
 		output.includes("Closed task"),
 		"summary column should include the done task's details",
@@ -756,6 +748,27 @@ test("formatTaskListTable renders all tasks including done with a summary column
 		output.includes("Active task"),
 		"summary column should include the active task's details",
 	);
+	const lines = output.split("\n");
+	const doneLine = lines.find((line: string) => line.includes("Closed task"));
+	const activeLine = lines.find((line: string) => line.includes("Active task"));
+	assert.ok(doneLine, "done task line should be present in Lista de tareas");
+	assert.ok(activeLine, "active task line should be present");
+	// content leads the row: the summary appears before the metadata tail
+	assert.ok(
+		doneLine.startsWith("Closed task"),
+		`done line should start with the content, got: ${doneLine}`,
+	);
+	// non-default "done" status is surfaced in the tail
+	assert.match(doneLine, /\bdone\b/u);
+	assert.match(doneLine, /P3/u);
+	assert.match(doneLine, /2h 0m/u);
+	// default "proposed" status carries no signal and is omitted
+	assert.doesNotMatch(activeLine, /proposed/u);
+	assert.match(activeLine, /P5/u);
+	// the truncated id, guard and category are dropped from the scan line
+	assert.doesNotMatch(doneLine, /task-done001/u);
+	assert.doesNotMatch(activeLine, /task-active0/u);
+	assert.doesNotMatch(activeLine, /\|/u);
 });
 
 test("formatTaskListTable returns an empty-state marker for zero tasks", () => {
@@ -872,17 +885,19 @@ test("renderTaskQueuePanel body shows done and skipped tasks but menu only has a
 		viewedTaskId: undefined,
 	});
 
-	// The body must show ALL three tasks in the top sub-panel.
+	// The body must show ALL three tasks in the top sub-panel. A1b: the
+	// "Lista de tareas" scan line leads with content and drops the id, so
+	// assert on the task content rather than the truncated id.
 	assert.ok(
-		render.content.includes("task-donelin"),
+		render.content.includes("Done task"),
 		`body should show the done task, got: ${render.content}`,
 	);
 	assert.ok(
-		render.content.includes("task-skiplin"),
+		render.content.includes("Skipped task"),
 		`body should show the skipped task, got: ${render.content}`,
 	);
 	assert.ok(
-		render.content.includes("task-activel"),
+		render.content.includes("Actionable task"),
 		`body should show the actionable task, got: ${render.content}`,
 	);
 
