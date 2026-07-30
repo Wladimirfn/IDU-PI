@@ -29,7 +29,13 @@
  * per role per sensor impulse.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { IduModelRoleId } from "./model-assignments.js";
 
@@ -208,8 +214,10 @@ export function saveRoleRails(
 	// Atomic-ish write: copy tmp to target then unlink tmp.
 	writeFileSync(path, readFileSync(tmp, "utf8"), "utf8");
 	try {
-		// best-effort cleanup
-		const { unlinkSync } = require("node:fs") as typeof import("node:fs");
+		// best-effort cleanup. This used to call a dynamic
+		// `require("node:fs")`, which throws ReferenceError in an ESM module
+		// ("type": "module") — the catch swallowed it, so the cleanup never
+		// ran and every save left a stale role-rails.json.tmp behind.
 		unlinkSync(tmp);
 	} catch {
 		// ignore
