@@ -163,6 +163,10 @@ import {
 	recordContextQualityEventDeferred,
 } from "./context-quality-events.js";
 import {
+	AUTONOMY_GATE_TEXTS,
+	buildAutonomyGateTraces,
+} from "./autonomy-gates.js";
+import {
 	filterRecentSupervisorActivityEvents,
 	readSupervisorActivityEvents,
 	recordSupervisorActivityEventDeferred,
@@ -2465,15 +2469,12 @@ export function buildSupervisorContextPack(
 		"supervisor_context_pack",
 		"requiredReads",
 	);
-	const autonomyGates = [
-		"Consultar Plan Maestro antes de definir objetivo o declarar cierre.",
-		"Ejecutar governance-review del orquestador antes del worker.",
-		"Corregir bugs dentro del objetivo aprobado con tests y evidencia.",
-		"Ejecutar idu_postflight antes de cerrar o commitear.",
-		"No commit/push/publicación sin instrucción explícita del humano u orquestador autorizado.",
-		"AgentLabs son audit-only y sólo por llamada explícita; nunca implementan.",
-		"Si falta evidencia o cobertura, reportar parcial/omisiones en vez de asumir aprobado.",
-	];
+	const autonomyGates: string[] = [...AUTONOMY_GATE_TEXTS];
+	// D2: structured per-gate verdict trace (read/write calibration). The
+	// legacy `autonomyGates` string list is kept for backward-compatible
+	// consumers; `autonomyGateTraces` carries the verdict/honor/override
+	// record the context-quality event now persists.
+	const autonomyGateTraces = buildAutonomyGateTraces();
 	const skipNoiseGuidance = [
 		"No leas docs completas si el pack ya trae objetivo, contratos y gates suficientes.",
 		"No cargues Source Library completa; pedí chunks concretos cuando la tarea lo requiera.",
@@ -2549,6 +2550,7 @@ export function buildSupervisorContextPack(
 		requiredReads: safeReads.items,
 		skipNoiseGuidance,
 		autonomyGates,
+		autonomyGateTraces,
 		humanApprovalRequired,
 		supervisorConsultation,
 		sourceEvidence,

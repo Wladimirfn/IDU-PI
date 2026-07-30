@@ -3,6 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { ContextBudgetProfile } from "./context-budget.js";
+import {
+	type AutonomyGateTrace,
+	buildAutonomyGateTraces,
+	classifyGateOperation,
+	parseAutonomyGateTrace,
+} from "./autonomy-gates.js";
 
 export type ContextQualitySource = "mcp" | "cli";
 export type ContextQualityScope = "supervisor_context_pack";
@@ -30,6 +36,13 @@ export type ContextQualityEvent = {
 	requiredReadsCount: number;
 	risksCount: number;
 	autonomyGatesCount: number;
+	/**
+	 * D2: per-gate verdict trace. One entry per autonomy gate that fired,
+	 * recording its verdict (allow/deny), whether it was honored or
+	 * overridden, its read/write classification, and its outcome. This is
+	 * a per-gate trace, not just the aggregate `autonomyGatesCount`.
+	 */
+	gateVerdicts: AutonomyGateTrace[];
 	skipNoiseGuidanceCount: number;
 	hasHumanVision: boolean;
 	hasPlanObjective: boolean;
@@ -219,6 +232,7 @@ export function contextQualityEventFromSupervisorContextPack(
 	const requiredReadsCount = arrayCount(data.requiredReads);
 	const risksCount = arrayCount(data.risks);
 	const autonomyGatesCount = arrayCount(data.autonomyGates);
+	const gateVerdicts = gateVerdictsFromPack(data);
 	const skipNoiseGuidanceCount = arrayCount(data.skipNoiseGuidance);
 	const hasTaskPackage = isRecord(data.taskPackage);
 	const hasTaskContext = isRecord(data.taskContext);
@@ -266,6 +280,7 @@ export function contextQualityEventFromSupervisorContextPack(
 		requiredReadsCount,
 		risksCount,
 		autonomyGatesCount,
+		gateVerdicts,
 		skipNoiseGuidanceCount,
 		hasHumanVision,
 		hasPlanObjective,
@@ -323,6 +338,7 @@ function normalizeContextQualityEvent(
 		requiredReadsCount: safeCount(input.requiredReadsCount),
 		risksCount: safeCount(input.risksCount),
 		autonomyGatesCount: safeCount(input.autonomyGatesCount),
+		gateVerdicts: normalizeGateVerdicts(input.gateVerdicts),
 		skipNoiseGuidanceCount: safeCount(input.skipNoiseGuidanceCount),
 		hasHumanVision: Boolean(input.hasHumanVision),
 		hasPlanObjective: Boolean(input.hasPlanObjective),
@@ -361,11 +377,12 @@ function parseContextQualityEvent(
 			omittedPaths: isRecord(value.omittedPaths)
 				? normalizeReasonCounts(value.omittedPaths)
 				: {},
-			contractsCount: numberField(value.contractsCount),
-			requiredReadsCount: numberField(value.requiredReadsCount),
-			risksCount: numberField(value.risksCount),
-			autonomyGatesCount: numberField(value.autonomyGatesCount),
-			skipNoiseGuidanceCount: numberField(value.skipNoiseGuidanceCount),
+		contractsCount: numberField(value.contractsCount),
+		requiredReadsCount: numberField(value.requiredReadsCount),
+		risksCount: numberField(value.risksCount),
+		autonomyGatesCount: numberField(value.autonomyGatesCount),
+		gateVerdicts: normalizeGateVerdicts(value.gateVerdicts),
+		skipNoiseGuidanceCount: numberField(value.skipNoiseGuidanceCount),
 			hasHumanVision: Boolean(value.hasHumanVision),
 			hasPlanObjective: Boolean(value.hasPlanObjective),
 			hasTaskGoal: Boolean(value.hasTaskGoal),
@@ -410,6 +427,39 @@ function omittedPathsFrom(items: unknown[]): Record<string, number> {
 	return sortRecord(paths);
 }
 
+/**
+ * D2: derive the per-gate verdict trace for a context pack.
+ *
+ * Preferred path: the pack carries a structured `autonomyGateTraces` array
+ * (built by `buildSupervisorContextPack`). Fallback: derive a trace from
+ * the legacy `autonomyGates` string list via `classifyGateOperation`, so
+ * packs that only have the strings still leave a per-gate record. An empty
+ * list is returned when neither field is present.
+ */
+function gateVerdictsFromPack(data: Record<string, unknown>): AutonomyGateTrace[] {
+	const structured = data.autonomyGateTraces;
+	if (Array.isArray(structured) && structured.length > 0) {
+		const parsed = structured
+			.map(parseAutonomyGateTrace)
+			.filter((trace): trace is AutonomyGateTrace => trace !== null);
+		if (parsed.length > 0) return parsed;
+	}
+	const texts = Array.isArray(data.autonomyGates) ? data.autonomyGates : [];
+	if (texts.length === 0) return [];
+	// Delegate to the catalog's trace builder by re-classifying each string.
+	// `buildAutonomyGateTraces` already applies the read/write calibration.
+	return buildAutonomyGateTraces(
+		texts.map((text, index) => {
+			const value = typeof text === "string" ? text : "";
+			return {
+				gateId: `legacy-gate-${index + 1}`,
+				text: value,
+				operation: classifyGateOperation(value),
+			};
+		}),
+	);
+}
+
 function normalizeReasonCounts(value: unknown): Record<string, number> {
 	if (!isRecord(value)) return {};
 	const normalized: Record<string, number> = {};
@@ -418,6 +468,20 @@ function normalizeReasonCounts(value: unknown): Record<string, number> {
 		normalized[label] = safeCount(count);
 	}
 	return sortRecord(normalized);
+}
+
+/**
+ * D2: coerce an unknown `gateVerdicts` payload into a clean trace array.
+ * Defends the persisted event against malformed/partial pack data: each
+ * entry is re-parsed through `parseAutonomyGateTrace`, and anything that
+ * is not a usable record is dropped rather than crashing the write.
+ */
+function normalizeGateVerdicts(value: unknown): AutonomyGateTrace[] {
+	if (!Array.isArray(value)) return [];
+	const traces = value
+		.map(parseAutonomyGateTrace)
+		.filter((trace): trace is AutonomyGateTrace => trace !== null);
+	return traces;
 }
 
 function emptyRatings(): Record<ContextQualityRating, number> {
