@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	existsSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -22,6 +23,9 @@ import {
 	roleRailsPath,
 	saveRoleRails,
 } from "../src/role-rails.js";
+import { anyRailHasTokensAvailable } from "../src/role-rails.js";
+import type { IduModelRoleId } from "../src/model-assignments.js";
+import type { RoleRail } from "../src/role-rails.js";
 
 function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
 	const root = mkdtempSync(join(tmpdir(), "idu-rails-"));
@@ -34,7 +38,7 @@ function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
 test("defaultRailForRole returns expected defaults", () => {
 	const rail = defaultRailForRole("supervisor-main");
 	assert.equal(rail.role, "supervisor-main");
-	assert.equal(rail.enabled, false);
+	assert.equal(rail.enabled, true);
 	assert.equal(rail.tokenBudget, DEFAULT_INITIAL_TOKEN_BUDGET);
 	assert.equal(rail.minTokenBudget, DEFAULT_MIN_TOKEN_BUDGET);
 	assert.equal(rail.maxTokenBudget, DEFAULT_MAX_TOKEN_BUDGET);
@@ -259,6 +263,211 @@ test("saveRoleRails writes a file readable by loadRoleRails", () => {
 			rails: Record<string, unknown>;
 		};
 		assert.ok(raw.rails["supervisor-main"]);
+	} finally {
+		cleanup();
+	}
+});
+
+// --- Block-1 point 6: rails enabled-by-default + one-pass migration ---
+
+// Mirrors the 13 known roles from src/role-rails.ts so the migration
+// fixtures exercise the real production shape, not a minimal subset.
+const KNOWN_ROLES_FIXTURE: IduModelRoleId[] = [
+	"supervisor-main",
+	"supervisor-semantic",
+	"supervisor-compaction",
+	"agentlab-general",
+	"agentlab-project-understanding",
+	"agentlab-security",
+	"agentlab-architecture",
+	"agentlab-database",
+	"agentlab-ui-ux",
+	"agentlab-performance",
+	"agentlab-code-quality",
+	"agentlab-docs",
+	"agentlab-librarian",
+];
+
+// Build a legacy v1-shape payload mirroring the real production file:
+// 13 roles, each enabled:false (the old default bleed), NO schemaVersion.
+function legacyV1Payload(): {
+	rails: Record<string, Partial<RoleRail>>;
+} {
+	const rails: Record<string, Partial<RoleRail>> = {};
+	for (const role of KNOWN_ROLES_FIXTURE) {
+		rails[role] = {
+			role,
+			enabled: false,
+			tokenBudget: 800,
+			minTokenBudget: 100,
+			maxTokenBudget: 2000,
+			cooldownMs: 30_000,
+			cooldownRemainingMs: 0,
+			wakeCount: 3,
+			successStreak: 1,
+			failureStreak: 0,
+			emergencyTimeoutMs: 600_000,
+		};
+	}
+	return { rails };
+}
+
+test("migration: v1 file with 13 rails enabled:false -> all enabled:true in-memory and schemaVersion:2 on disk", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		writeFileSync(
+			roleRailsPath(stateRoot),
+			JSON.stringify(legacyV1Payload()),
+			"utf8",
+		);
+		const rails = loadRoleRails(stateRoot);
+		// In-memory: all 13 flipped to enabled:true by the one-pass migration
+		for (const role of KNOWN_ROLES_FIXTURE) {
+			assert.equal(
+				rails[role].enabled,
+				true,
+				`${role} should be enabled in-memory after migration`,
+			);
+		}
+		// On disk: schemaVersion:2 stamped and all 13 persisted enabled:true
+		const onDisk = JSON.parse(
+			readFileSync(roleRailsPath(stateRoot), "utf8"),
+		) as {
+			schemaVersion?: number;
+			rails: Record<string, { enabled: boolean }>;
+		};
+		assert.equal(onDisk.schemaVersion, 2);
+		for (const role of KNOWN_ROLES_FIXTURE) {
+			assert.equal(
+				onDisk.rails[role].enabled,
+				true,
+				`${role} should be enabled on-disk after migration`,
+			);
+		}
+	} finally {
+		cleanup();
+	}
+});
+
+test("migration is idempotent: a v2 file is not rewritten and an explicit enabled:false survives", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		const v2Payload = {
+			schemaVersion: 2,
+			rails: {
+				"supervisor-main": {
+					role: "supervisor-main",
+					// Explicit user disable in an already-migrated v2 file —
+					// this is a deliberate choice, NOT legacy default bleed.
+					enabled: false,
+					tokenBudget: 800,
+					minTokenBudget: 100,
+					maxTokenBudget: 2000,
+					cooldownMs: 30_000,
+					cooldownRemainingMs: 0,
+					wakeCount: 0,
+					successStreak: 0,
+					failureStreak: 0,
+					emergencyTimeoutMs: 600_000,
+				},
+			},
+		};
+		writeFileSync(roleRailsPath(stateRoot), JSON.stringify(v2Payload), "utf8");
+		const before = readFileSync(roleRailsPath(stateRoot), "utf8");
+		const rails = loadRoleRails(stateRoot);
+		const after = readFileSync(roleRailsPath(stateRoot), "utf8");
+		// Explicit user disable survives (v2 file is not migrated)
+		assert.equal(rails["supervisor-main"].enabled, false);
+		// No write on a v2 load (idempotent — bytes unchanged)
+		assert.equal(before, after);
+	} finally {
+		cleanup();
+	}
+});
+
+test("fresh stateRoot (no file): loadRoleRails returns all rails enabled:true and writes no file", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		const rails = loadRoleRails(stateRoot);
+		for (const role of KNOWN_ROLES_FIXTURE) {
+			assert.equal(
+				rails[role].enabled,
+				true,
+				`${role} should default to enabled`,
+			);
+		}
+		// No file created — fresh state must not trigger a write
+		assert.equal(existsSync(roleRailsPath(stateRoot)), false);
+	} finally {
+		cleanup();
+	}
+});
+
+test("anyRailHasTokensAvailable returns true after migrating a v1 file (bypass unblocked)", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		writeFileSync(
+			roleRailsPath(stateRoot),
+			JSON.stringify(legacyV1Payload()),
+			"utf8",
+		);
+		// Before the fix this was permanently false: every rail had
+		// enabled:false so anyRailHasTokensAvailable could never return true.
+		// After migration rails are enabled:true with tokenBudget(800) >
+		// minTokenBudget(100) and no cooldown -> the bypass path is reachable.
+		assert.equal(anyRailHasTokensAvailable(stateRoot), true);
+	} finally {
+		cleanup();
+	}
+});
+
+test("saveRoleRails writes schemaVersion in the payload (marker survives a post-migration save)", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		const rails = loadRoleRails(stateRoot);
+		rails["supervisor-main"].tokenBudget = 4321;
+		saveRoleRails(stateRoot, rails);
+		const raw = JSON.parse(
+			readFileSync(roleRailsPath(stateRoot), "utf8"),
+		) as {
+			schemaVersion?: number;
+			rails: Record<string, unknown>;
+		};
+		assert.equal(raw.schemaVersion, 2);
+		assert.ok(raw.rails["supervisor-main"]);
+	} finally {
+		cleanup();
+	}
+});
+
+test("a rail explicitly disabled in a v2 file stays disabled across loads (user choice respected)", () => {
+	const { stateRoot, cleanup } = makeStateRoot();
+	try {
+		const v2Payload = {
+			schemaVersion: 2,
+			rails: {
+				"agentlab-security": {
+					role: "agentlab-security",
+					enabled: false,
+					tokenBudget: 800,
+					minTokenBudget: 100,
+					maxTokenBudget: 2000,
+					cooldownMs: 30_000,
+					cooldownRemainingMs: 0,
+					wakeCount: 0,
+					successStreak: 0,
+					failureStreak: 0,
+					emergencyTimeoutMs: 600_000,
+				},
+			},
+		};
+		writeFileSync(roleRailsPath(stateRoot), JSON.stringify(v2Payload), "utf8");
+		const first = loadRoleRails(stateRoot);
+		assert.equal(first["agentlab-security"].enabled, false);
+		// A second load must still respect the explicit disable and must
+		// not have re-migrated it to true.
+		const second = loadRoleRails(stateRoot);
+		assert.equal(second["agentlab-security"].enabled, false);
 	} finally {
 		cleanup();
 	}

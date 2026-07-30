@@ -59,6 +59,11 @@ export const TOKEN_BUDGET_EXPAND_FACTOR = 1.3;
 
 const RAIL_FILENAME = "role-rails.json";
 
+// Schema version stamped on the persisted role-rails file. Unversioned
+// (legacy) files are implicitly v1. Bump when the on-disk shape changes
+// again so loadRoleRails can run a fresh one-pass migration.
+const RAILS_SCHEMA_VERSION = 2;
+
 const KNOWN_ROLES: readonly IduModelRoleId[] = [
 	"supervisor-main",
 	"supervisor-semantic",
@@ -82,7 +87,14 @@ export function roleRailsPath(stateRoot: string): string {
 export function defaultRailForRole(role: IduModelRoleId): RoleRail {
 	return {
 		role,
-		enabled: false,
+		// Semantic shift (Block-1 point 6): `enabled` now means "not
+		// explicitly disabled", defaulting to true. The real permission
+		// gate for consults is role-engine.json's `roleEnabled` (honored
+		// by consultSupervisor); rail.enabled is the capacity signal the
+		// automaticov1 self-repair bypass reads via
+		// anyRailHasTokensAvailable. Defaulting to true keeps the bypass
+		// reachable instead of permanently blocked by the legacy false.
+		enabled: true,
 		tokenBudget: DEFAULT_INITIAL_TOKEN_BUDGET,
 		minTokenBudget: DEFAULT_MIN_TOKEN_BUDGET,
 		maxTokenBudget: DEFAULT_MAX_TOKEN_BUDGET,
@@ -117,6 +129,7 @@ export function loadRoleRails(
 	try {
 		const raw = JSON.parse(readFileSync(path, "utf8")) as {
 			rails?: Record<string, Partial<RoleRail>>;
+			schemaVersion?: number;
 		};
 		if (raw.rails) {
 			for (const [role, partial] of Object.entries(raw.rails)) {
@@ -124,6 +137,31 @@ export function loadRoleRails(
 				const def = defaultRailForRole(role);
 				result[role] = { ...def, ...partial, role };
 			}
+		}
+		// One-pass migration: legacy (v1) files persisted `enabled: false`
+		// because defaultRailForRole used to default to false and the
+		// merge `{...def, ...partial}` let that false bleed into the file.
+		// The automaticov1 self-repair bypass (anyRailHasTokensAvailable)
+		// requires `enabled: true`, so those persisted-false rails
+		// permanently blocked it. Changing the default alone is not
+		// enough — the persisted false overrides it via the merge. This
+		// flip reinterprets legacy false as "old default bleed, not an
+		// explicit user choice". Once schemaVersion===2 is stamped,
+		// subsequent loads skip this block, so a real user disable in a
+		// v2 file survives. Idempotent: a v2 file writes nothing.
+		if (raw.schemaVersion !== RAILS_SCHEMA_VERSION) {
+			for (const role of KNOWN_ROLES) {
+				const rail = result[role];
+				if (rail && rail.enabled === false) {
+					rail.enabled = true;
+				}
+			}
+			// Persist the migrated shape (schemaVersion + flipped rails)
+			// through the same atomic tmp+rename write as saveRoleRails,
+			// so this same load returns migrated rails (no one-tick delay
+			// before the bypass unblocks). Guarded: only reached when the
+			// on-disk schemaVersion is stale, never on a normal v2 load.
+			saveRoleRails(stateRoot, result);
 		}
 	} catch {
 		// corrupt JSON → defaults
@@ -159,7 +197,13 @@ export function saveRoleRails(
 	mkdirSync(stateRoot, { recursive: true });
 	const path = roleRailsPath(stateRoot);
 	const tmp = `${path}.tmp`;
-	const payload = JSON.stringify({ rails }, null, 2);
+	// Include schemaVersion so a post-migration wake/autoTune save does
+	// not strip the marker and re-trigger the migration on next load.
+	const payload = JSON.stringify(
+		{ schemaVersion: RAILS_SCHEMA_VERSION, rails },
+		null,
+		2,
+	);
 	writeFileSync(tmp, payload, "utf8");
 	// Atomic-ish write: copy tmp to target then unlink tmp.
 	writeFileSync(path, readFileSync(tmp, "utf8"), "utf8");
