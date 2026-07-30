@@ -265,11 +265,22 @@ function loadConstitutionStatus(
 	stateRoot: string,
 ): "active" | "missing" | "unknown" {
 	// First, check the constitution config directly (canonical source).
+	// Aligned to the sister `loadProjectCoreSnapshot` above: route through
+	// `readIdPathWithMigration` so Layout A
+	// (`<stateRoot>/.idu/config/project-constitution.json`) is preferred with
+	// a one-time migration from Layout B
+	// (`<stateRoot>/config/project-constitution.json`). The previous version
+	// hardcoded Layout B only; on projects that had already migrated to
+	// Layout A the hardcoded path was absent, so the gate reported "missing"
+	// and blocked the birth pipeline even though the real constitution was
+	// active. The fallback below (birth status) is intentionally unchanged.
 	try {
-		const path = join(stateRoot, "config", "project-constitution.json");
-		if (existsSync(path)) {
-			const raw = readFileSync(path, "utf8");
-			const parsed = JSON.parse(raw) as { status?: string };
+		const migrated = readIdPathWithMigration(
+			stateRoot,
+			"project-constitution.json",
+		);
+		if (migrated.content !== null) {
+			const parsed = JSON.parse(migrated.content) as { status?: string };
 			if (parsed.status === "active") return "active";
 		}
 	} catch {
