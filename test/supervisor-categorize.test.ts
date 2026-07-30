@@ -29,7 +29,26 @@ function makeRoot(): { root: string; stateRoot: string; cleanup: () => void } {
 	return {
 		root,
 		stateRoot,
-		cleanup: () => rmSync(root, { recursive: true, force: true }),
+		// Best-effort immediate removal. `makeTempDir` registered `root` for
+		// the helper's async afterEach and its exit sweep, so the directory is
+		// guaranteed to be removed even if this call cannot do it now — which
+		// makes swallowing safe here, and only here. A raw sync rmSync on
+		// Windows hits transient ENOTEMPTY right after the test's own
+		// synchronous writes (see the measurement in test/helpers/temp.ts);
+		// because these calls sit in `finally` blocks, that throw replaced a
+		// passing test result with a teardown failure.
+		cleanup: () => {
+			try {
+				rmSync(root, {
+					recursive: true,
+					force: true,
+					maxRetries: 5,
+					retryDelay: 50,
+				});
+			} catch {
+				// Tracked by makeTempDir; afterEach and the exit sweep finish it.
+			}
+		},
 	};
 }
 
