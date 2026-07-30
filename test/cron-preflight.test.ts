@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { makeTempDir } from "./helpers/temp.js";
 import { runCronPreflight } from "../src/cron-preflight.js";
 import type { CronPreflightResult } from "../src/cron-preflight.js";
 import { handleRunCronPreflight } from "../src/cli/supervisor/handlers.js";
@@ -22,13 +21,31 @@ function makeRoot(): {
 	stateRoot: string;
 	cleanup: () => void;
 } {
-	const projectRoot = mkdtempSync(join(tmpdir(), "idu-cron-preflight-"));
+	const projectRoot = makeTempDir("idu-cron-preflight-");
 	const stateRoot = join(projectRoot, "state");
 	mkdirSync(stateRoot, { recursive: true });
 	return {
 		projectRoot,
 		stateRoot,
-		cleanup: () => rmSync(projectRoot, { recursive: true, force: true }),
+		// Same contract as test/supervisor-categorize.test.ts: best-effort
+		// immediate removal, with `makeTempDir` tracking the directory for the
+		// helper's async afterEach and its exit sweep. A raw sync rmSync on
+		// Windows hits transient ENOTEMPTY right after the test's own writes
+		// (see the measurement in test/helpers/temp.ts), and these calls sit in
+		// `finally` blocks, so the throw would replace a passing result with a
+		// teardown failure.
+		cleanup: () => {
+			try {
+				rmSync(projectRoot, {
+					recursive: true,
+					force: true,
+					maxRetries: 5,
+					retryDelay: 50,
+				});
+			} catch {
+				// Tracked by makeTempDir; afterEach and the exit sweep finish it.
+			}
+		},
 	};
 }
 
