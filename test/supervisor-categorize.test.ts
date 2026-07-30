@@ -19,6 +19,7 @@ import {
 	type SupervisorAdvisory,
 	type SupervisorAdvisoryDiscard,
 } from "../src/supervisor-categorize.js";
+import type { AgentLabFinding } from "../src/agentlab-supervisor-contract.js";
 import { roleEngineConfigPath } from "../src/role-engine-config.js";
 import type { PromptForRoleResult } from "../src/agent-router.js";
 
@@ -75,6 +76,24 @@ function successPrompt(output: string) {
 		role: "supervisor-main" as never,
 	});
 }
+
+/**
+ * Minimal valid AgentLabFinding used as a building block in FindingSummary
+ * literals. Spread and override per-test (title / severity / category /
+ * controlPillars) so each test stays readable.
+ */
+const sampleFinding: AgentLabFinding = {
+	title: "Missing aria-label",
+	description: "The button element lacks an accessible label.",
+	evidence: "src/Button.tsx:12",
+	severity: "medium",
+	confidence: "high",
+	category: "ui_ux",
+	affectedFiles: ["src/Button.tsx"],
+	affectedFlows: [],
+	relatedRules: [],
+	controlPillars: ["quality"],
+};
 
 test("parseCategorizedCounts parses 'N critical, M medium, K low' format", () => {
 	assert.deepEqual(parseCategorizedCounts("4 critical, 2 medium, 1 low"), {
@@ -207,7 +226,9 @@ test("categorizeFindings: invokes supervisor-main and parses response", async ()
 					description: "Auth surface change",
 				},
 				ok: true,
-				response: "Plaintext password in source",
+				findings: [
+					{ ...sampleFinding, title: "Plaintext password in source" },
+				],
 			},
 			{
 				match: {
@@ -216,7 +237,7 @@ test("categorizeFindings: invokes supervisor-main and parses response", async ()
 					description: "UI/UX change",
 				},
 				ok: true,
-				response: "Missing aria-label",
+				findings: [{ ...sampleFinding, title: "Missing aria-label" }],
 			},
 		];
 		const result = await categorizeFindings({
@@ -248,7 +269,7 @@ test("categorizeFindings: returns role_not_enabled when supervisor is off", asyn
 					description: "UI/UX",
 				},
 				ok: true,
-				response: "missing aria",
+				findings: [sampleFinding],
 			},
 		];
 		const result = await categorizeFindings({
@@ -297,7 +318,7 @@ test("categorizeFindings: skips advisory when LLM response is unparseable", asyn
 					description: "UI/UX change",
 				},
 				ok: true,
-				response: "missing aria",
+				findings: [sampleFinding],
 			},
 		];
 		// LLM returns a tool-call-style response, not the requested format.
@@ -340,7 +361,7 @@ test("categorizeFindings: writes advisory for 0/0/0 (no findings is a valid resp
 					description: "UI/UX change",
 				},
 				ok: true,
-				response: "missing aria",
+				findings: [sampleFinding],
 			},
 		];
 		const result = await categorizeFindings({
@@ -376,7 +397,7 @@ function finding(file = "src/Button.tsx"): FindingSummary {
 	return {
 		match: { file, role: "agentlab-ui-ux", description: "UI/UX change" },
 		ok: true,
-		response: "missing aria",
+		findings: [sampleFinding],
 	};
 }
 
@@ -571,5 +592,283 @@ test("formatDiscardsSummary: groups, counts, and sorts deterministically", () =>
 	assert.equal(
 		formatDiscardsSummary(discards),
 		"4 discarded (depth_cap: agentlab-code-quality=2, agentlab-security=1; safety_ceiling: agentlab-architecture=1)",
+	);
+});
+
+// =========================================================================
+// Block-1 points 1+2: structured AgentLabFinding pipeline reaches the
+// categorizer, and the 300-char truncation (E1) is gone.
+//
+// The validated, pillar-routed findings now flow directly instead of raw
+// truncated prose. The summary is per-finding (severity + title + category)
+// with no slicing, and the question count reflects FINDINGS not SENSORS.
+// =========================================================================
+
+test("Block-1 #1: structured findings reach the categorizer (count is findings, not sensors)", async () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		// One sensor carrying 3 findings across different pillars/buckets.
+		const findings: FindingSummary[] = [
+			{
+				match: {
+					file: "src/auth.ts",
+					role: "agentlab-security",
+					description: "Auth surface",
+				},
+				ok: true,
+				findings: [
+					{
+						...sampleFinding,
+						title: "SQL injection in login query",
+						severity: "critical",
+						category: "security",
+						controlPillars: ["safety"],
+					},
+					{
+						...sampleFinding,
+						title: "Missing rate limit on auth endpoint",
+						severity: "medium",
+						category: "security",
+						controlPillars: ["time"],
+					},
+					{
+						...sampleFinding,
+						title: "Weak password hash algorithm",
+						severity: "low",
+						category: "security",
+						controlPillars: ["quality"],
+					},
+				],
+			},
+		];
+		let captured = "";
+		const result = await categorizeFindings({
+			stateRoot,
+			findings,
+			promptForRole: async (_role, message, _opts) => {
+				captured = message;
+				return {
+					ok: true,
+					output: "1 critical, 1 medium, 1 low",
+					provider: "test-provider",
+					model: "test-model",
+					role: "supervisor-main" as never,
+				};
+			},
+		});
+		assert.ok(result);
+		// The question count is the FINDING count (3), not the sensor count (1).
+		assert.ok(
+			captured.includes("Categorize these 3 AgentLab findings."),
+			`question must say 3 findings, got: ${captured}`,
+		);
+		// Each finding appears as a structured line: [role] file: [severity] title (category)
+		assert.ok(
+			captured.includes(
+				"[agentlab-security] src/auth.ts: [critical] SQL injection in login query (security)",
+			),
+		);
+		assert.ok(
+			captured.includes(
+				"[agentlab-security] src/auth.ts: [medium] Missing rate limit on auth endpoint (security)",
+			),
+		);
+		assert.ok(
+			captured.includes(
+				"[agentlab-security] src/auth.ts: [low] Weak password hash algorithm (security)",
+			),
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("Block-1 #2: no truncation — a finding with a long title is NOT sliced", async () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		const longTitle = "X".repeat(400);
+		const findings: FindingSummary[] = [
+			{
+				match: {
+					file: "src/big.ts",
+					role: "agentlab-code-quality",
+					description: "Big file",
+				},
+				ok: true,
+				findings: [{ ...sampleFinding, title: longTitle }],
+			},
+		];
+		let captured = "";
+		await categorizeFindings({
+			stateRoot,
+			findings,
+			promptForRole: async (_role, message, _opts) => {
+				captured = message;
+				return {
+					ok: true,
+					output: "0 critical, 0 medium, 0 low",
+					provider: "test-provider",
+					model: "test-model",
+					role: "supervisor-main" as never,
+				};
+			},
+		});
+		// The full 400-char title must be present (old code sliced at 300).
+		assert.ok(
+			captured.includes(longTitle),
+			"long title must not be truncated in the summary",
+		);
+		assert.ok(
+			!captured.includes("X".repeat(300) + "\n"),
+			"summary must not cut at the old 300-char boundary",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("Block-1 #3: invalid review contributes an EMPTY findings array (no garbled prose)", async () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		// A sensor whose review was invalid → findings: [] (the connector
+		// maps invalid reviews to an empty array, never raw prose).
+		const findings: FindingSummary[] = [
+			{
+				match: {
+					file: "src/broken.ts",
+					role: "agentlab-code-quality",
+					description: "Broken",
+				},
+				ok: true,
+				findings: [],
+			},
+		];
+		let llmCalled = false;
+		const result = await categorizeFindings({
+			stateRoot,
+			findings,
+			promptForRole: async () => {
+				llmCalled = true;
+				return {
+					ok: true,
+					output: "0 critical, 0 medium, 0 low",
+					provider: "test-provider",
+					model: "test-model",
+					role: "supervisor-main" as never,
+				};
+			},
+		});
+		// No findings to categorize → null, and the LLM is never called.
+		assert.equal(result, null);
+		assert.equal(llmCalled, false);
+	} finally {
+		cleanup();
+	}
+});
+
+test("Block-1 #4: all sensors empty findings → no LLM call (null when no discards)", async () => {
+	const { stateRoot, cleanup } = makeRoot();
+	try {
+		enableRole(stateRoot, "supervisor-main");
+		const findings: FindingSummary[] = [
+			{
+				match: {
+					file: "src/a.ts",
+					role: "agentlab-code-quality",
+					description: "A",
+				},
+				ok: true,
+				findings: [],
+			},
+			{
+				match: {
+					file: "src/b.ts",
+					role: "agentlab-ui-ux",
+					description: "B",
+				},
+				ok: true,
+				findings: [],
+			},
+		];
+		let llmCalled = false;
+		const result = await categorizeFindings({
+			stateRoot,
+			findings,
+			promptForRole: async () => {
+				llmCalled = true;
+				return {
+					ok: true,
+					output: "0 critical, 0 medium, 0 low",
+					provider: "test-provider",
+					model: "test-model",
+					role: "supervisor-main" as never,
+				};
+			},
+		});
+		assert.equal(result, null);
+		assert.equal(llmCalled, false);
+
+		// BUT when discards ARE present, the discard-only advisory fires
+		// (still no LLM call) — invisibility is the bug.
+		const { stateRoot: sr2, cleanup: c2 } = makeRoot();
+		try {
+			let llmCalled2 = false;
+			const result2 = await categorizeFindings({
+				stateRoot: sr2,
+				findings,
+				discards: depthDiscards,
+				promptForRole: async () => {
+					llmCalled2 = true;
+					return {
+						ok: true,
+						output: "0 critical, 0 medium, 0 low",
+						provider: "test-provider",
+						model: "test-model",
+						role: "supervisor-main" as never,
+					};
+				},
+			});
+			assert.ok(result2?.advisory, "discard advisory must fire");
+			assert.equal(llmCalled2, false);
+		} finally {
+			c2();
+		}
+	} finally {
+		cleanup();
+	}
+});
+
+test("Block-1 #5: per-finding char cost is lower than old per-sensor 300-char prose", () => {
+	// Structural proof: N structured finding-lines cost fewer chars than
+	// N × 300 (the old per-sensor truncated-prose worst case).
+	const N = 5;
+	const sensor: FindingSummary = {
+		match: {
+			file: "src/big.ts",
+			role: "agentlab-code-quality",
+			description: "Big file",
+		},
+		ok: true,
+		findings: Array.from({ length: N }, (_, i) => ({
+			...sampleFinding,
+			title: `Finding number ${i} with a realistic title`,
+		})),
+	};
+	// Replicate the categorizer's summary formula (deterministic, no slice).
+	const newSummary = [sensor]
+		.flatMap((f) =>
+			f.findings.map(
+				(finding) =>
+					`[${f.match.role}] ${f.match.file}: [${finding.severity}] ${finding.title} (${finding.category})`,
+			),
+		)
+		.join("\n");
+	const oldWorstCase = N * 300;
+	assert.ok(
+		newSummary.length < oldWorstCase,
+		`new summary (${newSummary.length} chars for ${N} findings) must be cheaper than old worst case (${oldWorstCase} chars)`,
 	);
 });

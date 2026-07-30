@@ -51,14 +51,38 @@ function enableRole(stateRoot: string, role: string): void {
 	writeFileSync(path, JSON.stringify(raw), "utf8");
 }
 
+// A valid JSON array of one AgentLabFinding. Sensors must return this shape
+// (per the sensor prompt contract) for the review to be "valid" and findings
+// to reach the categorizer via the structured pipeline.
+const VALID_SENSOR_FINDINGS_JSON = JSON.stringify([
+	{
+		title: "Missing aria-label",
+		description: "The button element lacks an accessible label.",
+		evidence: "src/Button.tsx:1",
+		severity: "critical",
+		confidence: "high",
+		category: "ui_ux",
+		affectedFiles: ["src/Button.tsx"],
+		affectedFlows: [],
+		relatedRules: [],
+		controlPillars: ["quality"],
+	},
+]);
+
 function successPrompt(output = "ok") {
 	return async (
-		_role: string,
+		role: string,
 		_message: string,
 		_options: unknown,
 	): Promise<PromptForRoleResult> => ({
 		ok: true,
-		output,
+		// Sensor roles must return a valid JSON findings array so the review
+		// is "valid" and structured findings flow to the categorizer. The
+		// supervisor-main role returns the categorization count string.
+		output:
+			role === "supervisor-main"
+				? output
+				: VALID_SENSOR_FINDINGS_JSON,
 		provider: "test-provider",
 		model: "test-model",
 		role: "agentlab-ui-ux" as never,

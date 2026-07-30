@@ -26,6 +26,7 @@ import { appendInjection, type Injection } from "./injection-store.js";
 import type { SensorMatch } from "./sensors.js";
 import type { PromptForRoleResult } from "./agent-router.js";
 import type { IduModelRoleId } from "./model-assignments.js";
+import type { AgentLabFinding } from "./agentlab-supervisor-contract.js";
 
 export type CategorizedCounts = {
 	critical: number;
@@ -36,7 +37,14 @@ export type CategorizedCounts = {
 export type FindingSummary = {
 	match: SensorMatch;
 	ok: boolean;
-	response: string;
+	/**
+	 * Structured, pillar-routed findings from the sensor's validated
+	 * AgentLabReviewReport (flattened across the 6 buckets). Replaces the
+	 * former `response: string` which carried raw truncated prose — the
+	 * validated findings sat unused in the report. Empty when the sensor's
+	 * review was invalid (no garbled prose reaches the categorizer).
+	 */
+	findings: readonly AgentLabFinding[];
 };
 
 /**
@@ -227,8 +235,14 @@ export async function categorizeFindings(input: {
 	const discardCount = discards.length;
 	const discardText = formatDiscardsSummary(discards);
 
+	// Flatten every sensor's structured findings into one stream. The count
+	// that matters for "is there anything to categorize" is the FINDING count,
+	// not the SENSOR count — a sensor whose review was invalid contributes an
+	// empty findings array and must not trigger a spurious LLM call.
+	const allFindings = input.findings.flatMap((f) => f.findings);
+
 	// Nothing to say: no findings to categorize and no discards to surface.
-	if (input.findings.length === 0 && discardCount === 0) return null;
+	if (allFindings.length === 0 && discardCount === 0) return null;
 
 	const now = input.now ?? new Date();
 
@@ -236,18 +250,24 @@ export async function categorizeFindings(input: {
 	// call (there is nothing to categorize). The owner's lesson across this
 	// whole arc: invisibility is the bug; never rely on the model to mention
 	// discards.
-	if (input.findings.length === 0) {
+	if (allFindings.length === 0) {
 		const advisory = buildDiscardAdvisory(now, discardCount, discardText);
 		writeSupervisorAdvisory(input.stateRoot, advisory);
 		return { ok: true, counts: advisory.counts, advisory };
 	}
 
+	// Per-finding structured line (severity + title + category). This is the
+	// validated, pillar-routed signal — more compact than 300 chars of raw
+	// prose per sensor, and never truncated (E1 fix).
 	const summary = input.findings
-		.map(
-			(f) => `[${f.match.role}] ${f.match.file}: ${f.response.slice(0, 300)}`,
+		.flatMap((f) =>
+			f.findings.map(
+				(finding) =>
+					`[${f.match.role}] ${f.match.file}: [${finding.severity}] ${finding.title} (${finding.category})`,
+			),
 		)
 		.join("\n");
-	const question = `Categorize these ${input.findings.length} AgentLab findings.
+	const question = `Categorize these ${allFindings.length} AgentLab findings.
 
 CRITICAL: respond with ONLY one line in the format "N critical, M medium, K low" (where N, M, K are integers). Do NOT call any tools. Do NOT write any other text, preamble, explanation, or markdown. Do NOT wrap the answer in code blocks. Just the one line.`;
 	const context = `Findings:\n${summary}`;
