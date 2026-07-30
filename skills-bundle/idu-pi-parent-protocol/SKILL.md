@@ -168,7 +168,7 @@ If `idu_proposal_outbox` is empty, `idu_pending_injections` is 0, and `idu_bibli
 1. `idu_status` → `connection.workspace.labDbExists`. If false, init with `idu-task` (creates tasks.jsonl) or via the lab init flow if available.
 2. `idu_status` → `connection.alignmentStatus`. If `stale`, run `idu_prepare` or `idu-master-plan-redraft` then re-approve.
 3. `idu_proposal_outbox` → if there are pending proposals, you must `idu-supervisor-improvements-approve` or `-reject` them. Procrastinating keeps them in `proposed`.
-4. `idu_lab_review_plan postflight` → close the lab review plan that the last `idu-prepare` flagged.
+4. `idu_agentlab_request_create({ source: "postflight" })` → close the lab review plan that the last `idu-prepare` flagged.
 
 ### 3. "Tasks stuck in `proposed` or `paused`"
 
@@ -180,7 +180,7 @@ If `idu_proposal_outbox` is empty, `idu_pending_injections` is 0, and `idu_bibli
 
 ### 4. "Trigger engine not firing"
 
-The trigger engine is **opt-in**. It only runs when the env var `IDU_PI_TRIGGER_ENGINE=1` is set, AND when the alert scheduler tick runs. The Windows Task Scheduler runs the tick every 15 min via `scripts/idu-supervisor-tick.ps1`. If you do not see fresh injections, check:
+The trigger engine is **opt-in**. It only runs when the env var `IDU_PI_TRIGGER_ENGINE=1` is set, AND when the alert scheduler tick runs. The Windows Task Scheduler runs the tick via `scripts/idu-supervisor-tick.ps1` on the interval set at install time (currently `PT1H`; check with `Get-ScheduledTask -TaskName "Idu-pi Supervisor Tick"`). If you do not see fresh injections, check:
 
 1. The task is installed: `Get-ScheduledTask -TaskName "Idu-pi Supervisor Tick"`.
 2. The env var is set in the script or the parent process.
@@ -203,7 +203,7 @@ Run this sequence once per project to make the loop live:
 2. idu_supervisor_context_pack            # learn objective + risks
 3. idu_proposal_outbox                    # list any pending proposals
 4. idu_pending_injections                 # check trigger pipeline
-5. idu_lab_review_plan postflight         # close lab review plan
+5. idu_agentlab_request_create source=postflight   # close lab review plan
 6. idu-master-plan-redraft latest         # if plan is stale
 7. idu-master-plan-approve latest         # re-approve
 8. idu_prepare                            # realign

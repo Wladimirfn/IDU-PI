@@ -39,5 +39,10 @@ jobs:
           LEAK_GUARD_THRESHOLD: '62'
         run: corepack pnpm test:guarded
 
+      # Runs after Test on purpose: a documentation gate must never mask the
+      # suite result. Costs ~200ms.
+      - name: Check Parent Protocol tool drift
+        run: corepack pnpm check:protocol-drift
+
       - name: Check diff whitespace
         run: git diff --check
