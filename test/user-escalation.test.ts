@@ -4,7 +4,6 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
-	readFileSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -17,49 +16,69 @@ import {
 	resolveEscalationPath,
 	ESCALATION_THRESHOLDS,
 } from "../src/user-escalation.js";
+import { initLabDb, runSql, sqlString } from "../src/lab-db.js";
 import { resolveInjectionsPath } from "../src/injection-store.js";
 
-function makeRoot(): { stateRoot: string; cleanup: () => void } {
+const PROJECT_ID = "test-project";
+
+function makeRoot(): { stateRoot: string; labDbPath: string; cleanup: () => void } {
 	const stateRoot = mkdtempSync(join(tmpdir(), "idu-user-escalation-"));
 	mkdirSync(stateRoot, { recursive: true });
+	const labDbPath = join(stateRoot, "lab.db");
+	initLabDb(labDbPath);
 	return {
 		stateRoot,
+		labDbPath,
 		cleanup: () => rmSync(stateRoot, { recursive: true, force: true }),
 	};
 }
 
-function makeInjection(
-	stateRoot: string,
-	severity: "info" | "warning" | "critical",
-	acked = false,
-): void {
-	const injection = {
-		ts: new Date().toISOString(),
-		triggerId: `test-${Date.now()}-${Math.random()}`,
-		kind: "supervisor_advisory",
-		decisionEnvelope: {
-			severity,
-			summary: `Test ${severity} finding`,
-			options: ["ack", "review"],
-			evidenceRefs: [],
-			orchestratorDecisionRequired: true,
-		},
-		injectionId: `inj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-		acked,
-	};
-	const path = resolveInjectionsPath(stateRoot);
-	if (!existsSync(path)) writeFileSync(path, "", "utf8");
-	appendFileSync(path, `${JSON.stringify(injection)}\n`, "utf8");
+type SeedOptions = {
+	id: string;
+	severity: "critical" | "high" | "medium" | "low" | "info";
+	status?: string;
+	// "YYYY-MM-DD HH:MM:SS" — canonical SQLite datetime (matches created_at).
+	createdAt?: string;
+	projectId?: string;
+};
+
+function seedFinding(labDbPath: string, options: SeedOptions): void {
+	const status = options.status ?? "new";
+	const createdAt = options.createdAt ?? "2026-06-15 12:00:00";
+	const projectId = options.projectId ?? PROJECT_ID;
+	runSql(
+		labDbPath,
+		`INSERT INTO bug_findings (
+			id, project_id, title, description, severity, confidence, status,
+			affected_files, created_at, updated_at
+		) VALUES (
+			${sqlString(options.id)},
+			${sqlString(projectId)},
+			${sqlString("title")},
+			${sqlString("description")},
+			${sqlString(options.severity)},
+			${sqlString("high")},
+			${sqlString(status)},
+			'[]',
+			${sqlString(createdAt)},
+			${sqlString(createdAt)}
+		);`,
+	);
 }
 
+// `now` is fixed; windowStart = now - 24h = 2026-06-14 13:00:00.
 const RECENT = "2026-06-15T12:00:00.000Z";
-const NOW = new Date("2026-06-15T13:00:00.000Z"); // 1 hour after RECENT
+const NOW = new Date("2026-06-15T13:00:00.000Z");
+const WITHIN_WINDOW = "2026-06-15 12:00:00"; // after windowStart -> counted
+const BEFORE_WINDOW = "2026-06-13 12:00:00"; // before windowStart -> stale
 
-test("checkUserEscalation: no escalation when no pending injections and recent interaction", () => {
-	const { stateRoot, cleanup } = makeRoot();
+test("checkUserEscalation: no escalation when no open findings and recent interaction", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
 		const result = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
@@ -68,84 +87,258 @@ test("checkUserEscalation: no escalation when no pending injections and recent i
 		assert.equal(result.counts.critical, 0);
 		assert.equal(result.counts.total, 0);
 		assert.equal(result.escalationId, null);
-		// No escalation file written
 		assert.equal(existsSync(resolveEscalationPath(stateRoot)), false);
 	} finally {
 		cleanup();
 	}
 });
 
-test("checkUserEscalation: escalates when unacked critical count >= threshold", () => {
-	const { stateRoot, cleanup } = makeRoot();
+// D1 scenario 1: a single critical finding escalates (recentCritical = 1).
+test("checkUserEscalation: a single critical finding triggers escalation (D1 recentCritical=1)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		// Create 3 critical un-acked injections
-		for (let i = 0; i < ESCALATION_THRESHOLDS.recentCritical; i++) {
-			makeInjection(stateRoot, "critical", false);
-		}
+		seedFinding(labDbPath, {
+			id: "f-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
 		const result = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
+		assert.equal(result.counts.critical, 1);
 		assert.equal(result.shouldEscalate, true);
 		assert.ok(result.reasons.includes("recent_critical_threshold"));
 		assert.ok(result.escalationId);
-		// Escalation file written
 		const events = readEscalationEvents(stateRoot);
 		assert.equal(events.length, 1);
 		assert.equal(events[0]?.escalationId, result.escalationId);
-		assert.ok(events[0]?.reasons.includes("recent_critical_threshold"));
 	} finally {
 		cleanup();
 	}
 });
 
-test("checkUserEscalation: does NOT escalate on critical if count < threshold", () => {
-	const { stateRoot, cleanup } = makeRoot();
+// D1 scenario 2: 24 non-critical findings -> total=24 (< 25), critical=0,
+// no escalation from either count rule.
+test("checkUserEscalation: 24 non-critical findings do not escalate (below total threshold)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		// Create 2 critical (below threshold of 3)
-		makeInjection(stateRoot, "critical", false);
-		makeInjection(stateRoot, "critical", false);
+		for (let i = 0; i < 24; i++) {
+			seedFinding(labDbPath, {
+				id: `f-${i}`,
+				severity: "medium",
+				createdAt: WITHIN_WINDOW,
+			});
+		}
 		const result = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
-		assert.equal(result.counts.critical, 2);
+		assert.equal(result.counts.critical, 0);
+		assert.equal(result.counts.total, 24);
 		assert.equal(result.shouldEscalate, false);
 	} finally {
 		cleanup();
 	}
 });
 
-test("checkUserEscalation: escalates when unacked total >= threshold", () => {
-	const { stateRoot, cleanup } = makeRoot();
+test("checkUserEscalation: 25 non-critical findings escalate on total threshold (D1 recentTotal=25)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		// Create 10 warning un-acked (below critical threshold, above total threshold)
 		for (let i = 0; i < ESCALATION_THRESHOLDS.recentTotal; i++) {
-			makeInjection(stateRoot, "warning", false);
+			seedFinding(labDbPath, {
+				id: `f-${i}`,
+				severity: "low",
+				createdAt: WITHIN_WINDOW,
+			});
 		}
 		const result = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
+		assert.equal(result.counts.total, ESCALATION_THRESHOLDS.recentTotal);
+		assert.equal(result.counts.critical, 0);
 		assert.equal(result.shouldEscalate, true);
 		assert.ok(result.reasons.includes("recent_total_threshold"));
+	} finally {
+		cleanup();
+	}
+});
+
+// D1 scenario 3: a triaged finding (status != 'new') is NOT counted.
+test("checkUserEscalation: triaged findings (status=accepted) are NOT counted", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "accepted-1",
+			severity: "critical",
+			status: "accepted",
+			createdAt: WITHIN_WINDOW,
+		});
+		seedFinding(labDbPath, {
+			id: "fixed-1",
+			severity: "critical",
+			status: "fixed",
+			createdAt: WITHIN_WINDOW,
+		});
+		seedFinding(labDbPath, {
+			id: "ignored-1",
+			severity: "critical",
+			status: "ignored",
+			createdAt: WITHIN_WINDOW,
+		});
+		const result = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// Human triage stopped all three from counting.
 		assert.equal(result.counts.critical, 0);
-		assert.equal(result.counts.total, ESCALATION_THRESHOLDS.recentTotal);
+		assert.equal(result.counts.total, 0);
+		assert.equal(result.shouldEscalate, false);
+	} finally {
+		cleanup();
+	}
+});
+
+// D1 scenario 4: an auto-acked injection does NOT stop counting. The cron
+// auto-ack flips `acked` on injections; bug_findings.status is unaffected,
+// so the finding still counts. (ack-decoupling preserved.)
+test("checkUserEscalation: auto-acked injection does NOT stop counting (ack-decoupling preserved)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "crit-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		// Simulate the cron auto-acking a supervisor advisory injection.
+		const injectionsPath = resolveInjectionsPath(stateRoot);
+		const ackedInjection = {
+			ts: "2026-06-15T12:30:00.000Z",
+			triggerId: "supervisor_categorize",
+			kind: "supervisor_advisory",
+			decisionEnvelope: {
+				severity: "critical",
+				summary: "1 critical",
+				options: ["ack"],
+				evidenceRefs: [],
+				orchestratorDecisionRequired: true,
+			},
+			injectionId: "inj-acked-1",
+			acked: true,
+		};
+		if (!existsSync(injectionsPath)) writeFileSync(injectionsPath, "", "utf8");
+		appendFileSync(injectionsPath, `${JSON.stringify(ackedInjection)}\n`, "utf8");
+		const result = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// The finding still counts even though the advisory injection was acked.
+		assert.equal(result.counts.critical, 1);
+		assert.equal(result.shouldEscalate, true);
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: ignores findings older than the 24h window (stale noise)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "stale-1",
+			severity: "critical",
+			createdAt: BEFORE_WINDOW,
+		});
+		const result = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(result.counts.critical, 0);
+		assert.equal(result.counts.total, 0);
+		assert.equal(result.shouldEscalate, false);
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: counts findings only for the given projectId", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "mine-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+			projectId: PROJECT_ID,
+		});
+		seedFinding(labDbPath, {
+			id: "other-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+			projectId: "other-project",
+		});
+		const result = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(result.counts.critical, 1);
+		assert.equal(result.counts.total, 1);
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: severity collapse (high+medium=warning, low+info=info)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, { id: "h", severity: "high", createdAt: WITHIN_WINDOW });
+		seedFinding(labDbPath, { id: "m", severity: "medium", createdAt: WITHIN_WINDOW });
+		seedFinding(labDbPath, { id: "l", severity: "low", createdAt: WITHIN_WINDOW });
+		seedFinding(labDbPath, { id: "i", severity: "info", createdAt: WITHIN_WINDOW });
+		const result = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(result.counts.critical, 0);
+		assert.equal(result.counts.warning, 2);
+		assert.equal(result.counts.info, 2);
+		assert.equal(result.counts.total, 4);
 	} finally {
 		cleanup();
 	}
 });
 
 test("checkUserEscalation: escalates when hours since last interaction >= threshold", () => {
-	const { stateRoot, cleanup } = makeRoot();
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		// Last interaction 7h ago
 		const longAgo = new Date(NOW.getTime() - 7 * 60 * 60 * 1000).toISOString();
 		const result = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: longAgo,
 			now: NOW,
 		});
@@ -158,14 +351,15 @@ test("checkUserEscalation: escalates when hours since last interaction >= thresh
 });
 
 test("checkUserEscalation: does NOT escalate on hours if recent interaction", () => {
-	const { stateRoot, cleanup } = makeRoot();
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		// Last interaction 5h ago
 		const fiveHoursAgo = new Date(
 			NOW.getTime() - 5 * 60 * 60 * 1000,
 		).toISOString();
 		const result = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: fiveHoursAgo,
 			now: NOW,
 		});
@@ -175,132 +369,32 @@ test("checkUserEscalation: does NOT escalate on hours if recent interaction", ()
 	}
 });
 
-test("checkUserEscalation: counts by ts, not by ack state (cron can auto-ack without breaking escalation)", () => {
-	// This is a design change: the cron auto-acks all advisories, so
-	// the user-escalation must use a different signal. We count
-	// advisories by timestamp (within the last 24h) so the escalation
-	// fires even when the cron has already acked everything.
-	const { stateRoot, cleanup } = makeRoot();
+test("checkUserEscalation: appends to user-escalations.jsonl across ticks", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		// 3 critical advisories, all acked, all in the last hour
-		for (let i = 0; i < 3; i++) {
-			makeInjection(stateRoot, "critical", true);
-		}
-		const result = checkUserEscalation({
+		seedFinding(labDbPath, {
+			id: "crit-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
-		// Now counts: even though acked, the advisories are within
-		// the last 24h, so the user-escalation sees them.
-		assert.equal(result.counts.critical, 3);
-		assert.equal(result.counts.total, 3);
-		assert.equal(result.shouldEscalate, true);
-	} finally {
-		cleanup();
-	}
-});
-
-test("checkUserEscalation: ignores advisories older than 24h (stale noise)", () => {
-	const { stateRoot, cleanup } = makeRoot();
-	try {
-		// 3 critical advisories, acked=false, but timestamped 25h ago
-		for (let i = 0; i < 3; i++) {
-			const stale = new Date(NOW.getTime() - 25 * 60 * 60 * 1000).toISOString();
-			const inj = {
-				ts: stale,
-				triggerId: `stale-critical-${i}`,
-				decisionEnvelope: {
-					severity: "critical",
-					summary: `Stale critical ${i}`,
-					options: ["ack"],
-					evidenceRefs: [],
-					orchestratorDecisionRequired: true,
-				},
-				injectionId: `inj-stale-${i}-${Date.now()}`,
-				acked: false,
-			};
-			const path = resolveInjectionsPath(stateRoot);
-			if (!existsSync(path)) writeFileSync(path, "", "utf8");
-			appendFileSync(path, `${JSON.stringify(inj)}\n`, "utf8");
-		}
-		const result = checkUserEscalation({
-			stateRoot,
-			lastUserInteractionAt: RECENT,
-			now: NOW,
-		});
-		// Stale advisories (older than 24h) are ignored.
-		assert.equal(result.counts.critical, 0);
-		assert.equal(result.shouldEscalate, false);
-	} finally {
-		cleanup();
-	}
-});
-
-test("checkUserEscalation: multiple reasons in one escalation", () => {
-	const { stateRoot, cleanup } = makeRoot();
-	try {
-		// 3 critical + 10 warning + 7h since = 3 reasons
-		for (let i = 0; i < 3; i++) {
-			makeInjection(stateRoot, "critical", false);
-		}
-		for (let i = 0; i < 10; i++) {
-			makeInjection(stateRoot, "warning", false);
-		}
-		const longAgo = new Date(NOW.getTime() - 7 * 60 * 60 * 1000).toISOString();
-		const result = checkUserEscalation({
-			stateRoot,
-			lastUserInteractionAt: longAgo,
-			now: NOW,
-		});
-		assert.equal(result.shouldEscalate, true);
-		assert.equal(result.reasons.length, 3);
-		assert.ok(result.reasons.includes("recent_critical_threshold"));
-		assert.ok(result.reasons.includes("recent_total_threshold"));
-		assert.ok(result.reasons.includes("hours_since_interaction"));
-	} finally {
-		cleanup();
-	}
-});
-
-test("checkUserEscalation: appends to user-escalations.jsonl (multiple ticks)", () => {
-	const { stateRoot, cleanup } = makeRoot();
-	try {
-		// First tick: escalation
-		for (let i = 0; i < 3; i++) {
-			makeInjection(stateRoot, "critical", false);
-		}
-		checkUserEscalation({ stateRoot, lastUserInteractionAt: RECENT, now: NOW });
-		// Second tick: another escalation
 		const result2 = checkUserEscalation({
 			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
 		const events = readEscalationEvents(stateRoot);
 		assert.equal(events.length, 2);
 		assert.notEqual(events[0]?.escalationId, events[1]?.escalationId);
-	} finally {
-		cleanup();
-	}
-});
-
-test("checkUserEscalation: counts by severity (info + warning + critical = total)", () => {
-	const { stateRoot, cleanup } = makeRoot();
-	try {
-		makeInjection(stateRoot, "info", false);
-		makeInjection(stateRoot, "info", false);
-		makeInjection(stateRoot, "warning", false);
-		makeInjection(stateRoot, "critical", false);
-		const result = checkUserEscalation({
-			stateRoot,
-			lastUserInteractionAt: RECENT,
-			now: NOW,
-		});
-		assert.equal(result.counts.info, 2);
-		assert.equal(result.counts.warning, 1);
-		assert.equal(result.counts.critical, 1);
-		assert.equal(result.counts.total, 4);
+		assert.ok(result2.escalationId);
 	} finally {
 		cleanup();
 	}

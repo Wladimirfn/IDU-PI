@@ -1406,10 +1406,12 @@ export function createCliRuntime(
 				// spuriously when the state file is missing.
 				lastUserInteractionAt = new Date().toISOString();
 			}
-			return checkUserEscalation({
-				stateRoot: runtimeStateRoot,
-				lastUserInteractionAt,
-			});
+		return checkUserEscalation({
+			stateRoot: runtimeStateRoot,
+			labDbPath,
+			projectId: activeProject.id,
+			lastUserInteractionAt,
+		});
 		},
 		supervisorCronPlan: () =>
 			planIduSupervisorCron({
