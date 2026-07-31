@@ -187,7 +187,7 @@ export function planDelivery(input: {
 		const ids = inWindow.map((e) => e.escalationId);
 		const text =
 			`🔵 [idu-pi] Resumen inicial — ${inWindow.length} escalaciones en las últimas 24h\n` +
-			`   ${sumCritical} recent_critical · ${sumTotal} recent_total\n` +
+			`   ${sumCritical} críticas · ${sumTotal} hallazgos\n` +
 			(skippedOutsideWindow > 0
 				? `   ${skippedOutsideWindow} anteriores fuera de ventana, no entregadas\n`
 				: "") +
