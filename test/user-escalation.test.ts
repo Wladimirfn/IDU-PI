@@ -113,9 +113,11 @@ test("checkUserEscalation: a single critical finding triggers escalation (D1 rec
 		assert.equal(result.shouldEscalate, true);
 		assert.ok(result.reasons.includes("recent_critical_threshold"));
 		assert.ok(result.escalationId);
+		assert.deepEqual(result.triggeredFindingIds, ["f-1"]);
 		const events = readEscalationEvents(stateRoot);
 		assert.equal(events.length, 1);
 		assert.equal(events[0]?.escalationId, result.escalationId);
+		assert.deepEqual(events[0]?.triggeredFindingIds, ["f-1"]);
 	} finally {
 		cleanup();
 	}
@@ -331,7 +333,10 @@ test("checkUserEscalation: severity collapse (high+medium=warning, low+info=info
 	}
 });
 
-test("checkUserEscalation: escalates when hours since last interaction >= threshold", () => {
+// HUECO 2 (pre-A1e): inactivity is NOT a standalone escalation reason.
+// hoursSinceLastInteraction no longer triggers escalation by itself; it is
+// retained in the report as an A1e delivery-timing modulator.
+test("checkUserEscalation: 0 findings + 6h+ inactive does NOT escalate (inactivity alone is not a trigger)", () => {
 	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
 		const longAgo = new Date(NOW.getTime() - 7 * 60 * 60 * 1000).toISOString();
@@ -342,34 +347,92 @@ test("checkUserEscalation: escalates when hours since last interaction >= thresh
 			lastUserInteractionAt: longAgo,
 			now: NOW,
 		});
-		assert.equal(result.shouldEscalate, true);
-		assert.ok(result.reasons.includes("hours_since_interaction"));
+		assert.equal(result.shouldEscalate, false);
+		assert.deepEqual(result.reasons, []);
+		// Inactivity is still REPORTED even though it no longer triggers.
 		assert.ok(result.hoursSinceLastInteraction >= 6);
+		assert.equal(existsSync(resolveEscalationPath(stateRoot)), false);
 	} finally {
 		cleanup();
 	}
 });
 
-test("checkUserEscalation: does NOT escalate on hours if recent interaction", () => {
+// HUECO 2: a critical finding drives escalation even when the user is also
+// inactive — the critical (not the inactivity) is the trigger.
+test("checkUserEscalation: 1 critical + 6h+ inactive escalates on the critical, not on inactivity", () => {
 	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
-		const fiveHoursAgo = new Date(
-			NOW.getTime() - 5 * 60 * 60 * 1000,
-		).toISOString();
+		seedFinding(labDbPath, {
+			id: "crit-inactive",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		const longAgo = new Date(NOW.getTime() - 7 * 60 * 60 * 1000).toISOString();
 		const result = checkUserEscalation({
 			stateRoot,
 			labDbPath,
 			projectId: PROJECT_ID,
-			lastUserInteractionAt: fiveHoursAgo,
+			lastUserInteractionAt: longAgo,
 			now: NOW,
 		});
-		assert.equal(result.shouldEscalate, false);
+		assert.equal(result.shouldEscalate, true);
+		assert.ok(result.reasons.includes("recent_critical_threshold"));
+		// hours_since_interaction is no longer produced as a reason at all:
+		// the only reason is the critical threshold.
+		assert.deepEqual(result.reasons, ["recent_critical_threshold"]);
 	} finally {
 		cleanup();
 	}
 });
 
-test("checkUserEscalation: appends to user-escalations.jsonl across ticks", () => {
+// HUECO 1 (pre-A1e): per-finding idempotency in the DECISION, not the count.
+// The same critical finding must not re-escalate every tick, but the COUNT
+// still reports it honestly (total-open includes it).
+test("checkUserEscalation: same critical finding does NOT re-escalate on the next tick (idempotent)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "crit-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		const first = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(first.shouldEscalate, true);
+		assert.deepEqual(first.triggeredFindingIds, ["crit-1"]);
+
+		// Second tick, same finding, same time window.
+		const second = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// Decision: idempotent — does not re-escalate.
+		assert.equal(second.shouldEscalate, false);
+		assert.deepEqual(second.reasons, []);
+		assert.equal(second.escalationId, null);
+		// Count stays HONEST: the finding is still open, still counted.
+		assert.equal(second.counts.critical, 1);
+		assert.equal(second.counts.total, 1);
+		// Only one event was written (the first escalation).
+		const events = readEscalationEvents(stateRoot);
+		assert.equal(events.length, 1);
+		assert.deepEqual(events[0]?.triggeredFindingIds, ["crit-1"]);
+	} finally {
+		cleanup();
+	}
+});
+
+// HUECO 1: a NEW critical finding (different id) fires again, because its
+// id is not in the idempotency memory.
+test("checkUserEscalation: a NEW critical finding (different id) fires again", () => {
 	const { stateRoot, labDbPath, cleanup } = makeRoot();
 	try {
 		seedFinding(labDbPath, {
@@ -384,17 +447,119 @@ test("checkUserEscalation: appends to user-escalations.jsonl across ticks", () =
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
-		const result2 = checkUserEscalation({
+		// A genuinely new critical appears on the next tick.
+		seedFinding(labDbPath, {
+			id: "crit-2",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		const result = checkUserEscalation({
 			stateRoot,
 			labDbPath,
 			projectId: PROJECT_ID,
 			lastUserInteractionAt: RECENT,
 			now: NOW,
 		});
+		assert.equal(result.shouldEscalate, true);
+		assert.ok(result.reasons.includes("recent_critical_threshold"));
+		// Only the NEW id triggered this escalation; crit-1 is not re-listed.
+		assert.deepEqual(result.triggeredFindingIds, ["crit-2"]);
+		// Count is still honest: both criticals are open.
+		assert.equal(result.counts.critical, 2);
+	} finally {
+		cleanup();
+	}
+});
+
+// HUECO 1: the event reports BOTH numbers — total-open criticals (honest
+// count) AND new-since-last-escalation (triggeredFindingIds length).
+test("checkUserEscalation: event reports BOTH total-open criticals AND new-since-last-escalation", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "crit-1",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		seedFinding(labDbPath, {
+			id: "crit-2",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		const first = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// First fire: both criticals are new.
+		assert.equal(first.counts.critical, 2);
+		assert.equal(first.triggeredFindingIds.length, 2);
+
+		// A third critical appears.
+		seedFinding(labDbPath, {
+			id: "crit-3",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+		});
+		const second = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// total-open criticals (honest count) = 3 ...
+		assert.equal(second.counts.critical, 3);
+		// ... but new-since-last-escalation = 1 (only crit-3).
+		assert.deepEqual(second.triggeredFindingIds, ["crit-3"]);
 		const events = readEscalationEvents(stateRoot);
 		assert.equal(events.length, 2);
-		assert.notEqual(events[0]?.escalationId, events[1]?.escalationId);
-		assert.ok(result2.escalationId);
+		assert.equal(events[1]?.counts.critical, 3);
+		assert.deepEqual(events[1]?.triggeredFindingIds, ["crit-3"]);
+	} finally {
+		cleanup();
+	}
+});
+
+// HUECO 1: the total rule is also idempotent — the same 25 findings do not
+// re-fire on the next tick.
+test("checkUserEscalation: total rule is idempotent (same 25 findings do not re-fire)", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		for (let i = 0; i < ESCALATION_THRESHOLDS.recentTotal; i++) {
+			seedFinding(labDbPath, {
+				id: `f-${i}`,
+				severity: "low",
+				createdAt: WITHIN_WINDOW,
+			});
+		}
+		const first = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(first.shouldEscalate, true);
+		assert.ok(first.reasons.includes("recent_total_threshold"));
+		assert.equal(
+			first.triggeredFindingIds.length,
+			ESCALATION_THRESHOLDS.recentTotal,
+		);
+
+		const second = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		// Idempotent: same findings already escalated.
+		assert.equal(second.shouldEscalate, false);
+		// Honest count unchanged.
+		assert.equal(second.counts.total, ESCALATION_THRESHOLDS.recentTotal);
 	} finally {
 		cleanup();
 	}
