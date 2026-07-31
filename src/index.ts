@@ -5,6 +5,12 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { resolvePackageRoot } from "./package-root.js";
 import {
+	writePidfile,
+	deletePidfile,
+	touchPidfile,
+	HEARTBEAT_INTERVAL_MIN,
+} from "./bridge-pidfile.js";
+import {
 	AgentRouter,
 	formatAgentProfiles,
 	type AgentRuntime,
@@ -3771,6 +3777,7 @@ bot.catch((error) => {
 
 function shutdown(): void {
 	agentRouter.stopAll("Bridge detenido.");
+	deletePidfile(resolvePackageRoot());
 }
 
 /**
@@ -3794,6 +3801,21 @@ async function gracefulShutdown(): Promise<void> {
 process.once("SIGINT", () => void gracefulShutdown());
 process.once("SIGTERM", () => void gracefulShutdown());
 process.once("exit", shutdown);
+
+// Write PID file for TUI liveness checks. The TUI reads this file and
+// checks kill(pid, 0) + mtime freshness to determine if the bridge is
+// alive — pure Node, microseconds, no CIM queries.
+const bridgeRepoRoot = resolvePackageRoot();
+writePidfile(bridgeRepoRoot);
+
+// Heartbeat: touch the pidfile every N minutes so the mtime stays fresh.
+// This defeats PID reuse: if the bridge crashes and Windows recycles the
+// PID, the heartbeat stops, the mtime goes stale, and the TUI correctly
+// reports "Caído" after 2×N minutes instead of saying "Activo" forever.
+const heartbeatTimer = setInterval(() => {
+	touchPidfile(bridgeRepoRoot);
+}, HEARTBEAT_INTERVAL_MIN * 60_000);
+heartbeatTimer.unref();
 
 console.log(
 	`pi-telegram-bridge iniciado. PID=${process.pid} CWD=${currentCwd} PI=${[config.piBin, "<PI_CLI_JS>", "--mode", "rpc"].join(" ")}`,

@@ -22,6 +22,10 @@ import {
 	type ToolStatus,
 } from "./idu-installer.js";
 import { resolveProjectStatePaths } from "./project-state.js";
+import {
+	getCombinedBridgeStatus,
+	formatBridgeStatusLine,
+} from "./bridge-pidfile.js";
 import { loadProjectCore } from "./project-core.js";
 import { loadConfirmedProjectConstitution } from "./project-constitution.js";
 import { slugifyProjectId } from "./projects.js";
@@ -467,6 +471,9 @@ export function formatCliHome(status: CliHomeStatus): string {
 		`- Proyecto git: ${project.isGitRepository ? "sí" : "no"}`,
 		`- Proyecto enrolado: ${project.registered ? "sí" : "no"}`,
 		`- Supervisor: ${project.supervisor}`,
+		...(status.packageRoot
+			? [`- ${formatBridgeStatusLine(getCombinedBridgeStatus(status.packageRoot))}`]
+			: []),
 		`- Project Core: ${project.projectCore}`,
 		`- Constitution: ${project.constitution}`,
 		`- recommended next: ${project.recommendedNext}`,
