@@ -27,6 +27,7 @@ import {
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { UserEscalationEvent } from "./user-escalation.js";
@@ -295,5 +296,76 @@ function compactPendingMessage(pending: UserEscalationEvent[]): DeliveryMessage 
 			`   ${sumCounts(pending, "critical")} críticas acumuladas · ${sumCounts(pending, "warning")} warnings · ${sumCounts(pending, "info")} info (total: ${sumCounts(pending, "total")})`;
 	}
 	return { text, escalationIds };
+}
+
+// ---------------------------------------------------------------------------
+// TUI toggle support
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the delivery opt-in flag. Absent = OFF (default). This is the
+ * INVERTED default from bridge-autostart.json (where absent = ON):
+ * delivery is the only thing that sends messages external to the
+ * machine, so off-by-default is the safe choice.
+ */
+export function readDeliveryFlag(packageRoot: string): boolean {
+	const flagPath = join(packageRoot, "escalation-delivery.json");
+	if (!existsSync(flagPath)) return false;
+	try {
+		const raw = JSON.parse(readFileSync(flagPath, "utf8")) as {
+			enabled?: boolean;
+		};
+		return raw.enabled === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Write the delivery flag. Both enabled:false and deleting the file
+ * produce the same observable result (readDeliveryFlag returns false).
+ * We write enabled:false instead of deleting so the operator can see
+ * the file exists and was explicitly disabled, not just missing.
+ */
+export function writeDeliveryFlag(
+	packageRoot: string,
+	enabled: boolean,
+): void {
+	const flagPath = join(packageRoot, "escalation-delivery.json");
+	writeFileSync(
+		flagPath,
+		`${JSON.stringify(
+			{ enabled, updatedAt: new Date().toISOString(), source: "tui" },
+			null,
+			2,
+		)}\n`,
+		"utf8",
+	);
+}
+
+/**
+ * Read the most recent delivery timestamp from the delivery log.
+ * Returns null if the log doesn't exist or is empty. Used by the TUI
+ * so an operator who receives nothing can distinguish "nothing
+ * happened" from "this isn't delivering."
+ */
+export function readLastDelivery(deliveryLogPath: string): string | null {
+	if (!existsSync(deliveryLogPath)) return null;
+	let raw: string;
+	try {
+		raw = readFileSync(deliveryLogPath, "utf8");
+	} catch {
+		return null;
+	}
+	const lines = raw.split("\n").filter((l) => l.trim());
+	if (lines.length === 0) return null;
+	try {
+		const last = JSON.parse(lines[lines.length - 1]) as {
+			deliveredAt?: string;
+		};
+		return last.deliveredAt ?? null;
+	} catch {
+		return null;
+	}
 }
 

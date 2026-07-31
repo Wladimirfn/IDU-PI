@@ -18,6 +18,12 @@ import {
 	formatBridgeStatusLine,
 } from "../../bridge-pidfile.js";
 import {
+	readDeliveryFlag,
+	writeDeliveryFlag,
+	readLastDelivery,
+	deliveryLogPath,
+} from "../../escalation-delivery.js";
+import {
 	buildCliHomeStatus,
 	formatSupervisorStatus,
 	formatDiagnosticsStatus,
@@ -571,6 +577,9 @@ export function telegramRemoteMenuOptions(packageRoot?: string): MenuOption[] {
 	const autostartEnabled = packageRoot
 		? readBridgeAutostart(packageRoot)
 		: true;
+	const deliveryEnabled = packageRoot
+		? readDeliveryFlag(packageRoot)
+		: false;
 	return [
 		{ label: "Ver estado remoto", value: "status" },
 		{ label: "Configurar acceso remoto", value: "configure" },
@@ -581,6 +590,10 @@ export function telegramRemoteMenuOptions(packageRoot?: string): MenuOption[] {
 		{
 			label: `Autostart: ${autostartEnabled ? "Activado" : "Desactivado"}`,
 			value: "autostart",
+		},
+		{
+			label: `Entrega escalación: ${deliveryEnabled ? "Activada" : "Desactivada"}`,
+			value: "delivery-toggle",
 		},
 		{ label: "Ver logs", value: "logs" },
 		{ label: "Save", value: "save" },
@@ -1461,7 +1474,17 @@ export async function handleTelegramRemoteChoice(
 			logExists: existsSync(logPath),
 			bridgeStatus: formatBridgeStatusLine(bridgeStatus),
 		});
-		return `${bridgeDetail}\n\n${envStatus}`;
+		const deliveryEnabled = readDeliveryFlag(status.packageRoot);
+		const stateRoot = status.project.stateRoot;
+		const lastDelivered = stateRoot
+			? readLastDelivery(deliveryLogPath(stateRoot))
+			: null;
+		const deliveryDetail = [
+			"─ Entrega escalación ─",
+			`Entrega:          ${deliveryEnabled ? "Activada" : "Desactivada"}`,
+			`Última entrega:   ${lastDelivered ?? "nunca"}`,
+		].join("\n");
+		return `${bridgeDetail}\n\n${deliveryDetail}\n\n${envStatus}`;
 	}
 	if (choice === "configure" || choice === "2") {
 		const token = (await question("TELEGRAM_BOT_TOKEN: ")).trim();
@@ -1500,6 +1523,24 @@ export async function handleTelegramRemoteChoice(
 		return now
 			? "Arranque automático ACTIVADO.\nEl bridge arrancará solo al iniciar sesión.\nSi no está corriendo ahora, iniciálo con 'Iniciar puente remoto'."
 			: "Arranque automático DESACTIVADO.\nEl bridge NO arrancará al iniciar sesión.\nSi está corriendo ahora, sigue corriendo hasta que lo detengas o cierres sesión.";
+	}
+	if (choice === "delivery-toggle") {
+		const current = readDeliveryFlag(status.packageRoot);
+		writeDeliveryFlag(status.packageRoot, !current);
+		const nowEnabled = readDeliveryFlag(status.packageRoot);
+		// Show last-delivered so the operator can distinguish
+		// "nothing happened" from "not delivering."
+		const stateRoot = status.project.stateRoot;
+		const lastTs =
+			stateRoot
+				? readLastDelivery(deliveryLogPath(stateRoot))
+				: null;
+		const lastLine = lastTs
+			? `Última entrega: ${lastTs}`
+			: "Última entrega: nunca";
+		return nowEnabled
+			? `Entrega de escalación ACTIVADA.\nEl bridge enviará alertas críticas a tu Telegram.\n${lastLine}`
+			: `Entrega de escalación DESACTIVADA.\nEl bridge NO enviará alertas.\n${lastLine}`;
 	}
 	if (choice === "logs" || choice === "7") return tailTextFile(logPath, 80);
 	if (choice === "save" || choice === "8")
