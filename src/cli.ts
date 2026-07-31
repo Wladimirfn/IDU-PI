@@ -1401,11 +1401,13 @@ export function createCliRuntime(
 					// ignore parse errors, fall through to default
 				}
 			}
-			if (!lastUserInteractionAt) {
-				// Default: treat as "now" so the hours-since rule does not fire
-				// spuriously when the state file is missing.
-				lastUserInteractionAt = new Date().toISOString();
-			}
+		if (!lastUserInteractionAt) {
+			// Default: treat as "now" so hoursSinceLastInteraction reports 0
+			// when the state file is missing. Inactivity is no longer a
+			// standalone escalation trigger (pre-A1e); it is reported as a
+			// delivery-timing modulator only.
+			lastUserInteractionAt = new Date().toISOString();
+		}
 		return checkUserEscalation({
 			stateRoot: runtimeStateRoot,
 			labDbPath,

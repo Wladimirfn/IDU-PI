@@ -263,11 +263,12 @@ try {
 
 # Step 3.5: user escalation check. PR-105c. Reads last-user-interaction.json
 # (if present) and the pending injections file. Escalation fires when:
-#   - unacked_critical_threshold (3+ critical)
-#   - unacked_total_threshold (10+ total)
-#   - hours_since_interaction (6h+ since last user touch)
-# If the state file is missing, treat last interaction as now (no escalation
-# from the hours-since rule).
+#   - recent_critical_threshold (1+ NEW open critical findings)
+#   - recent_total_threshold (25+ NEW open findings)
+# Each rule is idempotent per finding id within the 24h window.
+# NOTE: hours_since_interaction is NO LONGER a standalone trigger (pre-A1e);
+# it is retained as a delivery-timing modulator for A1e.
+# If the state file is missing, treat last interaction as now.
 try {
 	$cliPath = Join-Path $Root 'dist/src/cli.js'
 	$escalationOutput = & node $cliPath idu-check-user-escalation 2>&1

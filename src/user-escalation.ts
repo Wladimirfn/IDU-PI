@@ -2,12 +2,21 @@
  * user-escalation.ts — PR-105c.
  *
  * Determines when the supervisor should escalate to the human user
- * based on accumulation of open findings and inactivity.
+ * based on accumulation of open findings.
  *
- * Three independent rules (any one triggers escalation):
- *   1. recent_critical_threshold: N+ open critical findings
- *   2. recent_total_threshold: N+ open findings (any severity)
- *   3. hours_since_interaction: H+ hours since last user interaction
+ * IDEMPOTENCY (pre-A1e): the COUNT stays honest — it reports ALL open
+ * findings in the 24h window regardless of whether they already triggered
+ * an escalation. The idempotency lives in the DECISION: escalation fires
+ * only when there is at least one open finding whose id has NOT already
+ * triggered an escalation in the last 24h. See `triggeredFindingIds`.
+ *
+ * Two triggers (any one fires, both idempotent per finding id):
+ *   1. recent_critical_threshold: 1+ NEW open critical findings
+ *   2. recent_total_threshold: 25+ NEW open findings (any severity)
+ *
+ * Inactivity (hoursSinceLastInteraction) is NOT a standalone trigger
+ * here. It is retained in the event/report as a delivery-timing
+ * modulator for A1e, but it no longer causes escalation by itself.
  *
  * D1: escalation counts bug FINDINGS from `bug_findings` (lab.db), NOT
  * advisory envelopes from injections.jsonl. A single advisory that says
@@ -49,7 +58,9 @@ export const ESCALATION_WINDOW_HOURS = 24;
  *     single most important signal.
  *   - recentTotal:    10 envelopes → 25 findings. Findings arrive several
  *     per advisory; 25 ≈ one to two supervisor ticks of noise volume.
- *   - hoursSinceLastInteraction: unchanged (6h).
+ *   - hoursSinceLastInteraction: unchanged (6h). NOT a standalone
+ *     escalation trigger (pre-A1e); retained as the A1e delivery-timing
+ *     modulator threshold.
  */
 export const ESCALATION_THRESHOLDS = {
 	recentCritical: 1,
@@ -59,13 +70,20 @@ export const ESCALATION_THRESHOLDS = {
 
 export type EscalationReason =
 	| "recent_critical_threshold"
-	| "recent_total_threshold"
-	| "hours_since_interaction";
+	| "recent_total_threshold";
 
 export type UserEscalationEvent = {
 	ts: string;
 	escalationId: string;
 	reasons: EscalationReason[];
+	/**
+	 * Finding ids that were NEW (not escalated in the prior 24h) and caused
+	 * THIS escalation to fire. This is the idempotency memory: a future
+	 * evaluation collects these from recent events and skips re-escalating
+	 * the same ids. The `counts` field still reports ALL open findings
+	 * honestly — this field only records the newly-escalated subset.
+	 */
+	triggeredFindingIds: string[];
 	counts: {
 		critical: number;
 		warning: number;
@@ -79,6 +97,12 @@ export type UserEscalationEvent = {
 export type EscalationResult = {
 	shouldEscalate: boolean;
 	reasons: EscalationReason[];
+	/**
+	 * Finding ids that triggered this escalation (the new-since-last slice).
+	 * Empty when shouldEscalate is false. `counts` remains the honest
+	 * total-open picture; this is the idempotent decision subset.
+	 */
+	triggeredFindingIds: string[];
 	counts: {
 		critical: number;
 		warning: number;
@@ -165,6 +189,33 @@ function countOpenFindingsBySeverity(
 }
 
 /**
+ * Read the id + severity of OPEN bug findings within the escalation window.
+ *
+ * Uses the EXACT same WHERE clause as `countOpenFindingsBySeverity` so the
+ * returned ids correspond 1:1 with the counted findings. This is used ONLY
+ * for the idempotency DECISION (which ids are new since the last
+ * escalation); it is never subtracted from the honest count. Two queries
+ * are intentional — `countOpenFindingsBySeverity` stays untouched so the
+ * reported count cannot regress.
+ */
+function readOpenFindingIds(
+	labDbPath: string,
+	projectId: string,
+	windowStart: Date,
+): { id: string; severity: string }[] {
+	initLabDb(labDbPath);
+	const output = runSql(
+		labDbPath,
+		`SELECT id, severity FROM bug_findings
+		 WHERE project_id = ${sqlString(projectId)}
+		   AND status = 'new'
+		   AND created_at > ${sqlString(toSqliteDatetime(windowStart))};`,
+	).trim();
+	if (!output) return [];
+	return JSON.parse(output) as Array<{ id: string; severity: string }>;
+}
+
+/**
  * Read supervisor_advisory injections within the last
  * `ESCALATION_WINDOW_HOURS` hours, regardless of acked state.
  *
@@ -214,6 +265,31 @@ function writeEscalationEvent(
 	appendFileSync(filePath, `${JSON.stringify(event)}\n`, "utf8");
 }
 
+/**
+ * Collect the set of finding ids that already triggered an escalation in
+ * the last `ESCALATION_WINDOW_HOURS`. This is the idempotency memory: any
+ * id present here has already reached the human once this window and must
+ * not re-fire on the next tick.
+ *
+ * Events written before this idempotency existed have no
+ * `triggeredFindingIds`; they contribute nothing (the `?? []` fallback),
+ * so the first run under the new code escalates once and then goes quiet.
+ */
+function readAlreadyEscalatedFindingIds(stateRoot: string, now: Date): Set<string> {
+	const events = readEscalationEvents(stateRoot);
+	const windowStart = now.getTime() - ESCALATION_WINDOW_HOURS * 60 * 60 * 1000;
+	const escalated = new Set<string>();
+	for (const event of events) {
+		const ts = Date.parse(event.ts);
+		if (!Number.isFinite(ts)) continue;
+		if (ts < windowStart) continue;
+		for (const id of event.triggeredFindingIds ?? []) {
+			escalated.add(id);
+		}
+	}
+	return escalated;
+}
+
 export function checkUserEscalation(
 	input: UserEscalationInput,
 ): EscalationResult {
@@ -221,30 +297,64 @@ export function checkUserEscalation(
 	const windowStart = new Date(
 		now.getTime() - ESCALATION_WINDOW_HOURS * 60 * 60 * 1000,
 	);
-	// D1: count open bug findings (status='new') within the window, not
-	// advisory envelopes. The ack-decoupling is preserved because the cron
-	// auto-ack operates on injections, not on bug_findings.status.
+
+	// HONEST COUNT — ALL open findings in the window, regardless of prior
+	// escalations. Unchanged: this is the total-open picture reported to
+	// the human. Idempotency never removes from this number.
 	const counts = countOpenFindingsBySeverity(
 		input.labDbPath,
 		input.projectId,
 		windowStart,
 	);
 
+	// Finding ids in the window (same WHERE as the count). Used ONLY for
+	// the idempotency decision — never subtracted from the count.
+	const openFindings = readOpenFindingIds(
+		input.labDbPath,
+		input.projectId,
+		windowStart,
+	);
+
+	// IDEMPOTENCY MEMORY: union of finding ids that already triggered an
+	// escalation in the last 24h.
+	const alreadyEscalated = readAlreadyEscalatedFindingIds(input.stateRoot, now);
+
+	const newCriticalIds = openFindings
+		.filter((f) => f.severity === "critical" && !alreadyEscalated.has(f.id))
+		.map((f) => f.id);
+	const newFindingIds = openFindings
+		.filter((f) => !alreadyEscalated.has(f.id))
+		.map((f) => f.id);
+
 	const lastInteraction = new Date(input.lastUserInteractionAt);
 	const hoursSince =
 		(now.getTime() - lastInteraction.getTime()) / (1000 * 60 * 60);
 
 	const reasons: EscalationReason[] = [];
-	if (counts.critical >= ESCALATION_THRESHOLDS.recentCritical) {
+	const triggeredSet = new Set<string>();
+
+	// CRITICAL rule (idempotent): fire when at least one critical finding
+	// id has NOT been escalated in the last 24h. The count above still
+	// reports every open critical honestly; this gate only decides whether
+	// to re-notify.
+	if (newCriticalIds.length >= ESCALATION_THRESHOLDS.recentCritical) {
 		reasons.push("recent_critical_threshold");
-	}
-	if (counts.total >= ESCALATION_THRESHOLDS.recentTotal) {
-		reasons.push("recent_total_threshold");
-	}
-	if (hoursSince >= ESCALATION_THRESHOLDS.hoursSinceLastInteraction) {
-		reasons.push("hours_since_interaction");
+		for (const id of newCriticalIds) triggeredSet.add(id);
 	}
 
+	// TOTAL rule (idempotent): fire when the count of not-yet-escalated
+	// open findings reaches the noise threshold. Reports total-open via
+	// `counts.total`; escalates only on the new-since-last slice.
+	if (newFindingIds.length >= ESCALATION_THRESHOLDS.recentTotal) {
+		reasons.push("recent_total_threshold");
+		for (const id of newFindingIds) triggeredSet.add(id);
+	}
+
+	// Inactivity is NOT a standalone escalation reason. It becomes a
+	// delivery-timing modulator in A1e. Kept in the report (below) for
+	// that purpose — do not add an hours_since_interaction reason here.
+
+	const triggeredFindingIds = [...triggeredSet];
 	const shouldEscalate = reasons.length > 0;
 	let escalationId: string | null = null;
 	if (shouldEscalate) {
@@ -253,6 +363,7 @@ export function checkUserEscalation(
 			ts: now.toISOString(),
 			escalationId,
 			reasons,
+			triggeredFindingIds,
 			counts,
 			hoursSinceLastInteraction: hoursSince,
 			lastUserInteractionAt: input.lastUserInteractionAt,
@@ -262,6 +373,7 @@ export function checkUserEscalation(
 	return {
 		shouldEscalate,
 		reasons,
+		triggeredFindingIds,
 		counts,
 		hoursSinceLastInteraction: hoursSince,
 		escalationId,
