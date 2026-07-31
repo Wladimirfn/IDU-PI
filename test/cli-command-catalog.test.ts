@@ -73,6 +73,7 @@ const EXPECTED_CATALOG: readonly string[] = [
 	"idu-birth-repo-plan",
 	"idu-birth-status",
 	"idu-birth-validate",
+	"idu-check-liveness",
 	"idu-check-user-escalation",
 	"idu-decision-ledger",
 	"idu-events",
@@ -275,7 +276,7 @@ function parseCaseLabels(src: string): string[] {
 	return labels;
 }
 
-test("cli.ts command catalog: 220 case labels, set frozen", () => {
+test("cli.ts command catalog: 221 case labels, set frozen", () => {
 	const cli = readFileSync(
 		join(process.cwd(), "src", "cli.ts"),
 		"utf8",
