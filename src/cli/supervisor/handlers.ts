@@ -47,6 +47,7 @@ import {
 	formatSupervisorTriggerStatus,
 	getSupervisorTriggerStatus,
 } from "../../supervisor-trigger.js";
+import { formatLiveness } from "../../liveness-check.js";
 
 export async function handleRunCronPreflight(
 	runtime: CliRuntime,
@@ -120,6 +121,14 @@ export async function handleCheckUserEscalation(
 	return ok(
 		`User escalation: shouldEscalate=false critical=${result.counts.critical} total=${result.counts.total} hoursSince=${result.hoursSinceLastInteraction.toFixed(1)}\n`,
 	);
+}
+
+export function handleCheckLiveness(runtime: CliRuntime): CliResult {
+	const result = runtime.checkLiveness?.();
+	if (!result) {
+		return ok("Liveness: not available in this runtime\n");
+	}
+	return ok(`${formatLiveness(result)}\n`);
 }
 
 export function handleSupervisorTick(runtime: CliRuntime): CliResult {
