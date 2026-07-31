@@ -3,7 +3,7 @@
  * PR 6 of 7 (Item 4). Move + re-export PURO.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { createInterface } from "node:readline/promises";
@@ -515,7 +515,58 @@ export function resolveSupervisorTriggerStateRootForTui(): string | undefined {
 	}
 }
 
-export function telegramRemoteMenuOptions(): MenuOption[] {
+/**
+ * Read the bridge autostart flag. Absence of the flag file = enabled
+ * (default). The flag only exists when the operator has explicitly
+ * toggled autostart off from the TUI.
+ */
+function readBridgeAutostart(packageRoot: string): boolean {
+	const flagPath = join(packageRoot, "bridge-autostart.json");
+	if (!existsSync(flagPath)) return true;
+	try {
+		const raw = JSON.parse(readFileSync(flagPath, "utf8")) as {
+			enabled?: boolean;
+		};
+		return raw.enabled !== false;
+	} catch {
+		return true;
+	}
+}
+
+/**
+ * Write (or remove) the bridge autostart flag. When enabling, the flag
+ * is deleted — absence = default enabled, which start-bridge.ps1's
+ * Test-Path already handles. When disabling, the flag is written with
+ * enabled:false, which start-bridge.ps1 reads before launching.
+ */
+function writeBridgeAutostart(
+	packageRoot: string,
+	enabled: boolean,
+): void {
+	const flagPath = join(packageRoot, "bridge-autostart.json");
+	if (enabled) {
+		try {
+			unlinkSync(flagPath);
+		} catch {
+			// already absent — fine
+		}
+	} else {
+		writeFileSync(
+			flagPath,
+			`${JSON.stringify(
+				{ enabled: false, updatedAt: new Date().toISOString(), source: "tui" },
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+	}
+}
+
+export function telegramRemoteMenuOptions(packageRoot?: string): MenuOption[] {
+	const autostartEnabled = packageRoot
+		? readBridgeAutostart(packageRoot)
+		: true;
 	return [
 		{ label: "Ver estado remoto", value: "status" },
 		{ label: "Configurar acceso remoto", value: "configure" },
@@ -523,6 +574,10 @@ export function telegramRemoteMenuOptions(): MenuOption[] {
 		{ label: "Iniciar puente remoto", value: "run" },
 		{ label: "Detener puente remoto", value: "off" },
 		{ label: "Reiniciar puente remoto", value: "restart" },
+		{
+			label: `Autostart: ${autostartEnabled ? "Activado" : "Desactivado"}`,
+			value: "autostart",
+		},
 		{ label: "Ver logs", value: "logs" },
 		{ label: "Save", value: "save" },
 		{ label: "Descartar", value: "discard" },
@@ -538,7 +593,7 @@ export async function runTelegramRemoteMenuTui(
 	while (true) {
 		const choice = await selectMenu(
 			"Telegram remoto",
-			telegramRemoteMenuOptions(),
+			telegramRemoteMenuOptions(status.packageRoot),
 			undefined,
 			formatTelegramRemoteStatus(status),
 		);
@@ -1425,6 +1480,14 @@ export async function handleTelegramRemoteChoice(
 		return runBridgeLifecycleChoice("off", question, status, options);
 	if (choice === "restart" || choice === "6")
 		return runBridgeLifecycleChoice("restart", question, status, options);
+	if (choice === "autostart") {
+		const current = readBridgeAutostart(status.packageRoot);
+		writeBridgeAutostart(status.packageRoot, !current);
+		const now = readBridgeAutostart(status.packageRoot);
+		return now
+			? "Arranque automático ACTIVADO.\nEl bridge arrancará solo al iniciar sesión.\nSi no está corriendo ahora, iniciálo con 'Iniciar puente remoto'."
+			: "Arranque automático DESACTIVADO.\nEl bridge NO arrancará al iniciar sesión.\nSi está corriendo ahora, sigue corriendo hasta que lo detengas o cierres sesión.";
+	}
 	if (choice === "logs" || choice === "7") return tailTextFile(logPath, 80);
 	if (choice === "save" || choice === "8")
 		return "No hay draft pendiente; Configurar acceso remoto guarda con Save dentro del flujo.";
