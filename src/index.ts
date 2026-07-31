@@ -17,6 +17,7 @@ import {
 	deliveryLogPath,
 	DELIVERY_CHECK_INTERVAL_MIN,
 	MAX_MESSAGES_PER_HOUR,
+	type ResolvedFinding,
 } from "./escalation-delivery.js";
 import {
 	AgentRouter,
@@ -159,7 +160,7 @@ import {
 	stripEngramNoise,
 	summarizeOutput,
 } from "./lab-reports.js";
-import { formatInitLabDbResult, initLabDb } from "./lab-db.js";
+import { formatInitLabDbResult, initLabDb, runSql, sqlString } from "./lab-db.js";
 import { LabDbRepository } from "./lab-db-repository.js";
 import {
 	buildSemanticAuditStatus,
@@ -3898,10 +3899,52 @@ async function runEscalationDelivery(): Promise<void> {
 	const deliveredIds = readDeliveredIds(dlogPath);
 	const now = new Date();
 
+	// Resolve findings from bug_findings for message detail.
+	// Collect ALL triggeredFindingIds from ALL events (planDelivery
+	// filters to pending ones internally). Falls back to counts-only
+	// when triggeredFindingIds is empty (pre-#383 events).
+	const allFindingIds = [
+		...new Set(
+			(events as Array<{ triggeredFindingIds?: string[] }>)
+				.flatMap((e) => e.triggeredFindingIds ?? []),
+		),
+	];
+
+	let resolvedFindings: ResolvedFinding[] | undefined;
+	if (allFindingIds.length > 0) {
+		try {
+			const labDbPath = join(stateRoot, "lab.db");
+			initLabDb(labDbPath);
+			const idList = allFindingIds.map((id) => sqlString(id)).join(",");
+			const raw = runSql(
+				labDbPath,
+				`SELECT id, severity, title, affected_files, status FROM bug_findings WHERE id IN (${idList});`,
+			);
+			const rows = JSON.parse(raw) as Array<{
+				id: string;
+				severity: string;
+				title: string;
+				affected_files: string;
+				status: string;
+			}>;
+			resolvedFindings = rows.map((row) => ({
+				id: row.id,
+				severity: row.severity as ResolvedFinding["severity"],
+				title: row.title,
+				filePath:
+					(JSON.parse(row.affected_files || "[]") as string[])[0] ?? "",
+				status: row.status as ResolvedFinding["status"],
+			}));
+		} catch {
+			// DB query failed — fall back to counts-only message
+		}
+	}
+
 	const plan = planDelivery({
 		events: events as never[],
 		deliveredIds,
 		now,
+		resolvedFindings,
 	});
 
 	for (const msg of plan.messages) {

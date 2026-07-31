@@ -16,6 +16,7 @@ import {
 	writeDeliveryFlag,
 	readLastDelivery,
 	deliveryLogPath,
+	type ResolvedFinding,
 	type DeliveryPlan,
 } from "../src/escalation-delivery.js";
 import type { UserEscalationEvent, EscalationReason } from "../src/user-escalation.js";
@@ -35,6 +36,7 @@ function makeEvent(opts: {
 	info?: number;
 	total?: number;
 	reasons?: EscalationReason[];
+	findingIds?: string[];
 }): UserEscalationEvent {
 	const ts = new Date(NOW.getTime() - opts.minutesAgo * 60_000);
 	const critical = opts.critical ?? 1;
@@ -44,7 +46,7 @@ function makeEvent(opts: {
 		ts: ts.toISOString(),
 		escalationId: opts.id,
 		reasons: opts.reasons ?? (["recent_critical_threshold"] as EscalationReason[]),
-		triggeredFindingIds: [],
+		triggeredFindingIds: opts.findingIds ?? [],
 		counts: { critical, warning, info, total: opts.total ?? critical + warning + info },
 		hoursSinceLastInteraction: 0,
 		lastUserInteractionAt: ts.toISOString(),
@@ -452,5 +454,156 @@ describe("escalation-delivery readLastDelivery", () => {
 			"corrupt line",
 		].join("\n") + "\n", "utf8");
 		strictEqual(readLastDelivery(path), null);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2: finding detail rendering
+// ---------------------------------------------------------------------------
+
+function finding(opts: {
+	id: string;
+	severity?: "critical" | "high" | "medium" | "low" | "info";
+	title?: string;
+	filePath?: string;
+	status?: "new" | "ignored";
+}): ResolvedFinding {
+	return {
+		id: opts.id,
+		severity: opts.severity ?? "medium",
+		title: opts.title ?? "Test finding",
+		filePath: opts.filePath ?? "src/test.ts",
+		status: opts.status ?? "new",
+	};
+}
+
+describe("escalation-delivery planDelivery with resolvedFindings", () => {
+	test("open critical: 🔴 header with detail line", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, total: 3, findingIds: ["f-1"] }),
+		];
+		const findings = [
+			finding({ id: "f-1", severity: "critical", title: "Critical bug", filePath: "src/a.ts" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		strictEqual(plan.messages.length, 1);
+		ok(plan.messages[0].text.startsWith("🔴"), "Should have red emoji");
+		ok(plan.messages[0].text.includes("1 crítica"), "Should say 1 crítica");
+		ok(plan.messages[0].text.includes("src/a.ts"), "Should show file path");
+		ok(plan.messages[0].text.includes("Critical bug"), "Should show title");
+	});
+
+	test("ignored critical + open high: 🟡 header (the #397 case)", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, total: 26, findingIds: ["f-1", "f-2"] }),
+		];
+		const findings = [
+			finding({ id: "f-1", severity: "critical", status: "ignored", title: "False positive", filePath: "src/a.ts" }),
+			finding({ id: "f-2", severity: "high", title: "Real issue", filePath: "src/b.ts" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		strictEqual(plan.messages.length, 1);
+		ok(plan.messages[0].text.startsWith("🟡"), "No red — critical is ignored");
+		ok(plan.messages[0].text.includes("1 alta"), "Should say 1 alta");
+		ok(plan.messages[0].text.includes("Real issue"), "Should show the high finding");
+		ok(!plan.messages[0].text.includes("False positive"), "Should NOT show ignored in detail");
+		ok(plan.messages[0].text.includes("1 ya revisada"), "Should count reviewed at foot");
+	});
+
+	test("all findings ignored: no message, but marked delivered", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, findingIds: ["f-1"] }),
+		];
+		const findings = [
+			finding({ id: "f-1", severity: "critical", status: "ignored" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		strictEqual(plan.messages.length, 0, "No message — all reviewed");
+		strictEqual(plan.deliveredEscalationIds.length, 1, "Still marked delivered");
+	});
+
+	test("multiple criticals: all get detail lines", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 2, findingIds: ["f-1", "f-2"] }),
+		];
+		const findings = [
+			finding({ id: "f-1", severity: "critical", title: "First", filePath: "src/a.ts" }),
+			finding({ id: "f-2", severity: "critical", title: "Second", filePath: "src/b.ts" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		ok(plan.messages[0].text.includes("2 críticas"));
+		ok(plan.messages[0].text.includes("First"));
+		ok(plan.messages[0].text.includes("Second"));
+	});
+
+	test("no resolvedFindings: fallback to counts-only (pre-#383)", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 2, total: 5 }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+		});
+		strictEqual(plan.messages.length, 1);
+		ok(plan.messages[0].text.includes("2 crítica(s)"), "Counts format, not finding detail");
+	});
+
+	test("resolvedFindings present but no IDs match pending events: fallback", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1 }),
+		];
+		const findings = [
+			finding({ id: "f-unrelated", severity: "critical" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		strictEqual(plan.messages.length, 1);
+		// Falls back to counts format because no finding IDs match the event's triggeredFindingIds
+		ok(plan.messages[0].text.includes("crítica(s)"));
+	});
+
+	test("header does not say crítica when only critical is ignored", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, total: 10, findingIds: ["f-1", "f-2", "f-3"] }),
+		];
+		const findings = [
+			finding({ id: "f-1", severity: "critical", status: "ignored" }),
+			finding({ id: "f-2", severity: "medium" }),
+			finding({ id: "f-3", severity: "low" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		ok(!plan.messages[0].text.includes("crítica"), "Should not say crítica");
+		ok(plan.messages[0].text.includes("warning"), "Should say warnings");
+		ok(plan.messages[0].text.includes("1 ya revisada"), "Should count the ignored one");
 	});
 });
