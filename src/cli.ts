@@ -483,6 +483,7 @@ import {
 import {
 	handleRunCronPreflight,
 	handleCheckUserEscalation,
+	handleCheckLiveness,
 	handleSupervisorTick,
 	handleSupervisorImprovementsReview,
 	handleSupervisorImprovementsCreate,
@@ -595,6 +596,8 @@ import type {
 	TaskQueuePanelDispatchRuntime,
 	TaskQueuePanelDispatchResult,
 } from "./cli/queue/index.js";
+import { checkLiveness } from "./liveness-check.js";
+import { roleRailsPath } from "./role-rails.js";
 
 export type CliRuntime = {
 	projectId: string;
@@ -734,6 +737,7 @@ export type CliRuntime = {
 	checkUserEscalation?: (input: {
 		lastUserInteractionAt?: string;
 	}) => Promise<import("./user-escalation.js").EscalationResult>;
+	checkLiveness?: () => import("./liveness-check.js").LivenessResult;
 	formatSupervisorTick: (result: IduSupervisorLoopResult) => string;
 	executionDirectorTick?: () => ExecutionDirectorCliResult;
 	formatExecutionDirectorTick?: (result: ExecutionDirectorCliResult) => string;
@@ -1414,6 +1418,17 @@ export function createCliRuntime(
 			projectId: activeProject.id,
 			lastUserInteractionAt,
 		});
+		},
+		checkLiveness: () => {
+			return checkLiveness({
+				logPath: join(activeProject.path, "logs", "supervisor-tick.log"),
+				railsPath: roleRailsPath(runtimeStateRoot),
+				triggerPath: join(runtimeStateRoot, "supervisor-trigger.json"),
+				intervalMinutes: parseInt(
+					process.env.IDU_PI_TICK_INTERVAL_MINUTES ?? "60",
+					10,
+				),
+			});
 		},
 		supervisorCronPlan: () =>
 			planIduSupervisorCron({
@@ -2177,8 +2192,10 @@ async function runCliCommandInner(
 				return await handleRunCronPreflight(activeRuntime, rest);
 			case "idu-objective-status":
 				return handleIduObjectiveStatus(activeRuntime);
-			case "idu-check-user-escalation":
+		 case "idu-check-user-escalation":
 				return await handleCheckUserEscalation(activeRuntime);
+			case "idu-check-liveness":
+				return handleCheckLiveness(activeRuntime);
 			case "idu-usage-status":
 			case "usage-status":
 				return await handleUsageStatus(activeRuntime);

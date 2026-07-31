@@ -12,6 +12,7 @@
 export {
 	handleRunCronPreflight,
 	handleCheckUserEscalation,
+	handleCheckLiveness,
 	handleSupervisorTick,
 	handleSupervisorImprovementsReview,
 	handleSupervisorImprovementsCreate,

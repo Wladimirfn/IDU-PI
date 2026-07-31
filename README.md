@@ -184,6 +184,36 @@ El home muestra logo, estado del sistema, MCP, proyecto actual, supervisor, ruta
 
 Si no es interactivo, imprime el resumen y sale sin escribir archivos.
 
+### El bridge de Telegram como servicio
+
+El bridge es el proceso persistente del sistema: mantiene el bot vivo y es donde vive el monitoreo de infraestructura. Se registra como tarea programada `Idu-pi Telegram Bridge`, que arranca en cada inicio de sesión y se reinicia sola si el proceso muere.
+
+Instalar el arranque automático — **requiere PowerShell como Administrador**, porque `Register-ScheduledTask` no corre sin elevación:
+
+```powershell
+scripts\install-scheduled-task.ps1
+```
+
+Termina con el estado real de la tarea, por ejemplo `Tarea registrada: Idu-pi Telegram Bridge (estado: Running)`. Si no dice eso, no quedó instalada.
+
+Consultar, detener y desinstalar:
+
+```powershell
+scripts\scheduled-task-status.ps1     # estado, última corrida, próximo disparo
+scripts\stop-bridge.ps1               # detiene el proceso; la tarea sigue registrada
+scripts\uninstall-scheduled-task.ps1  # quita el arranque automático
+```
+
+Para levantarlo a mano sin tarea programada, en una ventana que hay que dejar abierta:
+
+```powershell
+scripts\start-bridge.ps1
+# o
+corepack pnpm serve
+```
+
+**El bridge compila el árbol de trabajo al arrancar.** `start-bridge.ps1` ejecuta `pnpm build` sobre la rama que esté checkouteada, así que si esa rama no compila, el bridge no levanta — tampoco en el siguiente inicio de sesión. Si vas a dejar la máquina sola, dejala en una rama que compile.
+
 Para configurar MCP y enrolar proyectos externos:
 
 ```text
