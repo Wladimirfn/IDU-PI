@@ -3918,12 +3918,13 @@ async function runEscalationDelivery(): Promise<void> {
 			const idList = allFindingIds.map((id) => sqlString(id)).join(",");
 			const raw = runSql(
 				labDbPath,
-				`SELECT id, severity, title, affected_files, status FROM bug_findings WHERE id IN (${idList});`,
+				`SELECT id, severity, title, description, affected_files, status FROM bug_findings WHERE id IN (${idList});`,
 			);
 			const rows = JSON.parse(raw) as Array<{
 				id: string;
 				severity: string;
 				title: string;
+				description: string;
 				affected_files: string;
 				status: string;
 			}>;
@@ -3931,6 +3932,7 @@ async function runEscalationDelivery(): Promise<void> {
 				id: row.id,
 				severity: row.severity as ResolvedFinding["severity"],
 				title: row.title,
+				description: row.description,
 				filePath:
 					(JSON.parse(row.affected_files || "[]") as string[])[0] ?? "",
 				status: row.status as ResolvedFinding["status"],
