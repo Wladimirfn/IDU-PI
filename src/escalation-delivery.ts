@@ -93,7 +93,17 @@ export function deliveryLogPath(stateRoot: string): string {
 export function readDeliveredIds(deliveryLogPath: string): Set<string> {
 	const delivered = new Set<string>();
 	if (!existsSync(deliveryLogPath)) return delivered;
-	const raw = readFileSync(deliveryLogPath, "utf8");
+	let raw: string;
+	try {
+		raw = readFileSync(deliveryLogPath, "utf8");
+	} catch {
+		// Unreadable (EISDIR, EACCES, corruption) — treat as empty.
+		// This is NOT the premiere case: the file exists but can't be
+		// read. Treating it as empty means the premiere might fire,
+		// but the lock in runEscalationDelivery prevents the loop
+		// when the subsequent appendDeliveryLog also fails.
+		return delivered;
+	}
 	if (!raw.trim()) return delivered;
 	for (const line of raw.split("\n")) {
 		if (!line.trim()) continue;
