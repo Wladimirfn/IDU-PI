@@ -60,6 +60,22 @@ export type DeliveryMessage = {
 	escalationIds: string[];
 };
 
+/**
+ * A finding resolved from bug_findings for message rendering.
+ *
+ * NOTE: line number is LOST here — affected_files stores paths only.
+ * The number exists in evidence as prose (e.g. "Lines ~289-295").
+ * When bug_findings gains a line column, add it to filePath + the
+ * detail format in renderWithFindings.
+ */
+export type ResolvedFinding = {
+	id: string;
+	severity: "critical" | "high" | "medium" | "low" | "info";
+	title: string;
+	filePath: string;
+	status: "new" | "ignored";
+};
+
 /** One append-only entry in the delivery log. */
 export type DeliveryLogEntry = {
 	escalationId: string;
@@ -156,6 +172,7 @@ export function planDelivery(input: {
 	freshnessWindowHours?: number;
 	maxMessagesPerHour?: number;
 	recentDeliveryCount?: number;
+	resolvedFindings?: ResolvedFinding[];
 }): DeliveryPlan {
 	const { events, deliveredIds, now } = input;
 	const windowMs = (input.freshnessWindowHours ?? 24) * 3600_000;
@@ -238,11 +255,45 @@ export function planDelivery(input: {
 	}
 
 	// NON-PREMIERE: compact ALL pending into a single message.
-	const message = compactPendingMessage(pending);
+	// When resolvedFindings is available, render with finding detail
+	// (criticals + highs get file + title lines, rest as counts).
+	// Fallback to counts-only when findings absent (pre-#383 events).
+	const deliveredIdsList = pending.map((e) => e.escalationId);
+
+	let message: DeliveryMessage | null;
+	if (input.resolvedFindings && input.resolvedFindings.length > 0) {
+		const pendingFindingIds = new Set(
+			pending.flatMap((e) => e.triggeredFindingIds ?? []),
+		);
+		const relevantFindings = input.resolvedFindings.filter((f) =>
+			pendingFindingIds.has(f.id),
+		);
+		message =
+			relevantFindings.length > 0
+				? renderWithFindings(relevantFindings, pending)
+				: compactPendingMessage(pending);
+	} else {
+		message = compactPendingMessage(pending);
+	}
+
+	// If all findings were reviewed (renderWithFindings returned null),
+	// still mark as delivered (no re-fire) but send no message.
+	if (message === null) {
+		return {
+			isPremiere: false,
+			messages: [],
+			deliveredEscalationIds: deliveredIdsList,
+			skippedAlreadyDelivered,
+			skippedOutsideWindow,
+			throttled: false,
+			totalEvents: events.length,
+		};
+	}
+
 	return {
 		isPremiere: false,
 		messages: [message],
-		deliveredEscalationIds: pending.map((e) => e.escalationId),
+		deliveredEscalationIds: deliveredIdsList,
 		skippedAlreadyDelivered,
 		skippedOutsideWindow,
 		throttled: false,
@@ -296,6 +347,86 @@ function compactPendingMessage(pending: UserEscalationEvent[]): DeliveryMessage 
 			`   ${sumCounts(pending, "critical")} críticas acumuladas · ${sumCounts(pending, "warning")} warnings · ${sumCounts(pending, "info")} info (total: ${sumCounts(pending, "total")})`;
 	}
 	return { text, escalationIds };
+}
+
+/**
+ * Render a delivery message WITH finding detail. The header is computed
+ * from the FILTERED set (status='new' only), not from event counts —
+ * so a critical that was reviewed and ignored does not produce a 🔴.
+ *
+ * Detail lines: open criticals + highs get file + title.
+ * Counts: 3-level collapse (warning = high+medium, info = low+info).
+ * Reviewed: count at foot ("N ya revisada(s)").
+ *
+ * Returns null when ALL findings are reviewed (nothing actionable).
+ * Caller marks the event as delivered but sends no message.
+ *
+ * NOTE: line number is LOST — affected_files stores paths only.
+ * The number exists in evidence as prose (e.g. "Lines ~289-295").
+ * When bug_findings gains a line column, add it to the detail line.
+ */
+function renderWithFindings(
+	findings: ResolvedFinding[],
+	pending: UserEscalationEvent[],
+): DeliveryMessage | null {
+	const escalationIds = pending.map((e) => e.escalationId);
+
+	const open = findings.filter((f) => f.status === "new");
+	const reviewed = findings.filter((f) => f.status === "ignored");
+
+	const criticals = open.filter((f) => f.severity === "critical");
+	const highs = open.filter((f) => f.severity === "high");
+	const mediums = open.filter((f) => f.severity === "medium");
+	const lows = open.filter((f) => f.severity === "low");
+	const infos = open.filter((f) => f.severity === "info");
+
+	const warnings = highs.length + mediums.length;
+	const infosCount = lows.length + infos.length;
+
+	// Header from filtered set
+	const last = pending[pending.length - 1];
+	const time = hhmm(last.ts);
+
+	let emoji: string;
+	let headerLabel: string;
+	if (criticals.length > 0) {
+		emoji = "🔴";
+		headerLabel = `${criticals.length} crítica${criticals.length === 1 ? "" : "s"}`;
+	} else if (highs.length > 0) {
+		emoji = "🟡";
+		headerLabel = `${highs.length} alta${highs.length === 1 ? "" : "s"}`;
+	} else if (warnings > 0) {
+		emoji = "🟡";
+		headerLabel = `${warnings} warning${warnings === 1 ? "" : "s"}`;
+	} else if (infosCount > 0) {
+		emoji = "🔵";
+		headerLabel = `${infosCount} hallazgo${infosCount === 1 ? "" : "s"}`;
+	} else {
+		// All findings reviewed — nothing to say
+		return null;
+	}
+
+	let text = `${emoji} [idu-pi] ${headerLabel} · supervisor ${time}\n`;
+
+	// Detail lines: criticals first, then highs
+	for (const f of [...criticals, ...highs]) {
+		text += `   → ${f.filePath} — ${f.title}\n`;
+	}
+
+	// Foot: 3-level collapse + reviewed count
+	const footParts: string[] = [];
+	if (warnings > 0)
+		footParts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
+	if (infosCount > 0) footParts.push(`${infosCount} info`);
+	if (reviewed.length > 0)
+		footParts.push(
+			`${reviewed.length} ya revisada${reviewed.length === 1 ? "" : "s"}`,
+		);
+	if (footParts.length > 0) {
+		text += `   ─ ${footParts.join(" · ")} ─`;
+	}
+
+	return { text: text.trimEnd(), escalationIds };
 }
 
 // ---------------------------------------------------------------------------
