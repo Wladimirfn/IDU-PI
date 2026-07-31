@@ -21,6 +21,7 @@ test-results/
 credentials.json
 serviceAccountKey.json
 bridge-autostart.json
+bridge.pid
 
 # Local runtime state / generated data
 /.codegraph/

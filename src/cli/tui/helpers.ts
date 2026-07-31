@@ -14,6 +14,10 @@ import {
 	launchBridgeLifecycle,
 } from "../../bridge-lifecycle.js";
 import {
+	getCombinedBridgeStatus,
+	formatBridgeStatusLine,
+} from "../../bridge-pidfile.js";
+import {
 	buildCliHomeStatus,
 	formatSupervisorStatus,
 	formatDiagnosticsStatus,
@@ -1434,7 +1438,15 @@ export async function handleTelegramRemoteChoice(
 	const logPath = join(status.packageRoot, "logs", "bridge.log");
 	if (choice === "status" || choice === "1") {
 		const draft = readEnvDraft(envPath);
-		return formatBridgeEnvStatus({
+		const bridgeStatus = getCombinedBridgeStatus(status.packageRoot);
+		const bridgeDetail = [
+			"─ Bridge ─",
+			`Proceso:          ${bridgeStatus.processRunning ? `Activo (PID ${bridgeStatus.pid})` : "Caído"}`,
+			`Autostart:        ${bridgeStatus.autostartEnabled ? "Activado" : "Desactivado"}`,
+			`Pidfile:          ${bridgeStatus.pidfileExists ? (bridgeStatus.stale ? "stale" : "fresco") : "ausente"}`,
+			`Estado efectivo:  ${formatBridgeStatusLine(bridgeStatus)}`,
+		].join("\n");
+		const envStatus = formatBridgeEnvStatus({
 			envPath,
 			exists: existsSync(envPath),
 			values: draft.values,
@@ -1447,8 +1459,9 @@ export async function handleTelegramRemoteChoice(
 			),
 			logPath,
 			logExists: existsSync(logPath),
-			bridgeStatus: "unknown (sin shell riesgosa)",
+			bridgeStatus: formatBridgeStatusLine(bridgeStatus),
 		});
+		return `${bridgeDetail}\n\n${envStatus}`;
 	}
 	if (choice === "configure" || choice === "2") {
 		const token = (await question("TELEGRAM_BOT_TOKEN: ")).trim();
