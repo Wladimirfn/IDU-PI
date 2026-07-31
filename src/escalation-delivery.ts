@@ -93,7 +93,23 @@ export function deliveryLogPath(stateRoot: string): string {
 export function readDeliveredIds(deliveryLogPath: string): Set<string> {
 	const delivered = new Set<string>();
 	if (!existsSync(deliveryLogPath)) return delivered;
-	const raw = readFileSync(deliveryLogPath, "utf8");
+	let raw: string;
+	try {
+		raw = readFileSync(deliveryLogPath, "utf8");
+	} catch {
+		// Unreadable (EISDIR, EACCES) — treat as empty. The file exists
+		// but cannot be read, so the premiere may fire on a log that
+		// already has entries.
+		//
+		// What bounds that: if the write fails too, the lock in
+		// runEscalationDelivery halts delivery. If the write SUCCEEDS
+		// while the read keeps failing — an odd but not impossible ACL —
+		// the lock never fires and every cycle re-fires the premiere.
+		// The in-memory ceiling is what caps it at MAX_MESSAGES_PER_HOUR
+		// instead of one message per check, forever. Do not remove that
+		// ceiling on the assumption the lock covers this path.
+		return delivered;
+	}
 	if (!raw.trim()) return delivered;
 	for (const line of raw.split("\n")) {
 		if (!line.trim()) continue;
@@ -281,31 +297,3 @@ function compactPendingMessage(pending: UserEscalationEvent[]): DeliveryMessage 
 	return { text, escalationIds };
 }
 
-/**
- * Count how many messages were delivered in the last hour, by reading
- * the `deliveredAt` timestamps from the delivery log. Used by the
- * caller to enforce MAX_MESSAGES_PER_HOUR before calling planDelivery.
- */
-export function countRecentDeliveries(
-	deliveryLogPath: string,
-	now: Date = new Date(),
-): number {
-	if (!existsSync(deliveryLogPath)) return 0;
-	const raw = readFileSync(deliveryLogPath, "utf8");
-	if (!raw.trim()) return 0;
-	const cutoff = now.getTime() - 3600_000;
-	let count = 0;
-	for (const line of raw.split("\n")) {
-		if (!line.trim()) continue;
-		try {
-			const entry = JSON.parse(line) as { deliveredAt?: string };
-			if (entry.deliveredAt) {
-				const ts = Date.parse(entry.deliveredAt);
-				if (Number.isFinite(ts) && ts >= cutoff) count++;
-			}
-		} catch {
-			continue;
-		}
-	}
-	return count;
-}

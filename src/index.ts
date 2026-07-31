@@ -15,8 +15,8 @@ import {
 	readDeliveredIds,
 	appendDeliveryLog,
 	deliveryLogPath,
-	countRecentDeliveries,
 	DELIVERY_CHECK_INTERVAL_MIN,
+	MAX_MESSAGES_PER_HOUR,
 } from "./escalation-delivery.js";
 import {
 	AgentRouter,
@@ -3835,8 +3835,27 @@ console.log(
  * repo root, no env vars, so the PowerShell side and the TypeScript
  * side resolve the same path.
  * On send failure, events stay pending — retry next cycle.
+ *
+ * LOOP PREVENTION (#392): two mechanisms prevent the feedback loop where
+ * a failed delivery-log write causes the premiere to re-fire every cycle:
+ *
+ * 1. LOCK: if appendDeliveryLog throws, deliveryDisabled is set and this
+ *    process never delivers again. "Si no podemos recordar, no hablamos."
+ *
+ * 2. IN-MEMORY CEILING: deliveryMessagesSent is tracked in memory, not by
+ *    counting delivery-log file rows. The file can fail; the counter
+ *    cannot. The premiere bypasses planDelivery's throttle, but it cannot
+ *    bypass this one.
  */
+
+let deliveryDisabled = false;
+let deliveryMessagesSent = 0;
+let deliveryHourStart = Date.now();
+
 async function runEscalationDelivery(): Promise<void> {
+	// LOCK: a previous cycle couldn't write the delivery log. Stop.
+	if (deliveryDisabled) return;
+
 	const repoRoot = resolvePackageRoot();
 	const flagPath = join(repoRoot, "escalation-delivery.json");
 	if (!existsSync(flagPath)) return; // default OFF
@@ -3848,6 +3867,13 @@ async function runEscalationDelivery(): Promise<void> {
 	} catch {
 		return;
 	}
+
+	// IN-MEMORY CEILING: reset on hour boundary, then enforce.
+	if (Date.now() - deliveryHourStart > 3600_000) {
+		deliveryMessagesSent = 0;
+		deliveryHourStart = Date.now();
+	}
+	if (deliveryMessagesSent >= MAX_MESSAGES_PER_HOUR) return;
 
 	const chatId = config.allowedUserId;
 	if (!chatId) return;
@@ -3870,19 +3896,18 @@ async function runEscalationDelivery(): Promise<void> {
 
 	const dlogPath = deliveryLogPath(stateRoot);
 	const deliveredIds = readDeliveredIds(dlogPath);
-	const recentCount = countRecentDeliveries(dlogPath);
 	const now = new Date();
 
 	const plan = planDelivery({
 		events: events as never[],
 		deliveredIds,
 		now,
-		recentDeliveryCount: recentCount,
 	});
 
 	for (const msg of plan.messages) {
 		try {
 			await bot.api.sendMessage(chatId, msg.text);
+			deliveryMessagesSent++;
 		} catch (e) {
 			console.error("[A1e] delivery failed:", e);
 			return; // don't mark as delivered — retry next cycle
@@ -3890,14 +3915,28 @@ async function runEscalationDelivery(): Promise<void> {
 	}
 
 	if (plan.deliveredEscalationIds.length > 0) {
-		appendDeliveryLog(
-			dlogPath,
-			plan.deliveredEscalationIds.map((id) => ({
-				escalationId: id,
-				deliveredAt: now.toISOString(),
-				chatId,
-			})),
-		);
+		try {
+			appendDeliveryLog(
+				dlogPath,
+				plan.deliveredEscalationIds.map((id) => ({
+					escalationId: id,
+					deliveredAt: now.toISOString(),
+					chatId,
+				})),
+			);
+		} catch (e) {
+			// LOCK: the message was sent but we cannot record it.
+			// If we continue, the next cycle sees an empty delivery-log,
+			// re-fires the premiere, and sends the same message again.
+			console.error(
+				"[A1e] DELIVERY HALTED: cannot write delivery log — " +
+					"message was sent but not recorded. Disabling delivery " +
+					"to prevent loop. Restart the bridge after fixing the " +
+					"disk/permission issue.",
+				e,
+			);
+			deliveryDisabled = true;
+		}
 	}
 }
 
