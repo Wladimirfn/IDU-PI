@@ -2,6 +2,32 @@ $ErrorActionPreference = 'Stop'
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot '..')
 Set-Location $Root
+
+# Autostart flag: if the operator disabled autostart from the TUI,
+# exit silently without launching the bridge. The flag file lives in
+# the repo root (next to this script's parent) so both the PowerShell
+# script and the TypeScript TUI resolve the same path without env vars
+# or stateRoot resolution — see the rail.enabled lesson: a flag that
+# the reader can't find is no flag at all.
+$AutostartFile = Join-Path $Root 'bridge-autostart.json'
+if (Test-Path $AutostartFile) {
+  try {
+    $autostartConfig = Get-Content $AutostartFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if ($autostartConfig.enabled -eq $false) {
+      # Say why. This runs before $LogFile exists, so the message goes to
+      # the console: an operator who runs this by hand and gets silence
+      # plus no bridge has no way to tell "disabled" from "broken".
+      Write-Host "Autostart desactivado por el operador; no arranco el bridge." -ForegroundColor Yellow
+      Write-Host "Para reactivarlo: TUI > Telegram remoto > Autostart, o borra $AutostartFile"
+      exit 0
+    }
+  } catch {
+    # Corrupt flag file — proceed with startup. A corrupt flag must
+    # not prevent the bridge from starting; the operator can fix the
+    # file or delete it.
+  }
+}
+
 $LogDir = Join-Path $Root 'logs'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $LogFile = Join-Path $LogDir 'bridge.log'

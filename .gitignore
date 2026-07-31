@@ -20,6 +20,7 @@ test-results/
 *.cert
 credentials.json
 serviceAccountKey.json
+bridge-autostart.json
 
 # Local runtime state / generated data
 /.codegraph/
