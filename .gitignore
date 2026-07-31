@@ -22,6 +22,7 @@ credentials.json
 serviceAccountKey.json
 bridge-autostart.json
 bridge.pid
+escalation-delivery.json
 
 # Local runtime state / generated data
 /.codegraph/

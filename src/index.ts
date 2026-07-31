@@ -1,5 +1,5 @@
 import { Bot, type Context } from "grammy";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,6 +10,14 @@ import {
 	touchPidfile,
 	HEARTBEAT_INTERVAL_MIN,
 } from "./bridge-pidfile.js";
+import {
+	planDelivery,
+	readDeliveredIds,
+	appendDeliveryLog,
+	deliveryLogPath,
+	countRecentDeliveries,
+	DELIVERY_CHECK_INTERVAL_MIN,
+} from "./escalation-delivery.js";
 import {
 	AgentRouter,
 	formatAgentProfiles,
@@ -3820,8 +3828,93 @@ heartbeatTimer.unref();
 console.log(
 	`pi-telegram-bridge iniciado. PID=${process.pid} CWD=${currentCwd} PI=${[config.piBin, "<PI_CLI_JS>", "--mode", "rpc"].join(" ")}`,
 );
+/**
+ * Escalation delivery: reads escalation events, plans delivery, sends
+ * via Telegram. Opt-in via <repoRoot>/escalation-delivery.json
+ * (absent = OFF), alongside bridge-autostart.json — same convention:
+ * repo root, no env vars, so the PowerShell side and the TypeScript
+ * side resolve the same path.
+ * On send failure, events stay pending — retry next cycle.
+ */
+async function runEscalationDelivery(): Promise<void> {
+	const repoRoot = resolvePackageRoot();
+	const flagPath = join(repoRoot, "escalation-delivery.json");
+	if (!existsSync(flagPath)) return; // default OFF
+	try {
+		const flag = JSON.parse(readFileSync(flagPath, "utf8")) as {
+			enabled?: boolean;
+		};
+		if (flag.enabled !== true) return;
+	} catch {
+		return;
+	}
+
+	const chatId = config.allowedUserId;
+	if (!chatId) return;
+
+	const stateRoot = activeProjectStateRoot();
+	if (!stateRoot) return;
+
+	const escPath = join(stateRoot, "user-escalations.jsonl");
+	if (!existsSync(escPath)) return;
+
+	let events: unknown[];
+	try {
+		events = readFileSync(escPath, "utf8")
+			.split("\n")
+			.filter((l) => l.trim())
+			.map((l) => JSON.parse(l));
+	} catch {
+		return;
+	}
+
+	const dlogPath = deliveryLogPath(stateRoot);
+	const deliveredIds = readDeliveredIds(dlogPath);
+	const recentCount = countRecentDeliveries(dlogPath);
+	const now = new Date();
+
+	const plan = planDelivery({
+		events: events as never[],
+		deliveredIds,
+		now,
+		recentDeliveryCount: recentCount,
+	});
+
+	for (const msg of plan.messages) {
+		try {
+			await bot.api.sendMessage(chatId, msg.text);
+		} catch (e) {
+			console.error("[A1e] delivery failed:", e);
+			return; // don't mark as delivered — retry next cycle
+		}
+	}
+
+	if (plan.deliveredEscalationIds.length > 0) {
+		appendDeliveryLog(
+			dlogPath,
+			plan.deliveredEscalationIds.map((id) => ({
+				escalationId: id,
+				deliveredAt: now.toISOString(),
+				chatId,
+			})),
+		);
+	}
+}
+
 void bot.start({
 	onStart: async () => {
 		await notifyBridgeStartupFromIntent();
+		// A1e: opt-in escalation delivery to Telegram. Default OFF.
+		// Fire immediately on startup (catch anything that accumulated
+		// while the bridge was down), then every DELIVERY_CHECK_INTERVAL_MIN.
+		void runEscalationDelivery().catch((e) =>
+			console.error("[A1e] delivery check failed:", e),
+		);
+		const deliveryTimer = setInterval(() => {
+			void runEscalationDelivery().catch((e) =>
+				console.error("[A1e] delivery check failed:", e),
+			);
+		}, DELIVERY_CHECK_INTERVAL_MIN * 60_000);
+		deliveryTimer.unref();
 	},
 });
