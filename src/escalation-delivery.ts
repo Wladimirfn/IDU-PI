@@ -72,6 +72,8 @@ export type ResolvedFinding = {
 	id: string;
 	severity: "critical" | "high" | "medium" | "low" | "info";
 	title: string;
+	/** Verbatim from bug_findings.description. 72-486 chars today. */
+	description: string;
 	filePath: string;
 	status: "new" | "ignored";
 };
@@ -408,12 +410,23 @@ function renderWithFindings(
 
 	let text = `${emoji} [idu-pi] ${headerLabel} · supervisor ${time}\n`;
 
-	// Detail lines: criticals first, then highs
-	for (const f of [...criticals, ...highs]) {
+	// Detail blocks: criticals first, then highs.
+	// Each gets: title line (→ file — title), description (verbatim),
+	// and the finding ID goes at the bottom of the message.
+	// NOTE: line number lives in description as prose (e.g. "line ~670"),
+	// not in a dedicated column. When bug_findings gains a line column,
+	// add it to the title line format.
+	const detailFindings = [...criticals, ...highs];
+
+	for (const f of detailFindings) {
 		text += `   → ${f.filePath} — ${f.title}\n`;
 	}
 
-	// Foot: 3-level collapse + reviewed count
+	// Description: verbatim, indented. The field is copied, not
+	// summarized — "el mensajero no piensa." Hard-cut at budget.
+	const DESC_BUDGET = 800;
+	const descPrefix = "  ";
+	// Calculate fixed overhead (everything except descriptions)
 	const footParts: string[] = [];
 	if (warnings > 0)
 		footParts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
@@ -422,9 +435,32 @@ function renderWithFindings(
 		footParts.push(
 			`${reviewed.length} ya revisada${reviewed.length === 1 ? "" : "s"}`,
 		);
-	if (footParts.length > 0) {
-		text += `   ─ ${footParts.join(" · ")} ─`;
+	const footLine =
+		footParts.length > 0 ? `  ─ ${footParts.join(" · ")} ─\n` : "";
+	const idLines = detailFindings.map((f) => `  ${f.id}\n`).join("");
+	const fixedOverhead = text.length + footLine.length + idLines.length;
+	const descBudget = Math.max(
+		0,
+		DESC_BUDGET - fixedOverhead,
+	);
+	const perDesc =
+		detailFindings.length > 0
+			? Math.floor(descBudget / detailFindings.length)
+			: 0;
+
+	for (const f of detailFindings) {
+		let desc = f.description;
+		if (desc.length > perDesc - descPrefix.length - 1) {
+			desc = desc.substring(0, perDesc - descPrefix.length - 1) + "…";
+		}
+		text += `${descPrefix}${desc}\n`;
 	}
+
+	// Foot
+	text += footLine;
+
+	// Finding IDs at the bottom (return path: operator → agent → status)
+	text += idLines;
 
 	return { text: text.trimEnd(), escalationIds };
 }

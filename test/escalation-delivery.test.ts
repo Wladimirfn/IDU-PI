@@ -465,6 +465,7 @@ function finding(opts: {
 	id: string;
 	severity?: "critical" | "high" | "medium" | "low" | "info";
 	title?: string;
+	description?: string;
 	filePath?: string;
 	status?: "new" | "ignored";
 }): ResolvedFinding {
@@ -472,6 +473,7 @@ function finding(opts: {
 		id: opts.id,
 		severity: opts.severity ?? "medium",
 		title: opts.title ?? "Test finding",
+		description: opts.description ?? "A test description.",
 		filePath: opts.filePath ?? "src/test.ts",
 		status: opts.status ?? "new",
 	};
@@ -605,5 +607,55 @@ describe("escalation-delivery planDelivery with resolvedFindings", () => {
 		ok(!plan.messages[0].text.includes("crítica"), "Should not say crítica");
 		ok(plan.messages[0].text.includes("warning"), "Should say warnings");
 		ok(plan.messages[0].text.includes("1 ya revisada"), "Should count the ignored one");
+	});
+
+	test("description appears verbatim and finding ID at bottom", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, findingIds: ["f-1"] }),
+		];
+		const findings = [
+			finding({
+				id: "f-1",
+				severity: "critical",
+				title: "Critical bug",
+				description: "The full description that should appear verbatim in the message.",
+				filePath: "src/a.ts",
+			}),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		const text = plan.messages[0].text;
+		ok(text.includes("The full description that should appear verbatim"), "Description verbatim");
+		ok(text.includes("f-1"), "Finding ID present");
+		// ID should be after the foot line
+		const idPos = text.lastIndexOf("f-1");
+		const footPos = text.lastIndexOf("─");
+		ok(idPos > footPos, "ID should be after foot");
+	});
+
+	test("message stays under 800 chars budget", () => {
+		const events = [
+			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, findingIds: ["f-1"] }),
+		];
+		const longDesc = "A".repeat(900); // longer than budget
+		const findings = [
+			finding({
+				id: "f-1",
+				severity: "critical",
+				description: longDesc,
+			}),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		ok(plan.messages[0].text.length <= 800, `Should be ≤800, got ${plan.messages[0].text.length}`);
+		ok(plan.messages[0].text.includes("…"), "Should include ellipsis when description is cut");
 	});
 });
