@@ -6,9 +6,16 @@
 
 import { test, describe } from "node:test";
 import { strictEqual, ok, deepStrictEqual } from "node:assert";
+import { writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { makeTempDir } from "./helpers/temp.js";
 import {
 	planDelivery,
 	MAX_MESSAGES_PER_HOUR,
+	readDeliveryFlag,
+	writeDeliveryFlag,
+	readLastDelivery,
+	deliveryLogPath,
 	type DeliveryPlan,
 } from "../src/escalation-delivery.js";
 import type { UserEscalationEvent, EscalationReason } from "../src/user-escalation.js";
@@ -340,7 +347,110 @@ describe("escalation-delivery planDelivery", () => {
 			deliveredIds: deliveredSet("esc-unrelated"),
 			now: NOW,
 		});
-		strictEqual(plan.isPremiere, false);
-		strictEqual(plan.messages.length, 1);
+	strictEqual(plan.isPremiere, false);
+	strictEqual(plan.messages.length, 1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Toggle + last-delivered tests
+// ---------------------------------------------------------------------------
+
+describe("escalation-delivery toggle (readDeliveryFlag / writeDeliveryFlag)", () => {
+	test("absent flag = OFF (inverted default)", () => {
+		const dir = makeTempDir("delivery-flag-absent-");
+		strictEqual(readDeliveryFlag(dir), false);
+	});
+
+	test("enabled: true → ON", () => {
+		const dir = makeTempDir("delivery-flag-on-");
+		writeFileSync(join(dir, "escalation-delivery.json"), '{"enabled":true}', "utf8");
+		strictEqual(readDeliveryFlag(dir), true);
+	});
+
+	test("enabled: false → OFF", () => {
+		const dir = makeTempDir("delivery-flag-off-");
+		writeFileSync(join(dir, "escalation-delivery.json"), '{"enabled":false}', "utf8");
+		strictEqual(readDeliveryFlag(dir), false);
+	});
+
+	test("INVARIANT: absent and enabled:false give same result (OFF)", () => {
+		const dirAbsent = makeTempDir("delivery-inv-absent-");
+		const dirFalse = makeTempDir("delivery-inv-false-");
+		writeFileSync(join(dirFalse, "escalation-delivery.json"), '{"enabled":false}', "utf8");
+		strictEqual(readDeliveryFlag(dirAbsent), readDeliveryFlag(dirFalse));
+		strictEqual(readDeliveryFlag(dirAbsent), false);
+	});
+
+	test("corrupt flag file → OFF", () => {
+		const dir = makeTempDir("delivery-flag-corrupt-");
+		writeFileSync(join(dir, "escalation-delivery.json"), "not json", "utf8");
+		strictEqual(readDeliveryFlag(dir), false);
+	});
+
+	test("writeDeliveryFlag(true) then read → true", () => {
+		const dir = makeTempDir("delivery-write-on-");
+		writeDeliveryFlag(dir, true);
+		strictEqual(readDeliveryFlag(dir), true);
+	});
+
+	test("writeDeliveryFlag(false) then read → false", () => {
+		const dir = makeTempDir("delivery-write-off-");
+		writeDeliveryFlag(dir, false);
+		strictEqual(readDeliveryFlag(dir), false);
+	});
+
+	test("toggle: write true → write false → read false", () => {
+		const dir = makeTempDir("delivery-toggle-");
+		writeDeliveryFlag(dir, true);
+		strictEqual(readDeliveryFlag(dir), true);
+		writeDeliveryFlag(dir, false);
+		strictEqual(readDeliveryFlag(dir), false);
+	});
+});
+
+describe("escalation-delivery readLastDelivery", () => {
+	test("absent file → null", () => {
+		const dir = makeTempDir("delivery-last-absent-");
+		strictEqual(readLastDelivery(join(dir, "delivery-log.jsonl")), null);
+	});
+
+	test("empty file → null", () => {
+		const dir = makeTempDir("delivery-last-empty-");
+		const path = join(dir, "delivery-log.jsonl");
+		writeFileSync(path, "", "utf8");
+		strictEqual(readLastDelivery(path), null);
+	});
+
+	test("one entry → returns deliveredAt", () => {
+		const dir = makeTempDir("delivery-last-one-");
+		const path = join(dir, "delivery-log.jsonl");
+		writeFileSync(path, JSON.stringify({
+			escalationId: "esc-1",
+			deliveredAt: "2026-07-31T16:37:38.969Z",
+			chatId: 12345,
+		}) + "\n", "utf8");
+		strictEqual(readLastDelivery(path), "2026-07-31T16:37:38.969Z");
+	});
+
+	test("multiple entries → returns last (most recent)", () => {
+		const dir = makeTempDir("delivery-last-multi-");
+		const path = join(dir, "delivery-log.jsonl");
+		writeFileSync(path, [
+			JSON.stringify({ escalationId: "esc-1", deliveredAt: "2026-07-31T10:00:00Z" }),
+			JSON.stringify({ escalationId: "esc-2", deliveredAt: "2026-07-31T12:00:00Z" }),
+			JSON.stringify({ escalationId: "esc-3", deliveredAt: "2026-07-31T16:37:38Z" }),
+		].join("\n") + "\n", "utf8");
+		strictEqual(readLastDelivery(path), "2026-07-31T16:37:38Z");
+	});
+
+	test("corrupt last line → null", () => {
+		const dir = makeTempDir("delivery-last-corrupt-");
+		const path = join(dir, "delivery-log.jsonl");
+		writeFileSync(path, [
+			JSON.stringify({ escalationId: "esc-1", deliveredAt: "2026-07-31T10:00:00Z" }),
+			"corrupt line",
+		].join("\n") + "\n", "utf8");
+		strictEqual(readLastDelivery(path), null);
 	});
 });
