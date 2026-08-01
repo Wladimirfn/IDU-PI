@@ -18,6 +18,7 @@ import {
 	DELIVERY_CHECK_INTERVAL_MIN,
 	MAX_MESSAGES_PER_HOUR,
 	type ResolvedFinding,
+	formatFindingCloseMessage,
 } from "./escalation-delivery.js";
 import {
 	AgentRouter,
@@ -160,7 +161,7 @@ import {
 	stripEngramNoise,
 	summarizeOutput,
 } from "./lab-reports.js";
-import { formatInitLabDbResult, initLabDb, runSql, sqlString } from "./lab-db.js";
+import { formatInitLabDbResult, initLabDb, runSql, sqlString, updateFindingStatus } from "./lab-db.js";
 import { LabDbRepository } from "./lab-db-repository.js";
 import {
 	buildSemanticAuditStatus,
@@ -3542,6 +3543,51 @@ bot.command(LEGACY_SESSION_COMMANDS, async (ctx) => {
 	await ctx.reply(
 		"Este comando queda para la próxima iteración. Esta versión mantiene una sesión RPC por CWD.",
 	);
+});
+
+bot.command("cerrar", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const text = ctx.message?.text ?? "";
+	// /cerrar <id> <reason> — reason is everything after the ID
+	const match = text.match(/^\/cerrar\s+(\S+)\s+(.+)$/s);
+	if (!match) {
+		await ctx.reply(
+			"Uso: /cerrar <id> <razón>\n" +
+				"La razón es obligatoria.\n" +
+				"Ejemplo: /cerrar bf-idu-pi-v2:abc123 Fixed the duplicate switch.",
+		);
+		return;
+	}
+	const [, findingId, reason] = match;
+	try {
+		const stateRoot = activeProjectStateRoot();
+		if (!stateRoot) {
+			await ctx.reply("Error: no hay proyecto activo.");
+			return;
+		}
+		const labDbPath = join(stateRoot, "lab.db");
+		const actor = `telegram:${ctx.from?.username ?? "unknown"}`;
+		const result = updateFindingStatus(
+			labDbPath,
+			findingId,
+			"fixed",
+			actor,
+			reason,
+		);
+		const msg = formatFindingCloseMessage({
+			findingId: result.findingId,
+			title: result.title,
+			filePath: result.filePath,
+			note: result.note,
+			oldStatus: result.oldStatus,
+			newStatus: result.newStatus,
+		});
+		await ctx.reply(msg ?? "Hallazgo cerrado.");
+	} catch (e) {
+		await ctx.reply(
+			`Error: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
 });
 
 async function sendPendingUiResponse(
