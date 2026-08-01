@@ -48,6 +48,13 @@ export type ConsultInput = {
 	role: IduModelRoleId;
 	question: string;
 	context?: string;
+	/**
+	 * "Where did I leave off" block built by the code (not the LLM).
+	 * Local tables + Engram narrative. Injected between the profile
+	 * summary and the question so the supervisor sees recent verdicts
+	 * before counting. #415.
+	 */
+	memory?: string;
 	promptForRole: (
 		role: IduModelRoleId,
 		message: string,
@@ -238,6 +245,10 @@ function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {
 			`rol-id: ${profile.rolId}`,
 			``,
 		);
+	}
+
+	if (input.memory && input.memory.trim().length > 0) {
+		sections.push(`## Previous context`, input.memory.trim(), ``);
 	}
 
 	sections.push(`## Question`, input.question, ``);

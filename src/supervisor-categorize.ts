@@ -22,6 +22,7 @@
  */
 
 import { consultSupervisor, type ConsultResult } from "./supervisor-consult.js";
+import { buildSupervisorMemory } from "./supervisor-memory.js";
 import { appendInjection, type Injection } from "./injection-store.js";
 import type { SensorMatch } from "./sensors.js";
 import type { PromptForRoleResult } from "./agent-router.js";
@@ -277,6 +278,7 @@ CRITICAL: respond with ONLY one line in the format "N critical, M medium, K low"
 		role: "supervisor-main",
 		question,
 		context,
+		memory: buildSupervisorMemory({ stateRoot: input.stateRoot }),
 		promptForRole: input.promptForRole,
 		now,
 	});
