@@ -49,10 +49,11 @@ export type ConsultInput = {
 	question: string;
 	context?: string;
 	/**
-	 * "Where did I leave off" block built by the code (not the LLM).
-	 * Local tables + Engram narrative. Injected between the profile
-	 * summary and the question so the supervisor sees recent verdicts
-	 * before counting. #415.
+	 * "Where did I leave off" block built by the code from three
+	 * sources: recent verdicts (finding_status_events), open findings
+	 * summary (bug_findings), and Engram narrative. Injected as
+	 * `## Previous context` sections between the profile summary and
+	 * the question. #415.
 	 */
 	memory?: string;
 	promptForRole: (
@@ -227,7 +228,7 @@ export async function consultSupervisor(
 	return consultResult;
 }
 
-function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {
+export function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {
 	const profile = safeLoadProfile(input.role);
 	const sections: string[] = [
 		`# Role: ${input.role}`,

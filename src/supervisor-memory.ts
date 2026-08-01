@@ -2,9 +2,9 @@
  * supervisor-memory.ts — builds the "where did I leave off" context
  * that the supervisor receives on each wake-up.
  *
- * Two sources, one block:
- *   1. finding_status_events — what was decided and why (local, fast)
- *   2. Engram CLI — narrative between sessions (local, fast)
+ * Two sources, one block, CODE-driven:
+ *   1. finding_status_events — recent verdicts with reasons (local DB)
+ *   2. Engram CLI — narrative between sessions (local CLI)
  *
  * Both are CODE-driven, not LLM-driven. The code queries and formats;
  * the model receives the result in the prompt. Never the pattern from
@@ -13,6 +13,13 @@
  * #414 trap: each role's clone has origin pointing to a local path.
  * Engram resolves project by git remote — from inside a clone, it
  * can't find idu-pi. The CLI --project flag overrides this.
+ *
+ * Budget: 2000 chars. This is MODEL INPUT context (the supervisor
+ * prompt), not a Telegram message. supervisor_context_pack handles
+ * 10000 chars total. Asking for 3 Engram memories + 5 verdicts + an
+ * open-findings summary fits comfortably in 2000 with room for all to
+ * survive. The earlier 400-char budget came from a phone-reading
+ * criterion — wrong budget for the wrong consumer.
  */
 
 import { execFileSync } from "node:child_process";
@@ -20,15 +27,19 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const MEMORY_BUDGET_CHARS = 400;
+const MEMORY_BUDGET_CHARS = 2000;
 const ENGRAM_TIMEOUT_MS = 5000;
+const LOCAL_VERDICT_LIMIT = 5;
+
+// ---------------------------------------------------------------------------
+// Engram CLI
+// ---------------------------------------------------------------------------
 
 /**
  * Resolve the Engram binary: PATH first, then the known install
  * location on this machine. Never hardcode the path in call sites.
  */
 function resolveEngramBinary(): string | null {
-	// Try PATH (where/which)
 	try {
 		const cmd = process.platform === "win32" ? "where" : "which";
 		const output = execFileSync(cmd, ["engram"], {
@@ -37,14 +48,12 @@ function resolveEngramBinary(): string | null {
 			stdio: ["ignore", "pipe", "ignore"],
 		}).trim();
 		if (output) {
-			// Take the first match (where can return multiple).
 			return output.split("\n")[0]!.trim();
 		}
 	} catch {
 		// Not in PATH
 	}
 
-	// Try known install location
 	const known =
 		process.platform === "win32"
 			? join(homedir(), "AppData", "Local", "engram", "bin", "engram.exe")
@@ -52,10 +61,6 @@ function resolveEngramBinary(): string | null {
 	return existsSync(known) ? known : null;
 }
 
-/**
- * Query Engram CLI for recent project memories.
- * Returns formatted text or null when Engram is unavailable.
- */
 function queryEngramMemory(
 	projectId: string,
 	query: string,
@@ -78,22 +83,15 @@ function queryEngramMemory(
 		}
 		return output;
 	} catch {
-		// Engram unavailable — proceed without narrative memory
 		return null;
 	}
 }
 
-/**
- * Format the first N lines of Engram output to fit the budget.
- * The raw CLI output includes IDs, timestamps, and metadata — we keep
- * titles and first line of content, drop the rest for compactness.
- */
 function compactEngram(raw: string, maxChars: number): string {
 	const lines = raw.split("\n");
 	const compact: string[] = [];
 	let used = 0;
 	for (const line of lines) {
-		// Keep title lines (contain #) and first content line
 		const isTitle = line.includes("—") && (line.includes("#") || line.includes("["));
 		const isContent = line.trim().startsWith("**") || line.trim().length > 20;
 		if (!isTitle && !isContent) continue;
@@ -104,41 +102,135 @@ function compactEngram(raw: string, maxChars: number): string {
 	return compact.join("\n");
 }
 
+// ---------------------------------------------------------------------------
+// Local tables (finding_status_events, bug_findings)
+// ---------------------------------------------------------------------------
+
+/**
+ * Query the last N transitions from finding_status_events. Excludes
+ * births (WHERE old_status IS NOT NULL). Each row is one verdict with
+ * its reason — the labeled data point #397 measures.
+ *
+ * Uses execFileSync like the codebase's other sqlite3 calls (see
+ * lab-db.js). No dep injection for simplicity — if the DB doesn't
+ * exist yet, return null (no verdicts yet).
+ */
+function queryRecentVerdicts(labDbPath: string): string | null {
+	if (!existsSync(labDbPath)) return null;
+	try {
+		const output = execFileSync(
+			"sqlite3",
+			["-json", labDbPath,
+				`SELECT finding_id, old_status, new_status, actor, substr(note, 1, 120) AS note, created_at FROM finding_status_events WHERE old_status IS NOT NULL ORDER BY created_at DESC LIMIT ${LOCAL_VERDICT_LIMIT};`,
+			],
+			{
+				encoding: "utf8",
+				timeout: 3000,
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		).trim();
+		if (!output || output === "[]") return null;
+		const rows = JSON.parse(output) as Array<{
+			finding_id: string;
+			old_status: string;
+			new_status: string;
+			actor: string;
+			note: string;
+			created_at: string;
+		}>;
+		return rows
+			.map(
+				(r) =>
+					`${r.finding_id}: ${r.old_status}→${r.new_status} (${r.actor}, "${r.note}")`,
+			)
+			.join("\n");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Count open findings by severity. Same exclusion as the orchestrator's
+ * listOpenFindings (status NOT IN fixed/ignored/duplicate).
+ */
+function queryOpenFindingsSummary(labDbPath: string): string | null {
+	if (!existsSync(labDbPath)) return null;
+	try {
+		const output = execFileSync(
+			"sqlite3",
+			["-json", labDbPath,
+				`SELECT severity, COUNT(*) as count FROM bug_findings WHERE project_id = (SELECT project_id FROM bug_findings LIMIT 1) AND status NOT IN ('fixed','ignored','duplicate') GROUP BY severity ORDER BY severity;`,
+			],
+			{
+				encoding: "utf8",
+				timeout: 3000,
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		).trim();
+		if (!output || output === "[]") return null;
+		const rows = JSON.parse(output) as Array<{
+			severity: string;
+			count: number;
+		}>;
+		return rows.map((r) => `${r.count} ${r.severity}`).join(", ");
+	} catch {
+		return null;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Main builder
+// ---------------------------------------------------------------------------
+
 /**
  * Build the supervisor's "previous context" block.
  *
+ * Three sections:
+ *   1. Recent verdicts (from finding_status_events) — what was decided
+ *   2. Open findings summary (from bug_findings) — what's still open
+ *   3. Engram narrative — context between sessions
+ *
  * Project id is derived from the stateRoot path (the last segment,
  * per project-state.ts convention: `<workspace>/projects/<projectId>`).
- * The code extracts it — never the caller — so the wiring doesn't
- * need to know about Engram's project resolution.
  *
- * @returns compact text (~400 chars) for prompt injection, or empty
- * string when Engram is unavailable.
+ * @returns compact text (≤2000 chars) for prompt injection, or empty
+ * string when both sources are empty/unavailable.
  */
 export function buildSupervisorMemory(input: {
 	stateRoot: string;
 }): string {
-	// Extract projectId from stateRoot path.
-	// Normalize backslashes before split for Windows paths.
 	const segments = input.stateRoot.replace(/\\/gu, "/").split("/").filter(Boolean);
 	const projectId = segments[segments.length - 1];
 	if (!projectId) return "";
 
-	const parts: string[] = [];
+	const sections: string[] = [];
+	const labDbPath = join(input.stateRoot, "lab.db");
 
-	// Engram: narrative between sessions
+	// Section 1: recent verdicts
+	const verdicts = queryRecentVerdicts(labDbPath);
+	if (verdicts) {
+		sections.push(`## Recent verdicts\n${verdicts}`);
+	}
+
+	// Section 2: open findings summary
+	const openSummary = queryOpenFindingsSummary(labDbPath);
+	if (openSummary) {
+		sections.push(`## Open findings (excluding fixed/ignored)\n${openSummary}`);
+	}
+
+	// Section 3: Engram narrative
 	const engram = queryEngramMemory(
 		projectId,
 		"finding status decision verdict critical",
 		3,
 	);
 	if (engram) {
-		parts.push(compactEngram(engram, MEMORY_BUDGET_CHARS));
+		sections.push(`## Project narrative (from Engram)\n${compactEngram(engram, MEMORY_BUDGET_CHARS / 3)}`);
 	}
 
-	const result = parts.filter(Boolean).join("\n");
+	let result = sections.join("\n\n");
 	if (result.length > MEMORY_BUDGET_CHARS) {
-		return result.substring(0, MEMORY_BUDGET_CHARS - 1) + "…";
+		result = result.substring(0, MEMORY_BUDGET_CHARS - 1) + "…";
 	}
 	return result;
 }
