@@ -5,6 +5,7 @@ import {
 	sliceTextToBudget,
 	type ContextBudgetUsage,
 } from "./context-budget.js";
+import type { IduModelRoleId } from "./model-assignments.js";
 
 export type AgentLabSpecialty =
 	| "security"
@@ -1826,4 +1827,46 @@ function compactTimestamp(date: Date): string {
 		.toISOString()
 		.replace(/[-:]/gu, "")
 		.replace(/\.\d{3}Z$/u, "Z");
+}
+
+/**
+ * Map an AgentLabSpecialty to its canonical IduModelRoleId.
+ *
+ * This is the SINGLE source of truth for the mapping. Previously two
+ * near-identical switch statements existed (agentLabRoleForSpecialty in
+ * review-requests and mapSpecialtyToRole in review-runner) that
+ * disagreed on token_cost and skill_review — both routings went to
+ * agentlab-general instead of the correct specialized role. The B5 PR2
+ * routing that's the context here is broken because the two paths produce
+ * different role resolutions for the same specialty.
+ *
+ * Mapping rationale:
+ *   token_cost → agentlab-performance: token usage IS a performance
+ *     metric; AgentLabReviewReport has a dedicated tokenCostFindings
+ *     section. Sending it to general skips the specialized performance
+ *     prompt.
+ *   skill_review → agentlab-code-quality: reviewing a skill draft is
+ *     a quality assessment, not a performance one.
+ *
+ * Update both call sites to use this function; remove the two private
+ * duplicates so the next disagreement is impossible by construction.
+ */
+export function specialtyToRole(
+	specialty: AgentLabSpecialty,
+): IduModelRoleId {
+	const map: Record<AgentLabSpecialty, IduModelRoleId> = {
+		security: "agentlab-security",
+		project_understanding: "agentlab-project-understanding",
+		architecture: "agentlab-architecture",
+		database: "agentlab-database",
+		ui_ux: "agentlab-ui-ux",
+		performance: "agentlab-performance",
+		token_cost: "agentlab-performance",
+		code_quality: "agentlab-code-quality",
+		skill_review: "agentlab-code-quality",
+		docs: "agentlab-docs",
+		librarian: "agentlab-librarian",
+		general: "agentlab-general",
+	};
+	return map[specialty];
 }

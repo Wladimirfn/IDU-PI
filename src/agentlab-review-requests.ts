@@ -11,6 +11,7 @@ import {
 	buildAgentLabReviewRequest,
 	buildAgentLabWorkloadEnvelope,
 	mapRiskToAgentLabSpecialties,
+	specialtyToRole,
 	validateAgentLabReviewRequest,
 	type AgentLabReviewRequest,
 	type AgentLabSpecialty,
@@ -1360,7 +1361,7 @@ function resolveCreateTimeModelErrors(
 	const errors: string[] = [];
 	for (const request of requests) {
 		if (request.model) continue;
-		const role = agentLabRoleForSpecialty(request.specialty);
+		const role = specialtyToRole(request.specialty);
 		const resolution = profileForModelRole(
 			assignments,
 			role,
@@ -1380,33 +1381,4 @@ function resolveCreateTimeModelErrors(
 		);
 	}
 	return errors;
-}
-
-function agentLabRoleForSpecialty(
-	specialty: AgentLabSpecialty,
-): import("./model-assignments.js").IduModelRoleId {
-	switch (specialty) {
-		case "security":
-			return "agentlab-security";
-		case "project_understanding":
-			return "agentlab-project-understanding";
-		case "architecture":
-			return "agentlab-architecture";
-		case "database":
-			return "agentlab-database";
-		case "ui_ux":
-			return "agentlab-ui-ux";
-		case "performance":
-		case "token_cost":
-			return "agentlab-performance";
-		case "code_quality":
-		case "skill_review":
-			return "agentlab-code-quality";
-		case "docs":
-			return "agentlab-docs";
-		case "librarian":
-			return "agentlab-librarian";
-		case "general":
-			return "agentlab-general";
-	}
 }
