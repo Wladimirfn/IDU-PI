@@ -84,15 +84,27 @@ describe("updateFindingStatus", () => {
 		);
 	});
 
-	test("same status: idempotent (no error)", () => {
+	test("same status: idempotent (no new event written)", () => {
 		const dbPath = makeTestDb();
 		seedFinding(dbPath, "test-finding-3");
 
-		// First update
+		// First update: new → ignored
 		updateFindingStatus(dbPath, "test-finding-3", "ignored", "operator", "Not relevant.");
-		// Second update to same status — should not throw
-		const result = updateFindingStatus(dbPath, "test-finding-3", "ignored", "operator", "Still not relevant.");
-		strictEqual(result.newStatus, "ignored");
+		const eventsAfterFirst = JSON.parse(
+			runSql(dbPath, `SELECT COUNT(*) as count FROM finding_status_events WHERE finding_id = 'test-finding-3'`),
+		) as Array<{ count: number }>;
+
+		// Second call with SAME status: should be no-op
+		updateFindingStatus(dbPath, "test-finding-3", "ignored", "operator", "Still not relevant.");
+		const eventsAfterSecond = JSON.parse(
+			runSql(dbPath, `SELECT COUNT(*) as count FROM finding_status_events WHERE finding_id = 'test-finding-3'`),
+		) as Array<{ count: number }>;
+
+		strictEqual(
+			eventsAfterSecond[0].count,
+			eventsAfterFirst[0].count,
+			"No new event for same status (idempotent)",
+		);
 	});
 });
 

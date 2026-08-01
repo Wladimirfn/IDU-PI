@@ -598,23 +598,8 @@ export function updateFindingStatus(
 	if (oldStatus === undefined) {
 		throw new Error(`Finding not found: ${findingId}`);
 	}
-	if (oldStatus === newStatus) {
-		// Idempotent — no transition to record.
-	}
 
-	// Update status
-	runSql(
-		dbPath,
-		`UPDATE bug_findings SET status = ${sqlString(newStatus)}, updated_at = datetime('now') WHERE id = ${sqlString(findingId)};`,
-	);
-
-	// Write audit event — ALWAYS, not just at birth.
-	runSql(
-		dbPath,
-		`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note) VALUES (${sqlString(findingId)}, ${sqlString(oldStatus)}, ${sqlString(newStatus)}, ${sqlString(actor)}, ${sqlString(note.trim())});`,
-	);
-
-	// Read finding details for the close message
+	// Read finding details (needed for return value in both paths)
 	const detailOutput = runSql(
 		dbPath,
 		`SELECT title, severity, affected_files FROM bug_findings WHERE id = ${sqlString(findingId)} LIMIT 1;`,
@@ -627,6 +612,32 @@ export function updateFindingStatus(
 	const detail = detailRows[0];
 	const filePath =
 		(JSON.parse(detail?.affected_files || "[]") as string[])[0] ?? "";
+
+	// Idempotent: same status = no-op. A self-transition (ignored→ignored)
+	// is noise for #397, not a labeled data point. Return without writing.
+	if (oldStatus === newStatus) {
+		return {
+			findingId,
+			oldStatus,
+			newStatus,
+			actor,
+			note: note.trim(),
+			title: detail?.title ?? "",
+			filePath,
+			severity: detail?.severity ?? "",
+		};
+	}
+
+	// Transaction: both UPDATE and INSERT succeed or neither does.
+	// Same lesson as #392 — if the event write fails after the status
+	// moves, the reason is lost and the system lies. BEGIN → UPDATE →
+	// INSERT → COMMIT. If INSERT throws, the transaction rolls back.
+	const txSql =
+		`BEGIN;\n` +
+		`UPDATE bug_findings SET status = ${sqlString(newStatus)}, updated_at = datetime('now') WHERE id = ${sqlString(findingId)};\n` +
+		`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note) VALUES (${sqlString(findingId)}, ${sqlString(oldStatus)}, ${sqlString(newStatus)}, ${sqlString(actor)}, ${sqlString(note.trim())});\n` +
+		`COMMIT;`;
+	runSql(dbPath, txSql);
 
 	return {
 		findingId,
