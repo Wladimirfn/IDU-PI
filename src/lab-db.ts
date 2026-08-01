@@ -550,6 +550,107 @@ function readFindingStatus(dbPath: string, id: string): string | undefined {
 	return rows[0]?.status;
 }
 
+/**
+ * Result of a status update. Carries the finding details needed to
+ * render the close message (one source → two destinations: the DB
+ * note and the Telegram message read the same fields).
+ */
+export type FindingStatusUpdate = {
+	findingId: string;
+	oldStatus: string;
+	newStatus: FindingStatus;
+	actor: string;
+	note: string;
+	title: string;
+	filePath: string;
+	severity: string;
+};
+
+/**
+ * Change a finding's status with a MANDATORY reason.
+ *
+ * The reason is the label #397 measures. Without it, a closed finding
+ * is mute data — indistinguishable from "barrido debajo de la
+ * alfombra". The code enforces non-empty; goodwill is not enough.
+ *
+ * Writes BOTH the status update AND a finding_status_events row.
+ * Today lab-db.ts only registers births — this function closes that
+ * gap for every transition.
+ *
+ * Idempotent: if old === new, returns without writing.
+ */
+export function updateFindingStatus(
+	dbPath: string,
+	findingId: string,
+	newStatus: FindingStatus,
+	actor: string,
+	note: string,
+): FindingStatusUpdate {
+	if (!note || !note.trim()) {
+		throw new Error(
+			"Reason is required to change finding status. " +
+				"Without it, the audit trail is mute and #397 cannot measure.",
+		);
+	}
+	initLabDb(dbPath);
+
+	const oldStatus = readFindingStatus(dbPath, findingId);
+	if (oldStatus === undefined) {
+		throw new Error(`Finding not found: ${findingId}`);
+	}
+
+	// Read finding details (needed for return value in both paths)
+	const detailOutput = runSql(
+		dbPath,
+		`SELECT title, severity, affected_files FROM bug_findings WHERE id = ${sqlString(findingId)} LIMIT 1;`,
+	).trim();
+	const detailRows = JSON.parse(detailOutput) as Array<{
+		title: string;
+		severity: string;
+		affected_files: string;
+	}>;
+	const detail = detailRows[0];
+	const filePath =
+		(JSON.parse(detail?.affected_files || "[]") as string[])[0] ?? "";
+
+	// Idempotent: same status = no-op. A self-transition (ignored→ignored)
+	// is noise for #397, not a labeled data point. Return without writing.
+	if (oldStatus === newStatus) {
+		return {
+			findingId,
+			oldStatus,
+			newStatus,
+			actor,
+			note: note.trim(),
+			title: detail?.title ?? "",
+			filePath,
+			severity: detail?.severity ?? "",
+		};
+	}
+
+	// Transaction: both UPDATE and INSERT succeed or neither does.
+	// Same lesson as #392 — if the event write fails after the status
+	// moves, the reason is lost and the system lies. BEGIN → UPDATE →
+	// INSERT → COMMIT. If INSERT throws, the transaction rolls back.
+	const txSql =
+		`BEGIN;\n` +
+		`UPDATE bug_findings SET status = ${sqlString(newStatus)}, updated_at = datetime('now') WHERE id = ${sqlString(findingId)};\n` +
+		`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note) VALUES (${sqlString(findingId)}, ${sqlString(oldStatus)}, ${sqlString(newStatus)}, ${sqlString(actor)}, ${sqlString(note.trim())});\n` +
+		`COMMIT;`;
+	runSql(dbPath, txSql);
+
+	return {
+		findingId,
+		oldStatus,
+		newStatus,
+		actor,
+		note: note.trim(),
+		title: detail?.title ?? "",
+		filePath,
+		severity: detail?.severity ?? "",
+	};
+}
+
 export function listOpenFindings(
 	dbPath: string,
 	projectId: string,
