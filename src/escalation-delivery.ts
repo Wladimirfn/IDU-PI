@@ -536,3 +536,41 @@ export function readLastDelivery(deliveryLogPath: string): string | null {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Finding close message (the return loop)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a close confirmation message for Telegram. Same budget as the
+ * alert (800 chars). One source → two destinations: the note in the DB
+ * and this message read the SAME field. If they diverge, the label lies.
+ *
+ * @returns the formatted message, or null if the finding details are empty.
+ */
+export function formatFindingCloseMessage(input: {
+	findingId: string;
+	title: string;
+	filePath: string;
+	note: string;
+	oldStatus: string;
+	newStatus: string;
+}): string | null {
+	if (!input.title) return null;
+
+	const CLOSE_BUDGET = 800;
+	const emoji = input.newStatus === "fixed" ? "✅" : "🔶";
+
+	let text =
+		`${emoji} [idu-pi] Hallazgo ${input.newStatus}\n` +
+		`   → ${input.filePath} — ${input.title}\n` +
+		`  ${input.findingId}\n` +
+		`  Razón: ${input.note}`;
+
+	// Hard cut at budget (same rule as alert messages)
+	if (text.length > CLOSE_BUDGET) {
+		text = text.substring(0, CLOSE_BUDGET - 1) + "…";
+	}
+
+	return text;
+}
+
