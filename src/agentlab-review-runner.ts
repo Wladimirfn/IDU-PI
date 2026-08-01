@@ -21,6 +21,7 @@ import type { LabRunRecord } from "./lab-reports.js";
 import {
 	buildAgentLabWorkloadEnvelope,
 	formatAgentLabReviewRequestForPrompt,
+	specialtyToRole,
 	validateAgentLabReportAgainstSupervisorContract,
 	validateAgentLabReviewRequest,
 	type AgentLabFinding,
@@ -307,7 +308,7 @@ export async function runAgentLabReviewRequest(
 		const result = usePromptForRole
 			? await Promise.race([
 					input.router.promptForRole(
-						input.role ?? mapSpecialtyToRole(input.request.specialty),
+						input.role ?? specialtyToRole(input.request.specialty),
 						prompt,
 						{
 							projectId: input.request.projectId,
@@ -1868,41 +1869,6 @@ function countRuns(
 
 export function sanitizeAgentLabSummary(output: string): string {
 	return summarizeOutput(cleanAgentOutput(output), 300);
-}
-
-/**
- * Map an AgentLab review specialty to the corresponding `IduModelRoleId`
- * for B5 PR2 wiring. Defaults to `agentlab-general` for unknown
- * specialties so the runner never blocks on missing mappings.
- */
-function mapSpecialtyToRole(
-	specialty: AgentLabReviewRequest["specialty"],
-): import("./model-assignments.js").IduModelRoleId {
-	switch (specialty) {
-		case "security":
-			return "agentlab-security";
-		case "database":
-			return "agentlab-database";
-		case "architecture":
-			return "agentlab-architecture";
-		case "code_quality":
-			return "agentlab-code-quality";
-		case "ui_ux":
-			return "agentlab-ui-ux";
-		case "performance":
-			return "agentlab-performance";
-		case "project_understanding":
-			return "agentlab-project-understanding";
-		case "docs":
-			return "agentlab-docs";
-		case "librarian":
-			return "agentlab-librarian";
-		case "general":
-		case "skill_review":
-		case "token_cost":
-		default:
-			return "agentlab-general";
-	}
 }
 
 function legacySummary(output: string): string {
