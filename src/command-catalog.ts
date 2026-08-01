@@ -536,6 +536,12 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/queue_reject task-abc"],
 	},
 	{
+		command: "cerrar",
+		description: "Cerrar un hallazgo como fixed con razón obligatoria",
+		help: "/cerrar <id> <razón> - cerrar hallazgo; la razón es obligatoria y queda en finding_status_events",
+		usage: ["/cerrar bf-idu-pi-v2:abc123 Fixed the duplicate switch."],
+	},
+	{
 		command: "config",
 		description: "Configuración guiada del proyecto",
 		help: "/config [doctor|init_workspace|init_assets|init_project_config|inspect_project_map|scan_project_map|suggest_project_flows|draft_project_flows|review_project_flows_draft|apply_project_flows_draft|ai_draft_project_blueprint|ai_draft_project_flows|review_ai_blueprint_draft|review_ai_flows_draft|skills_sync|db_init|sync_commands] - configuración guiada del bridge/proyecto",
