@@ -278,3 +278,124 @@ test("promptForRole reuses the existing profile runtime when the assignment is a
 	assert.equal(sink[0]?.status, "success");
 	assert.equal(sink[0]?.model, "codex");
 });
+
+// ---------------------------------------------------------------------------
+// #414: per-role workspace isolation in clone mode
+// ---------------------------------------------------------------------------
+
+/**
+ * Router in clone mode with an injectable resolveWorkspace.
+ * The fake resolver records what profileId it receives and returns a
+ * deterministic path per role — proving the session gets the right cwd.
+ */
+function makeCloneRouter() {
+	const created: Array<{ options: PiRpcOptions; session: FakeSession }> = [];
+	const resolverCalls: Array<{
+		projectId: string;
+		targetCwd: string;
+		profileId: string;
+	}> = [];
+	const router = new AgentRouter({
+		piBin: "node",
+		basePiArgs: ["pi-cli.js"],
+		profiles: [
+			{ id: "default", label: "Pi default", provider: "pi", piArgs: [] },
+			{
+				id: "codex",
+				label: "GPT Codex",
+				provider: "pi",
+				piArgs: ["--model", "codex"],
+			},
+		],
+		defaultProjectId: "project-a",
+		defaultCwd: "C:/project-a",
+		workspaceMode: "clone",
+		resolveWorkspace: (projectId, targetCwd, profile) => {
+			resolverCalls.push({ projectId, targetCwd, profileId: profile.id });
+			return `C:/workspaces/${projectId}__${profile.id}`;
+		},
+		createSession: (options) => {
+			const session = new FakeSession(options.cwd, options.piArgs ?? []);
+			created.push({ options, session });
+			return session;
+		},
+	});
+	return { router, created, resolverCalls };
+}
+
+test("#414: direct-model role in clone mode gets an isolated workspace per role", async () => {
+	const root = tempStateRoot();
+	writeAssignments(root, {
+		"agentlab-security": "opencode-go/deepseek-v4-pro",
+	});
+	const { router, created, resolverCalls } = makeCloneRouter();
+
+	await router.promptForRole("agentlab-security", "audit", {
+		projectId: "project-a",
+		stateRoot: root,
+	});
+
+	// The resolver was called with the ROLE as profile.id — not profiles[0].
+	assert.equal(resolverCalls.length, 1);
+	assert.equal(resolverCalls[0]?.profileId, "agentlab-security");
+
+	// The session received the workspace cwd from the resolver.
+	assert.equal(created.length, 1);
+	assert.equal(
+		created[0]?.session.cwd,
+		"C:/workspaces/project-a__agentlab-security",
+	);
+});
+
+test("#414: two roles get two distinct workspaces (not shared)", async () => {
+	const root = tempStateRoot();
+	writeAssignments(root, {
+		"agentlab-security": "opencode-go/deepseek-v4-pro",
+		"agentlab-database": "opencode-go/deepseek-v4-pro",
+	});
+	const { router, created, resolverCalls } = makeCloneRouter();
+
+	await router.promptForRole("agentlab-security", "sec audit", {
+		projectId: "project-a",
+		stateRoot: root,
+	});
+	await router.promptForRole("agentlab-database", "db audit", {
+		projectId: "project-a",
+		stateRoot: root,
+	});
+
+	// Two resolver calls, two different profileIds.
+	assert.equal(resolverCalls.length, 2);
+	assert.equal(resolverCalls[0]?.profileId, "agentlab-security");
+	assert.equal(resolverCalls[1]?.profileId, "agentlab-database");
+
+	// Two sessions with DIFFERENT cwds.
+	assert.equal(created.length, 2);
+	assert.notEqual(
+		created[0]?.session.cwd,
+		created[1]?.session.cwd,
+		"Two roles must have different workspace paths",
+	);
+});
+
+test("#414: assigned profile in clone mode already worked (regression guard)", async () => {
+	const root = tempStateRoot();
+	writeAssignments(root, {
+		// Assign to the "codex" profile (not profiles[0]) — clone path.
+		"agentlab-security": "codex",
+	});
+	const { router, created, resolverCalls } = makeCloneRouter();
+
+	await router.promptForRole("agentlab-security", "audit", {
+		projectId: "project-a",
+		stateRoot: root,
+	});
+
+	// The assigned branch passes the real profile ("codex") to workspaceFor.
+	assert.equal(resolverCalls.length, 1);
+	assert.equal(resolverCalls[0]?.profileId, "codex");
+	assert.equal(
+		created[0]?.session.cwd,
+		"C:/workspaces/project-a__codex",
+	);
+});
