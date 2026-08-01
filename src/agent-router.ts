@@ -336,7 +336,7 @@ export class AgentRouter {
 				role,
 			};
 		}
-		const resolved = resolveSessionForRole(resolution, this);
+		const resolved = resolveSessionForRole(resolution, this, role);
 		try {
 			const result = await resolved.runtime.session.prompt(
 				message,
@@ -491,12 +491,17 @@ export class AgentRouter {
 	 * role-based call is one-off and should not touch the active
 	 * runtime the user has selected via Telegram.
 	 */
-	private createRoleSession(piArgs: string[]): AgentSession {
-		const workspace = this.workspaceFor(
-			this.projectId,
-			this.cwd,
-			this.options.profiles[0]!,
-		);
+	private createRoleSession(
+		piArgs: string[],
+		cwdOverride?: string,
+	): AgentSession {
+		const workspace = cwdOverride
+			? { cwd: cwdOverride }
+			: this.workspaceFor(
+					this.projectId,
+					this.cwd,
+					this.options.profiles[0]!,
+				);
 		return this.createSession({
 			piBin: this.options.piBin,
 			piArgs: [...this.options.basePiArgs, ...piArgs],
@@ -547,11 +552,17 @@ type DirectModelResolution = {
 function resolveSessionForRole(
 	resolution: AssignedResolution | DirectModelResolution,
 	router: AgentRouter,
+	role: IduModelRoleId,
 ): ResolvedRoleSession {
 	if (resolution.source === "direct-model") {
 		const parsed = parseModelAssignment(resolution.modelId);
 		return {
-			runtime: createDirectModelRuntime(router, parsed.provider, parsed.model),
+			runtime: createDirectModelRuntime(
+				router,
+				parsed.provider,
+				parsed.model,
+				role,
+			),
 			provider: parsed.provider,
 			model: parsed.model,
 			ephemeral: true,
@@ -570,28 +581,36 @@ function createDirectModelRuntime(
 	router: AgentRouter,
 	provider: string,
 	model: string,
+	role: IduModelRoleId,
 ): AgentRuntime {
-	const session = router["createRoleSession"]([
-		"--provider",
-		provider,
-		"--model",
-		model,
-	]);
+	// Virtual profile with the ROLE as id — becomes the clone directory
+	// name (e.g. workspaces/pi-telegram-bridge__agentlab-security).
+	// Per-role isolation, not per-model: 13 roles get 13 clones even
+	// when they share the same model. Two workers in the same directory
+	// isn't isolation — ensureCloneWorkspace runs reset --hard + clean
+	// -fd on every call, so role B's prep would delete role A's worktree.
+	const virtualProfile: AgentProfile = {
+		id: role,
+		label: `Direct model: ${provider}/${model}`,
+		provider: "pi",
+		piArgs: ["--provider", provider, "--model", model],
+	};
+	// Compute workspace ONCE with the role-based profile.
 	const workspace = router["workspaceFor"](
 		router["projectId"],
 		router["cwd"],
-		router["profiles"][0]!,
+		virtualProfile,
+	);
+	// Create session with the SAME cwd — no second workspaceFor call.
+	const session = router["createRoleSession"](
+		["--provider", provider, "--model", model],
+		workspace.cwd,
 	);
 	return {
 		projectId: router["projectId"],
 		targetCwd: router["cwd"],
 		cwd: workspace.cwd,
-		profile: {
-			id: "__agent_router_role_runtime__",
-			label: "agentRouter role runtime",
-			provider: "pi",
-			piArgs: ["--provider", provider, "--model", model],
-		},
+		profile: virtualProfile,
 		modePrefix: "",
 		workspaceKind: workspace.kind,
 		session,
