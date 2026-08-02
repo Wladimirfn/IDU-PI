@@ -48,6 +48,14 @@ export type ConsultInput = {
 	role: IduModelRoleId;
 	question: string;
 	context?: string;
+	/**
+	 * "Where did I leave off" block built by the code from three
+	 * sources: recent verdicts (finding_status_events), open findings
+	 * summary (bug_findings), and Engram narrative. Injected as
+	 * `## Previous context` sections between the profile summary and
+	 * the question. #415.
+	 */
+	memory?: string;
 	promptForRole: (
 		role: IduModelRoleId,
 		message: string,
@@ -220,7 +228,7 @@ export async function consultSupervisor(
 	return consultResult;
 }
 
-function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {
+export function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {
 	const profile = safeLoadProfile(input.role);
 	const sections: string[] = [
 		`# Role: ${input.role}`,
@@ -238,6 +246,10 @@ function buildConsultPrompt(input: ConsultInput, rail: RoleRail): string {
 			`rol-id: ${profile.rolId}`,
 			``,
 		);
+	}
+
+	if (input.memory && input.memory.trim().length > 0) {
+		sections.push(`## Previous context`, input.memory.trim(), ``);
 	}
 
 	sections.push(`## Question`, input.question, ``);
