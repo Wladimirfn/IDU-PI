@@ -1065,7 +1065,7 @@ export function createCliRuntime(
 		profiles: config.agentProfiles,
 		defaultProjectId: activeProject.id,
 		defaultCwd: activeProject.path,
-		workspaceRoot: runtimeWorkspaceRoot,
+		workspaceRoot: config.agentWorkspaceRoot,
 		workspaceMode: config.agentWorkspaceMode,
 	});
 	const modelAssignments = projectStatePaths
@@ -1379,13 +1379,19 @@ export function createCliRuntime(
 				projectPath: activeProject.path,
 				stateRoot: runtimeStateRoot,
 				changedFiles: preflightInput.changedFiles,
-				promptForRole: (role, message, options) =>
-					agentRouter.promptForRole(role, message, {
+				promptForRole: (role, message, options) => {
+					if (process.env.IDU_PI_WORKSPACE_DIAGNOSTICS === "1") {
+						console.error(
+							`[workspace-diagnostic] ${JSON.stringify({ event: "cli-cron-preflight-promptForRole", role })}`,
+						);
+					}
+					return agentRouter.promptForRole(role, message, {
 						projectId: activeProject.id,
 						stateRoot: runtimeStateRoot,
 						invocationSink:
 							labDbRepository.appendInvocation.bind(labDbRepository),
-					}),
+					});
+				},
 			});
 		},
 		checkUserEscalation: async (escalationInput) => {

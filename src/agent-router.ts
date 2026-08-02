@@ -56,6 +56,16 @@ type WorkspaceSyncer = (
 	profileId: string,
 ) => string;
 
+function logWorkspaceDiagnostic(
+	event: string,
+	details: Record<string, string>,
+): void {
+	if (process.env.IDU_PI_WORKSPACE_DIAGNOSTICS !== "1") return;
+	console.error(
+		`[workspace-diagnostic] ${JSON.stringify({ event, ...details })}`,
+	);
+}
+
 function slug(input: string): string {
 	return (
 		input
@@ -460,10 +470,16 @@ export class AgentRouter {
 		profile: AgentProfile,
 	): { cwd: string; kind: "direct" | "clone" } {
 		const defaultProfileId = this.options.profiles[0].id;
-		if (
-			(this.options.workspaceMode ?? "direct") !== "clone" ||
-			profile.id === defaultProfileId
-		) {
+		const workspaceMode = this.options.workspaceMode ?? "direct";
+		if (workspaceMode !== "clone" || profile.id === defaultProfileId) {
+			logWorkspaceDiagnostic("workspaceFor", {
+				workspaceMode,
+				profileId: profile.id,
+				defaultProfileId,
+				kind: "direct",
+				reason:
+					workspaceMode !== "clone" ? "mode-not-clone" : "default-profile",
+			});
 			return { cwd: targetCwd, kind: "direct" };
 		}
 		const cwd = this.resolveWorkspace
@@ -474,6 +490,13 @@ export class AgentRouter {
 					targetCwd,
 					profile.id,
 				);
+		logWorkspaceDiagnostic("workspaceFor", {
+			workspaceMode,
+			profileId: profile.id,
+			defaultProfileId,
+			kind: "clone",
+			reason: this.resolveWorkspace ? "resolver" : "sync-workspace",
+		});
 		return { cwd, kind: "clone" };
 	}
 
@@ -583,6 +606,7 @@ function createDirectModelRuntime(
 	model: string,
 	role: IduModelRoleId,
 ): AgentRuntime {
+	logWorkspaceDiagnostic("createDirectModelRuntime", { role });
 	// Virtual profile with the ROLE as id — becomes the clone directory
 	// name (e.g. workspaces/pi-telegram-bridge__agentlab-security).
 	// Per-role isolation, not per-model: 13 roles get 13 clones even
