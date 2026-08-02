@@ -1065,7 +1065,7 @@ export function createCliRuntime(
 		profiles: config.agentProfiles,
 		defaultProjectId: activeProject.id,
 		defaultCwd: activeProject.path,
-		workspaceRoot: runtimeWorkspaceRoot,
+		workspaceRoot: config.agentWorkspaceRoot,
 		workspaceMode: config.agentWorkspaceMode,
 	});
 	const modelAssignments = projectStatePaths
