@@ -3,17 +3,15 @@ import { execFileSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
-	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createCliRuntime } from "../src/cli.js";
+import { makeTempDir } from "./helpers/temp.js";
 
 test("#423: CLI role clones use the global agent workspace root", async () => {
-	const root = mkdtempSync(join(tmpdir(), "idu-cli-agent-workspace-"));
+	const root = makeTempDir("idu-cli-agent-workspace-");
 	const projectPath = join(root, "project");
 	const workspaceRoot = join(root, "bridge-agents");
 	const stateRoot = join(workspaceRoot, "projects", "project-a");
@@ -101,6 +99,5 @@ test("#423: CLI role clones use the global agent workspace root", async () => {
 			if (value === undefined) delete process.env[key];
 			else process.env[key] = value;
 		}
-		rmSync(root, { recursive: true, force: true });
 	}
 });
