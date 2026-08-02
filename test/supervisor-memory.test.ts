@@ -5,40 +5,28 @@
 // real Engram calls); the prompt injection is tested directly via the
 // exported buildConsultPrompt.
 
-import { test, describe, after } from "node:test";
+import { test, describe } from "node:test";
 import { strictEqual, ok } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildSupervisorMemory } from "../src/supervisor-memory.js";
 import { buildConsultPrompt } from "../src/supervisor-consult.js";
+import { makeTempDir } from "./helpers/temp.js";
 
-const tempRoots: string[] = [];
 /**
  * Create a stateRoot shaped like production: the last path segment is
  * `projectId`, matching production's
  * `<workspace>/projects/<projectId>` convention. Tests that filter
  * by project_id use this to plant a real match. The uniqueness
- * suffix lives in the *parent* dir, not the projectId segment.
+ * suffix lives in the tracked parent dir, not the projectId segment.
  */
 function tempStateRoot(projectId: string): string {
-	const suffix = Math.random().toString(36).slice(2, 8);
-	const parent = join(tmpdir(), `supervisor-memory-${suffix}`);
-	mkdirSync(parent, { recursive: true });
+	const parent = makeTempDir("supervisor-memory-");
 	const dir = join(parent, projectId);
 	mkdirSync(dir, { recursive: true });
-	tempRoots.push(dir);
 	return dir;
 }
-after(async () => {
-	await Promise.all(
-		tempRoots.splice(0).map((dir) =>
-			rm(dir, { recursive: true, force: true }),
-		),
-	);
-});
 // No-op Engram mock: tests don't hit the real Engram CLI.
 function engramFnNull(): null {
 	return null;
