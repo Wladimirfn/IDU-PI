@@ -446,13 +446,20 @@ describe("escalation-delivery readLastDelivery", () => {
 		strictEqual(readLastDelivery(path), "2026-07-31T16:37:38Z");
 	});
 
-	test("corrupt last line → null", () => {
+	test("partial trailing line → returns previous parseable deliveredAt", () => {
 		const dir = makeTempDir("delivery-last-corrupt-");
 		const path = join(dir, "delivery-log.jsonl");
 		writeFileSync(path, [
 			JSON.stringify({ escalationId: "esc-1", deliveredAt: "2026-07-31T10:00:00Z" }),
-			"corrupt line",
-		].join("\n") + "\n", "utf8");
+			'{"escalationId":"esc-2","deliveredAt":',
+		].join("\n"), "utf8");
+		strictEqual(readLastDelivery(path), "2026-07-31T10:00:00Z");
+	});
+
+	test("no parseable entries → null", () => {
+		const dir = makeTempDir("delivery-last-corrupt-only-");
+		const path = join(dir, "delivery-log.jsonl");
+		writeFileSync(path, "corrupt line\n{\"deliveredAt\":", "utf8");
 		strictEqual(readLastDelivery(path), null);
 	});
 });
