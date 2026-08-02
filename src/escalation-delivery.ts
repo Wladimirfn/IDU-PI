@@ -524,16 +524,17 @@ export function readLastDelivery(deliveryLogPath: string): string | null {
 	} catch {
 		return null;
 	}
-	const lines = raw.split("\n").filter((l) => l.trim());
-	if (lines.length === 0) return null;
-	try {
-		const last = JSON.parse(lines[lines.length - 1]) as {
-			deliveredAt?: string;
-		};
-		return last.deliveredAt ?? null;
-	} catch {
-		return null;
+	const lines = raw.split("\n");
+	for (let index = lines.length - 1; index >= 0; index--) {
+		if (!lines[index].trim()) continue;
+		try {
+			const entry = JSON.parse(lines[index]) as { deliveredAt?: unknown };
+			if (typeof entry.deliveredAt === "string") return entry.deliveredAt;
+		} catch {
+			continue;
+		}
 	}
+	return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -573,4 +574,3 @@ export function formatFindingCloseMessage(input: {
 
 	return text;
 }
-
