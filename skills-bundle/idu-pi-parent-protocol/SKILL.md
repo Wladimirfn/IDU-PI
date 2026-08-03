@@ -70,8 +70,25 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 | `idu_orchestrator_procedure` | official procedure for a given purpose |
 | `idu_agentlab_request_create` | create an audit-only request |
 | `idu_agentlab_review_run` | run an audit (orchestrator explicit) |
+| `idu_agentlab_review_status` | read AgentLab review status |
 | `idu_project_enroll` | register a project (see ⚠️ warning below) |
 | `idu_project_status` | inspect a registered project (path + stateRoot) |
+| `idu_birth_status` | birth pipeline status (also auto-fired by `idu-supervisor-tick.ps1` → `idu-automaticov1 cycle`) |
+| `idu_birth_general_spec` | write the general spec for a birth project |
+| `idu_birth_prototype_master` | manage the birth prototype (`action`: draft / approve / reject) |
+| `idu_birth_repo_plan` | produce the repo plan for a birth project |
+| `idu_birth_validate` | run birth validation; chains bibliotecario discovery + status |
+| `idu_birth_bibliotecario_discovery` | discover project sources for the birth pipeline (advisory; not auto-fired) |
+| `idu_supervisor_consult` | ask the supervisor a question (multi-consumer: CLI, sensors, MCP) |
+| `idu_supervisor_tick` | run a supervisor tick (manual via CLI / Telegram bot; the scheduled tick does not call this) |
+| `idu_semantic_audit_status` | read the semantic audit status (advisory; not auto-fired) |
+| `idu_objective_status` | read the objective injection status (also read by the PISO envelope gate) |
+| `idu_master_plan_create` | create a new master plan |
+| `idu_task` | fetch a queued task |
+| `idu_genesis_mission_draft` | draft a genesis mission from project blueprints |
+| `idu_genesis_mission_confirm` | confirm a drafted genesis mission |
+| `idu_ack_advisory` | acknowledge a pending advisory injection (`injectionId` + `reason`) |
+| `idu_skill_draft_from_lessons` | draft a skill from past lessons (auto-fired by `idu-automaticov1 cycle` only when `--allow-skill-proposals` is set) |
 
 ## ⚠️ Enrolling a project without orphaning the confirmed state
 
