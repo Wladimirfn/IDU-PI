@@ -107,6 +107,38 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 | `idu_source_skill_candidates_review` | review skill candidates (`pathOrLatest`) |
 | `idu_external_source_recommend` | recommend external sources for a task (`request`, `domains`, `language`, `framework`, `maxMatches`) |
 | `idu_external_intelligence_report` | external intelligence report (`sourceIds`) |
+| `idu_activate` | enable idu-pi guardrails for a project (CLI/MCP) |
+| `idu_deactivate` | disable idu-pi guardrails for a project |
+| `idu_bootstrap_project` | bootstrap a project (`allowCreateDrafts`, `activate`) |
+| `idu_project_reset_state` | reset a project's runtime state (`confirm`) |
+| `idu_architectural_pruning_plan` | build the architectural pruning plan (4+ static candidates) |
+| `idu_context_pruning_advisory` | build the context pruning advisory report (501-line impl reading context events) |
+| `idu_autonomous_alerts_control` | enable/disable/pause the autonomous alert engine (`action`, `domain`, `pauseMinutes`, `reason`) |
+| `idu_bibliotecario_init` | initialize the bibliotecario for a project |
+| `idu_birth_existing_scan` | scan an existing project for birth-readiness |
+| `idu_birth_general_spec_derive` | derive general spec fragments from project files |
+| `idu_continuation_proposal` | build a continuation proposal (`request`, `autonomyWindowMinutes`, `maxScope`) |
+| `idu_execution_director_tick` | run an execution director tick |
+| `idu_automaticov1_cycle` | run an automaticov1 cycle (`allowTaskCreation`, `allowExternalFetch`, `allowSkillProposals`) |
+| `idu_hygiene_migrate` | migrate the hygiene layout (Layout A ↔ B) |
+| `idu_hygiene_sweep` | run a hygiene sweep |
+| `idu_master_plan_reject` | reject a master plan draft (`selector`, `reason`) |
+| `idu_model_invocation_status` | read the model invocation log status (`role`, `limit`) |
+| `idu_next_advisory_action` | build the next advisory action (`request`, `mode`, `maxScope`) |
+| `idu_outbox_prune` | prune the proposal outbox (`olderThanDays`, `confirm`) |
+| `idu_plan_snapshot` | read a plan snapshot by `selector` |
+| `idu_proposal_detail` | read a proposal by `id` |
+| `idu_queue_complete` | mark a queue task done (`taskId`, `evidence`) |
+| `idu_queue_detail` | read the queue tasks |
+| `idu_role_engine_control` | role engine control (`action`, `role`) |
+| `idu_role_engine_status` | read the role engine config status |
+| `idu_skill_for_task` | load skills for a task (`request`) |
+| `idu_skill_rating` | rate a skill proposal (`proposalId`, `score`) |
+| `idu_supervisor_cron_plan` | build the supervisor cron plan |
+| `idu_supervisor_responses` | read supervisor response history (`limit`) |
+| `idu_supervisor_self_maintenance_advisory` | build the runtime self-maintenance report |
+| `idu_supervisor_trigger` | supervisor trigger control (`action`) |
+| `idu_trigger_engine` | trigger engine control (`action`) |
 
 ## ⚠️ Enrolling a project without orphaning the confirmed state
 
