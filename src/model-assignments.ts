@@ -458,9 +458,16 @@ export function profileModelInventory(
 	};
 }
 
-export function readGentleModelRouting(cwd?: string): string[] {
+export function readGentleModelRouting(
+	cwd?: string,
+	env: NodeJS.ProcessEnv = process.env,
+): string[] {
+	const overridePath = env.IDU_PI_GENTLE_MODELS_PATH?.trim();
+	const homePath = join(homedir(), ".pi", "gentle-ai", "models.json");
+	const homePaths =
+		overridePath === "" ? [] : overridePath ? [overridePath] : [homePath];
 	const paths = [
-		join(homedir(), ".pi", "gentle-ai", "models.json"),
+		...homePaths,
 		...(cwd ? [join(cwd, ".pi", "gentle-ai", "models.json")] : []),
 	];
 	const modelIds: string[] = [];
