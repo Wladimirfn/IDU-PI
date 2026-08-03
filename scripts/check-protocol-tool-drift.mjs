@@ -38,40 +38,7 @@ const PROTOCOL = "skills-bundle/idu-pi-parent-protocol/SKILL.md";
 // tool becomes documented and is removed); it cannot grow during normal
 // maintenance. Retiring a registry entry is fine: the staleAllowlist check
 // at the bottom will print a warning to remove it.
-const INTENTIONALLY_UNDOCUMENTED = new Set([
-	"idu_activate",
-	"idu_architectural_pruning_plan",
-	"idu_automaticov1_cycle",
-	"idu_autonomous_alerts_control",
-	"idu_bibliotecario_init",
-	"idu_birth_existing_scan",
-	"idu_birth_general_spec_derive",
-	"idu_bootstrap_project",
-	"idu_context_pruning_advisory",
-	"idu_continuation_proposal",
-	"idu_deactivate",
-	"idu_execution_director_tick",
-	"idu_hygiene_migrate",
-	"idu_hygiene_sweep",
-	"idu_master_plan_reject",
-	"idu_model_invocation_status",
-	"idu_next_advisory_action",
-	"idu_outbox_prune",
-	"idu_plan_snapshot",
-	"idu_project_reset_state",
-	"idu_proposal_detail",
-	"idu_queue_complete",
-	"idu_queue_detail",
-	"idu_role_engine_control",
-	"idu_role_engine_status",
-	"idu_skill_for_task",
-	"idu_skill_rating",
-	"idu_supervisor_cron_plan",
-	"idu_supervisor_responses",
-	"idu_supervisor_self_maintenance_advisory",
-	"idu_supervisor_trigger",
-	"idu_trigger_engine",
-]);
+const INTENTIONALLY_UNDOCUMENTED = new Set([]);
 
 // Names the protocol mentions ON PURPOSE as things that do NOT exist — its
 // "never invent a tool name" section teaches by counter-example:
