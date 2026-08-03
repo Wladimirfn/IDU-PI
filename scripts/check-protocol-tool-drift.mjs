@@ -30,7 +30,82 @@ const PROTOCOL = "skills-bundle/idu-pi-parent-protocol/SKILL.md";
 // Registered tools the protocol intentionally does not document. Adding a
 // name here is a decision ("the orchestrator should not reach for this"),
 // not a way to silence the check. Keep it sorted.
-const INTENTIONALLY_UNDOCUMENTED = new Set([]);
+//
+// This set is the ratchet for #434. The list was frozen on 2026-08-03 with
+// 66 entries — the entire documented-vs-registered gap at that moment. Any
+// new tool that registers without being documented AND without being added
+// here will fail CI under --strict-coverage. The list can only shrink (a
+// tool becomes documented and is removed); it cannot grow during normal
+// maintenance. Retiring a registry entry is fine: the staleAllowlist check
+// at the bottom will print a warning to remove it.
+const INTENTIONALLY_UNDOCUMENTED = new Set([
+	"idu_ack_advisory",
+	"idu_activate",
+	"idu_agentlab_review_status",
+	"idu_architectural_pruning_plan",
+	"idu_automaticov1_cycle",
+	"idu_autonomous_alerts_control",
+	"idu_bibliotecario_init",
+	"idu_birth_bibliotecario_discovery",
+	"idu_birth_existing_scan",
+	"idu_birth_general_spec",
+	"idu_birth_general_spec_derive",
+	"idu_birth_prototype_master",
+	"idu_birth_repo_plan",
+	"idu_birth_status",
+	"idu_birth_validate",
+	"idu_bootstrap_project",
+	"idu_context_pruning_advisory",
+	"idu_continuation_proposal",
+	"idu_deactivate",
+	"idu_execution_director_tick",
+	"idu_external_intelligence_report",
+	"idu_external_source_recommend",
+	"idu_genesis_mission_confirm",
+	"idu_genesis_mission_draft",
+	"idu_hygiene_migrate",
+	"idu_hygiene_sweep",
+	"idu_master_plan_create",
+	"idu_master_plan_reject",
+	"idu_model_invocation_status",
+	"idu_next_advisory_action",
+	"idu_objective_status",
+	"idu_outbox_prune",
+	"idu_plan_snapshot",
+	"idu_project_reset_state",
+	"idu_proposal_detail",
+	"idu_queue_complete",
+	"idu_queue_detail",
+	"idu_role_engine_control",
+	"idu_role_engine_status",
+	"idu_semantic_audit_status",
+	"idu_skill_draft_from_lessons",
+	"idu_skill_for_task",
+	"idu_skill_rating",
+	"idu_source_add",
+	"idu_source_chunk_read",
+	"idu_source_digest",
+	"idu_source_digest_status",
+	"idu_source_extract",
+	"idu_source_read",
+	"idu_source_recommend_for_task",
+	"idu_source_refresh",
+	"idu_source_remove",
+	"idu_source_report",
+	"idu_source_required_actions",
+	"idu_source_research_report",
+	"idu_source_skill_candidates_create",
+	"idu_source_skill_candidates_review",
+	"idu_source_status",
+	"idu_supervisor_consult",
+	"idu_supervisor_cron_plan",
+	"idu_supervisor_responses",
+	"idu_supervisor_self_maintenance_advisory",
+	"idu_supervisor_tick",
+	"idu_supervisor_trigger",
+	"idu_task",
+	"idu_trigger_engine",
+]);
 
 // Names the protocol mentions ON PURPOSE as things that do NOT exist — its
 // "never invent a tool name" section teaches by counter-example:
