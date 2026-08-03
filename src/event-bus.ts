@@ -5,7 +5,7 @@ import {
 	readFileSync,
 	writeFileSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { assertSafeArtifactName } from "./birth-artifacts.js";
 
@@ -26,6 +26,8 @@ export type EventKind =
 	// (postflight, alerts scheduler, source library, etc.); the engine
 	// only consumes and emits the cap warning.
 	| "orchestrator_turn"
+	| "orchestrator_turn_completed"
+	| "tool_received"
 	| "alerts_scheduled_tick"
 	| "context_budget_grew"
 	| "file_changed"
@@ -56,6 +58,11 @@ export type Event = {
 	sourceRef: string;
 	evidenceRefs: string[];
 	ownerId?: string;
+	// Unique id assigned at append time. Used by orchestrator_turn_completed
+	// and tool_received events to link back to the start event via
+	// payload.followsUp. Earlier events in the log may not have an id;
+	// readers should treat it as optional.
+	id?: string;
 };
 
 export type ReadEventsOptions = {
@@ -132,7 +139,7 @@ export function appendEvent(
 	stateRoot: string,
 	event: Event,
 	config: Partial<EventBusConfig> = {},
-): void {
+): string | undefined {
 	const maxLines = config.eventsMaxLines ?? DEFAULT_EVENTS_MAX_LINES;
 	const ownerId = config.ownerId;
 	// Path-safety guard: validate the kind field against artifact-name rules.
@@ -151,19 +158,28 @@ export function appendEvent(
 	}
 	if (seen.has(hash)) return;
 	seen.add(hash);
+	// Assign an id at append time. The id is what orchestrator_turn_completed
+	// and tool_received reference via payload.followsUp. The dedup key is
+	// still the content hash so identical events from a single process
+	// collapse; the id is unique per emission round.
+	const withId: Event = event.id ? event : { ...event, id: randomUUID() };
 	// living-roles-v2: notify in-process listeners before writing JSONL.
 	// We deliberately do not await the notification: the JSONL write
 	// is synchronous and audit-grade; listeners that need async work
 	// can schedule it themselves. Throwing listeners are caught
 	// inside `notifyListeners`.
-	void notifyListeners(enriched);
+	void notifyListeners(withId);
 	const filePath = resolveEventsPath(stateRoot);
 	if (!existsSync(filePath)) {
 		mkdirSync(dirname(filePath), { recursive: true });
 		writeFileSync(filePath, "", "utf8");
 	}
-	appendFileSync(filePath, `${JSON.stringify(enriched)}\n`, "utf8");
+	appendFileSync(filePath, `${JSON.stringify(withId)}\n`, "utf8");
 	enforceCap(filePath, maxLines);
+	// Return the id so callers can link follow-up events via
+	// payload.followsUp. Undefined if the event was deduplicated
+	// (already seen this process for this stateRoot).
+	return withId.id;
 }
 
 export function readEvents(

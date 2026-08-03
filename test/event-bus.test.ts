@@ -52,7 +52,37 @@ test("appendEvent roundtrips event through JSONL", () => {
 	appendEvent(root, baseEvent);
 	const events = readEvents(root);
 	assert.equal(events.length, 1);
-	assert.deepEqual(events[0], baseEvent);
+	// appendEvent now assigns an id at append time so end events and
+	// ack events can link back via payload.followsUp. The id is unique
+	// per emission; the rest of the roundtrip must match exactly.
+	const stored = events[0] as Event;
+	assert.equal(typeof stored.id, "string");
+	assert.ok((stored.id ?? "").length > 0);
+	assert.equal(stored.ts, baseEvent.ts);
+	assert.equal(stored.kind, baseEvent.kind);
+	assert.equal(stored.projectId, baseEvent.projectId);
+	assert.deepEqual(stored.payload, baseEvent.payload);
+	assert.equal(stored.sourceRef, baseEvent.sourceRef);
+	assert.deepEqual(stored.evidenceRefs, baseEvent.evidenceRefs);
+});
+
+test("appendEvent returns the assigned id (caller can use it for followsUp)", () => {
+	const root = freshRoot();
+	const id = appendEvent(root, baseEvent);
+	assert.equal(typeof id, "string");
+	assert.ok((id ?? "").length > 0);
+	const events = readEvents(root);
+	assert.equal(events[0]?.id, id);
+});
+
+test("appendEvent returns undefined when the event is deduplicated within the process", () => {
+	const root = freshRoot();
+	const first = appendEvent(root, baseEvent);
+	const second = appendEvent(root, baseEvent);
+	assert.equal(typeof first, "string");
+	assert.equal(second, undefined);
+	const events = readEvents(root);
+	assert.equal(events.length, 1);
 });
 
 test("readEvents filters by since and kindFilter", () => {

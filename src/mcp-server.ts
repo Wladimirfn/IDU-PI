@@ -107,7 +107,11 @@ import {
 } from "./injection-store.js";
 import { applyPrune, planPrune } from "./idu-outbox-prune.js";
 import { listDecisions } from "./decision-ledger.js";
-import { emitOrchestratorTurn } from "./role-events.js";
+import {
+	emitOrchestratorTurn,
+	emitOrchestratorTurnCompleted,
+	type OrchestratorTurnOutcome,
+} from "./role-events.js";
 import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
 import { readBirthArtifact } from "./birth-artifacts.js";
 import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
@@ -1552,102 +1556,172 @@ export async function callIduMcpTool(
 	input: unknown = {},
 	options: IduMcpServerOptions = {},
 ): Promise<IduMcpToolResult> {
-	// Emit orchestrator_turn event so supervisor-main and
-	// supervisor-semantic (which are subscribed to this kind) receive
-	// a stimulus at the start of every tool call. Best-effort: a
-	// failure to append the event must not block the tool.
-	try {
-		const ctx = resolveMcpProjectContext(
-			(options as { projectPath?: string }).projectPath,
-		);
-		if (ctx.projectId && ctx.stateRoot) {
-			emitOrchestratorTurn({
-				stateRoot: ctx.stateRoot,
-				projectId: ctx.projectId,
-				toolName: name,
-				source: "mcp-server",
-				now: new Date(),
-			});
-		}
-	} catch {
-		// best-effort; do not block the tool
-	}
-	if (!isToolName(name)) {
-		return envelope({
-			stateRoot: null,
+	// Pair invariant (#425): the start event and the end event come
+	// together. The start event fires before any check below; the
+	// finally block below emits the end event in EVERY code path that
+	// reaches a return, including the unknown_tool, lifecycle, and
+	// failed-resolution early returns. If the start event itself fails
+	// to emit, no end event is emitted (no start to pair with). The
+	// audit walks the log and pairs them via payload.followsUp, so any
+	// future start-without-end is signal, not structural noise.
+	let startEventId: string | undefined;
+	let outcome: OrchestratorTurnOutcome = "throw";
+	let startCtx: { stateRoot: string; projectId: string } | undefined;
+	let result: IduMcpToolResult | undefined;
 
-			ok: false,
-			tool: "idu_status",
-			projectId: null,
-			projectPath: null,
-			summary: `Herramienta MCP desconocida: ${name}`,
-			data: { requestedTool: name },
-			errors: [`Herramienta MCP desconocida: ${name}`],
-		});
-	}
-	const args = asRecord(input);
-	if (isProjectLifecycleTool(name)) {
-		return handleProjectLifecycleTool(name, args, options);
-	}
-	const resolution = (options.projectResolver ?? resolveMcpProjectContext)(
-		stringArg(args, "projectPath"),
-	);
-	if (
-		resolution.status === "unregistered_project" ||
-		resolution.status === "invalid_project"
-	) {
-		return envelope({
-			stateRoot: resolution.stateRoot,
-
-			ok: false,
-			tool: name,
-			projectId: resolution.projectId,
-			projectPath: resolution.projectPath,
-			summary:
-				resolution.status === "unregistered_project"
-					? "Proyecto no registrado para Idu-pi MCP."
-					: "Proyecto inválido para Idu-pi MCP.",
-			data: {
-				resolutionStatus: resolution.status,
-				recommendedNext: resolution.recommendedNext,
-			},
-			safeNotes: resolution.safeNotes,
-			errors: resolution.errors,
-		});
-	}
 	try {
-		const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
-			resolution.projectPath,
-		);
-		const startedAt = Date.now();
-		const result = await dispatchTool(name, args, runtime, resolution);
-		if (
-			!isReadOnlyAlertTelemetryExcludedTool(name) &&
-			runtime.projectId.trim()
-		) {
-			await recordMcpUsage(
-				runtime,
-				result,
-				Date.now() - startedAt,
-				resolution.stateRoot,
+		// Emit orchestrator_turn event so supervisor-main and
+		// supervisor-semantic (which are subscribed to this kind) receive
+		// a stimulus at the start of every tool call. Best-effort: a
+		// failure to append the event must not block the tool.
+		try {
+			const ctx = resolveMcpProjectContext(
+				(options as { projectPath?: string }).projectPath,
 			);
-			recordMcpAgentLabEffectiveness(runtime, result, resolution.stateRoot);
-			recordMcpContextQuality(runtime, result, resolution.stateRoot);
+			if (ctx.projectId && ctx.stateRoot) {
+				startEventId = emitOrchestratorTurn({
+					stateRoot: ctx.stateRoot,
+					projectId: ctx.projectId,
+					toolName: name,
+					source: "mcp-server",
+					now: new Date(),
+				});
+				startCtx = { stateRoot: ctx.stateRoot, projectId: ctx.projectId };
+			}
+		} catch {
+			// start event failed; the finally block will not emit
+			// the end event because startEventId is undefined.
 		}
-		return result;
-	} catch (error) {
-		return envelope({
-			stateRoot: resolution.stateRoot ?? null,
 
-			ok: false,
-			tool: name,
-			projectId: resolution.projectId,
-			projectPath: resolution.projectPath,
-			summary: `Falló ${name}: ${redactSecrets(errorMessage(error))}`,
-			data: { resolutionStatus: resolution.status },
-			safeNotes: resolution.safeNotes,
-			errors: [redactSecrets(errorMessage(error))],
-		});
+		if (!isToolName(name)) {
+			outcome = "unknown_tool";
+			result = envelope({
+				stateRoot: null,
+
+				ok: false,
+				tool: "idu_status",
+				projectId: null,
+				projectPath: null,
+				summary: `Herramienta MCP desconocida: ${name}`,
+				data: { requestedTool: name },
+				errors: [`Herramienta MCP desconocida: ${name}`],
+			});
+			return result;
+		}
+		const args = asRecord(input);
+		if (isProjectLifecycleTool(name)) {
+			outcome = "lifecycle";
+			result = await handleProjectLifecycleTool(name, args, options);
+			return result;
+		}
+		const resolution = (options.projectResolver ?? resolveMcpProjectContext)(
+			stringArg(args, "projectPath"),
+		);
+		if (
+			resolution.status === "unregistered_project" ||
+			resolution.status === "invalid_project"
+		) {
+			outcome = resolution.status;
+			result = envelope({
+				stateRoot: resolution.stateRoot,
+
+				ok: false,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary:
+					resolution.status === "unregistered_project"
+						? "Proyecto no registrado para Idu-pi MCP."
+						: "Proyecto inválido para Idu-pi MCP.",
+				data: {
+					resolutionStatus: resolution.status,
+					recommendedNext: resolution.recommendedNext,
+				},
+				safeNotes: resolution.safeNotes,
+				errors: resolution.errors,
+			});
+			return result;
+		}
+		try {
+			const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
+				resolution.projectPath,
+			);
+			const startedAt = Date.now();
+			const dispatchResult = await dispatchTool(
+				name,
+				args,
+				runtime,
+				resolution,
+			);
+			if (
+				!isReadOnlyAlertTelemetryExcludedTool(name) &&
+				runtime.projectId.trim()
+			) {
+				await recordMcpUsage(
+					runtime,
+					dispatchResult,
+					Date.now() - startedAt,
+					resolution.stateRoot,
+				);
+				recordMcpAgentLabEffectiveness(
+					runtime,
+					dispatchResult,
+					resolution.stateRoot,
+				);
+				recordMcpContextQuality(
+					runtime,
+					dispatchResult,
+					resolution.stateRoot,
+				);
+			}
+			outcome = "ok";
+			result = dispatchResult;
+			return result;
+		} catch (error) {
+			outcome = "throw";
+			result = envelope({
+				stateRoot: resolution.stateRoot ?? null,
+
+				ok: false,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary: `Falló ${name}: ${redactSecrets(errorMessage(error))}`,
+				data: { resolutionStatus: resolution.status },
+				safeNotes: resolution.safeNotes,
+				errors: [redactSecrets(errorMessage(error))],
+			});
+			return result;
+		}
+	} finally {
+		// Emit end event IF start succeeded. This is the pair invariant:
+		// start firing without end must never happen, because the only
+		// way to start firing is for ctx.projectId && ctx.stateRoot to be
+		// truthy above, and the finally block runs on every return.
+		if (startEventId && startCtx) {
+			try {
+				emitOrchestratorTurnCompleted({
+					stateRoot: startCtx.stateRoot,
+					projectId: startCtx.projectId,
+					toolName: name,
+					startEventId,
+					outcome,
+					ok: result?.ok,
+					summary: result?.summary,
+					evidenceRefs: result
+						? arrayField(result.data, "evidenceRefs").map(String)
+						: [],
+					autonomyGateTraces: result
+						? arrayField(result.data, "autonomyGateTraces")
+						: [],
+					errors: result?.errors,
+					source: "mcp-server",
+					now: new Date(),
+				});
+			} catch {
+				// best-effort; do not affect the result
+			}
+		}
 	}
 }
 
