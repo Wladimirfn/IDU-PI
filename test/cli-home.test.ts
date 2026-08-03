@@ -60,6 +60,7 @@ function snapshotEnv(): EnvSnapshot {
 		IDU_PI_ENV_PATH: process.env.IDU_PI_ENV_PATH,
 		IDU_PI_REGISTRY_PATH: process.env.IDU_PI_REGISTRY_PATH,
 		IDU_PI_MODEL_CATALOG_PATH: process.env.IDU_PI_MODEL_CATALOG_PATH,
+		IDU_PI_GENTLE_MODELS_PATH: process.env.IDU_PI_GENTLE_MODELS_PATH,
 	};
 }
 
@@ -1126,6 +1127,7 @@ test("interactive model role assignment writes project state", async () => {
 		process.env.ALLOWED_ROOTS = root;
 		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
+		process.env.IDU_PI_GENTLE_MODELS_PATH = "";
 		process.env.PI_AGENT_PROFILES =
 			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt";
 		const answers = ["4", "1", "agentlab-security", "codex", "s"];
@@ -1173,6 +1175,7 @@ test("interactive model role assignment accepts unified catalog direct models", 
 		process.env.ALLOWED_ROOTS = root;
 		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
+		process.env.IDU_PI_GENTLE_MODELS_PATH = "";
 		process.env.PI_AGENT_PROFILES = "default|Pi default";
 		const answers = [
 			"4",
@@ -1232,8 +1235,9 @@ test("interactive model role assignment selects snapshot models by provider grou
 		process.env.DEFAULT_CWD = projectPath;
 		process.env.ALLOWED_ROOTS = root;
 		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
-		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
+process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
 		process.env.IDU_PI_MODEL_CATALOG_PATH = snapshotPath;
+		process.env.IDU_PI_GENTLE_MODELS_PATH = "";
 		process.env.PI_AGENT_PROFILES = "default|Pi default";
 		const answers = ["4", "1", "agentlab-librarian", "2", "1", "s"];
 		const output = await runInteractiveHomeWithQuestion(
@@ -1278,6 +1282,7 @@ test("malformed Pi registry snapshot does not crash model assignment fallback", 
 		process.env.AGENT_WORKSPACE_ROOT = join(root, "workspace");
 		process.env.IDU_PI_REGISTRY_PATH = join(root, "data", "projects.json");
 		process.env.IDU_PI_MODEL_CATALOG_PATH = snapshotPath;
+		process.env.IDU_PI_GENTLE_MODELS_PATH = "";
 		process.env.PI_AGENT_PROFILES =
 			"default|Pi default;codex|GPT Codex|--model openai-codex/gpt";
 		const answers = ["4", "1", "agentlab-security", "codex", "s"];
