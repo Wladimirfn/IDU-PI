@@ -44,5 +44,14 @@ jobs:
       - name: Check Parent Protocol tool drift
         run: corepack pnpm check:protocol-drift
 
+      # Cluster map gate. Source of truth is config/cluster-map.json; this
+      # runs in CI so a stale cluster assignment cannot merge the way the
+      # 26-vs-89 protocol table did. The :verify variant regenerates
+      # docs/cluster-map.md and fails if the working tree is dirty — that
+      # is the only invariant: the .md in the repo is a faithful view of
+      # the JSON, never an edit-by-hand second source.
+      - name: Check cluster map drift
+        run: corepack pnpm check:cluster-drift:verify
+
       - name: Check diff whitespace
         run: git diff --check
