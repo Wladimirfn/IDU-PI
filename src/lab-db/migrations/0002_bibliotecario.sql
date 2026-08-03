@@ -19,22 +19,22 @@ CREATE TABLE IF NOT EXISTS skills (
   name TEXT NOT NULL,
   version TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('draft', 'proposed', 'active', 'archived')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS sources (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('markdown', 'pdf', 'txt', 'code', 'external')),
   path TEXT NOT NULL,
-  added_at TEXT NOT NULL DEFAULT (datetime('now')),
+  added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'extracted', 'digested', 'failed'))
 );
 
 CREATE TABLE IF NOT EXISTS digests (
   id TEXT PRIMARY KEY,
   source_id TEXT NOT NULL,
-  generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  generated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   body TEXT NOT NULL,
   FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
 );
@@ -44,14 +44,14 @@ CREATE TABLE IF NOT EXISTS ratings (
   target_id TEXT NOT NULL,
   target_kind TEXT NOT NULL CHECK (target_kind IN ('skill', 'source', 'digest', 'proposal')),
   score INTEGER NOT NULL CHECK (score >= 0 AND score <= 10),
-  rated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  rated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS bibliotecario_proposals (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
   payload TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   status TEXT NOT NULL CHECK (status IN ('proposed', 'approved', 'rejected', 'deferred'))
 );
 

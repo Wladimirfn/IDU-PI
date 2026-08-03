@@ -101,7 +101,7 @@ CREATE TABLE IF NOT EXISTS lab_runs (
   error TEXT,
   started_at TEXT NOT NULL,
   finished_at TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS bug_findings (
@@ -118,8 +118,8 @@ CREATE TABLE IF NOT EXISTS bug_findings (
   dedupe_key TEXT,
   specialty TEXT,
   recurrence_count INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS bug_findings_dedupe_idx
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS finding_status_events (
   new_status TEXT NOT NULL,
   actor TEXT NOT NULL,
   note TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS proposals (
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   priority INTEGER NOT NULL DEFAULT 3,
   status TEXT NOT NULL DEFAULT 'proposed' CHECK (status IN ('proposed','approved','rejected','implemented','superseded')),
   created_by_agent_id TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   decided_at TEXT
 );
 
@@ -160,8 +160,8 @@ CREATE TABLE IF NOT EXISTS lab_tasks (
   assigned_agent_id TEXT,
   command_budget INTEGER,
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS skill_index (
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS skill_index (
   description TEXT,
   priority INTEGER NOT NULL DEFAULT 100,
   fingerprint TEXT,
-  indexed_at TEXT NOT NULL DEFAULT (datetime('now'))
+  indexed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS finding_skills (
@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS user_signal_events (
   urgency INTEGER NOT NULL CHECK (urgency BETWEEN 1 AND 5),
   confidence TEXT NOT NULL,
   matched_keywords TEXT NOT NULL DEFAULT '[]',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS semantic_audit_runs (
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS semantic_audit_runs (
   critical_findings TEXT NOT NULL DEFAULT '[]',
   rules_to_preserve TEXT NOT NULL DEFAULT '[]',
   suggested_agent_tasks TEXT NOT NULL DEFAULT '[]',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   completed_at TEXT
 );
 
@@ -232,8 +232,8 @@ CREATE TABLE IF NOT EXISTS semantic_memory_items (
   summary TEXT NOT NULL,
   tags TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived','superseded')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 `;
 
@@ -267,6 +267,7 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 	const created = !existsSync(dbPath);
 	mkdirSync(dirname(dbPath), { recursive: true });
 	runSql(dbPath, SCHEMA);
+	backfillLegacyTimestamps(dbPath);
 	ensureColumn(
 		dbPath,
 		"semantic_audit_checkpoints",
@@ -295,6 +296,55 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 	// from src/lab-db/migrations at runtime.
 	applyMigrations(dbPath);
 	return { dbPath, created };
+}
+
+/**
+ * Backfill for #406: rows written before the schema switched to
+ * strftime('%Y-%m-%dT%H:%M:%SZ', 'now') are stored as
+ * "YYYY-MM-DD HH:MM:SS" — UTC values, but with a space separator and no
+ * Z. The lexicographic `created_at > '<windowStart>'` comparison in
+ * countFindingsSince sorts those rows BEFORE any bound emitted by
+ * toSqliteDatetime (which produces "YYYY-MM-DDTHH:MM:SSZ") because the
+ * space (0x20) sorts before the T (0x54). The blind spot lasts as long
+ * as the ESCALATION_WINDOW_HOURS window crosses the schema change.
+ *
+ * This function converts the separator to T and appends Z. The WHERE
+ * clause `LIKE '____-__-__ __:__:__'` matches the exact 19-character
+ * shape of `datetime('now')` output: 4 chars, '-', 2, '-', 2, ' ',
+ * 2, ':', 2, ':', 2. Empty strings, date-only strings, and the new
+ * ISO-with-Z form do NOT match — so re-runs after the conversion are
+ * a no-op (verified across three passes: same rows in, same rows out).
+ *
+ * Idempotent by construction. Runs once per init, after SCHEMA (so
+ * the tables exist) and before applyMigrations (which has no opinion
+ * on this). Nullable columns are skipped implicitly because NULL LIKE
+ * anything is NULL, which is false in a WHERE predicate.
+ */
+function backfillLegacyTimestamps(dbPath: string): void {
+	const updates: Array<{ table: string; column: string }> = [
+		{ table: "bug_findings", column: "created_at" },
+		{ table: "bug_findings", column: "updated_at" },
+		{ table: "finding_status_events", column: "created_at" },
+		{ table: "lab_runs", column: "created_at" },
+		{ table: "proposals", column: "created_at" },
+		{ table: "proposals", column: "decided_at" },
+		{ table: "lab_tasks", column: "created_at" },
+		{ table: "lab_tasks", column: "updated_at" },
+		{ table: "skill_index", column: "indexed_at" },
+		{ table: "user_signal_events", column: "created_at" },
+		{ table: "semantic_audit_runs", column: "created_at" },
+		{ table: "semantic_audit_runs", column: "completed_at" },
+		{ table: "semantic_audit_checkpoints", column: "last_audit_at" },
+		{ table: "semantic_memory_items", column: "created_at" },
+		{ table: "semantic_memory_items", column: "updated_at" },
+	];
+	for (const { table, column } of updates) {
+		runSql(
+			dbPath,
+			`UPDATE ${table} SET ${column} = REPLACE(${column}, ' ', 'T') || 'Z' ` +
+				`WHERE ${column} LIKE '____-__-__ __:__:__';`,
+		);
+	}
 }
 
 function ensureColumn(
@@ -387,7 +437,7 @@ INSERT INTO bug_findings (
   ${sqlString(affectedFiles)},
   ${sqlString(input.finding.dedupeKey)},
   ${sqlOptionalString(input.finding.specialty)},
-  datetime('now')
+  strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 )
 ON CONFLICT(id) DO UPDATE SET
   title = excluded.title,
@@ -400,7 +450,7 @@ ON CONFLICT(id) DO UPDATE SET
   affected_files = excluded.affected_files,
   dedupe_key = excluded.dedupe_key,
   recurrence_count = recurrence_count + 1,
-  updated_at = datetime('now')
+  updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 ON CONFLICT(project_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key != '' DO UPDATE SET
   title = excluded.title,
   description = excluded.description,
@@ -411,7 +461,7 @@ ON CONFLICT(project_id, dedupe_key) WHERE dedupe_key IS NOT NULL AND dedupe_key 
   suspected_cause = excluded.suspected_cause,
   affected_files = excluded.affected_files,
   recurrence_count = recurrence_count + 1,
-  updated_at = datetime('now');
+  updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 `;
 	runSql(dbPath, sql);
 	if (!input.proposal) return;
@@ -502,7 +552,7 @@ INSERT INTO bug_findings (
   ${sqlString(affectedFiles)},
   ${sqlString(input.dedupeKey)},
   ${sqlOptionalString(input.specialty)},
-  datetime('now')
+  strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 )
 ON CONFLICT(id) DO UPDATE SET
   title = excluded.title,
@@ -515,7 +565,7 @@ ON CONFLICT(id) DO UPDATE SET
   affected_files = excluded.affected_files,
   dedupe_key = excluded.dedupe_key,
   recurrence_count = recurrence_count + 1,
-  updated_at = datetime('now');
+  updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 `;
 	// Whether this id already existed decides if a status event is honest.
 	// Read BEFORE the upsert: afterwards the row exists either way.
@@ -634,7 +684,7 @@ export function updateFindingStatus(
 	// INSERT → COMMIT. If INSERT throws, the transaction rolls back.
 	const txSql =
 		`BEGIN;\n` +
-		`UPDATE bug_findings SET status = ${sqlString(newStatus)}, updated_at = datetime('now') WHERE id = ${sqlString(findingId)};\n` +
+		`UPDATE bug_findings SET status = ${sqlString(newStatus)}, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ${sqlString(findingId)};\n` +
 		`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note) VALUES (${sqlString(findingId)}, ${sqlString(oldStatus)}, ${sqlString(newStatus)}, ${sqlString(actor)}, ${sqlString(note.trim())});\n` +
 		`COMMIT;`;
 	runSql(dbPath, txSql);
