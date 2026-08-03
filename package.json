@@ -24,7 +24,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
     "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js dist/test/**/*.test.js",
     "test:guarded": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node scripts/run-tests-with-leak-guard.mjs",
-    "check:protocol-drift": "node scripts/check-protocol-tool-drift.mjs",
+    "check:protocol-drift": "node scripts/check-protocol-tool-drift.mjs --strict-coverage",
     "check:cluster-drift": "node scripts/check-cluster-map-drift.mjs",
     "check:cluster-drift:emit": "node scripts/check-cluster-map-drift.mjs --emit-md",
     "check:cluster-drift:verify": "node scripts/check-cluster-map-drift.mjs --verify",
