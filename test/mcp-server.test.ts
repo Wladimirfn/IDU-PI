@@ -84,6 +84,10 @@ import type {
 	SourceLibraryMutationResult,
 	SourceLibraryStatus,
 } from "../src/source-library.js";
+import {
+	addSourceLibraryItem,
+	removeSourceLibraryItem,
+} from "../src/source-library.js";
 import type { ExternalIntelligenceReport } from "../src/external-intelligence.js";
 import type { ExternalSourceRecommendationReport } from "../src/external-source-registry.js";
 import type { FlowBoundProposal } from "../src/proposal-outbox.js";
@@ -4570,7 +4574,7 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 
 	const remove = await callIduMcpTool(
 		"idu_source_remove",
-		{ sourceId: "source-demo-manual-abc123" },
+		{ sourceId: "source-demo-manual-abc123", confirm: true },
 		{ runtimeFactory: factory(), projectResolver: () => registered() },
 	);
 	assert.equal(remove.ok, true);
@@ -4783,6 +4787,101 @@ test("source library MCP tools remain advisory and stateRoot-only", async () => 
 	assert.ok(
 		refresh.safeNotes.some((note) => /No cambié contratos/u.test(note)),
 	);
+});
+
+test("idu_source_remove without confirm does not delete the source on disk", async () => {
+	// Issue #430: "no alcanza con que la puerta exista, tiene que probarse
+	// que no se puede pasar sin abrirla." This test wires the handler to
+	// the REAL removeSourceLibraryItem (not the mock that the rest of the
+	// test suite uses) and asserts that the source file remains on disk
+	// after a no-confirm call.
+	const temp = makeTempDir("idu-source-remove-gate-");
+	const stateRoot = join(temp, "state", "projects", "demo");
+	const repo = join(temp, "repo");
+	mkdirSync(repo, { recursive: true });
+	const source = join(repo, "manual.md");
+	writeFileSync(source, "# Manual\nReglas humanas", "utf8");
+	const now = (): Date => new Date("2026-06-01T12:00:00.000Z");
+	const added = addSourceLibraryItem({
+		stateRoot,
+		projectId: "Demo",
+		inputPath: source,
+		now,
+	});
+	const stored = join(added.paths.root, added.addedSource!.storedPath);
+	const extracted = join(
+		added.paths.root,
+		added.addedSource!.extractedTextPath!,
+	);
+	assert.ok(existsSync(stored));
+	assert.ok(existsSync(extracted));
+
+	// Runtime that points sourceLibraryRemove at the real
+	// removeSourceLibraryItem. If the gate fails to block the call,
+	// the file disappears and the assertions below fire.
+	const realRemoveRuntime = {
+		projectId: "Demo",
+		projectPath: repo,
+		workspaceRoot: stateRoot,
+		sourceLibraryRemove: (sourceId: string): RemoveSourceLibraryItemResult =>
+			removeSourceLibraryItem({
+				stateRoot,
+				projectId: "Demo",
+				sourceId,
+				now,
+			}),
+	} as unknown as CliRuntime;
+	const resolution = {
+		status: "registered_project",
+		projectId: "Demo",
+		projectPath: repo,
+		stateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	// 1. Without confirm — gate MUST block.
+	const blocked = await callIduMcpTool(
+		"idu_source_remove",
+		{ sourceId: added.addedSource!.id },
+		{
+			runtimeFactory: () => realRemoveRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(blocked.ok, false);
+	assert.match(blocked.errors.join("\n"), /confirm=true/u);
+	assert.ok(existsSync(stored));
+	assert.ok(existsSync(extracted));
+
+	// 2. With confirm:false — gate MUST block (boolean false is not
+	// "not provided"; both must refuse). This catches a regression
+	// where someone defaults to truthy on undefined.
+	const blockedExplicit = await callIduMcpTool(
+		"idu_source_remove",
+		{ sourceId: added.addedSource!.id, confirm: false },
+		{
+			runtimeFactory: () => realRemoveRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(blockedExplicit.ok, false);
+	assert.ok(existsSync(stored));
+	assert.ok(existsSync(extracted));
+
+	// 3. With confirm:true — gate OPENS. Real remove fires; files
+	// vanish. This is the only path that should touch disk.
+	const allowed = await callIduMcpTool(
+		"idu_source_remove",
+		{ sourceId: added.addedSource!.id, confirm: true },
+		{
+			runtimeFactory: () => realRemoveRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(allowed.ok, true);
+	assert.equal(existsSync(stored), false);
+	assert.equal(existsSync(extracted), false);
 });
 
 test("postflight request create remains request-only and review-run reports sandbox notes", async () => {

@@ -34,7 +34,7 @@ import { runHygieneSensor } from "../../hygiene-sensor.js";
 import { recordLifecycleEvent } from "../../telemetry-lifecycle.js";
 import { TRIGGER_DEFINITIONS } from "../../trigger-engine.js";
 import { planSweep, type PlanSweepResult } from "../../sweep-command.js";
-import { envelope } from "../_shared/index.js";
+import { booleanArg, envelope } from "../_shared/index.js";
 import type {
 	IduMcpToolResult,
 	IduMcpToolName,
@@ -124,8 +124,11 @@ export async function handlePendingInjections(
 }
 
 /**
- * idu_hygiene_migrate — manifest-driven hygiene layout migration.
- * Body verbatim from src/mcp-server.ts.
+ * idu_hygiene_migrate — manifest-driven hygiene layout migration
+ * (requires confirm=true). Body verbatim from src/mcp-server.ts, with
+ * destructive-confirmation gate matching the pattern of
+ * idu_project_reset_state (see src/mcp/session/handlers.ts:182). See
+ * issue #430.
  */
 export async function handleHygieneMigrate(
 	name: IduMcpToolName,
@@ -133,7 +136,25 @@ export async function handleHygieneMigrate(
 	runtime: CliRuntime,
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
+	const confirmed = booleanArg(args, "confirm", false);
 	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+	if (!confirmed) {
+		return envelope({
+			stateRoot,
+
+			ok: false,
+			tool: name,
+			projectId: runtime.projectId,
+			projectPath: runtime.projectPath,
+			summary: "Migración cancelada: falta confirm=true.",
+			data: { requiresConfirmation: true },
+			safeNotes: [
+				...resolution.safeNotes,
+				"No moví nada porque falta confirmación explícita.",
+			],
+			errors: ["Para ejecutar la migración enviá confirm=true."],
+		});
+	}
 	const params = args as { projectPath?: string };
 	const repoRoot = (params.projectPath ?? runtime.projectPath ?? "").trim();
 	if (!repoRoot) {

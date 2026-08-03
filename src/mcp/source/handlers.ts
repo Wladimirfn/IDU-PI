@@ -46,7 +46,12 @@ import {
 	withSourceContentBudget,
 	withSourceResearchBudget,
 } from "../../mcp-server.js";
-import { envelope, requiredText, stringArg } from "../_shared/index.js";
+import {
+	booleanArg,
+	envelope,
+	requiredText,
+	stringArg,
+} from "../_shared/index.js";
 import type {
 	IduMcpToolResult,
 	IduMcpToolName,
@@ -115,8 +120,10 @@ export async function handleSourceAdd(
 }
 
 /**
- * idu_source_remove — remove a source from stateRoot.
- * Body verbatim from src/mcp-server.ts.
+ * idu_source_remove — remove a source from stateRoot (requires confirm=true).
+ * Body verbatim from src/mcp-server.ts, with destructive-confirmation gate
+ * matching the pattern of idu_project_reset_state (see
+ * src/mcp/session/handlers.ts:182). See issue #430.
  */
 export async function handleSourceRemove(
 	name: IduMcpToolName,
@@ -124,10 +131,28 @@ export async function handleSourceRemove(
 	runtime: CliRuntime,
 	resolution: IduMcpProjectResolution,
 ): Promise<IduMcpToolResult> {
+	const confirmed = booleanArg(args, "confirm", false);
+	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
+	if (!confirmed) {
+		return envelope({
+			stateRoot,
+
+			ok: false,
+			tool: name,
+			projectId: runtime.projectId,
+			projectPath: runtime.projectPath,
+			summary: "Remoción cancelada: falta confirm=true.",
+			data: { requiresConfirmation: true },
+			safeNotes: [
+				...resolution.safeNotes,
+				"No borré nada porque falta confirmación explícita.",
+			],
+			errors: ["Para remover la fuente enviá confirm=true."],
+		});
+	}
 	const result = runtime.sourceLibraryRemove(
 		requiredText(args, "sourceId"),
 	);
-	const stateRoot = resolution.stateRoot ?? runtime.workspaceRoot;
 	return envelope({
 		stateRoot,
 
