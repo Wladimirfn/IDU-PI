@@ -89,6 +89,23 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 | `idu_genesis_mission_confirm` | confirm a drafted genesis mission |
 | `idu_ack_advisory` | acknowledge a pending advisory injection (`injectionId` + `reason`) |
 | `idu_skill_draft_from_lessons` | draft a skill from past lessons (auto-fired by `idu-automaticov1 cycle` only when `--allow-skill-proposals` is set) |
+| `idu_source_add` | register a source path for the bibliotecario |
+| `idu_source_remove` | unregister a source by `sourceId` |
+| `idu_source_refresh` | re-pull a registered source (manual; the bibliotecario does not auto-fire) |
+| `idu_source_read` | read a source's content by `sourceId` |
+| `idu_source_chunk_read` | read a single chunk of a source (`sourceId`, `chunkId`) |
+| `idu_source_extract` | extract structured content from a source |
+| `idu_source_digest` | generate a digest of a source |
+| `idu_source_status` | read the source registry status (will be routed via `idu_status` facade with `scope: "source"`) |
+| `idu_source_digest_status` | read the digest pipeline status (will be routed via `idu_status` facade with `scope: "source_digest"`) |
+| `idu_source_report` | source report by `sourceId` |
+| `idu_source_research_report` | research report for a query (web-backed) |
+| `idu_source_recommend_for_task` | recommend a source for a task (`request`) |
+| `idu_source_required_actions` | list required actions for the source cluster |
+| `idu_source_skill_candidates_create` | create skill candidates from sources (`selector`) |
+| `idu_source_skill_candidates_review` | review skill candidates (`pathOrLatest`) |
+| `idu_external_source_recommend` | recommend external sources for a task (`request`, `domains`, `language`, `framework`, `maxMatches`) |
+| `idu_external_intelligence_report` | external intelligence report (`sourceIds`) |
 
 ## ⚠️ Enrolling a project without orphaning the confirmed state
 
