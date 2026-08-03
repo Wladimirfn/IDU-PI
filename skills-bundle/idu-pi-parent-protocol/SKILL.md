@@ -55,7 +55,7 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 | `idu_supervisor_context_pack` | before delegating implementation. Pass `projectPath` if needed. |
 | `idu_preflight` | before risky/structural changes |
 | `idu_postflight` | after a diff, before commit |
-| `idu_advisory` | quick advisory |
+| `idu_advisory` | quick advisory derived from preflight state. Lighter alternative to `idu_preflight` when you only need the next-action summary. |
 | `idu_task_context` | per-task advisory fallback |
 | `idu_task_package_create` | create a task package for the orchestrator to govern |
 | `idu_master_plan_status` | check Plan Maestro state |
@@ -73,6 +73,7 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 | `idu_agentlab_review_status` | read AgentLab review status |
 | `idu_project_enroll` | register a project (see ⚠️ warning below) |
 | `idu_project_status` | inspect a registered project (path + stateRoot) |
+| `idu_start` | switch the active project to a previously-enrolled one (re-runs the resolution against the existing stateRoot) |
 | `idu_birth_status` | birth pipeline status (also auto-fired by `idu-supervisor-tick.ps1` → `idu-automaticov1 cycle`) |
 | `idu_birth_general_spec` | write the general spec for a birth project |
 | `idu_birth_prototype_master` | manage the birth prototype (`action`: draft / approve / reject) |
