@@ -132,13 +132,18 @@ export function resolveEscalationPath(stateRoot: string): string {
 
 /**
  * Convert a Date to the canonical SQLite datetime string
- * "YYYY-MM-DD HH:MM:SS" — the same format `datetime('now')` emits for
- * `bug_findings.created_at`. Using one shared format makes the
+ * "YYYY-MM-DDTHH:MM:SSZ" — the same format `strftime('%Y-%m-%dT%H:%M:%SZ', 'now')`
+ * emits for `bug_findings.created_at`. Using one shared format makes the
  * `created_at > ?` comparison lexicographically correct (no 'T' vs ' '
  * mismatch between the stored value and the bound window start).
+ *
+ * For rows written before #406 the storage is "YYYY-MM-DD HH:MM:SS" with a
+ * space separator and no Z. Those rows are repaired by backfillLegacyTimestamps
+ * (initLabDb, src/lab-db.ts) so the lexicographic comparison is correct
+ * end-to-end.
  */
 function toSqliteDatetime(date: Date): string {
-	return date.toISOString().replace("T", " ").replace(/\.\d+Z$/u, "");
+	return date.toISOString();
 }
 
 /**

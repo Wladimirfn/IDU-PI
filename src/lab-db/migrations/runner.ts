@@ -32,7 +32,7 @@ function runSqlFile(dbPath: string, filePath: string): void {
 function ensureMigrationsTable(dbPath: string): void {
 	runSql(
 		dbPath,
-		`CREATE TABLE IF NOT EXISTS \`${MIGRATIONS_TABLE}\` (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`,
+		`CREATE TABLE IF NOT EXISTS \`${MIGRATIONS_TABLE}\` (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')));`,
 	);
 }
 

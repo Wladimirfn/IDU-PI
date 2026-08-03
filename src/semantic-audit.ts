@@ -261,7 +261,7 @@ INSERT INTO semantic_audit_checkpoints (
   ${sqlInteger(stats.memoryItemCount, "memoryItemCount")},
   ${sqlInteger(stats.criticalFindingCount, "criticalFindingCount")},
   ${sqlInteger(stats.highFindingCount, "highFindingCount")},
-  datetime('now')
+  strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 )
 ON CONFLICT(project_id) DO UPDATE SET
   last_lab_run_count = excluded.last_lab_run_count,
@@ -296,7 +296,7 @@ INSERT INTO semantic_memory_items (
   ${sqlString(input.summary)},
   ${sqlString(JSON.stringify(input.tags ?? []))},
   ${sqlString(input.status ?? "active")},
-  datetime('now')
+  strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 )
 ON CONFLICT(id) DO UPDATE SET
   source_type = excluded.source_type,
@@ -306,7 +306,7 @@ ON CONFLICT(id) DO UPDATE SET
   summary = excluded.summary,
   tags = excluded.tags,
   status = excluded.status,
-  updated_at = datetime('now');
+  updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 `;
 	runSql(dbPath, sql);
 }

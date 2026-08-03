@@ -84,7 +84,7 @@ test("applyMigrations inserts a row in lab-migrations-applied after the first ru
 	assert.ok(rows.length >= 1, "at least 0001 should be applied");
 	const names = rows.map((row) => row.name);
 	assert.ok(names.includes("0001_model_invocation_log.sql"));
-	assert.match(rows[0].applied_at, /^\d{4}-\d{2}-\d{2} /u);
+	assert.match(rows[0].applied_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u);
 });
 
 test("applyMigrations is idempotent: second run applies 0 migrations", () => {
