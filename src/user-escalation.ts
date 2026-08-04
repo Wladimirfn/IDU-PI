@@ -48,6 +48,25 @@ export const ESCALATION_FILE = "user-escalations.jsonl";
 export const ESCALATION_WINDOW_HOURS = 24;
 
 /**
+ * Issue #399: when a finding is re-reported enough times it becomes
+ * noise rather than a fresh alert. The operator said "si ya lleva 20
+ * veces creo que es mejor que se compacten". The threshold is
+ * per-finding `recurrence_count`; the 24h idempotency window is too
+ * short for high-recurrence findings (a finding reported daily
+ * reaches 20 in three weeks, but the 24h window only suppresses
+ * within-day repeats). The recurrence rule has its own longer
+ * idempotency window so the operator sees the signal once per week
+ * instead of once per day.
+ *
+ * 20 is the operator's stated threshold; the recurrence idempotency
+ * window is 7 days. These are local to user-escalation — they are
+ * not part of the alert-engine bypass gate (#398) or the
+ * supervisor loop (#416).
+ */
+export const RECURRENCE_COMPACT_THRESHOLD = 20;
+export const RECURRENCE_IDEMPOTENCY_HOURS = 168;
+
+/**
  * Escalation thresholds.
  *
  * D1 recalibration: these now count bug FINDINGS (bug_findings rows),
@@ -70,7 +89,8 @@ export const ESCALATION_THRESHOLDS = {
 
 export type EscalationReason =
 	| "recent_critical_threshold"
-	| "recent_total_threshold";
+	| "recent_total_threshold"
+	| "recent_recurrence_threshold";
 
 export type UserEscalationEvent = {
 	ts: string;
@@ -84,6 +104,16 @@ export type UserEscalationEvent = {
 	 * honestly — this field only records the newly-escalated subset.
 	 */
 	triggeredFindingIds: string[];
+	/**
+	 * Issue #399: subset of `triggeredFindingIds` whose escalation
+	 * reason was `recent_recurrence_threshold` (the finding has been
+	 * re-reported enough times to compact). Tracked separately so the
+	 * recurrence idempotency window (`RECURRENCE_IDEMPOTENCY_HOURS`)
+	 * can be longer than the 24h window without affecting the regular
+	 * thresholds. Optional for backward compat with events written
+	 * before the rule existed; absent falls back to the empty set.
+	 */
+	triggeredByRecurrence?: string[];
 	counts: {
 		critical: number;
 		warning: number;
@@ -103,6 +133,12 @@ export type EscalationResult = {
 	 * total-open picture; this is the idempotent decision subset.
 	 */
 	triggeredFindingIds: string[];
+	/**
+	 * Issue #399: the recurrence-triggered subset of
+	 * `triggeredFindingIds`. Empty when no finding crossed
+	 * `RECURRENCE_COMPACT_THRESHOLD` this tick.
+	 */
+	triggeredByRecurrence: string[];
 	counts: {
 		critical: number;
 		warning: number;
@@ -207,17 +243,27 @@ function readOpenFindingIds(
 	labDbPath: string,
 	projectId: string,
 	windowStart: Date,
-): { id: string; severity: string }[] {
+): { id: string; severity: string; recurrenceCount: number }[] {
 	initLabDb(labDbPath);
+	// Alias `recurrence_count` to `recurrenceCount` so the JSON
+	// object the runner returns uses camelCase keys the rest of this
+	// file already uses. (SQLite column names are snake_case; without
+	// the alias `f.recurrenceCount` is `undefined` and the recurrence
+	// rule silently never fires — caught by the audit that produced
+	// #399's tests.)
 	const output = runSql(
 		labDbPath,
-		`SELECT id, severity FROM bug_findings
+		`SELECT id, severity, COALESCE(recurrence_count, 1) AS recurrenceCount FROM bug_findings
 		 WHERE project_id = ${sqlString(projectId)}
 		   AND status = 'new'
 		   AND created_at > ${sqlString(toSqliteDatetime(windowStart))};`,
 	).trim();
 	if (!output) return [];
-	return JSON.parse(output) as Array<{ id: string; severity: string }>;
+	return JSON.parse(output) as Array<{
+		id: string;
+		severity: string;
+		recurrenceCount: number;
+	}>;
 }
 
 /**
@@ -295,6 +341,39 @@ function readAlreadyEscalatedFindingIds(stateRoot: string, now: Date): Set<strin
 	return escalated;
 }
 
+/**
+ * Issue #399: id-only idempotency for the recurrence rule. A finding
+ * that has already been escalated for `recent_recurrence_threshold`
+ * within the last `RECURRENCE_IDEMPOTENCY_HOURS` (7 days) is
+ * suppressed here, so the operator sees the recurrence signal once
+ * per week rather than once per day. The 24h window above still
+ * applies to the regular thresholds.
+ *
+ * Events written before the recurrence rule existed have no
+ * `triggeredByRecurrence` field; the `?? []` fallback keeps them out
+ * of the recurrence suppression (so a finding that crossed
+ * `RECURRENCE_COMPACT_THRESHOLD` for the first time right after the
+ * upgrade still gets its first recurrence-escalation).
+ */
+function readRecentlyRecurrenceEscalatedIds(
+	stateRoot: string,
+	now: Date,
+): Set<string> {
+	const events = readEscalationEvents(stateRoot);
+	const windowStart =
+		now.getTime() - RECURRENCE_IDEMPOTENCY_HOURS * 60 * 60 * 1000;
+	const escalated = new Set<string>();
+	for (const event of events) {
+		const ts = Date.parse(event.ts);
+		if (!Number.isFinite(ts)) continue;
+		if (ts < windowStart) continue;
+		for (const id of event.triggeredByRecurrence ?? []) {
+			escalated.add(id);
+		}
+	}
+	return escalated;
+}
+
 export function checkUserEscalation(
 	input: UserEscalationInput,
 ): EscalationResult {
@@ -323,6 +402,14 @@ export function checkUserEscalation(
 	// IDEMPOTENCY MEMORY: union of finding ids that already triggered an
 	// escalation in the last 24h.
 	const alreadyEscalated = readAlreadyEscalatedFindingIds(input.stateRoot, now);
+	// Issue #399: separate, longer idempotency for the recurrence rule.
+	// A finding that already fired `recent_recurrence_threshold` in
+	// the last 7 days is suppressed here so the operator sees the
+	// signal once per week, not once per day.
+	const alreadyRecurrenceEscalated = readRecentlyRecurrenceEscalatedIds(
+		input.stateRoot,
+		now,
+	);
 
 	const newCriticalIds = openFindings
 		.filter((f) => f.severity === "critical" && !alreadyEscalated.has(f.id))
@@ -331,12 +418,27 @@ export function checkUserEscalation(
 		.filter((f) => !alreadyEscalated.has(f.id))
 		.map((f) => f.id);
 
+	// Issue #399: compact high-recurrence findings. The 24h window above
+	// is too short for findings reported daily: at one report/day the
+	// finding would re-escalate every day. The recurrence rule fires
+	// only when the finding reaches `RECURRENCE_COMPACT_THRESHOLD`
+	// reports AND the operator hasn't seen the recurrence signal in the
+	// last `RECURRENCE_IDEMPOTENCY_HOURS` (7 days).
+	const newRecurrenceIds = openFindings
+		.filter(
+			(f) =>
+				f.recurrenceCount >= RECURRENCE_COMPACT_THRESHOLD &&
+				!alreadyRecurrenceEscalated.has(f.id),
+		)
+		.map((f) => f.id);
+
 	const lastInteraction = new Date(input.lastUserInteractionAt);
 	const hoursSince =
 		(now.getTime() - lastInteraction.getTime()) / (1000 * 60 * 60);
 
 	const reasons: EscalationReason[] = [];
 	const triggeredSet = new Set<string>();
+	const recurrenceTriggered = new Set<string>();
 
 	// CRITICAL rule (idempotent): fire when at least one critical finding
 	// id has NOT been escalated in the last 24h. The count above still
@@ -355,11 +457,25 @@ export function checkUserEscalation(
 		for (const id of newFindingIds) triggeredSet.add(id);
 	}
 
+	// RECURRENCE rule (idempotent on its own 7-day window): fire when
+	// a finding has been reported `RECURRENCE_COMPACT_THRESHOLD` or
+	// more times and the operator hasn't seen this signal in the last
+	// week. This is the operator's "compact when repetition becomes
+	// noise" rule — the same finding stops re-firing every day.
+	if (newRecurrenceIds.length > 0) {
+		reasons.push("recent_recurrence_threshold");
+		for (const id of newRecurrenceIds) {
+			recurrenceTriggered.add(id);
+			triggeredSet.add(id);
+		}
+	}
+
 	// Inactivity is NOT a standalone escalation reason. It becomes a
 	// delivery-timing modulator in A1e. Kept in the report (below) for
 	// that purpose — do not add an hours_since_interaction reason here.
 
 	const triggeredFindingIds = [...triggeredSet];
+	const triggeredByRecurrence = [...recurrenceTriggered];
 	const shouldEscalate = reasons.length > 0;
 	let escalationId: string | null = null;
 	if (shouldEscalate) {
@@ -369,6 +485,7 @@ export function checkUserEscalation(
 			escalationId,
 			reasons,
 			triggeredFindingIds,
+			triggeredByRecurrence,
 			counts,
 			hoursSinceLastInteraction: hoursSince,
 			lastUserInteractionAt: input.lastUserInteractionAt,
@@ -379,6 +496,7 @@ export function checkUserEscalation(
 		shouldEscalate,
 		reasons,
 		triggeredFindingIds,
+		triggeredByRecurrence,
 		counts,
 		hoursSinceLastInteraction: hoursSince,
 		escalationId,

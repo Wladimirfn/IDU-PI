@@ -40,6 +40,11 @@ type SeedOptions = {
 	// "YYYY-MM-DD HH:MM:SS" — canonical SQLite datetime (matches created_at).
 	createdAt?: string;
 	projectId?: string;
+	// Issue #399: when the seed caller wants to test the recurrence
+	// rule, this sets `bug_findings.recurrence_count` directly via a
+	// follow-up UPDATE (the INSERT path uses the schema default of 1
+	// to keep every other test's seed shape stable).
+	recurrenceCount?: number;
 };
 
 function seedFinding(labDbPath: string, options: SeedOptions): void {
@@ -64,6 +69,14 @@ function seedFinding(labDbPath: string, options: SeedOptions): void {
 			${sqlString(createdAt)}
 		);`,
 	);
+	if (options.recurrenceCount !== undefined) {
+		runSql(
+			labDbPath,
+			`UPDATE bug_findings SET recurrence_count = ${sqlString(
+				String(options.recurrenceCount),
+			)} WHERE id = ${sqlString(options.id)};`,
+		);
+	}
 }
 
 // `now` is fixed; windowStart = now - 24h = 2026-06-14 13:00:00.
@@ -560,6 +573,233 @@ test("checkUserEscalation: total rule is idempotent (same 25 findings do not re-
 		assert.equal(second.shouldEscalate, false);
 		// Honest count unchanged.
 		assert.equal(second.counts.total, ESCALATION_THRESHOLDS.recentTotal);
+	} finally {
+		cleanup();
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Issue #399: recurrence_count is read by the escalation gate so high-
+// recurrence findings stop re-firing every day. The 24h window for
+// the regular thresholds stays unchanged; the recurrence rule has its
+// own 7-day idempotency window.
+// ---------------------------------------------------------------------------
+
+import { RECURRENCE_COMPACT_THRESHOLD } from "../src/user-escalation.js";
+
+const ONE_WEEK_LATER = new Date(NOW.getTime() + 7 * 24 * 60 * 60 * 1000 + 60 * 60 * 1000); // 7d + 1h to clear the 7d idempotency boundary
+
+test("checkUserEscalation: recurrence_count < 20 does NOT trigger recent_recurrence_threshold", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-low",
+			severity: "high",
+			createdAt: WITHIN_WINDOW,
+			recurrenceCount: RECURRENCE_COMPACT_THRESHOLD - 1,
+		});
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(out.shouldEscalate, false);
+		assert.ok(!out.reasons.includes("recent_recurrence_threshold"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: recurrence_count >= 20 fires recent_recurrence_threshold", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-noisy",
+			severity: "high",
+			createdAt: WITHIN_WINDOW,
+			recurrenceCount: RECURRENCE_COMPACT_THRESHOLD,
+		});
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(out.shouldEscalate, true);
+		assert.ok(out.reasons.includes("recent_recurrence_threshold"));
+		assert.deepEqual(out.triggeredByRecurrence, ["f-noisy"]);
+		assert.ok(out.triggeredFindingIds.includes("f-noisy"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: same noisy finding does NOT re-fire within 7 days (issue #399 compact)", () => {
+	// The operator's complaint: the same critical finding re-notifies
+	// every day for 20 days. After this fix, once the finding reaches
+	// `RECURRENCE_COMPACT_THRESHOLD` the recurrence rule fires once
+	// and stays quiet for 7 days.
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-noisy",
+			severity: "high",
+			createdAt: WITHIN_WINDOW,
+			recurrenceCount: RECURRENCE_COMPACT_THRESHOLD,
+		});
+		const first = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(first.shouldEscalate, true);
+		assert.ok(first.reasons.includes("recent_recurrence_threshold"));
+
+		// 1 day later. The finding's `created_at` is moved into the new
+		// 24h window so the regular thresholds can see it; the
+		// recurrence idempotency window (7 days) still covers it, so
+		// the operator sees the signal once, not twice.
+		const nextDay = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
+		runSql(
+			labDbPath,
+			`UPDATE bug_findings SET created_at = ${sqlString(
+				new Date(nextDay.getTime() - 60 * 60 * 1000).toISOString(),
+			)} WHERE id = 'f-noisy';`,
+		);
+		const second = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: nextDay,
+		});
+		assert.equal(
+			second.shouldEscalate,
+			false,
+			"within 7 days the recurrence signal must NOT re-fire",
+		);
+		assert.equal(second.counts.total, 1, "honest count unchanged");
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: noisy finding re-fires after the 7-day window expires", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-noisy",
+			severity: "high",
+			createdAt: WITHIN_WINDOW,
+			recurrenceCount: RECURRENCE_COMPACT_THRESHOLD,
+		});
+		const first = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(first.shouldEscalate, true);
+		assert.ok(first.reasons.includes("recent_recurrence_threshold"));
+
+		// A week later, the 7-day idempotency window expires. The
+		// recurrence rule can fire again — in case the operator fixed
+		// it and it came back, or in case the operator still hasn't
+		// touched it and they need a fresh nudge.
+		runSql(
+			labDbPath,
+			`UPDATE bug_findings SET created_at = ${sqlString(
+				new Date(ONE_WEEK_LATER.getTime() - 60 * 60 * 1000).toISOString(),
+			)} WHERE id = 'f-noisy';`,
+		);
+		const later = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: ONE_WEEK_LATER,
+		});
+		assert.equal(
+			later.shouldEscalate,
+			true,
+			"after 7 days the recurrence signal can re-fire",
+		);
+		assert.ok(later.reasons.includes("recent_recurrence_threshold"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: recurrence rule does not affect the regular 24h idempotency", () => {
+	// The regular thresholds (recent_critical, recent_total) keep
+	// their 24h window. A noisy finding that crosses
+	// `RECURRENCE_COMPACT_THRESHOLD` AND is also critical must
+	// trigger both reasons, and on the next tick (within 24h) the
+	// regular rule is suppressed but the recurrence rule already
+	// fired above and won't fire again until the 7-day window passes.
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-noisy-critical",
+			severity: "critical",
+			createdAt: WITHIN_WINDOW,
+			recurrenceCount: RECURRENCE_COMPACT_THRESHOLD,
+		});
+		const first = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(first.shouldEscalate, true);
+		assert.ok(first.reasons.includes("recent_critical_threshold"));
+		assert.ok(first.reasons.includes("recent_recurrence_threshold"));
+
+		// 1 hour later — within the 24h window, both rules suppressed.
+		const oneHourLater = new Date(NOW.getTime() + 60 * 60 * 1000);
+		const second = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: oneHourLater,
+		});
+		assert.equal(
+			second.shouldEscalate,
+			false,
+			"both rules suppressed within their respective windows",
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("checkUserEscalation: recurrence_count default 1 (no override) does NOT trigger the rule", () => {
+	// New finding, no re-reports yet — recurrenceCount defaults to 1
+	// via the schema. The rule must not fire on a brand-new finding.
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-fresh",
+			severity: "high",
+			createdAt: WITHIN_WINDOW,
+		});
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT,
+			now: NOW,
+		});
+		assert.equal(out.shouldEscalate, false);
+		assert.ok(!out.reasons.includes("recent_recurrence_threshold"));
 	} finally {
 		cleanup();
 	}
