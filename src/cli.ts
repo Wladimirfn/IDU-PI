@@ -557,6 +557,7 @@ import {
 	handleIduProjectResetState,
 	handleIduHygieneMigrate,
 	handleIduAckAdvisory,
+	handleIduBugFindingShow,
 	handleIduHygieneSweep,
 	handleIduSkillsDeploy,
 	handleIduPreflight,
@@ -2134,6 +2135,9 @@ async function runCliCommandInner(
 			case "idu-ack-advisory":
 			case "ack-advisory":
 				return handleIduAckAdvisory(activeRuntime, rest);
+			case "idu-bug-finding-show":
+			case "bug-finding-show":
+				return handleIduBugFindingShow(activeRuntime, rest);
 			case "idu-hygiene-sweep":
 			case "hygiene-sweep":
 				return handleIduHygieneSweep(activeRuntime);

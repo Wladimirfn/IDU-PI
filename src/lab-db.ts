@@ -742,3 +742,56 @@ export function listOpenFindings(
 		recurrenceCount: row.recurrenceCount,
 	}));
 }
+
+/**
+ * Issue #459: return the full bug_finding row by id. The
+ * `bug_findings.id` is already broadcast in the alert (e.g.
+ * `bf-idu-pi-v2:abc123`). The truncation that drops the caveat
+ * in the alert is fixed by giving the operator a way to retrieve
+ * the complete row on demand. Returns `null` when the id is not
+ * found (covers the case of an alert referencing a row that was
+ * already triaged/fixed/deleted).
+ */
+export function getBugFinding(
+	dbPath: string,
+	id: string,
+): BugFinding | null {
+	initLabDb(dbPath);
+	const output = runSql(
+		dbPath,
+		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey, COALESCE(specialty, '') AS specialty, COALESCE(recurrence_count, 1) AS recurrenceCount FROM bug_findings WHERE id = ${sqlString(id)} LIMIT 1;`,
+	).trim();
+	if (!output) return null;
+	const rows = JSON.parse(output) as Array<{
+		id: string;
+		project_id: string;
+		title: string;
+		description: string;
+		severity: FindingSeverity;
+		confidence: FindingConfidence;
+		status: FindingStatus;
+		evidence: string;
+		suspectedCause: string;
+		affectedFiles: string;
+		dedupeKey: string;
+		specialty: string;
+		recurrenceCount: number;
+	}>;
+	const row = rows[0];
+	if (!row) return null;
+	return {
+		id: row.id,
+		projectId: row.project_id,
+		title: row.title,
+		description: row.description,
+		severity: row.severity,
+		confidence: row.confidence,
+		status: row.status,
+		evidence: row.evidence,
+		suspectedCause: row.suspectedCause,
+		affectedFiles: JSON.parse(row.affectedFiles) as string[],
+		dedupeKey: row.dedupeKey,
+		specialty: row.specialty,
+		recurrenceCount: row.recurrenceCount,
+	};
+}

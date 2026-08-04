@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import {
 	formatInitLabDbResult,
+	getBugFinding,
 	initLabDb,
 	listOpenFindings,
 	recordBugFinding,
@@ -58,4 +59,54 @@ test("recordBugFinding stores open findings for lab context", () => {
 	assert.equal(findings[0].id, "bug-1");
 	assert.equal(findings[0].title, "Cancel does not interrupt busy prompt");
 	assert.deepEqual(findings[0].affectedFiles, ["src/index.ts"]);
+});
+
+// Issue #459: the alert truncated the caveat. The data is whole
+// in `bug_findings`; the row's `id` is in the alert. This is the
+// third option the owner picked: a command that retrieves the
+// complete row on demand.
+test("getBugFinding returns the full row by id", () => {
+	const dbPath = join(tempDir(), "reports", "lab.db");
+	initLabDb(dbPath);
+
+	recordBugFinding(dbPath, {
+		id: "bf-idu-pi-v2:abc123",
+		projectId: "pi-telegram-bridge",
+		title: "reverse check missing in check-protocol-tool-drift",
+		description:
+			"Comment promises 'if any of these ever becomes a real registered tool... this script fails', but the truncated body does not show that branch.",
+		severity: "medium",
+		confidence: "high",
+		status: "new",
+		evidence:
+			"Comment: 'the declaration is load-bearing in BOTH directions... the reverse check below' (truncated, not visible)",
+		affectedFiles: ["scripts/check-protocol-tool-drift.mjs"],
+		dedupeKey: "protocol-drift:reverse-check-missing",
+	});
+
+	const row = getBugFinding(dbPath, "bf-idu-pi-v2:abc123");
+
+	assert.ok(row, "must return the row when the id exists");
+	assert.equal(row!.id, "bf-idu-pi-v2:abc123");
+	assert.equal(row!.title, "reverse check missing in check-protocol-tool-drift");
+	// The caveat the alert cut — preserved verbatim in the row.
+	assert.ok(
+		row!.description.includes(
+			"the truncated body does not show that branch",
+		),
+		"description must be preserved verbatim — the alert truncated it",
+	);
+	assert.ok(
+		row!.evidence.includes("truncated, not visible"),
+		"evidence must be preserved verbatim — the alert truncated it",
+	);
+	assert.deepEqual(row!.affectedFiles, ["scripts/check-protocol-tool-drift.mjs"]);
+});
+
+test("getBugFinding returns null when the id is missing", () => {
+	const dbPath = join(tempDir(), "reports", "lab.db");
+	initLabDb(dbPath);
+
+	const row = getBugFinding(dbPath, "bf-not-here");
+	assert.equal(row, null);
 });

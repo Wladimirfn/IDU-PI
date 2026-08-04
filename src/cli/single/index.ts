@@ -9,6 +9,7 @@ export {
 	handleIduProjectResetState,
 	handleIduHygieneMigrate,
 	handleIduAckAdvisory,
+	handleIduBugFindingShow,
 	handleIduHygieneSweep,
 	handleIduSkillsDeploy,
 	handleIduPreflight,

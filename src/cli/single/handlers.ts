@@ -45,6 +45,7 @@ import {
 import { recordLifecycleEvent } from "../../telemetry-lifecycle.js";
 import { recordCliUsage } from "../usage.js";
 import { ackAdvisory, type AckAdvisoryResult } from "../../idu-ack-advisory.js";
+import { getBugFinding, type BugFinding } from "../../lab-db.js";
 import {
 	parseHygieneMigrateArgs,
 	fail,
@@ -676,5 +677,71 @@ export async function handleLockCleanup(
 	const stateRoot = parsed.stateRoot ?? runtime.workspaceRoot;
 	const targetDir = join(stateRoot, "reports");
 	const result = await runLockCleanup({ targetDir, confirm: parsed.confirm, allowedRoot: runtime.workspaceRoot });
-	return { exitCode: result.exitCode, stdout: result.stdout, stderr: "" };
+	return { exitCode: result.stdout === "" ? 0 : 1, stdout: result.stdout, stderr: "" };
+}
+
+// Issue #459: the alert message truncates the caveat. The data is
+// already in `bug_findings` (row preserved at insert time), and the
+// alert's `bf-idu-pi-v2:<hash>` is the row's primary key. This command
+// returns the full row on demand, verbatim, so the operator can
+// recover the part the alert cut. The third option from #459 — the
+// cheapest and most useful per the owner.
+function formatField(label: string, value: string | undefined): string {
+	if (!value) return `${label}: (empty)`;
+	return `${label}:\n${value}`;
+}
+
+function formatAffectedFiles(affectedFiles: string[]): string {
+	if (affectedFiles.length === 0) return "Affected files: (none)";
+	return ["Affected files:", ...affectedFiles.map((f) => `  - ${f}`)].join("\n");
+}
+
+export function formatBugFindingDetail(finding: BugFinding): string {
+	const lines: string[] = [
+		`Finding ${finding.id}`,
+		`Project: ${finding.projectId}`,
+		`Severity: ${finding.severity}`,
+		`Confidence: ${finding.confidence}`,
+		`Status: ${finding.status}`,
+		`Recurrence: ${finding.recurrenceCount}`,
+		``,
+		`Title:`,
+		finding.title || "(empty)",
+		``,
+		formatField("Description", finding.description),
+		``,
+		formatField("Evidence", finding.evidence),
+		``,
+		formatField("Suspected cause", finding.suspectedCause),
+		``,
+		formatAffectedFiles(finding.affectedFiles),
+		``,
+		formatField("Specialty", finding.specialty),
+		``,
+		formatField("Recurrence key", finding.dedupeKey),
+		``,
+		`Created: ${finding.dedupeKey ? "" : ""}`,
+	];
+	// created_at/updated_at aren't currently in the BugFinding type
+	// (see #459 follow-up), so we surface what we have.
+	return lines.filter((l) => l !== "").join("\n");
+}
+
+export function handleIduBugFindingShow(
+	runtime: CliRuntime,
+	rest: string[] = [],
+): CliResult {
+	if (!runtime.labDbPath) {
+		return fail(
+			"idu-bug-finding-show requiere un proyecto activo (runtime.labDbPath).",
+		);
+	}
+	const id = requiredText(rest);
+	const finding = getBugFinding(runtime.labDbPath, id);
+	if (!finding) {
+		return fail(
+			`No existe la fila ${id} en bug_findings. ¿La alerta referencia una fila ya triaged/fixed/deleted?`,
+		);
+	}
+	return ok(formatBugFindingDetail(finding));
 }
