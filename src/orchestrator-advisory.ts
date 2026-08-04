@@ -35,9 +35,39 @@ export type OrchestratorAdvisory = {
 export function buildPreflightOrchestratorAdvisory(
 	report: ProjectPreflightReport,
 ): OrchestratorAdvisory {
+	// Issue #427: the perception layer (humanIntent) computes a judgment
+	// about whether the system understood the request. Until this fix that
+	// judgment lived in `report.humanIntent.shouldAskClarification` but
+	// never reached the verdict — an absurd input with low risk would still
+	// produce `allow`. We wire the perception signal into the verdict so
+	// the envelope (and the orchestrator reading it) reflect the doubt.
+	const perceptionUnclear = report.humanIntent?.shouldAskClarification === true;
+	const perceptionAmbiguity = report.humanIntent?.ambiguity ?? [];
+
 	const requiresHuman =
-		report.requiresHumanConfirmation || report.risk === "blocker";
-	const recommendation = recommendationFromPreflight(report);
+		report.requiresHumanConfirmation ||
+		report.risk === "blocker" ||
+		perceptionUnclear;
+
+	const baseRecommendation = recommendationFromPreflight(report);
+	// Don't downgrade a stricter verdict. Only escalate `allow` to
+	// `ask_human` when the perception layer flagged the request as
+	// unclear; `warn` / `needs_deeper_audit` / `block` already carry
+	// more weight than `ask_human` would.
+	const recommendation: OrchestratorRecommendation =
+		perceptionUnclear && baseRecommendation === "allow"
+			? "ask_human"
+			: baseRecommendation;
+
+	// When perception flags uncertainty, cap confidence well below 0.5 so
+	// the envelope is visibly different from a clean `allow` (which lands
+	// at 0.7). A low confidence on `ask_human` tells the agent "I am
+	// asking you to clarify" rather than "I am uncertain and you can
+	// proceed".
+	const confidence = perceptionUnclear
+		? Math.min(confidenceFromRisk(report.risk), 0.4)
+		: confidenceFromRisk(report.risk);
+
 	return {
 		audience: "orchestrator",
 		severity:
@@ -49,9 +79,11 @@ export function buildPreflightOrchestratorAdvisory(
 						? "warning"
 						: "info",
 		recommendation,
-		confidence: confidenceFromRisk(report.risk),
+		confidence,
 		summary: requiresHuman
-			? "Supervisor detectó riesgo antes de ejecutar."
+			? perceptionUnclear
+				? "Perception no entendió la intención; pedir aclaración antes de ejecutar."
+				: "Supervisor detectó riesgo antes de ejecutar."
 			: "Supervisor no detectó bloqueo para esta intención.",
 		alignment: alignmentFromAreas(report.affectedAreas),
 		recommendedNext: compactActions([
@@ -66,6 +98,9 @@ export function buildPreflightOrchestratorAdvisory(
 			`risk:${report.risk}`,
 			`connection:${report.connectionStatus}`,
 			...report.affectedAreas.map((area) => `area:${area}`),
+			...(perceptionUnclear
+				? perceptionAmbiguity.map((reason) => `ambiguity:${reason}`)
+				: []),
 			...(report.constitutionGate?.kind === "ran"
 				? report.constitutionGate.result.affectedRules
 				: []
@@ -77,7 +112,14 @@ export function buildPreflightOrchestratorAdvisory(
 		contractsAffected: contractAreasFromImpact(report.affectedAreas),
 		requiredReads: requiredReadsFromImpact(report.affectedAreas),
 		suggestedAgentLabs: suggestedLabsFromImpact(report.affectedAreas),
-		orchestratorGuidance: orchestratorGuidance(recommendation),
+		orchestratorGuidance: perceptionUnclear
+			? compactActions([
+					...orchestratorGuidance(recommendation),
+					...perceptionAmbiguity.map(
+						(reason) => `Perception flagged: ${reason}`,
+					),
+				])
+			: orchestratorGuidance(recommendation),
 	};
 }
 

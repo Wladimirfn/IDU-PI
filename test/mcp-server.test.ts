@@ -2329,6 +2329,194 @@ test("idu_orchestrator_procedure and task_context guide without implementing", a
 	);
 });
 
+test("idu_task_context propagates perception: shouldAskClarification forces envelope.requiresHuman even at low risk (issue #427)", async () => {
+	// Issue #427: the perception layer (humanIntent) computes that the
+	// system did not understand the request. Without this fix the verdict
+	// said `allow` for an absurd input because the orchestrator advisory
+	// builder only consulted `report.risk` and never read
+	// `report.humanIntent`. We wire the perception signal through.
+	function fakeHumanIntent(
+		shouldAskClarification: boolean,
+		ambiguity: string[],
+	): unknown {
+		return {
+			originalText: "Banana umbrellas negotiate with silent triangles...",
+			normalizedText: "banana umbrellas negotiate with silent triangles",
+			languageHints: "unknown",
+			intent: "unknown",
+			taskCategory: "general",
+			concepts: [],
+			riskHints: [],
+			confidence: shouldAskClarification ? "low" : "medium",
+			matchedEvidence: shouldAskClarification ? [] : ["why"],
+			ambiguity,
+			shouldAskClarification,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: shouldAskClarification
+				? "ask_clarification"
+				: "safe_to_execute",
+			kind: "unknown",
+			action: "none",
+			riskHint: "low",
+			requiresHumanConfirmation: shouldAskClarification,
+			emotion: "neutral",
+			urgency: 0,
+			evidence: [],
+		};
+	}
+
+	function preflightWithHumanIntent(
+		risk: "low" | "high" | "blocker",
+		shouldAskClarification: boolean,
+		ambiguity: string[] = [],
+	): ProjectPreflightReport {
+		return {
+			risk,
+			okToProceed: risk === "low",
+			request: "anything",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas:
+				risk === "low" ? ["tarea simple"] : ["auth/seguridad"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext:
+				risk === "low"
+					? "Puede continuar con alcance acotado."
+					: "Pedir confirmación humana antes de implementar.",
+			requiresHumanConfirmation: risk !== "low",
+			shouldRunAgentLab: false,
+			humanIntent: fakeHumanIntent(
+				shouldAskClarification,
+				ambiguity,
+			) as never,
+		};
+	}
+
+	function runtimeWith(
+		preflight: () => ProjectPreflightReport,
+	): CliRuntime {
+		return {
+			...fakeRuntime(),
+			preflight,
+		} as CliRuntime;
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	// Case A: low risk + shouldAskClarification=true → must require human.
+	const caseA = await callIduMcpTool(
+		"idu_task_context",
+		{ request: "Banana umbrellas negotiate with silent triangles..." },
+		{
+			runtimeFactory: () =>
+				runtimeWith(() =>
+					preflightWithHumanIntent(
+						"low",
+						true,
+						["intent_unknown", "concept_unknown"],
+					),
+				),
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(caseA.ok, true);
+	const envA = caseA.data.decisionEnvelope as DecisionEnvelope;
+	const advisoryA = caseA.data.alignmentAdvisory as {
+		recommendation: string;
+		requiresHuman: boolean;
+		confidence: number;
+		evidenceRefs: string[];
+		summary: string;
+		orchestratorGuidance: string[];
+	};
+	assert.equal(
+		envA.requiresHuman,
+		true,
+		`envelope.requiresHuman must be true when shouldAskClarification=true, got ${envA.requiresHuman}`,
+	);
+	assert.ok(
+		envA.confidence < 0.5,
+		`envelope.confidence must drop below 0.5 when perception is unclear, got ${envA.confidence}`,
+	);
+	assert.equal(envA.recommendation, "ask_human");
+	assert.equal(advisoryA.requiresHuman, true);
+	assert.equal(advisoryA.recommendation, "ask_human");
+	assert.ok(
+		advisoryA.evidenceRefs.some((ref) => /^ambiguity:/u.test(ref)),
+	);
+	assert.ok(
+		advisoryA.orchestratorGuidance.some((line) =>
+			/Perception flagged: intent_unknown/u.test(line),
+		),
+	);
+	assert.match(advisoryA.summary, /Perception no entendi/u);
+
+	// Case B (control): low risk + shouldAskClarification=false → stays allow.
+	const caseB = await callIduMcpTool(
+		"idu_task_context",
+		{ request: "explain how the login flow works" },
+		{
+			runtimeFactory: () =>
+				runtimeWith(() => preflightWithHumanIntent("low", false)),
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(caseB.ok, true);
+	const envB = caseB.data.decisionEnvelope as DecisionEnvelope;
+	const advisoryB = caseB.data.alignmentAdvisory as {
+		recommendation: string;
+		requiresHuman: boolean;
+		confidence: number;
+	};
+	assert.equal(envB.requiresHuman, false);
+	assert.equal(envB.recommendation, "allow");
+	assert.equal(
+		envB.confidence,
+		0.7,
+		`clean low-risk advisory must keep default confidence 0.7, got ${envB.confidence}`,
+	);
+	assert.equal(advisoryB.recommendation, "allow");
+	assert.equal(advisoryB.requiresHuman, false);
+
+	// Case C (agreement): high risk + shouldAskClarification=true → both
+	// signals agree. The fix must NOT downgrade: `recommendationFromPreflight`
+	// already produces `needs_deeper_audit` for high risk, which is at
+	// least as strict as `ask_human`. Demoting it to `ask_human` would
+	// make a stricter verdict look softer.
+	const caseC = await callIduMcpTool(
+		"idu_task_context",
+		{ request: "modify the login table" },
+		{
+			runtimeFactory: () =>
+				runtimeWith(() =>
+					preflightWithHumanIntent(
+						"high",
+						true,
+						["intent_unknown"],
+					),
+				),
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(caseC.ok, true);
+	const envC = caseC.data.decisionEnvelope as DecisionEnvelope;
+	assert.equal(envC.requiresHuman, true);
+	assert.notEqual(
+		envC.recommendation,
+		"allow",
+		`high-risk perception-unclear request must not be demoted to allow, got ${envC.recommendation}`,
+	);
+});
+
 test("approved plan advisory loop returns snapshot, next action, and task package", async () => {
 	const options = {
 		runtimeFactory: factory(),
