@@ -419,7 +419,11 @@ test("Idu-pi supervisor cycle is accepted end-to-end without unsafe apply", asyn
 			isIduActive: () => true,
 			saveSemanticCompactionDraft: () => semanticDraft(paths),
 		});
-		assert.equal(supervisorResult.status, "completed");
+		// Issue #416: under critical_findings the loop's top-level status
+		// is `warning` (a step carries warning + the loop exposes a
+		// followUp). The cycle is still accepted; the e2e tests the
+		// safety invariants, not the advisory verdict.
+		assert.equal(supervisorResult.status, "warning");
 		assert.equal(auditRuns, 1);
 		assert.equal(checkpointUpdates, 1);
 		assert.equal(memoryWrites, 0);
@@ -427,7 +431,7 @@ test("Idu-pi supervisor cycle is accepted end-to-end without unsafe apply", asyn
 			supervisorResult.steps.find(
 				(step) => step.name === "semantic_compaction_draft",
 			)?.status,
-			"completed",
+			"warning",
 		);
 		assert.match(
 			formatIduSupervisorLoopResult(supervisorResult),
