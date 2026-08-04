@@ -2550,6 +2550,222 @@ test("idu_task_context propagates perception: shouldAskClarification forces enve
 	assert.equal(envD.requiresHuman, true);
 });
 
+test("idu_task_context reflects unacked blocking injection in the decision envelope (issue #428)", async () => {
+	// Issue #428: the `blocking` field on the envelope response is a
+	// signal of an unacked blocking injection (graph_drift_finding,
+	// objective_reminder, ...). Before this fix the signal lived in
+	// the response as informational metadata only; the decision envelope
+	// still said `allowedToProceed: true`. This test wires a real
+	// injections.jsonl into a temp stateRoot and asserts that an
+	// unacked injection with `decisionRequired: true` flips the
+	// decision envelope.
+	interface BlockingInjectionRow {
+		injectionId: string;
+		kind: "graph_drift_finding" | "objective_reminder";
+		triggerId: string;
+		decisionEnvelope: {
+			severity: "info" | "warning" | "critical";
+			summary: string;
+			options: string[];
+			evidenceRefs: string[];
+			orchestratorDecisionRequired: boolean;
+		};
+		acked: boolean;
+		ts: string;
+	}
+
+	function seedInjection(
+		stateRoot: string,
+		injection: BlockingInjectionRow,
+	): void {
+		const path = join(stateRoot, "injections.jsonl");
+		writeFileSync(path, `${JSON.stringify(injection)}\n`, "utf8");
+	}
+
+	function runtimeWithStateRoot(
+		stateRoot: string,
+		risk: "low" | "high" = "low",
+	): CliRuntime {
+		return {
+			...fakeRuntime(),
+			workspaceRoot: stateRoot,
+			preflight: () => ({
+				risk,
+				okToProceed: risk === "low",
+				request: "anything",
+				projectId: "sistema_de_mantencion",
+				projectPath: "C:/projects/sistema",
+				connectionStatus: "ready",
+				affectedAreas: ["tarea simple"],
+				missingContext: [],
+				warnings: [],
+				recommendedNext: "Puede continuar con alcance acotado.",
+				requiresHumanConfirmation: false,
+				shouldRunAgentLab: false,
+			}),
+		} as CliRuntime;
+	}
+
+	function buildInjection(
+		overrides: Partial<{
+			injectionId: string;
+			acked: boolean;
+			decisionRequired: boolean;
+			kind: "graph_drift_finding" | "objective_reminder";
+		}> = {},
+	): BlockingInjectionRow {
+		return {
+			injectionId: overrides.injectionId ?? "test-blocking-1",
+			kind: overrides.kind ?? "graph_drift_finding",
+			triggerId: "graph_drift_sensor",
+			decisionEnvelope: {
+				severity: "warning",
+				summary: "blast radius uncovered for finding rule",
+				options: ["acknowledge"],
+				evidenceRefs: ["graph-drift:test"],
+				orchestratorDecisionRequired:
+					overrides.decisionRequired ?? true,
+			},
+			acked: overrides.acked ?? false,
+			ts: new Date().toISOString(),
+		};
+	}
+
+	function buildResolution(stateRoot: string): IduMcpProjectResolution {
+		return {
+			status: "registered_project",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			stateRoot,
+			safeNotes: [],
+			errors: [],
+		} as IduMcpProjectResolution;
+	}
+
+	function callWithStateRoot(
+		stateRoot: string,
+		risk: "low" | "high",
+	): Promise<{ ok: boolean; data: { decisionEnvelope: DecisionEnvelope } }> {
+		return callIduMcpTool(
+			"idu_task_context",
+			{ request: "anything" },
+			{
+				runtimeFactory: () => runtimeWithStateRoot(stateRoot, risk),
+				projectResolver: () => buildResolution(stateRoot),
+			},
+		) as unknown as Promise<{ ok: boolean; data: { decisionEnvelope: DecisionEnvelope } }>;
+	}
+
+	// Case A (gate fires): unacked blocking injection with
+	// decisionRequired: true. The decision envelope MUST reflect the
+	// block: requiresHuman=true, allowedToProceed=false, requiredActions
+	// gets the human-owned ack entry.
+	const tempA = makeTempDir("idu-428-gate-");
+	try {
+		seedInjection(tempA, buildInjection({ acked: false, decisionRequired: true }));
+		const resultA = await callWithStateRoot(tempA, "low");
+		assert.equal(resultA.ok, true);
+		const envA = resultA.data.decisionEnvelope;
+		assert.equal(
+			envA.requiresHuman,
+			true,
+			`unacked decisionRequired blocking must force requiresHuman=true, got ${envA.requiresHuman}`,
+		);
+		assert.equal(
+			envA.allowedToProceed,
+			false,
+			`unacked decisionRequired blocking must force allowedToProceed=false, got ${envA.allowedToProceed}`,
+		);
+		const ackAction = envA.requiredActions.find(
+			(action) => action.id === "injection-ack-test-blocking-1",
+		);
+		assert.ok(
+			ackAction,
+			`requiredActions must include the ack entry for the blocking injection, got ${JSON.stringify(envA.requiredActions)}`,
+		);
+		assert.equal(ackAction?.owner, "human");
+		assert.equal(ackAction?.blocking, true);
+		assert.ok(
+			envA.evidenceRefs.some((ref) => ref === "injection:test-blocking-1"),
+			`evidenceRefs must include injection:<id>, got ${JSON.stringify(envA.evidenceRefs)}`,
+		);
+	} finally {
+		rmSync(tempA, { recursive: true, force: true });
+	}
+
+	// Case B (control — already acked): the operator acked the
+	// blocking injection. The decision envelope MUST NOT be modified;
+	// allowedToProceed stays true (clean low-risk advisory).
+	const tempB = makeTempDir("idu-428-acked-");
+	try {
+		seedInjection(tempB, buildInjection({ acked: true, decisionRequired: true }));
+		const resultB = await callWithStateRoot(tempB, "low");
+		const envB = resultB.data.decisionEnvelope;
+		assert.equal(
+			envB.allowedToProceed,
+			true,
+			`acked blocking must not affect allowedToProceed, got ${envB.allowedToProceed}`,
+		);
+		assert.equal(
+			envB.requiresHuman,
+			false,
+			`acked blocking must not affect requiresHuman, got ${envB.requiresHuman}`,
+		);
+		assert.ok(
+			!envB.requiredActions.some(
+				(action) => action.id === "injection-ack-test-blocking-1",
+			),
+			`acked blocking must not append an ack action`,
+		);
+	} finally {
+		rmSync(tempB, { recursive: true, force: true });
+	}
+
+	// Case C (control — informational only): unacked injection but
+	// decisionRequired: false. The block is informational; the
+	// decision envelope MUST NOT be modified.
+	const tempC = makeTempDir("idu-428-informational-");
+	try {
+		seedInjection(tempC, buildInjection({ acked: false, decisionRequired: false }));
+		const resultC = await callWithStateRoot(tempC, "low");
+		const envC = resultC.data.decisionEnvelope;
+		assert.equal(envC.allowedToProceed, true);
+		assert.equal(envC.requiresHuman, false);
+		assert.ok(
+			!envC.requiredActions.some(
+				(action) => action.id === "injection-ack-test-blocking-1",
+			),
+		);
+	} finally {
+		rmSync(tempC, { recursive: true, force: true });
+	}
+
+	// Case D (anti-downgrade): high-risk + unacked blocking injection.
+	// The decision envelope already says requiresHuman=true because
+	// of the high-risk path. The blocking must not be silently dropped
+	// — the requiredAction must be present, and allowedToProceed must
+	// stay false (the blocking is at least as strict as the risk).
+	const tempD = makeTempDir("idu-428-agreement-");
+	try {
+		seedInjection(tempD, buildInjection({ acked: false, decisionRequired: true }));
+		const resultD = await callWithStateRoot(tempD, "high");
+		const envD = resultD.data.decisionEnvelope;
+		assert.equal(envD.requiresHuman, true);
+		assert.equal(
+			envD.allowedToProceed,
+			false,
+			`high-risk + unacked blocking must keep allowedToProceed=false, got ${envD.allowedToProceed}`,
+		);
+		assert.ok(
+			envD.requiredActions.some(
+				(action) => action.id === "injection-ack-test-blocking-1",
+			),
+		);
+	} finally {
+		rmSync(tempD, { recursive: true, force: true });
+	}
+});
+
 test("approved plan advisory loop returns snapshot, next action, and task package", async () => {
 	const options = {
 		runtimeFactory: factory(),

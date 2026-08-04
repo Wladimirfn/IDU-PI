@@ -20,6 +20,8 @@
 // JsonObject, etc.) keep working without changes.
 
 import { readPendingBlockingInjection } from "../../objective-injection.js";
+import type { BlockingInjection } from "../../objective-injection.js";
+import type { EvidenceRequiredAction } from "../../evidence-gateways.js";
 
 // =====================================================================
 // Types
@@ -188,6 +190,81 @@ function redactObject<T>(value: T): T {
 	) as T;
 }
 
+/**
+ * Issue #428: an unacked blocking injection with `decisionRequired: true`
+ * MUST have consequences on the verdict. Before this helper the `blocking`
+ * field on the response was informational metadata only — the same
+ * disconnect #427 closed for perception. This function augments the
+ * decision envelope in `data` so that, when it is present, the verdict
+ * reflects the blocked state:
+ *
+ *   - `requiresHuman: true` (or stays true; OR semantics)
+ *   - `allowedToProceed: false` (always; the gate is closed)
+ *   - `requiredActions` gets a new `human`/`acknowledge` entry with
+ *     `blocking: true` so downstream consumers see what is being awaited
+ *   - `evidenceRefs` gets an `injection:<id>` reference
+ *
+ * Returns the original `data` unchanged when the verdict is missing,
+ * when the blocking isn't decisionRequired, or when the blocking is
+ * already acked. The top-level `blocking` field is still surfaced on
+ * the response for tools that don't carry a decisionEnvelope.
+ */
+function applyBlockingInjectionToDecisionEnvelope(
+	data: JsonObject,
+	blocking: BlockingInjection,
+): JsonObject {
+	if (
+		blocking.decisionRequired !== true ||
+		blocking.acked === true
+	) {
+		return data;
+	}
+	const decisionEnvelope = data.decisionEnvelope;
+	if (
+		!decisionEnvelope ||
+		typeof decisionEnvelope !== "object"
+	) {
+		return data;
+	}
+	const env = decisionEnvelope as Record<string, unknown>;
+	const existingActions: EvidenceRequiredAction[] = Array.isArray(
+		env.requiredActions,
+	)
+		? (env.requiredActions as EvidenceRequiredAction[])
+		: [];
+	const existingRefs: string[] = Array.isArray(env.evidenceRefs)
+		? (env.evidenceRefs as string[])
+		: [];
+	const ackAction: EvidenceRequiredAction = {
+		id: `injection-ack-${blocking.injectionId}`,
+		owner: "human",
+		action: "acknowledge",
+		reason: blocking.summary,
+		blocking: true,
+		data: {
+			injectionId: blocking.injectionId,
+			kind: blocking.kind,
+			ageMs: blocking.ageMs,
+		},
+	};
+	return {
+		...data,
+		decisionEnvelope: {
+			...env,
+			requiresHuman:
+				typeof env.requiresHuman === "boolean"
+					? env.requiresHuman || true
+					: true,
+			allowedToProceed: false,
+			requiredActions: [...existingActions, ackAction],
+			evidenceRefs: [
+				...existingRefs,
+				`injection:${blocking.injectionId}`,
+			],
+		},
+	};
+}
+
 // =====================================================================
 // envelope() — the universal contract.
 //
@@ -227,6 +304,9 @@ function envelope(input: {
 	const blocking = inputStateRoot
 		? readPendingBlockingInjection(inputStateRoot)
 		: null;
+	const dataWithBlockingApplied = blocking
+		? applyBlockingInjectionToDecisionEnvelope(input.data, blocking)
+		: input.data;
 	return {
 		ok: input.ok,
 		tool: input.tool,
@@ -234,7 +314,7 @@ function envelope(input: {
 		projectPath: input.projectPath,
 		stateRoot: outputStateRoot,
 		summary: redactSecrets(input.summary),
-		data: redactObject(input.data),
+		data: redactObject(dataWithBlockingApplied),
 		safeNotes: dedupe([...SAFE_BASE_NOTES, ...(input.safeNotes ?? [])]),
 		errors: (input.errors ?? []).map(redactSecrets),
 		blocking,
