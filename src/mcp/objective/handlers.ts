@@ -339,6 +339,10 @@ export async function handleAutomaticov1Cycle(
 	};
 	const request =
 		"automaticov1 cyclic autonomous loop: Bibliotecario evidence/news/docs intelligence, supervisor participation, skill proposals, project structure optimization, failure detection and repair boundaries.";
+	// Issue #398: pass the alert-engine control state and cooldowns
+	// so the Layer-2 bypass gate honors disabled domains and active
+	// cooldowns.
+	const alertEngineState = readAutonomousAlertEngineState(stateRoot);
 	const result = await runAutomaticov1AdvisoryCycle({
 		projectId: runtime.projectId,
 		projectPath: runtime.projectPath,
@@ -347,6 +351,8 @@ export async function handleAutomaticov1Cycle(
 		allowTaskCreation: booleanArg(args, "allowTaskCreation", false),
 		allowExternalFetch: booleanArg(args, "allowExternalFetch", false),
 		allowSkillDraftProposal: booleanArg(args, "allowSkillProposals", false),
+		alertControl: alertEngineState.control,
+		alertCooldowns: alertEngineState.cooldowns,
 		usageEvents: readIduUsageEvents(stateRoot, 500),
 		loadPlan: () => {
 			if (!runtime.masterPlanReview) {

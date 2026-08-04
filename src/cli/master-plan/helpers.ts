@@ -22,6 +22,7 @@ import { buildExternalIntelligenceReport } from "../../external-intelligence.js"
 import { inspectEvents, formatInspectEventsReport } from "../../events-inspector.js";
 import { ProposalOutboxStore, type FlowBoundProposal } from "../../proposal-outbox.js";
 import { buildCliSelfMaintenanceReport } from "../_shared/index.js";
+import { readAutonomousAlertEngineState } from "../../autonomous-alert-engine-state.js";
 import type { CliRuntime } from "../../cli.js";
 import type { CliResult } from "../dispatch-glue/index.js";
 import { ok } from "../dispatch-glue/index.js";
@@ -130,6 +131,12 @@ export async function runCliAutomaticov1Cycle(
 	};
 	const request =
 		"automaticov1 cyclic autonomous loop: Bibliotecario evidence/news/docs intelligence, supervisor participation, skill proposals, project structure optimization, failure detection and repair boundaries.";
+	// Issue #398: pass the alert-engine control state and cooldowns so
+	// the Layer-2 bypass gate honors disabled domains and active
+	// cooldowns.
+	const alertEngineState = readAutonomousAlertEngineState(
+		runtime.workspaceRoot,
+	);
 	return runAutomaticov1AdvisoryCycle({
 		projectId: runtime.projectId,
 		projectPath: runtime.projectPath,
@@ -138,6 +145,8 @@ export async function runCliAutomaticov1Cycle(
 		allowTaskCreation,
 		allowExternalFetch,
 		allowSkillDraftProposal,
+		alertControl: alertEngineState.control,
+		alertCooldowns: alertEngineState.cooldowns,
 		usageEvents: readIduUsageEvents(runtime.workspaceRoot, 500),
 		loadPlan: () => {
 			if (!runtime.masterPlanReview) {
