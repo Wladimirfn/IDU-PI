@@ -501,12 +501,28 @@ export function systemicBypassEligibility(
 	cooldowns: Record<string, string> | undefined,
 	now: Date,
 ): { canCreateTask: boolean; protectedDomainPresent: boolean } {
-	// Fail-closed: without the alert engine's control state, treat
-	// every signal as if its domain were disabled. The bypass must
-	// not fire. Mirrors decisionFromSelfMaintenanceSignal's
-	// `if (!domain || input.control.disabledDomains.includes(domain)) return undefined`
-	// branch for the "no control info" case.
+	// Issue #463: the four "I can't tell" conditions are decided in
+	// ONE place at the top of the helper, not per-signal. Each
+	// condition mirrors a check the motor de alertas performs in
+	// `buildAutonomousAlertEngineReport` (line ~142):
+	//   !control.active              — operator turned the engine off
+	//   isPaused(control, now)       — control.pausedUntil in the future
+	// Without `control` the helper can't know either way; that is the
+	// previous fail-closed (#462). The trade-off: the protectedDomain
+	// floor's "intentional redundancy" disappears for these three
+	// "no info" paths — but the redundancy was meant to defend
+	// against a per-signal case that could let a task through, and
+	// these are global cuts that already deny at the source. The
+	// per-signal redundancy (cooldown, disabled, protected, high)
+	// remains. The owner said: "decidí una sola vez para las
+	// cuatro condiciones, no una por una."
 	if (!control) {
+		return { canCreateTask: false, protectedDomainPresent: false };
+	}
+	if (control.active === false) {
+		return { canCreateTask: false, protectedDomainPresent: false };
+	}
+	if (control.pausedUntil && new Date(control.pausedUntil) > now) {
 		return { canCreateTask: false, protectedDomainPresent: false };
 	}
 	let canCreateTask = false;

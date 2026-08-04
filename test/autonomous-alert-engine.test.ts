@@ -605,3 +605,48 @@ test("systemicBypassEligibility: control=undefined with taskable signal still ->
 	assert.equal(out.canCreateTask, false);
 	assert.equal(out.protectedDomainPresent, false);
 });
+
+// Issue #463: the motor de alertas corta before deciding anything
+// when `control.active === false` (operator turned the engine off)
+// or `isPaused(control, now)` (`control.pausedUntil` in the future).
+// The bypass must mirror that — once the operator said "no", every
+// signal's wouldCreateTask is false. The protectedDomainPresent
+// floor is the same shape as the no-control path: when the helper
+// can't tell whether any signal is "really" protected, it fails
+// closed on both flags (the "decide once for the four conditions"
+// design).
+test("systemicBypassEligibility: control.active===false -> both flags false (mirror #142 early-return)", () => {
+	const inactiveControl: AutonomousAlertControlState = {
+		...activeControl,
+		active: false,
+	};
+	const signals = [signal({ id: "sig-a" })];
+	const out = systemicBypassEligibility(signals, inactiveControl, undefined, NOW);
+	assert.equal(out.canCreateTask, false);
+	assert.equal(out.protectedDomainPresent, false);
+});
+
+test("systemicBypassEligibility: control.pausedUntil>now -> both flags false (mirror #142 early-return)", () => {
+	const pausedControl: AutonomousAlertControlState = {
+		...activeControl,
+		pausedUntil: new Date(NOW.getTime() + 60 * 60 * 1000).toISOString(),
+	};
+	const signals = [signal({ id: "sig-a" })];
+	const out = systemicBypassEligibility(signals, pausedControl, undefined, NOW);
+	assert.equal(out.canCreateTask, false);
+	assert.equal(out.protectedDomainPresent, false);
+});
+
+test("systemicBypassEligibility: control.active=true AND pausedUntil in past -> bypass works (control path is clean)", () => {
+	// Sanity: when the four "I can't tell" conditions are all clear,
+	// the bypass operates as before. This is the "no mutation" baseline.
+	const pastPausedControl: AutonomousAlertControlState = {
+		...activeControl,
+		active: true,
+		pausedUntil: new Date(NOW.getTime() - 60 * 60 * 1000).toISOString(),
+	};
+	const signals = [signal({ id: "sig-a" })];
+	const out = systemicBypassEligibility(signals, pastPausedControl, undefined, NOW);
+	assert.equal(out.canCreateTask, true);
+	assert.equal(out.protectedDomainPresent, false);
+});
