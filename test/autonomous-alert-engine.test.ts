@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { StructuredTask } from "../src/structured-task-queue.js";
+import type { SupervisorSelfMaintenanceSignal } from "../src/supervisor-self-maintenance-advisory.js";
 import {
 	buildAutonomousAlertEngineReport,
+	classifySignal,
+	systemicBypassEligibility,
 	type AutonomousAlertControlState,
 } from "../src/autonomous-alert-engine.js";
 
@@ -417,4 +420,188 @@ test("npm security coverage gap is raw honest and does not claim coverage", () =
 			),
 		),
 	);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #398: shared signal classification + bypass gate that honors
+// disabledDomains and active cooldowns. The previous bypass gate was
+// a stripped mirror that skipped both checks.
+// ---------------------------------------------------------------------------
+
+function signal(
+	overrides: Partial<{
+		id: string;
+		category: SupervisorSelfMaintenanceSignal["category"];
+		severity: SupervisorSelfMaintenanceSignal["severity"];
+	}> = {},
+): SupervisorSelfMaintenanceSignal {
+	return {
+		id: overrides.id ?? "signal-1",
+		category: overrides.category ?? "supervisor_activity_pressure",
+		severity: overrides.severity ?? "warning",
+		confidence: 0.85,
+		summary: "test signal",
+		evidenceRefs: [],
+		recommendedActions: [],
+	};
+}
+
+const NOW = new Date("2026-06-05T00:00:00.000Z");
+
+test("classifySignal: wouldCreateTask when not disabled, not protected, not cooldown, severity!=high", () => {
+	const cls = classifySignal(signal(), activeControl, undefined, NOW);
+	assert.equal(cls.domain, "agentlab");
+	assert.equal(cls.protectedDomain, false);
+	assert.equal(cls.inCooldown, false);
+	assert.equal(cls.highRisk, false);
+	assert.equal(cls.wouldCreateTask, true);
+});
+
+test("classifySignal: wouldCreateTask=false when domain is disabled", () => {
+	const control: AutonomousAlertControlState = {
+		...activeControl,
+		disabledDomains: ["agentlab"],
+	};
+	const cls = classifySignal(signal(), control, undefined, NOW);
+	assert.equal(cls.domain, "agentlab");
+	assert.equal(cls.wouldCreateTask, false, "disabled domain MUST NOT contribute to canCreateTask");
+});
+
+test("classifySignal: wouldCreateTask=false when in cooldown", () => {
+	const cooldowns = { "agentlab:signal-1": new Date(NOW.getTime() + 60_000).toISOString() };
+	const cls = classifySignal(signal(), activeControl, cooldowns, NOW);
+	assert.equal(cls.inCooldown, true);
+	assert.equal(cls.wouldCreateTask, false, "cooldowned signal MUST NOT contribute to canCreateTask");
+});
+
+test("classifySignal: wouldCreateTask=false when severity is high", () => {
+	const cls = classifySignal(
+		signal({ severity: "high" }),
+		activeControl,
+		undefined,
+		NOW,
+	);
+	assert.equal(cls.highRisk, true);
+	assert.equal(cls.wouldCreateTask, false);
+});
+
+test("classifySignal: wouldCreateTask=false when domain is protected (security/db)", () => {
+	const cls = classifySignal(
+		signal({ category: "security_review_pressure" }),
+		activeControl,
+		undefined,
+		NOW,
+	);
+	assert.equal(cls.domain, "security");
+	assert.equal(cls.protectedDomain, true);
+	assert.equal(cls.wouldCreateTask, false);
+});
+
+test("classifySignal: wouldCreateTask=false for unmapped category", () => {
+	const cls = classifySignal(
+		signal({ category: "external_security_coverage_gap" }),
+		activeControl,
+		undefined,
+		NOW,
+	);
+	assert.equal(cls.wouldCreateTask, false);
+});
+
+test("systemicBypassEligibility: canCreateTask when at least one signal would create", () => {
+	const signals = [signal({ id: "sig-a" }), signal({ id: "sig-b" })];
+	const out = systemicBypassEligibility(signals, activeControl, undefined, NOW);
+	assert.equal(out.canCreateTask, true);
+	assert.equal(out.protectedDomainPresent, false);
+});
+
+test("systemicBypassEligibility: empty signals -> both false", () => {
+	const out = systemicBypassEligibility([], activeControl, undefined, NOW);
+	assert.deepEqual(out, { canCreateTask: false, protectedDomainPresent: false });
+});
+
+test("systemicBypassEligibility: disabled domain -> NO contribution (mirror decisionFromSelfMaintenanceSignal)", () => {
+	const control: AutonomousAlertControlState = {
+		...activeControl,
+		disabledDomains: ["security", "agentlab"],
+	};
+	// Issue #398: a signal whose domain is disabled must be skipped
+	// entirely. Same as decisionFromSelfMaintenanceSignal returning
+	// undefined. Before the fix, the bypass gate counted it toward
+	// protectedDomainPresent if it was protected; this test asserts
+	// the new (mirror) behavior — disabled == off.
+	const signals = [
+		signal({ id: "sig-a", category: "security_review_pressure" }),
+		signal({ id: "sig-b", category: "supervisor_activity_pressure" }),
+	];
+	const out = systemicBypassEligibility(signals, control, undefined, NOW);
+	assert.equal(out.canCreateTask, false);
+	assert.equal(
+		out.protectedDomainPresent,
+		false,
+		"disabled protected domain must NOT trip the protected floor — it is off",
+	);
+});
+
+test("systemicBypassEligibility: cooldown -> canCreateTask=false, protected floor still fires when domain is protected", () => {
+	// cooldowns fire for "agentlab:signal-a" so sig-a does NOT
+	// contribute to canCreateTask. sig-b is in security (protected),
+	// not in cooldown. The protected floor should still fire for it.
+	const cooldowns = {
+		"agentlab:signal-a": new Date(NOW.getTime() + 60_000).toISOString(),
+	};
+	const signals = [
+		signal({ id: "signal-a" }),
+		signal({ id: "signal-b", category: "security_review_pressure" }),
+	];
+	const out = systemicBypassEligibility(signals, activeControl, cooldowns, NOW);
+	assert.equal(out.canCreateTask, false, "cooldowned sig-a must NOT enable bypass");
+	assert.equal(
+		out.protectedDomainPresent,
+		true,
+		"sig-b is protected (security) so the floor must still fire",
+	);
+});
+
+test("systemicBypassEligibility: high severity -> canCreateTask=false, protected floor still fires when domain is protected", () => {
+	const signals = [
+		signal({ id: "sig-a", severity: "high" }),
+		signal({ id: "sig-b", category: "security_review_pressure" }),
+	];
+	const out = systemicBypassEligibility(signals, activeControl, undefined, NOW);
+	assert.equal(out.canCreateTask, false, "high-severity sig-a must NOT enable bypass");
+	assert.equal(out.protectedDomainPresent, true);
+});
+
+test("systemicBypassEligibility: deterministic with same inputs", () => {
+	const signals = [
+		signal({ id: "sig-a" }),
+		signal({ id: "sig-b", category: "security_review_pressure" }),
+	];
+	const a = systemicBypassEligibility(signals, activeControl, undefined, NOW);
+	const b = systemicBypassEligibility(signals, activeControl, undefined, NOW);
+	assert.deepEqual(a, b);
+});
+
+// Issue #398 audit (post-merge): without `control`, the helper MUST
+// fail closed. A previous PR default of `{ disabledDomains: [] }`
+// was fail-open: the empty list is the most permissive state and
+// reproduced the pre-fix bug exactly (granted bypass on signals the
+// operator had not authorised). Both flags must be `false` when
+// control is undefined. Mirrors `decisionFromSelfMaintenanceSignal`
+// returning `undefined` for the same "no info" case.
+test("systemicBypassEligibility: control=undefined -> both flags false (fail-closed)", () => {
+	const signals = [signal({ id: "sig-a" }), signal({ id: "sig-b" })];
+	const out = systemicBypassEligibility(signals, undefined, undefined, NOW);
+	assert.deepEqual(out, { canCreateTask: false, protectedDomainPresent: false });
+});
+
+test("systemicBypassEligibility: control=undefined with taskable signal still -> both flags false (fail-closed)", () => {
+	// Even with a signal that would normally produce create_task
+	// (no disabled, no cooldown, not protected, severity!=high),
+	// an absent control must NOT enable the bypass. Same shape
+	// that a disabled domain would produce, mirrored.
+	const signals = [signal({ id: "sig-a", severity: "warning" })];
+	const out = systemicBypassEligibility(signals, undefined, undefined, NOW);
+	assert.equal(out.canCreateTask, false);
+	assert.equal(out.protectedDomainPresent, false);
 });

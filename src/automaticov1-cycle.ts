@@ -5,7 +5,10 @@ import {
 } from "./autonomous-alert-scheduler.js";
 import { decideAllowTaskCreation } from "./allow-task-creation.js";
 import { anyRailHasTokensAvailable } from "./role-rails.js";
-import { systemicBypassEligibility } from "./autonomous-alert-engine.js";
+import {
+	systemicBypassEligibility,
+	type AutonomousAlertControlState,
+} from "./autonomous-alert-engine.js";
 import type { ExternalIntelligenceReport } from "./external-intelligence.js";
 import type { IduSupervisorCronPlanResult } from "./idu-supervisor-cron.js";
 import {
@@ -64,6 +67,20 @@ export type Automaticov1CycleInput = {
 	loadExecutionReadiness?: () => IduExecutionReadiness;
 	loadSelfMaintenanceSignals: () => readonly SupervisorSelfMaintenanceSignal[];
 	createTask: AutonomousAlertScheduledTickInput["createTask"];
+	/**
+	 * Issue #398: control state for the alert engine. Used by the
+	 * Layer-2 bypass gate (`systemicBypassEligibility`) so disabled
+	 * domains and active cooldowns are honored there. Optional for
+	 * backward-compat with callers that don't yet read the engine
+	 * state; the fail-closed default below means an absent field
+	 * produces `canCreateTask: false` (no bypass granted).
+	 */
+	alertControl?: AutonomousAlertControlState;
+	/**
+	 * Issue #398: active cooldowns, keyed by the alert engine's
+	 * `${domain}:${signal.id}` schema. Optional for backward-compat.
+	 */
+	alertCooldowns?: Record<string, string>;
 	buildSupervisorCronPlan?: () => IduSupervisorCronPlanResult | UnknownJson;
 	buildBibliotecarioSnapshot?: () => UnknownJson;
 	buildExternalIntelligenceReport?: () => Promise<
@@ -131,7 +148,21 @@ export async function runAutomaticov1AdvisoryCycle(
 	// (see systemicBypassEligibility) so it never fires for signals
 	// that produce no repair task or sit in a protected domain.
 	const railTokensAvailable = anyRailHasTokensAvailable(input.stateRoot);
-	const bypassEligible = systemicBypassEligibility(selfMaintenanceSignals);
+	// Issue #398: pass the alert-engine control state and cooldowns
+	// so the bypass gate honors disabledDomains and active cooldowns.
+	// `input.alertControl` may be undefined when the caller did not
+	// wire the engine state; `systemicBypassEligibility` treats that
+	// as fail-closed (both flags `false`) — see the helper's comment.
+	// Do NOT construct a permissive default here: the previous
+	// `{ disabledDomains: [] }` fallback reproduced the pre-fix bug
+	// because the empty list is the most permissive state and
+	// granted bypass on signals the operator had not authorised.
+	const bypassEligible = systemicBypassEligibility(
+		selfMaintenanceSignals,
+		input.alertControl,
+		input.alertCooldowns,
+		now,
+	);
 	const emergencyCapReached = now.getTime() - cycleStart >= EMERGENCY_CAP_MS;
 	const taskDecision = decideAllowTaskCreation({
 		allowTaskCreation,

@@ -316,15 +316,14 @@ function decisionFromSelfMaintenanceSignal(
 	generatedAt: string,
 	now: Date,
 ): AutonomousAlertDecision | undefined {
-	const domain = mapSignalDomain(signal.category);
-	if (!domain || input.control.disabledDomains.includes(domain)) {
-		return undefined;
-	}
-	const cooldownKey = `${domain}:${signal.id}`;
+	const cls = classifySignal(signal, input.control, input.cooldowns, now);
+	if (!cls.domain) return undefined;
+	const domain = cls.domain;
+	const cooldownKey = cls.cooldownKey;
 	const cooldownUntil = input.cooldowns?.[cooldownKey];
-	const inCooldown = cooldownActive(cooldownUntil, now);
-	const protectedDomain = isProtectedDomain(domain);
-	const highRisk = signal.severity === "high" || protectedDomain;
+	const inCooldown = cls.inCooldown;
+	const protectedDomain = cls.protectedDomain;
+	const highRisk = cls.highRisk;
 	const recommendedAction: AutonomousAlertRecommendedAction = inCooldown
 		? "snooze"
 		: protectedDomain || signal.severity === "high"
@@ -400,24 +399,80 @@ export function isProtectedDomain(domain: AutonomousAlertDomain): boolean {
 }
 
 /**
+ * Issue #398: shared signal classification. Both
+ * `decisionFromSelfMaintenanceSignal` (the create_task branch) and
+ * `systemicBypassEligibility` (the Layer-2 bypass gate) need the
+ * SAME four checks — domain mapping, disabled-domain, cooldown, and
+ * severity/protection — to decide whether a signal is eligible to
+ * produce a task. Before this helper the bypass function only ran
+ * the domain/severity tests and silently passed disabled or
+ * cooldowned signals through. Centralising the logic here is the
+ * "compartan la condición" the issue asks for: any future change to
+ * the task-ability condition updates both branches at once.
+ */
+export type SignalClassification = {
+	domain: AutonomousAlertDomain | undefined;
+	cooldownKey: string;
+	inCooldown: boolean;
+	protectedDomain: boolean;
+	highRisk: boolean;
+	/** True iff the signal would produce `create_task` if
+	 *  `allowTaskCreation` were true. False for unmapped, disabled,
+	 *  cooldowned, protected, or `high`-severity signals. The bypass
+	 *  gate uses this without `allowTaskCreation`; the alert engine
+	 *  multiplies it by `input.allowTaskCreation` to pick the actual
+	 *  recommendedAction. */
+	wouldCreateTask: boolean;
+};
+
+export function classifySignal(
+	signal: SupervisorSelfMaintenanceSignal,
+	control: AutonomousAlertControlState,
+	cooldowns: Record<string, string> | undefined,
+	now: Date,
+): SignalClassification {
+	const domain = mapSignalDomain(signal.category);
+	const cooldownKey = domain ? `${domain}:${signal.id}` : "";
+	const inCooldown = domain
+		? cooldownActive(cooldowns?.[cooldownKey], now)
+		: false;
+	const protectedDomain = domain ? isProtectedDomain(domain) : false;
+	const highRisk = signal.severity === "high" || protectedDomain;
+	const wouldCreateTask =
+		domain !== undefined &&
+		!control.disabledDomains.includes(domain) &&
+		!inCooldown &&
+		!protectedDomain &&
+		signal.severity !== "high";
+	return {
+		domain,
+		cooldownKey,
+		inCooldown,
+		protectedDomain,
+		highRisk,
+		wouldCreateTask,
+	};
+}
+
+/**
  * Derives self-repair bypass eligibility from the systemic
  * self-maintenance signals, WITHOUT re-running the full alert
- * decision. Reuses mapSignalDomain + isProtectedDomain (single
- * source of truth for domain mapping and protection).
+ * decision. Reuses `classifySignal` (single source of truth for the
+ * task-ability condition) so this function and
+ * `decisionFromSelfMaintenanceSignal` cannot drift.
  *
  * Used by the automaticov1 cycle to gate the Layer 2 self-repair
- * bypass in decideAllowTaskCreation so the bypass fires only when:
+ * bypass in `decideAllowTaskCreation` so the bypass fires only when:
  *   - canCreateTask: at least one signal would produce a concrete
  *     create_task (a repair to queue), AND
- *   - protectedDomainPresent is false: NONE of the signals is in a
- *     protected domain (security / db).
+ *   - protectedDomainPresent is false: NONE of the (non-disabled)
+ *     signals is in a protected domain (security / db).
  *
- * The task-ability test mirrors the create_task branch of
- * decisionFromSelfMaintenanceSignal: a signal produces create_task
- * when its domain is not protected and its severity is not "high".
- * This MUST stay in sync with that branch — if that branch changes
- * (e.g. a new severity threshold or an extra gate), update the
- * condition here or the bypass gate will drift.
+ * Issue #398: disabled-domain and cooldown gates are checked here
+ * via `classifySignal`. A signal whose domain is in
+ * `control.disabledDomains` is skipped entirely — same as
+ * `decisionFromSelfMaintenanceSignal` returning `undefined` for the
+ * same case.
  *
  * The protectedDomainPresent floor is INTENTIONALLY REDUNDANT with
  * canCreateTask: a protected domain also fails the task-ability test
@@ -426,23 +481,46 @@ export function isProtectedDomain(domain: AutonomousAlertDomain): boolean {
  * if someone later adds a taskDraft to a protected signal, the floor
  * still blocks the bypass, and removing security protection becomes a
  * visible diff rather than a silent behavior change.
+ *
+ * `control` is OPTIONAL with FAIL-CLOSED semantics. When the
+ * caller did not wire the alert-engine state we cannot know which
+ * domains are disabled — the same shape as a domain being disabled
+ * — so the bypass must NOT fire. Returning both flags `false`
+ * reproduces the "off" verdict the alert engine would emit for an
+ * unknown-disabled signal. This was the bug the owner caught in
+ * the PR audit: a previous default of `{ disabledDomains: [] }`
+ * was fail-OPEN (the empty list is the most permissive state and
+ * reproduced the pre-fix bug exactly). Fail-closed is enforced
+ * here at the helper level so any caller that forgets to wire
+ * control gets the safe verdict, regardless of the cycle-level
+ * default.
  */
 export function systemicBypassEligibility(
 	signals: readonly SupervisorSelfMaintenanceSignal[],
+	control: AutonomousAlertControlState | undefined,
+	cooldowns: Record<string, string> | undefined,
+	now: Date,
 ): { canCreateTask: boolean; protectedDomainPresent: boolean } {
+	// Fail-closed: without the alert engine's control state, treat
+	// every signal as if its domain were disabled. The bypass must
+	// not fire. Mirrors decisionFromSelfMaintenanceSignal's
+	// `if (!domain || input.control.disabledDomains.includes(domain)) return undefined`
+	// branch for the "no control info" case.
+	if (!control) {
+		return { canCreateTask: false, protectedDomainPresent: false };
+	}
 	let canCreateTask = false;
 	let protectedDomainPresent = false;
 	for (const signal of signals) {
-		const domain = mapSignalDomain(signal.category);
-		// Unmapped categories (e.g. repeated_failure_patterns) produce
-		// no alert at all: they can neither create a task nor be a
-		// protected floor. Mirrors decisionFromSelfMaintenanceSignal's
-		// `if (!domain) return undefined` guard.
-		if (!domain) continue;
-		if (!isProtectedDomain(domain) && signal.severity !== "high") {
+		const cls = classifySignal(signal, control, cooldowns, now);
+		// Mirror decisionFromSelfMaintenanceSignal's
+		// `if (!domain || input.control.disabledDomains.includes(domain)) return undefined`.
+		// Unmapped and disabled-domain signals produce no decision at all.
+		if (!cls.domain) continue;
+		if (control.disabledDomains.includes(cls.domain)) continue;
+		if (cls.wouldCreateTask) {
 			canCreateTask = true;
-		}
-		if (isProtectedDomain(domain)) {
+		} else if (isProtectedDomain(cls.domain)) {
 			protectedDomainPresent = true;
 		}
 	}
