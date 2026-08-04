@@ -902,10 +902,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 	),
 	tool(
 		"idu_hygiene_migrate",
-		"Migración one-time desde <repo>/config/ y <repo>/.agents/skills/ legacy a <repo>/.idu/. Idempotente. Sin repoRoot usa el proyecto activo.",
+		"Migración one-time desde <repo>/config/ y <repo>/.agents/skills/ legacy a <repo>/.idu/. Idempotente. Sin repoRoot usa el proyecto activo. Requiere confirm=true.",
 		{
 			projectPath: optionalString(
 				"Ruta opcional del repo a migrar; por defecto el proyecto activo.",
+			),
+			confirm: optionalBoolean(
+				"Debe ser true para ejecutar la migración destructiva.",
 			),
 		},
 	),
@@ -1109,10 +1112,13 @@ const TOOLS: IduMcpToolDefinition[] = [
 	),
 	tool(
 		"idu_source_remove",
-		"Remueve una fuente registrada de Source Library y sus copias en stateRoot; no toca contratos.",
+		"Remueve una fuente registrada de Source Library y sus copias en stateRoot; no toca contratos. Requiere confirm=true.",
 		{
 			sourceId: requiredString("ID de fuente a remover."),
 			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			confirm: optionalBoolean(
+				"Debe ser true para ejecutar la remoción destructiva.",
+			),
 		},
 	),
 	tool(

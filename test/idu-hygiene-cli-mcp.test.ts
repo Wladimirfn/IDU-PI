@@ -328,7 +328,7 @@ test("MCP idu_hygiene_migrate returns the full MigrationResult shape", async () 
 		const opts = mcpOptions(repoRoot, stateRoot);
 		const result = await callIduMcpTool(
 			"idu_hygiene_migrate",
-			{ projectPath: repoRoot },
+			{ projectPath: repoRoot, confirm: true },
 			opts as never,
 		);
 
@@ -372,7 +372,7 @@ test("MCP idu_hygiene_migrate returns ok=false when no projectPath and runtime h
 		});
 		const result = await callIduMcpTool(
 			"idu_hygiene_migrate",
-			{},
+			{ confirm: true },
 			{ runtimeFactory: () => runtime, projectResolver } as never,
 		);
 		assert.equal(result.ok, false);
@@ -391,14 +391,14 @@ test("MCP idu_hygiene_migrate is idempotent on second call", async () => {
 		const opts = mcpOptions(repoRoot, stateRoot);
 		const first = await callIduMcpTool(
 			"idu_hygiene_migrate",
-			{ projectPath: repoRoot },
+			{ projectPath: repoRoot, confirm: true },
 			opts as never,
 		);
 		assert.match(first.summary, /moved=1/u);
 
 		const second = await callIduMcpTool(
 			"idu_hygiene_migrate",
-			{ projectPath: repoRoot },
+			{ projectPath: repoRoot, confirm: true },
 			opts as never,
 		);
 		assert.equal(second.ok, true);
@@ -407,6 +407,72 @@ test("MCP idu_hygiene_migrate is idempotent on second call", async () => {
 		cleanup();
 	}
 });
+
+test(
+	"MCP idu_hygiene_migrate moves config files only when confirm=true",
+	async () => {
+		// Issue #430: gate must be proven, not assumed. The migration
+		// MOVES files (safeMove on the config branch in hygiene-migrate.ts).
+		// The test below creates the legacy config file, calls
+		// idu_hygiene_migrate WITHOUT confirm, then asserts the legacy
+		// file is still at the legacy path AND the new path does not
+		// exist. Only after confirm:true do the files actually move.
+		const { repoRoot, stateRoot, cleanup } = makeRepo();
+		try {
+			const legacyCorePath = join(
+				repoRoot,
+				"config",
+				"project-core.json",
+			);
+			writeJSON(legacyCorePath, { name: "core" });
+
+			const opts = mcpOptions(repoRoot, stateRoot);
+
+			// 1. Without confirm — gate MUST block. Legacy file stays.
+			const blocked = await callIduMcpTool(
+				"idu_hygiene_migrate",
+				{ projectPath: repoRoot },
+				opts as never,
+			);
+			assert.equal(blocked.ok, false);
+			assert.match(blocked.errors.join("\n"), /confirm=true/u);
+			assert.equal(existsSync(legacyCorePath), true);
+			assert.equal(
+				existsSync(join(repoRoot, ".idu", "config", "project-core.json")),
+				false,
+			);
+
+			// 2. With confirm:false — gate MUST still block.
+			const blockedExplicit = await callIduMcpTool(
+				"idu_hygiene_migrate",
+				{ projectPath: repoRoot, confirm: false },
+				opts as never,
+			);
+			assert.equal(blockedExplicit.ok, false);
+			assert.equal(existsSync(legacyCorePath), true);
+			assert.equal(
+				existsSync(join(repoRoot, ".idu", "config", "project-core.json")),
+				false,
+			);
+
+			// 3. With confirm:true — gate OPENS. Migration runs; file
+			// moves to .idu/config/.
+			const allowed = await callIduMcpTool(
+				"idu_hygiene_migrate",
+				{ projectPath: repoRoot, confirm: true },
+				opts as never,
+			);
+			assert.equal(allowed.ok, true);
+			assert.equal(existsSync(legacyCorePath), false);
+			assert.equal(
+				existsSync(join(repoRoot, ".idu", "config", "project-core.json")),
+				true,
+			);
+		} finally {
+			cleanup();
+		}
+	},
+);
 
 // =========================================================================
 // Bootstrap consent
