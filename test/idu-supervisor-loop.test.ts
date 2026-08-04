@@ -262,10 +262,12 @@ test("loop crea draft si allowSemanticDraft true y critical", () => {
 	});
 
 	assert.equal(calls.draft, 1);
+	// Issue #416: under critical_findings the draft IS created but the
+	// step carries status=warning so the loop exposes a followUp.
 	assert.equal(
 		result.steps.find((step) => step.name === "semantic_compaction_draft")
 			?.status,
-		"completed",
+		"warning",
 	);
 });
 
@@ -544,4 +546,117 @@ test("A3-S1: loop uses canonical reportsPath (stateRoot/reports) for buildSemant
 			!draftReportsPath?.startsWith(root + "\\reports"),
 		`reportsPath must not be workspaceRoot/reports directly: got ${draftReportsPath}`,
 	);
+});
+
+// ---------------------------------------------------------------------------
+// Issue #416: follow-ups derived from warning steps so the supervisor can
+// express "what didn't resolve on this pass". The actual re-consultation
+// is a separate concern; this PR establishes the data model only.
+// ---------------------------------------------------------------------------
+
+import {
+	buildSupervisorFollowUps,
+	type IduSupervisorStepName,
+	type IduSupervisorStepStatus,
+} from "../src/idu-supervisor-loop.js";
+
+test("buildSupervisorFollowUps: empty when no step warns", () => {
+	const out = buildSupervisorFollowUps([
+		{ name: "session_check", status: "active", summary: "ok" },
+		{ name: "semantic_audit_status", status: "completed", summary: "ok" },
+	]);
+	assert.deepEqual(out, []);
+});
+
+test("buildSupervisorFollowUps: one entry per warning step, in declaration order", () => {
+	const out = buildSupervisorFollowUps([
+		{ name: "session_check", status: "active", summary: "ok" },
+		{ name: "semantic_audit_status", status: "warning", summary: "drift detected" },
+		{ name: "semantic_compaction_draft", status: "completed", summary: "ok" },
+		{ name: "semantic_agent_tasks", status: "warning", summary: "needs review" },
+	]);
+	assert.equal(out.length, 2);
+	assert.equal(out[0]?.stepName, "semantic_audit_status");
+	assert.equal(out[0]?.reason, "drift detected");
+	assert.equal(out[1]?.stepName, "semantic_agent_tasks");
+	assert.equal(out[1]?.reason, "needs review");
+});
+
+test("buildSupervisorFollowUps: deterministic with same steps", () => {
+	const steps: ReadonlyArray<{
+		name: IduSupervisorStepName;
+		status: IduSupervisorStepStatus;
+		summary: string;
+	}> = [
+		{ name: "semantic_audit_status", status: "warning", summary: "r" },
+		{ name: "semantic_compaction_draft", status: "warning", summary: "r2" },
+	];
+	const a = buildSupervisorFollowUps(steps);
+	const b = buildSupervisorFollowUps(steps);
+	assert.deepEqual(a, b);
+});
+
+test("idu_supervisor_loop: critical_findings emits warning step + followUp", () => {
+	// The supervisor can't say "all resolved" when critical findings
+	// appeared since the last checkpoint — that's exactly the case
+	// where the operator needs to know the audit didn't close cleanly.
+	// The semantic_compaction_draft step carries status=warning and
+	// the loop result has followUps with one entry naming it.
+	const { result, calls } = runWithDeps({
+		stats: stats({ criticalFindingCount: 1 }), // triggers critical_findings
+		allowSemanticDraft: true,
+		allowAgentTaskPlan: true,
+	});
+	const draftStep = result.steps.find(
+		(step) => step.name === "semantic_compaction_draft",
+	);
+	assert.ok(draftStep);
+	assert.equal(
+		draftStep?.status,
+		"warning",
+		`semantic_compaction_draft under critical_findings must be warning, got ${draftStep?.status}`,
+	);
+	assert.equal(calls.draft, 1, "draft must still be created under warning");
+	const followUps = result.followUps ?? [];
+	assert.equal(
+		followUps.length,
+		1,
+		`followUps must have one entry for the warning step, got ${followUps.length}`,
+	);
+	assert.equal(followUps[0]?.stepName, "semantic_compaction_draft");
+	assert.equal(result.status, "warning");
+});
+
+test("idu_supervisor_loop: threshold_major emits no warning step, no followUps", () => {
+	// threshold_major also creates the draft but is NOT a "didn't resolve"
+	// case. The draft step stays completed; followUps stays empty; the
+	// loop's top-level status stays completed.
+	const { result } = runWithDeps({
+		stats: stats({
+			criticalFindingCount: 0,
+			highFindingCount: 0,
+			labRunCount: 1500, // enough to cross major threshold (1000)
+		}),
+		checkpoint: checkpoint({ lastLabRunCount: 0 }),
+		allowSemanticDraft: true,
+		allowAgentTaskPlan: true,
+	});
+	const draftStep = result.steps.find(
+		(step) => step.name === "semantic_compaction_draft",
+	);
+	assert.ok(draftStep);
+	assert.equal(draftStep?.status, "completed");
+	assert.deepEqual(result.followUps ?? [], []);
+	assert.equal(result.status, "completed");
+});
+
+test("idu_supervisor_loop: not_enough_data has empty steps, empty followUps", () => {
+	const { result } = runWithDeps({
+		stats: stats({ criticalFindingCount: 0, highFindingCount: 0 }),
+		checkpoint: checkpoint(),
+		allowSemanticDraft: true,
+		allowAgentTaskPlan: true,
+	});
+	assert.deepEqual(result.followUps ?? [], []);
+	assert.equal(result.status, "completed");
 });

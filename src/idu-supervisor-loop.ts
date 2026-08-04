@@ -44,6 +44,21 @@ export type IduSupervisorStepResult = {
 	summary: string;
 };
 
+/**
+ * Issue #416: when the supervisor finishes a tick, certain step
+ * statuses (currently `warning`) signal that something needs a second
+ * pass — re-consultation with updated context, or operator review.
+ * The loop records one `SupervisorFollowUp` per warning step so the
+ * orchestrator can see what didn't resolve on this pass. The actual
+ * re-consultation is a separate concern (this PR establishes the
+ * data model only — see the PR body for what is deferred).
+ */
+export type SupervisorFollowUp = {
+	stepName: IduSupervisorStepName;
+	reason: string;
+	suggestedAction: string;
+};
+
 export type IduSupervisorLoopResult = {
 	status: "completed" | "skipped" | "warning";
 	reason?: "idu_inactive" | "not_enough_data";
@@ -57,6 +72,13 @@ export type IduSupervisorLoopResult = {
 	createdTasks: number;
 	summary: string;
 	recommendedNext: string[];
+	/**
+	 * Issue #416: follow-ups derived from steps whose status is
+	 * `warning`. The loop always sets this to an array (empty when
+	 * no step warns). Marked optional in the type so test fixtures
+	 * that construct `IduSupervisorLoopResult` directly do not break.
+	 */
+	followUps?: SupervisorFollowUp[];
 	safety: {
 		agentLabsExecuted: false;
 		rulesApplied: false;
@@ -110,6 +132,33 @@ const SAFE_FLAGS = {
 	projectCoreModified: false,
 } as const;
 
+/**
+ * Build the followUps list from the executed steps. Any step with
+ * status `warning` produces one entry naming the step, the reason
+ * surfaced in its summary, and a suggested action. The default
+ * suggested action is the same regardless of step: re-consult with
+ * updated context. A later PR will specialize per step type.
+ *
+ * Returns an empty array when no step warns. Returns an empty array
+ * when input is empty. Deterministic: same steps in → same entries
+ * out, in declaration order.
+ */
+export function buildSupervisorFollowUps(
+	steps: readonly IduSupervisorStepResult[],
+): SupervisorFollowUp[] {
+	const out: SupervisorFollowUp[] = [];
+	for (const step of steps) {
+		if (step.status !== "warning") continue;
+		out.push({
+			stepName: step.name,
+			reason: step.summary,
+			suggestedAction:
+				"Re-consultar con contexto actualizado antes de aceptar el resultado.",
+		});
+	}
+	return out;
+}
+
 export function runIduSupervisorLoop(
 	input: IduSupervisorLoopInput,
 ): IduSupervisorLoopResult {
@@ -136,6 +185,7 @@ export function runIduSupervisorLoop(
 			recommendedNext: [
 				"Activar con /idu o idu-pi idu si querés supervisor automático.",
 			],
+			followUps: [],
 			safety: SAFE_FLAGS,
 		};
 	}
@@ -212,9 +262,17 @@ export function runIduSupervisorLoop(
 			workspaceRoot: input.workspaceRoot,
 		});
 		draftPath = draft.path;
+		// Issue #416: a draft created under critical_findings is the
+		// supervisor's signal that the previous compaction did not
+		// resolve what the audit flagged. The followUps entry names
+		// the draft and asks for re-consultation with updated context.
+		const stepStatus: IduSupervisorStepStatus =
+			auditStatus.decision.triggerReason === "critical_findings"
+				? "warning"
+				: "completed";
 		steps.push({
 			name: "semantic_compaction_draft",
-			status: "completed",
+			status: stepStatus,
 			summary: draft.path,
 		});
 	} else {
@@ -275,8 +333,9 @@ export function runIduSupervisorLoop(
 	}
 
 	const recommendedNext = recommendations(auditStatus, createdTasks);
+	const followUps = buildSupervisorFollowUps(steps);
 	return {
-		status: "completed",
+		status: followUps.length > 0 ? "warning" : "completed",
 		reason: auditStatus.decision.shouldRun ? undefined : "not_enough_data",
 		trigger: input.trigger,
 		projectId: input.projectId,
@@ -292,6 +351,7 @@ export function runIduSupervisorLoop(
 				: `Supervisor completado. Tareas creadas: ${createdTasks}.`
 			: "No se alcanzó umbral. No se ejecutaron tareas.",
 		recommendedNext,
+		followUps,
 		safety: SAFE_FLAGS,
 	};
 }
