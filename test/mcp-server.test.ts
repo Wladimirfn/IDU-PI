@@ -2515,6 +2515,39 @@ test("idu_task_context propagates perception: shouldAskClarification forces enve
 		"allow",
 		`high-risk perception-unclear request must not be demoted to allow, got ${envC.recommendation}`,
 	);
+
+	// Case D (anti-downgrade): blocker + shouldAskClarification=true.
+	// Case C used `assert.notEqual(recommendation, "allow")` — but that
+	// passes even if a stricter verdict (block) gets softened to
+	// ask_human. The rule "only escalate allow to ask_human, never
+	// downgrade block" is what the fix actually does; this case proves
+	// it with equality, not inequality. Mutation: drop the
+	// `&& baseRecommendation === "allow"` from the gate. Then
+	// blocker + perceptionUnclear → ask_human (softer). This assertion
+	// fires.
+	const caseD = await callIduMcpTool(
+		"idu_task_context",
+		{ request: "blocker request with absurd framing" },
+		{
+			runtimeFactory: () =>
+				runtimeWith(() =>
+					preflightWithHumanIntent(
+						"blocker",
+						true,
+						["intent_unknown"],
+					),
+				),
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(caseD.ok, true);
+	const envD = caseD.data.decisionEnvelope as DecisionEnvelope;
+	assert.equal(
+		envD.recommendation,
+		"block",
+		`blocker + shouldAskClarification=true must stay block (anti-downgrade), got ${envD.recommendation}`,
+	);
+	assert.equal(envD.requiresHuman, true);
 });
 
 test("approved plan advisory loop returns snapshot, next action, and task package", async () => {
