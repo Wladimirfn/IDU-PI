@@ -91,6 +91,12 @@ export const TELEGRAM_COMMANDS: TelegramCommandEntry[] = [
 		usage: ["/idu_alerts_tick"],
 	},
 	{
+		command: "idu_bug_finding_show",
+		description: "Ver fila completa de bug_findings (issue #459)",
+		help: "/idu_bug_finding_show <id> - devuelve la fila entera de bug_findings sin el corte que aplica el alert. Gemelo de /cerrar pero de lectura.",
+		usage: ["/idu_bug_finding_show bf-idu-pi-v2:abc123"],
+	},
+	{
 		command: "idu_alerts_pause",
 		description: "Pausar alertas Idu-pi",
 		help: "/idu_alerts_pause - pausar alertas autónomas sin apagar todo Idu-pi",

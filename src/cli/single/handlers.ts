@@ -45,7 +45,8 @@ import {
 import { recordLifecycleEvent } from "../../telemetry-lifecycle.js";
 import { recordCliUsage } from "../usage.js";
 import { ackAdvisory, type AckAdvisoryResult } from "../../idu-ack-advisory.js";
-import { getBugFinding, type BugFinding } from "../../lab-db.js";
+import { getBugFinding } from "../../lab-db.js";
+import { formatBugFindingDetail } from "../../escalation-delivery.js";
 import {
 	parseHygieneMigrateArgs,
 	fail,
@@ -686,47 +687,11 @@ export async function handleLockCleanup(
 // returns the full row on demand, verbatim, so the operator can
 // recover the part the alert cut. The third option from #459 — the
 // cheapest and most useful per the owner.
-function formatField(label: string, value: string | undefined): string {
-	if (!value) return `${label}: (empty)`;
-	return `${label}:\n${value}`;
-}
-
-function formatAffectedFiles(affectedFiles: string[]): string {
-	if (affectedFiles.length === 0) return "Affected files: (none)";
-	return ["Affected files:", ...affectedFiles.map((f) => `  - ${f}`)].join("\n");
-}
-
-export function formatBugFindingDetail(finding: BugFinding): string {
-	const lines: string[] = [
-		`Finding ${finding.id}`,
-		`Project: ${finding.projectId}`,
-		`Severity: ${finding.severity}`,
-		`Confidence: ${finding.confidence}`,
-		`Status: ${finding.status}`,
-		`Recurrence: ${finding.recurrenceCount}`,
-		``,
-		`Title:`,
-		finding.title || "(empty)",
-		``,
-		formatField("Description", finding.description),
-		``,
-		formatField("Evidence", finding.evidence),
-		``,
-		formatField("Suspected cause", finding.suspectedCause),
-		``,
-		formatAffectedFiles(finding.affectedFiles),
-		``,
-		formatField("Specialty", finding.specialty),
-		``,
-		formatField("Recurrence key", finding.dedupeKey),
-		``,
-		`Created: ${finding.dedupeKey ? "" : ""}`,
-	];
-	// created_at/updated_at aren't currently in the BugFinding type
-	// (see #459 follow-up), so we surface what we have.
-	return lines.filter((l) => l !== "").join("\n");
-}
-
+//
+// The formatter (`formatBugFindingDetail`) lives next to its peer
+// `formatFindingCloseMessage` in `src/escalation-delivery.ts` so the
+// bot twin (`/idu_bug_finding_show` in `src/index.ts`) can reuse it
+// without reaching into the CLI module.
 export function handleIduBugFindingShow(
 	runtime: CliRuntime,
 	rest: string[] = [],

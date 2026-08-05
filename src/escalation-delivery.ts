@@ -31,6 +31,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { UserEscalationEvent } from "./user-escalation.js";
+import type { BugFinding } from "./lab-db.js";
 
 export const DELIVERY_LOG_FILE = "delivery-log.jsonl";
 
@@ -573,4 +574,56 @@ export function formatFindingCloseMessage(input: {
 	}
 
 	return text;
+}
+
+// ---------------------------------------------------------------------------
+// Bug finding detail (the read twin of /cerrar)
+// ---------------------------------------------------------------------------
+
+function formatDetailField(label: string, value: string | undefined): string {
+	if (!value) return `${label}: (empty)`;
+	return `${label}:\n${value}`;
+}
+
+function formatDetailAffectedFiles(affectedFiles: string[]): string {
+	if (affectedFiles.length === 0) return "Affected files: (none)";
+	return ["Affected files:", ...affectedFiles.map((f) => `  - ${f}`)].join("\n");
+}
+
+/**
+ * Issue #459: format the full bug_finding row for the operator. The
+ * alert message truncates the caveat at the per-finding budget (see
+ * `DESC_BUDGET` and the per-finding division in this file's alert
+ * formatter — at three findings the per-finding cut is well below
+ * 800 chars). This formatter returns every column of the row verbatim,
+ * no internal truncation; only `replyLong` chunks at Telegram's
+ * 4096-char outer bound.
+ */
+export function formatBugFindingDetail(finding: BugFinding): string {
+	const lines: string[] = [
+		`Finding ${finding.id}`,
+		`Project: ${finding.projectId}`,
+		`Severity: ${finding.severity}`,
+		`Confidence: ${finding.confidence}`,
+		`Status: ${finding.status}`,
+		`Recurrence: ${finding.recurrenceCount}`,
+		``,
+		`Title:`,
+		finding.title || "(empty)",
+		``,
+		formatDetailField("Description", finding.description),
+		``,
+		formatDetailField("Evidence", finding.evidence),
+		``,
+		formatDetailField("Suspected cause", finding.suspectedCause),
+		``,
+		formatDetailAffectedFiles(finding.affectedFiles),
+		``,
+		formatDetailField("Specialty", finding.specialty),
+		``,
+		formatDetailField("Recurrence key", finding.dedupeKey),
+	];
+	// created_at/updated_at aren't currently in the BugFinding type
+	// (see #459 follow-up), so we surface what we have.
+	return lines.join("\n");
 }

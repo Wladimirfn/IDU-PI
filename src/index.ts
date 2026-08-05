@@ -19,6 +19,7 @@ import {
 	MAX_MESSAGES_PER_HOUR,
 	type ResolvedFinding,
 	formatFindingCloseMessage,
+	formatBugFindingDetail,
 } from "./escalation-delivery.js";
 import {
 	AgentRouter,
@@ -161,7 +162,7 @@ import {
 	stripEngramNoise,
 	summarizeOutput,
 } from "./lab-reports.js";
-import { formatInitLabDbResult, initLabDb, runSql, sqlString, updateFindingStatus } from "./lab-db.js";
+import { formatInitLabDbResult, initLabDb, runSql, sqlString, updateFindingStatus, getBugFinding } from "./lab-db.js";
 import { LabDbRepository } from "./lab-db-repository.js";
 import {
 	buildSemanticAuditStatus,
@@ -3583,6 +3584,50 @@ bot.command("cerrar", async (ctx) => {
 			newStatus: result.newStatus,
 		});
 		await ctx.reply(msg ?? "Hallazgo cerrado.");
+	} catch (e) {
+		await ctx.reply(
+			`Error: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
+});
+
+// Issue #459: read twin of `/cerrar`. The alert truncates the
+// caveat at the per-finding budget (see `DESC_BUDGET` and the
+// per-finding division in `escalation-delivery.ts`); the operator
+// needs a way to recover the full row from the phone.
+//
+// Command name uses underscore because Telegram bot.command
+// rejects hyphens — the neighbor commands follow this rule
+// (`idu_status`, `idu_master_plan_status`, `idu_master_plan_approve`).
+// `cerrar` survives because it is a single word. We mirror its
+// parser shape: text.match against `/idu_bug_finding_show <id>`.
+bot.command("idu_bug_finding_show", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const text = ctx.message?.text ?? "";
+	const match = text.match(/^\/idu_bug_finding_show\s+(\S+)\s*$/s);
+	if (!match) {
+		await ctx.reply(
+			"Uso: /idu_bug_finding_show <id>\n" +
+				"Ejemplo: /idu_bug_finding_show bf-idu-pi-v2:abc123",
+		);
+		return;
+	}
+	const [, findingId] = match;
+	try {
+		const stateRoot = activeProjectStateRoot();
+		if (!stateRoot) {
+			await ctx.reply("Error: no hay proyecto activo.");
+			return;
+		}
+		const labDbPath = join(stateRoot, "lab.db");
+		const finding = getBugFinding(labDbPath, findingId);
+		if (!finding) {
+			await ctx.reply(
+				`No existe la fila ${findingId} en bug_findings. ¿La alerta referencia una fila ya triaged/fixed/deleted?`,
+			);
+			return;
+		}
+		await replyLong(ctx, formatBugFindingDetail(finding));
 	} catch (e) {
 		await ctx.reply(
 			`Error: ${e instanceof Error ? e.message : String(e)}`,

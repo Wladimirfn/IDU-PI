@@ -112,27 +112,44 @@ test("getBugFinding returns null when the id is missing", () => {
 });
 
 // Issue #459 audit bar (owner, PR #467 thread): the alert truncates
-// the description at DESC_BUDGET = 800 in escalation-delivery.ts:427.
-// The full text must survive the round trip through `bug_findings`.
-// This test seeds a description longer than the cut and verifies
-// byte-by-byte that the row preserves it, including the caveat
-// text that the alert cut.
-test("getBugFinding returns the full description byte-by-byte when longer than the alert cut", () => {
+// the description at the per-finding budget, NOT at DESC_BUDGET = 800.
+// See escalation-delivery.ts around line 419-449:
+//   detailFindings = [...criticals, ...highs]
+//   fixedOverhead = header + title lines + foot + id lines
+//   descBudget    = max(0, DESC_BUDGET - fixedOverhead)
+//   perDesc       = floor(descBudget / detailFindings.length)
+// The alert then slices each description at `perDesc - prefixLen - 1`
+// and appends `…`.
+//
+// In the 03:48 CI run the alert carried 3 findings. fixedOverhead
+// was approximately:
+//   header  ≈ 45  ("⚠️ [idu-pi] 3 hallazgos · supervisor 03:48\n")
+//   titles  ≈ 60  (3 × "   → path — title\n")
+//   idLines ≈ 90  (3 × "  bf-idu-pi-v2:abcdef\n")
+//   foot    ≈ 25  ("  ─ N warnings · N info ─\n")
+//                              total ≈ 220
+// So perDesc = floor((800 - 220) / 3) = floor(193) = 193 chars,
+// minus 2 (descPrefix) minus 1 (the ellipsis) = 190 chars per
+// finding. The actual cut is ~190 chars, not 800. The operator sees
+// the caveat cut whenever the description is longer than that.
+//
+// This test seeds a description of ~340 chars (well over the
+// per-finding cut for 3 findings, well under 800 so the test
+// failure message stays readable) and verifies byte-by-byte that
+// the row preserves it, including the caveat text at the end.
+test("getBugFinding returns the full description byte-by-byte when longer than the per-finding alert cut", () => {
 	const dbPath = join(tempDir(), "reports", "lab.db");
 	initLabDb(dbPath);
 
-	const DESC_BUDGET = 800;
-	// Build a description that is > DESC_BUDGET and ends with the
-	// caveat text the alert cut ("if X is missing", "truncated",
-	// "not visible") — exactly the pattern from the #459 alert.
+	// Per-finding cut at the 03:48 3-finding run (see comment above).
+	const PER_FINDING_CUT_AT_3 = 190;
 	const caveat =
 		" — caveat: if the alias column is missing from the table, the script returns 0 instead of failing. Not visible in the truncated alert body; verify against the column list before triaging.";
-	const filler =
-		"Description body. The reverse check below depends on every declared tool being registered. ";
-	const description = filler.repeat(40) + caveat;
+	const filler = "Body text. ";
+	const description = filler.repeat(34) + caveat;
 	assert.ok(
-		description.length > DESC_BUDGET,
-		`description must exceed DESC_BUDGET (${DESC_BUDGET}); got ${description.length}`,
+		description.length > PER_FINDING_CUT_AT_3,
+		`description must exceed the per-finding cut at 3 findings (${PER_FINDING_CUT_AT_3}); got ${description.length}`,
 	);
 
 	recordBugFinding(dbPath, {
@@ -152,11 +169,11 @@ test("getBugFinding returns the full description byte-by-byte when longer than t
 
 	assert.ok(row, "must return the row when the id exists");
 	// Byte-by-byte: the description must come back identical, not
-	// sliced at any budget boundary.
+	// sliced at the per-finding budget boundary.
 	assert.equal(
 		row!.description,
 		description,
-		"description must be preserved verbatim — no internal truncation at the alert cut",
+		"description must be preserved verbatim — no internal truncation at the per-finding alert cut",
 	);
 	assert.equal(
 		row!.description.length,
@@ -164,8 +181,8 @@ test("getBugFinding returns the full description byte-by-byte when longer than t
 		"description length must match — alert-cut truncation must not have leaked into the read path",
 	);
 	assert.ok(
-		row!.description.length > DESC_BUDGET,
-		"the read path must return text longer than the alert cut — that is the whole point of #459",
+		row!.description.length > PER_FINDING_CUT_AT_3,
+		"the read path must return text longer than the per-finding cut — that is the whole point of #459",
 	);
 	// The caveat lives at the end of the description; it is what the
 	// alert cut. The operator relies on this exact substring to

@@ -14,7 +14,8 @@ import {
 	runSql,
 	type FindingStatus,
 } from "../src/lab-db.js";
-import { formatFindingCloseMessage } from "../src/escalation-delivery.js";
+import { formatFindingCloseMessage, formatBugFindingDetail } from "../src/escalation-delivery.js";
+import type { BugFinding } from "../src/lab-db.js";
 
 function makeTestDb(): string {
 	const dir = makeTempDir("finding-status-");
@@ -164,5 +165,105 @@ describe("formatFindingCloseMessage", () => {
 		});
 
 		strictEqual(msg, null);
+	});
+});
+
+// Issue #459: formatBugFindingDetail is the formatter behind the bot
+// command `/idu_bug_finding_show <id>` and the CLI command
+// `idu-bug-finding-show`. It must return the entire row verbatim;
+// the only outer bound is `replyLong` chunking at Telegram's
+// 4096-char limit. There is NO internal truncation.
+describe("formatBugFindingDetail", () => {
+	const baseFinding: BugFinding = {
+		id: "bf-idu-pi-v2:abc123",
+		projectId: "pi-telegram-bridge",
+		title: "reverse check missing",
+		description: "short description",
+		severity: "medium",
+		confidence: "high",
+		status: "new",
+		evidence: "comment truncated in alert",
+		suspectedCause: "",
+		affectedFiles: ["scripts/check-protocol-tool-drift.mjs"],
+		dedupeKey: "protocol-drift:reverse-check",
+		specialty: "tools",
+		recurrenceCount: 1,
+	};
+
+	test("includes every column from the BugFinding row", () => {
+		const out = formatBugFindingDetail(baseFinding);
+
+		ok(out.includes("bf-idu-pi-v2:abc123"), "shows the id");
+		ok(out.includes("pi-telegram-bridge"), "shows the project");
+		ok(out.includes("medium"), "shows severity");
+		ok(out.includes("high"), "shows confidence");
+		ok(out.includes("new"), "shows status");
+		ok(out.includes("reverse check missing"), "shows title");
+		ok(out.includes("short description"), "shows description");
+		ok(out.includes("comment truncated in alert"), "shows evidence");
+		ok(
+			out.includes("scripts/check-protocol-tool-drift.mjs"),
+			"shows affected files",
+		);
+		ok(out.includes("protocol-drift:reverse-check"), "shows dedupe key");
+	});
+
+	test("preserves description byte-by-byte when longer than the per-finding alert cut", () => {
+		// Per-finding cut at the 03:48 3-finding run is ~190 chars
+		// (see test/lab-db.test.ts for the calculation). The formatter
+		// must NOT slice at that boundary.
+		const caveat =
+			" — caveat: if the alias column is missing, returns 0 instead of failing. Not visible in the truncated alert body.";
+		const filler = "Body text. ";
+		const description = filler.repeat(34) + caveat;
+		const finding: BugFinding = { ...baseFinding, description };
+
+		const out = formatBugFindingDetail(finding);
+
+		ok(
+			out.includes(description),
+			"full description must appear verbatim — no internal truncation at the per-finding alert cut",
+		);
+		// The caveat lives at the end of the description. It is the
+		// operator's triage signal — verify it appears verbatim
+		// inside the Description section, not at the absolute end
+		// of the formatted output (which has more fields after it).
+		const descStart = out.indexOf("Description:");
+		const descEnd = out.indexOf("\n\nEvidence:");
+		ok(descStart >= 0 && descEnd > descStart, "Description section framed");
+		const descBlock = out.substring(descStart, descEnd);
+		ok(
+			descBlock.includes(description),
+			"Description block must contain the full text verbatim",
+		);
+		ok(
+			descBlock.endsWith(caveat),
+			"the caveat at the end of the Description block must be preserved verbatim",
+		);
+	});
+
+	test("marks missing optional fields with (empty) instead of dropping them", () => {
+		const finding: BugFinding = {
+			...baseFinding,
+			suspectedCause: "",
+			evidence: "",
+			dedupeKey: "",
+			specialty: "",
+		};
+		const out = formatBugFindingDetail(finding);
+
+		ok(out.includes("Evidence: (empty)"), "evidence labelled when missing");
+		ok(
+			out.includes("Suspected cause: (empty)"),
+			"suspectedCause labelled when missing",
+		);
+		ok(
+			out.includes("Specialty: (empty)"),
+			"specialty labelled when missing",
+		);
+		ok(
+			out.includes("Recurrence key: (empty)"),
+			"dedupeKey labelled when missing",
+		);
 	});
 });
