@@ -110,7 +110,7 @@ test("getBugFinding returns null when the id is missing", () => {
 // the description at the per-finding budget, NOT at DESC_BUDGET = 800.
 // See escalation-delivery.ts around line 419-449:
 //   detailFindings = [...criticals, ...highs]
-//   fixedOverhead = header + title lines + foot + id lines
+//   fixedOverhead = header + title lines + foot + id lines + footer lines
 //   descBudget    = max(0, DESC_BUDGET - fixedOverhead)
 //   perDesc       = floor(descBudget / detailFindings.length)
 // The alert then slices each description at `perDesc - prefixLen - 1`
@@ -118,15 +118,18 @@ test("getBugFinding returns null when the id is missing", () => {
 //
 // In the 03:48 CI run the alert carried 3 findings. fixedOverhead
 // was approximately:
-//   header  ≈ 45  ("⚠️ [idu-pi] 3 hallazgos · supervisor 03:48\n")
-//   titles  ≈ 60  (3 × "   → path — title\n")
-//   idLines ≈ 90  (3 × "  bf-idu-pi-v2:abcdef\n")
-//   foot    ≈ 25  ("  ─ N warnings · N info ─\n")
-//                              total ≈ 220
-// So perDesc = floor((800 - 220) / 3) = floor(193) = 193 chars,
-// minus 2 (descPrefix) minus 1 (the ellipsis) = 190 chars per
-// finding. The actual cut is ~190 chars, not 800. The operator sees
-// the caveat cut whenever the description is longer than that.
+//   header    ≈ 45  ("⚠️ [idu-pi] 3 hallazgos · supervisor 03:48\n")
+//   titles    ≈ 60  (3 × "   → path — title\n")
+//   idLines   ≈ 90  (3 × "  bf-idu-pi-v2:abcdef\n")
+//   footLines ≈150  (3 × "  → fila completa: /idu_bug_finding_show <id>\n")
+//   foot      ≈ 25  ("  ─ N warnings · N info ─\n")
+//                              total ≈ 370
+// So perDesc = floor((800 - 370) / 3) = floor(143) = 143 chars,
+// minus 2 (descPrefix) minus 1 (the ellipsis) = 140 chars per
+// finding. The footer line added by the #459 close-the-loop fix
+// tightens the cut further (from ~190 to ~140 chars at 3 findings).
+// The operator sees the caveat cut whenever the description is
+// longer than that.
 //
 // This test seeds a description of ~340 chars (well over the
 // per-finding cut for 3 findings, well under 800 so the test
@@ -136,8 +139,9 @@ test("getBugFinding returns the full description byte-by-byte when longer than t
 	const dbPath = join(tempDir(), "reports", "lab.db");
 	initLabDb(dbPath);
 
-	// Per-finding cut at the 03:48 3-finding run (see comment above).
-	const PER_FINDING_CUT_AT_3 = 190;
+	// Per-finding cut at the 03:48 3-finding run with the issue
+	// #459 footer line included (see comment above).
+	const PER_FINDING_CUT_AT_3 = 140;
 	const caveat =
 		" — caveat: if the alias column is missing from the table, the script returns 0 instead of failing. Not visible in the truncated alert body; verify against the column list before triaging.";
 	const filler = "Body text. ";

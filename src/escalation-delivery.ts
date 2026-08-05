@@ -438,7 +438,22 @@ function renderWithFindings(
 		);
 	const footLine =
 		footParts.length > 0 ? `  ─ ${footParts.join(" · ")} ─\n` : "";
-	const idLines = detailFindings.map((f) => `  ${f.id}\n`).join("");
+	// Issue #459: each finding id is the return path back to the
+	// full row. The alert truncates the caveat at the per-finding
+	// budget, so we surface the recovery command next to the id.
+	// Without this footer line, the alert shows the cut but the
+	// operator has no way to know `/idu_bug_finding_show <id>`
+	// exists — the command is in the catalog and `/comandos`
+	// lists it, but you, looking at the alert on the phone, don't
+	// have a reason to go look. The footer closes the loop: the
+	// cut announces there's more, and tells you how to ask for it.
+	const idLines = detailFindings
+		.map(
+			(f) =>
+				`  ${f.id}\n` +
+				`  → fila completa: /idu_bug_finding_show ${f.id}\n`,
+		)
+		.join("");
 	const fixedOverhead = text.length + footLine.length + idLines.length;
 	const descBudget = Math.max(
 		0,

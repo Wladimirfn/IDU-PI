@@ -3599,20 +3599,29 @@ bot.command("cerrar", async (ctx) => {
 // Command name uses underscore because Telegram bot.command
 // rejects hyphens — the neighbor commands follow this rule
 // (`idu_status`, `idu_master_plan_status`, `idu_master_plan_approve`).
-// `cerrar` survives because it is a single word. We mirror its
-// parser shape: text.match against `/idu_bug_finding_show <id>`.
+// `cerrar` survives because it is a single word.
+//
+// Uses `commandArg` (src/index.ts:733) for the same reason as
+// `queue_approve` (line 3460) and other handlers: Telegram appends
+// `@BotName` to the command when it comes from a group, and a
+// raw `/command` regex misses that form. `commandArg` strips
+// `/command` and the optional `@BotName` together, leaving just
+// the args. Without this, `/idu_bug_finding_show <id>` works in
+// a private chat but `/idu_bug_finding_show@IduPiBot <id>` in a
+// group falls through to "Uso: ...". The owner verified this hole
+// is reachable: `isAllowedUser` filters by user, not by chat, so
+// nothing prevents writing to the bot from a group. `/cerrar` has
+// had the same hole since before #459 — same pattern, same fix.
 bot.command("idu_bug_finding_show", async (ctx) => {
 	if (!(await guard(ctx))) return;
-	const text = ctx.message?.text ?? "";
-	const match = text.match(/^\/idu_bug_finding_show\s+(\S+)\s*$/s);
-	if (!match) {
+	const findingId = commandArg(ctx.message?.text ?? "");
+	if (!findingId) {
 		await ctx.reply(
 			"Uso: /idu_bug_finding_show <id>\n" +
 				"Ejemplo: /idu_bug_finding_show bf-idu-pi-v2:abc123",
 		);
 		return;
 	}
-	const [, findingId] = match;
 	try {
 		const stateRoot = activeProjectStateRoot();
 		if (!stateRoot) {
