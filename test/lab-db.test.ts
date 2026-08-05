@@ -110,3 +110,72 @@ test("getBugFinding returns null when the id is missing", () => {
 	const row = getBugFinding(dbPath, "bf-not-here");
 	assert.equal(row, null);
 });
+
+// Issue #459 audit bar (owner, PR #467 thread): the alert truncates
+// the description at DESC_BUDGET = 800 in escalation-delivery.ts:427.
+// The full text must survive the round trip through `bug_findings`.
+// This test seeds a description longer than the cut and verifies
+// byte-by-byte that the row preserves it, including the caveat
+// text that the alert cut.
+test("getBugFinding returns the full description byte-by-byte when longer than the alert cut", () => {
+	const dbPath = join(tempDir(), "reports", "lab.db");
+	initLabDb(dbPath);
+
+	const DESC_BUDGET = 800;
+	// Build a description that is > DESC_BUDGET and ends with the
+	// caveat text the alert cut ("if X is missing", "truncated",
+	// "not visible") — exactly the pattern from the #459 alert.
+	const caveat =
+		" — caveat: if the alias column is missing from the table, the script returns 0 instead of failing. Not visible in the truncated alert body; verify against the column list before triaging.";
+	const filler =
+		"Description body. The reverse check below depends on every declared tool being registered. ";
+	const description = filler.repeat(40) + caveat;
+	assert.ok(
+		description.length > DESC_BUDGET,
+		`description must exceed DESC_BUDGET (${DESC_BUDGET}); got ${description.length}`,
+	);
+
+	recordBugFinding(dbPath, {
+		id: "bf-idu-pi-v2:longdesc",
+		projectId: "pi-telegram-bridge",
+		title: "description length exceeds alert cut",
+		description,
+		severity: "medium",
+		confidence: "high",
+		status: "new",
+		evidence: caveat,
+		affectedFiles: ["scripts/check-protocol-tool-drift.mjs"],
+		dedupeKey: "protocol-drift:longdesc",
+	});
+
+	const row = getBugFinding(dbPath, "bf-idu-pi-v2:longdesc");
+
+	assert.ok(row, "must return the row when the id exists");
+	// Byte-by-byte: the description must come back identical, not
+	// sliced at any budget boundary.
+	assert.equal(
+		row!.description,
+		description,
+		"description must be preserved verbatim — no internal truncation at the alert cut",
+	);
+	assert.equal(
+		row!.description.length,
+		description.length,
+		"description length must match — alert-cut truncation must not have leaked into the read path",
+	);
+	assert.ok(
+		row!.description.length > DESC_BUDGET,
+		"the read path must return text longer than the alert cut — that is the whole point of #459",
+	);
+	// The caveat lives at the end of the description; it is what the
+	// alert cut. The operator relies on this exact substring to
+	// triage the finding correctly.
+	assert.ok(
+		row!.description.endsWith(caveat),
+		"the caveat text at the end of the description must be preserved verbatim",
+	);
+	assert.ok(
+		row!.evidence.endsWith(caveat),
+		"the caveat text at the end of the evidence must be preserved verbatim",
+	);
+});
