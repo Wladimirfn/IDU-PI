@@ -184,7 +184,7 @@ test("runSensorImpulses: file content is read from projectRoot and passed as con
 		});
 		assert.ok(result2.impulses[0]?.fileContent);
 		assert.ok(
-			result2.impulses[0]?.fileContent?.includes("Button"),
+			result2.impulses[0]?.fileContent?.content.includes("Button"),
 			"file content should include Button",
 		);
 	} finally {
@@ -954,6 +954,279 @@ test("runSensorImpulses: routing metrics reconcile (total == pillar + fallback) 
 		assert.equal(
 			result.metrics.totalValidatedFindings,
 			result.metrics.findingsRoutedByPillar + result.metrics.findingsRoutedByFallback,
+		);
+	} finally {
+		await cleanup();
+	}
+});
+
+// Issue #458: the sensor audits on partial content when a file is
+// larger than MAX_FILE_CONTENT_CHARS (4_000). Without an explicit
+// marker, the model emits "the guard isn't here" findings with
+// full severity — inverted findings the operator cannot distinguish
+// from real ones. The fix: fileContent carries a `truncated` flag,
+// the verdict downgrades every finding's severity by one level, and
+// the per-finding evidence is suffixed with a "[Sensor cap: ...]"
+// marker. The test pins all three: the flag flows through, the
+// downgrade applies, and the marker lands in the persisted finding.
+
+const MAX_FILE_CONTENT_CHARS_FOR_TEST = 4_000;
+
+test("runSensorImpulses: fileContent carries the truncation flag and originalLength when capped", async () => {
+	const { root, stateRoot, cleanup } = makeRoot();
+	try {
+		enableRoles(stateRoot, ["agentlab-ui-ux"]);
+		const filePath = join(root, "src/Big.tsx");
+		mkdirSync(join(root, "src"), { recursive: true });
+		// Force the file past the cap so the read is truncated.
+		const padding = "x".repeat(MAX_FILE_CONTENT_CHARS_FOR_TEST + 200);
+		writeFileSync(filePath, `export const Big = "${padding}";`, "utf8");
+		const wrapper = async (): Promise<PromptForRoleResult> => ({
+			ok: true,
+			output: "ok",
+			provider: "p",
+			model: "m",
+			role: "supervisor-main" as never,
+		});
+		const result = await runSensorImpulses({
+			stateRoot,
+			projectId: "sensor-test",
+			projectRoot: root,
+			changedFiles: ["src/Big.tsx"],
+			promptForRole: wrapper,
+		});
+		const fc = result.impulses[0]?.fileContent;
+		assert.ok(fc, "fileContent is defined for an existing file");
+		assert.equal(fc.truncated, true, "truncated=true when file > cap");
+		assert.ok(
+			fc.originalLength > MAX_FILE_CONTENT_CHARS_FOR_TEST,
+			`originalLength (${fc.originalLength}) must exceed the cap`,
+		);
+		assert.ok(
+			fc.content.length <= MAX_FILE_CONTENT_CHARS_FOR_TEST + 80,
+			`read content (${fc.content.length}) must be at or below the cap + truncation marker overhead`,
+		);
+	} finally {
+		await cleanup();
+	}
+});
+
+test("runSensorImpulses: fileContent reports truncated=false for small files", async () => {
+	const { root, stateRoot, cleanup } = makeRoot();
+	try {
+		enableRoles(stateRoot, ["agentlab-ui-ux"]);
+		const filePath = join(root, "src/Small.tsx");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(filePath, "export const Small = 1;", "utf8");
+		const wrapper = async (): Promise<PromptForRoleResult> => ({
+			ok: true,
+			output: "ok",
+			provider: "p",
+			model: "m",
+			role: "supervisor-main" as never,
+		});
+		const result = await runSensorImpulses({
+			stateRoot,
+			projectId: "sensor-test",
+			projectRoot: root,
+			changedFiles: ["src/Small.tsx"],
+			promptForRole: wrapper,
+		});
+		const fc = result.impulses[0]?.fileContent;
+		assert.ok(fc);
+		assert.equal(fc.truncated, false);
+		assert.equal(fc.originalLength, "export const Small = 1;".length);
+		assert.equal(fc.content, "export const Small = 1;");
+	} finally {
+		await cleanup();
+	}
+});
+
+test("runSensorImpulses: truncated file downgrades each finding's severity by one level", async () => {
+	const { root, stateRoot, cleanup } = makeRoot();
+	try {
+		enableRoles(stateRoot, ["agentlab-ui-ux"]);
+		const filePath = join(root, "src/Big.tsx");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(
+			filePath,
+			"x".repeat(MAX_FILE_CONTENT_CHARS_FOR_TEST + 200),
+			"utf8",
+		);
+		// Model emits findings at multiple severities so we can
+		// verify each one is downgraded by exactly one level.
+		const findings = [
+			{ ...validFinding, severity: "critical", title: "Critical bug" },
+			{ ...validFinding, severity: "high", title: "High bug" },
+			{ ...validFinding, severity: "medium", title: "Medium bug" },
+			{ ...validFinding, severity: "low", title: "Low bug" },
+			{ ...validFinding, severity: "info", title: "Info bug" },
+		];
+		const wrapper = async (): Promise<PromptForRoleResult> => ({
+			ok: true,
+			output: JSON.stringify(findings),
+			provider: "p",
+			model: "m",
+			role: "supervisor-main" as never,
+		});
+		const result = await runSensorImpulses({
+			stateRoot,
+			projectId: "sensor-test",
+			projectRoot: root,
+			changedFiles: ["src/Big.tsx"],
+			promptForRole: wrapper,
+		});
+		const report = result.impulses[0]?.review.report;
+		assert.ok(report, "report is valid");
+		const flat = [
+			...report.qualityFindings,
+			...report.safetyFindings,
+			...report.architectureFindings,
+			...report.tokenCostFindings,
+			...report.timeFindings,
+			...report.resourceFindings,
+		];
+		assert.equal(flat.length, 5);
+		// Severity goes one level down: critical→high, high→medium,
+		// medium→low, low→info, info→info (no level below).
+		const byTitle = new Map(flat.map((f) => [f.title, f.severity]));
+		assert.equal(byTitle.get("Critical bug"), "high");
+		assert.equal(byTitle.get("High bug"), "medium");
+		assert.equal(byTitle.get("Medium bug"), "low");
+		assert.equal(byTitle.get("Low bug"), "info");
+		assert.equal(byTitle.get("Info bug"), "info");
+	} finally {
+		await cleanup();
+	}
+});
+
+test("runSensorImpulses: truncated file marks each finding's evidence with the cap", async () => {
+	const { root, stateRoot, cleanup } = makeRoot();
+	try {
+		enableRoles(stateRoot, ["agentlab-ui-ux"]);
+		const filePath = join(root, "src/Big.tsx");
+		mkdirSync(join(root, "src"), { recursive: true });
+		const totalChars = MAX_FILE_CONTENT_CHARS_FOR_TEST + 1234;
+		writeFileSync(filePath, "x".repeat(totalChars), "utf8");
+		const wrapper = async (): Promise<PromptForRoleResult> => ({
+			ok: true,
+			output: JSON.stringify([
+				{ ...validFinding, severity: "critical" },
+			]),
+			provider: "p",
+			model: "m",
+			role: "supervisor-main" as never,
+		});
+		const result = await runSensorImpulses({
+			stateRoot,
+			projectId: "sensor-test",
+			projectRoot: root,
+			changedFiles: ["src/Big.tsx"],
+			promptForRole: wrapper,
+		});
+		const report = result.impulses[0]?.review.report;
+		assert.ok(report);
+		const flat = [
+			...report.qualityFindings,
+			...report.safetyFindings,
+			...report.architectureFindings,
+			...report.tokenCostFindings,
+			...report.timeFindings,
+			...report.resourceFindings,
+		];
+		assert.equal(flat.length, 1);
+		const marker = `[Sensor cap: file was read at ${MAX_FILE_CONTENT_CHARS_FOR_TEST} of ${totalChars} chars; severity downgraded one level]`;
+		assert.ok(
+			flat[0].evidence.endsWith(marker),
+			`evidence should end with the cap marker; got: ${JSON.stringify(flat[0].evidence)}`,
+		);
+	} finally {
+		await cleanup();
+	}
+});
+
+test("runSensorImpulses: small file leaves severity unchanged (no downgrade, no marker)", async () => {
+	const { root, stateRoot, cleanup } = makeRoot();
+	try {
+		enableRoles(stateRoot, ["agentlab-ui-ux"]);
+		const filePath = join(root, "src/Small.tsx");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(filePath, "export const Small = 1;", "utf8");
+		const wrapper = async (): Promise<PromptForRoleResult> => ({
+			ok: true,
+			output: JSON.stringify([
+				{ ...validFinding, severity: "critical" },
+			]),
+			provider: "p",
+			model: "m",
+			role: "supervisor-main" as never,
+		});
+		const result = await runSensorImpulses({
+			stateRoot,
+			projectId: "sensor-test",
+			projectRoot: root,
+			changedFiles: ["src/Small.tsx"],
+			promptForRole: wrapper,
+		});
+		const report = result.impulses[0]?.review.report;
+		assert.ok(report);
+		const flat = [
+			...report.qualityFindings,
+			...report.safetyFindings,
+			...report.architectureFindings,
+			...report.tokenCostFindings,
+			...report.timeFindings,
+			...report.resourceFindings,
+		];
+		assert.equal(flat.length, 1);
+		assert.equal(
+			flat[0].severity,
+			"critical",
+			"small file: no downgrade — finding keeps its original severity",
+		);
+		assert.ok(
+			!flat[0].evidence.includes("Sensor cap"),
+			"small file: no truncation marker in evidence",
+		);
+	} finally {
+		await cleanup();
+	}
+});
+
+test("runSensorImpulses: truncated file's report summary mentions the cap", async () => {
+	const { root, stateRoot, cleanup } = makeRoot();
+	try {
+		enableRoles(stateRoot, ["agentlab-ui-ux"]);
+		const filePath = join(root, "src/Big.tsx");
+		mkdirSync(join(root, "src"), { recursive: true });
+		writeFileSync(
+			filePath,
+			"x".repeat(MAX_FILE_CONTENT_CHARS_FOR_TEST + 100),
+			"utf8",
+		);
+		const wrapper = async (): Promise<PromptForRoleResult> => ({
+			ok: true,
+			output: JSON.stringify([validFinding]),
+			provider: "p",
+			model: "m",
+			role: "supervisor-main" as never,
+		});
+		const result = await runSensorImpulses({
+			stateRoot,
+			projectId: "sensor-test",
+			projectRoot: root,
+			changedFiles: ["src/Big.tsx"],
+			promptForRole: wrapper,
+		});
+		const report = result.impulses[0]?.review.report;
+		assert.ok(report);
+		assert.ok(
+			report.summary.includes("sensor-capped"),
+			`truncated summary must mention the cap; got: ${report.summary}`,
+		);
+		assert.ok(
+			report.summary.includes(String(MAX_FILE_CONTENT_CHARS_FOR_TEST)),
+			"truncated summary must mention the cap size",
 		);
 	} finally {
 		await cleanup();
