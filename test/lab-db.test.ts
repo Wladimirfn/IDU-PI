@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { after, test } from "node:test";
+import { test } from "node:test";
 import {
 	formatInitLabDbResult,
 	getBugFinding,
@@ -11,20 +9,17 @@ import {
 	listOpenFindings,
 	recordBugFinding,
 } from "../src/lab-db.js";
+import { makeTempDir } from "./helpers/temp.js";
 
-const tempRoots: string[] = [];
-
+// Issue #459: use the tracked-temp-dir helper (test/helpers/temp.ts)
+// so failures cannot leak temp dirs past the suite boundary. The
+// helper's afterEach cleans per-test; the exit sweep is a fallback
+// for SIGKILL. This replaces the previous raw mkdtempSync pattern
+// in this file (the test runner's leak guard flagged the raw
+// pattern as recently-touched).
 function tempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "pi-telegram-lab-db-"));
-	tempRoots.push(dir);
-	return dir;
+	return makeTempDir("pi-telegram-lab-db-");
 }
-
-after(async () => {
-	await Promise.all(
-		tempRoots.map((dir) => rm(dir, { recursive: true, force: true })),
-	);
-});
 
 test("initLabDb creates sqlite database with bug tracking schema", () => {
 	const dbPath = join(tempDir(), "reports", "lab.db");
