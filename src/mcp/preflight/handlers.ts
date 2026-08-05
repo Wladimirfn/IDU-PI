@@ -345,7 +345,10 @@ export async function handlePostflight(
 					tokenBudget: s.consult.rail.tokenBudget,
 					cooldownRemainingMs: s.consult.rail.cooldownRemainingMs,
 				},
-				fileContentTruncated: !!s.fileContent,
+				// Issue #458: read the real truncation flag (was `!!s.fileContent`,
+				// which reported "truncated" for every file that existed).
+				fileContentTruncated: s.fileContent?.truncated === true,
+				fileContentOriginalLength: s.fileContent?.originalLength,
 				review: s.review,
 			})),
 			sensorImpulseMetrics: sensorImpulseRun.metrics,

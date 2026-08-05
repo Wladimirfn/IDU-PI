@@ -6,6 +6,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -25,11 +26,25 @@ import {
 import type { PromptForRoleResult } from "../src/agent-router.js";
 import { makeTempDir } from "./helpers/temp.js";
 
-function makeStateRoot(): { stateRoot: string; cleanup: () => void } {
-	const root = mkdtempSync(join(tmpdir(), "idu-consult-"));
+/**
+ * Returns `{ stateRoot, cleanup }`. `cleanup` is async: it
+ * flushes the deferred supervisor-response-history write FIRST
+ * (consultSupervisor fires it fire-and-forget — issue #342),
+ * then async `rm`s the tree. Sync `rmSync` races with the
+ * in-flight write on Windows and fails with ENOTEMPTY; the
+ * `await flush…` + `await rm(…)` ordering avoids the race.
+ */
+function makeStateRoot(): {
+	stateRoot: string;
+	cleanup: () => Promise<void>;
+} {
+	const root = makeTempDir("idu-consult-");
 	return {
 		stateRoot: root,
-		cleanup: () => rmSync(root, { recursive: true, force: true }),
+		cleanup: async () => {
+			await flushSupervisorResponseHistory(root);
+			await rm(root, { recursive: true, force: true });
+		},
 	};
 }
 
@@ -76,7 +91,7 @@ test("consultSupervisor: returns role_not_enabled when role-engine.json says rol
 		assert.equal(result.ok, false);
 		assert.equal(result.reason, "role_not_enabled");
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -92,7 +107,7 @@ test("consultSupervisor: returns role_not_enabled when role-engine.json is missi
 		assert.equal(result.ok, false);
 		assert.equal(result.reason, "role_not_enabled");
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -114,7 +129,7 @@ test("consultSupervisor: succeeds when role is enabled and returns model respons
 		assert.equal(result.provider, "test-provider");
 		assert.equal(result.reason, undefined);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -157,7 +172,7 @@ test("consultSupervisor: returns cooldown_active when role is in cooldown", asyn
 		assert.equal(result.reason, "cooldown_active");
 		assert.ok((result.cooldownRemainingMs ?? 0) > 0);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -186,7 +201,7 @@ test("consultSupervisor: successful wake records in rail and autoTune success st
 		assert.equal(persisted.rails["supervisor-main"].wakeCount, 1);
 		assert.equal(persisted.rails["supervisor-main"].successStreak, 1);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -208,7 +223,7 @@ test("consultSupervisor: failed wake increments failure streak", async () => {
 		assert.equal(result.rail.failureStreak, 1);
 		assert.equal(result.rail.successStreak, 0);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -249,7 +264,7 @@ test("consultSupervisor: build prompt with token budget instruction", async () =
 			"prompt mentions budget",
 		);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -284,7 +299,7 @@ test("consultSupervisor records a success entry in the supervisor response histo
 		assert.ok(entry.response && entry.response.includes("proceed"));
 		assert.equal(entry.error, undefined);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -320,7 +335,7 @@ test("consultSupervisor records an error entry in the supervisor response histor
 			/^prompt_error: model invocation exploded$/u,
 		);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -342,7 +357,7 @@ test("consultSupervisor: role_not_enabled early return does NOT write to the his
 			"config-check early returns must not create the history file",
 		);
 	} finally {
-		cleanup();
+		await cleanup();
 	}
 });
 
@@ -462,3 +477,4 @@ test("consultSupervisor: a follow-up consult after a throw hits the cooldown (ra
 		rmSync(stateRoot, { recursive: true, force: true });
 	}
 });
+

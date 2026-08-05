@@ -53,6 +53,7 @@ import type { IduModelRoleId } from "./model-assignments.js";
 import {
 	validateAgentLabReviewReport,
 	type AgentLabFinding,
+	type AgentLabFindingSeverity,
 	type AgentLabReviewReport,
 	type AgentLabSpecialty,
 } from "./agentlab-supervisor-contract.js";
@@ -63,6 +64,23 @@ const MAX_PER_ROLE_DEPTH = 2;
 /** Safety ceiling on total selected matches. Non-binding today (7 roles x 2 = 14). */
 const MAX_SENSOR_CALLS_SAFETY = 24;
 const MAX_SENSOR_RESPONSE_CHARS = 16_000;
+
+/**
+ * Issue #458: a sensor that audits on partial content emits
+ * inverted findings with full severity ("the guard isn't here" when
+ * the guard is past the cut). The fix is to make the truncation
+ * visible in the verdict — downgrade severity by one level, mark
+ * each finding's evidence with the cap, and surface the truncation
+ * in the report summary — instead of only in the prompt. This type
+ * carries the info the verdict needs.
+ */
+export type FileContentRead = {
+	content: string;
+	/** True iff the file exceeded MAX_FILE_CONTENT_CHARS and was sliced. */
+	truncated: boolean;
+	/** Length of the file on disk in chars. Used for the verdict marker. */
+	originalLength: number;
+};
 
 export type SensorImpulseInput = {
 	stateRoot: string;
@@ -147,7 +165,7 @@ export type SensorImpulseReview =
 export type SensorImpulseResult = {
 	match: SensorMatch;
 	consult: ConsultResult;
-	fileContent: string | undefined;
+	fileContent: FileContentRead | undefined;
 	review: SensorImpulseReview;
 };
 
@@ -206,13 +224,21 @@ export type SensorImpulseRunResult = {
 	discards: SensorDiscard[];
 };
 
-function readFileCapped(path: string): string | undefined {
+function readFileCapped(path: string): FileContentRead | undefined {
 	try {
 		if (!existsSync(path)) return undefined;
 		const raw = readFileSync(path, "utf8");
 		return raw.length > MAX_FILE_CONTENT_CHARS
-			? `${raw.slice(0, MAX_FILE_CONTENT_CHARS)}\n\n[... truncated at ${MAX_FILE_CONTENT_CHARS} chars ...]`
-			: raw;
+			? {
+					content: `${raw.slice(0, MAX_FILE_CONTENT_CHARS)}\n\n[... truncated at ${MAX_FILE_CONTENT_CHARS} chars ...]`,
+					truncated: true,
+					originalLength: raw.length,
+				}
+			: {
+					content: raw,
+					truncated: false,
+					originalLength: raw.length,
+				};
 	} catch {
 		return undefined;
 	}
@@ -231,9 +257,16 @@ export async function runSensorImpulses(
 			`Audit this change: ${match.file} (${match.description}).`,
 			"Return ONLY a JSON array of AgentLabFinding objects. Do not return a report envelope, markdown, prose, or code fences.",
 			"Every finding must contain title, description, evidence, severity (info|low|medium|high|critical), confidence (low|medium|high), category, affectedFiles, affectedFlows, relatedRules, and controlPillars (quality|time|token_cost|safety|reporting|resources|architecture_consistency|learning).",
-		].join(" ");
+			fileContent?.truncated
+				? `IMPORTANT: the file content shown below is truncated to ${MAX_FILE_CONTENT_CHARS} of ${fileContent.originalLength} chars. Findings about content you cannot see (especially "missing", "not visible", "not implemented") are inverted: the missing portion might contain what you flag as absent. Lower your confidence in absence-claims and prefer absence-claims only when the surrounding code would normally have made the absence obvious before the cut.`
+				: "",
+		]
+			.filter(Boolean)
+			.join(" ");
 		const context = fileContent
-			? `File: ${match.file}\n\nContent (truncated to ${MAX_FILE_CONTENT_CHARS} chars):\n\`\`\`\n${fileContent}\n\`\`\``
+			? fileContent.truncated
+				? `File: ${match.file}\n\nContent (SENSOR-CAPPED — only the first ${MAX_FILE_CONTENT_CHARS} of ${fileContent.originalLength} chars are shown; the rest is unread by you):\n\`\`\`\n${fileContent.content}\n\`\`\``
+				: `File: ${match.file}\n\nContent (${fileContent.originalLength} chars):\n\`\`\`\n${fileContent.content}\n\`\`\``
 			: `File: ${match.file} (content unavailable)`;
 		const consult = await consultSupervisor({
 			stateRoot: input.stateRoot,
@@ -246,7 +279,12 @@ export async function runSensorImpulses(
 			match,
 			consult,
 			fileContent,
-			review: buildSensorImpulseReview(input.projectId, match, consult),
+			review: buildSensorImpulseReview(
+				input.projectId,
+				match,
+				consult,
+				fileContent,
+			),
 		});
 	}
 	return {
@@ -477,6 +515,7 @@ function buildSensorImpulseReview(
 	projectId: string,
 	match: SensorMatch,
 	consult: ConsultResult,
+	fileContent?: FileContentRead,
 ): SensorImpulseReview {
 	const specialty = agentLabSpecialtyForSensorRole(match.role);
 	if (!specialty) {
@@ -488,8 +527,8 @@ function buildSensorImpulseReview(
 		};
 	}
 
-	const findings = parseSensorFindings(consult.response);
-	if (!findings) {
+	const rawFindings = parseSensorFindings(consult.response);
+	if (!rawFindings) {
 		return {
 			status: "invalid",
 			report: undefined,
@@ -498,6 +537,19 @@ function buildSensorImpulseReview(
 		};
 	}
 
+	// Issue #458: when the file was truncated to MAX_FILE_CONTENT_CHARS,
+	// the model audited only the visible portion. Absence-claims
+	// ("missing", "not visible", "not implemented") are inverted: the
+	// cut might have contained what the model flagged as absent. To
+	// stop inverted findings from carrying full severity into the
+	// verdict, we downgrade every finding from a truncated file by
+	// one level AND append a marker to each finding's evidence so
+	// the operator reading the bug_finding record knows the finding
+	// was based on partial content.
+	const findings = fileContent?.truncated
+		? rawFindings.map((f) => downgradeFinding(f, fileContent))
+		: rawFindings;
+
 	const buckets = routeFindingsToBuckets(findings, specialty);
 	const { id, requestId } = computeSensorReportIdentity(
 		projectId,
@@ -505,13 +557,16 @@ function buildSensorImpulseReview(
 		match.role,
 		consult.response,
 	);
+	const summary = fileContent?.truncated
+		? `Sensor audit for ${match.file} returned ${findings.length} finding(s) — file was sensor-capped at ${MAX_FILE_CONTENT_CHARS} of ${fileContent.originalLength} chars; severities downgraded one level and per-finding evidence is marked to flag the partial view.`
+		: `Sensor audit for ${match.file} returned ${findings.length} finding(s).`;
 	const validation = validateAgentLabReviewReport({
 		id,
 		requestId,
 		projectId,
 		specialty,
 		status: "completed",
-		summary: `Sensor audit for ${match.file} returned ${findings.length} finding(s).`,
+		summary,
 		qualityFindings: buckets.qualityFindings,
 		safetyFindings: buckets.safetyFindings,
 		architectureFindings: buckets.architectureFindings,
@@ -543,6 +598,42 @@ function buildSensorImpulseReview(
 		report: validation.report,
 		findingsCount: findings.length,
 	};
+}
+
+/**
+ * Issue #458: downgrade severity by one level and append a marker
+ * to the evidence so the operator reading the persisted bug_finding
+ * record sees that the finding was based on partial content. The
+ * marker names the cap (`${MAX_FILE_CONTENT_CHARS}` of original
+ * chars) so the audit trail is reproducible.
+ */
+function downgradeFinding(
+	finding: AgentLabFinding,
+	fileContent: FileContentRead,
+): AgentLabFinding {
+	const marker = `[Sensor cap: file was read at ${MAX_FILE_CONTENT_CHARS} of ${fileContent.originalLength} chars; severity downgraded one level]`;
+	return {
+		...finding,
+		severity: downgradeSeverity(finding.severity),
+		evidence: finding.evidence ? `${finding.evidence}\n${marker}` : marker,
+	};
+}
+
+const SEVERITY_DOWNGRADE: Record<
+	AgentLabFindingSeverity,
+	AgentLabFindingSeverity
+> = {
+	critical: "high",
+	high: "medium",
+	medium: "low",
+	low: "info",
+	info: "info",
+};
+
+function downgradeSeverity(
+	severity: AgentLabFindingSeverity,
+): AgentLabFindingSeverity {
+	return SEVERITY_DOWNGRADE[severity] ?? severity;
 }
 
 /**
@@ -619,12 +710,14 @@ function measureSensorImpulses(
 	};
 }
 
-function parseSensorFindings(response: string): unknown[] | undefined {
+function parseSensorFindings(response: string): AgentLabFinding[] | undefined {
 	if (response.length > MAX_SENSOR_RESPONSE_CHARS) return undefined;
 	const direct = parseJsonArray(response.trim());
-	if (direct) return direct;
-	if (response.includes("```")) return parseFencedJsonArray(response);
-	return parseBracketDelimitedJsonArray(response);
+	if (direct) return direct as AgentLabFinding[];
+	if (response.includes("```")) {
+		return parseFencedJsonArray(response) as AgentLabFinding[] | undefined;
+	}
+	return parseBracketDelimitedJsonArray(response) as AgentLabFinding[] | undefined;
 }
 
 function parseJsonArray(value: string): unknown[] | undefined {
