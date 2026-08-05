@@ -72,11 +72,14 @@ export type DeliveryMessage = {
 export type ResolvedFinding = {
 	id: string;
 	severity: "critical" | "high" | "medium" | "low" | "info";
-	title: string;
-	/** Verbatim from bug_findings.description. 72-486 chars today. */
-	description: string;
 	filePath: string;
-	status: "new" | "ignored";
+	title: string;
+	description: string;
+	status: string;
+	/** Issue #474: true iff this finding came from a sensor-capped file. */
+	viewPartial: boolean;
+	/** Issue #474: the severity BEFORE the #458 sensor downgrade, if any. */
+	originalSeverity?: string;
 };
 
 /** One append-only entry in the delivery log. */
@@ -390,6 +393,17 @@ function renderWithFindings(
 	const last = pending[pending.length - 1];
 	const time = hhmm(last.ts);
 
+	// Issue #474: findings whose severity was downgraded by the sensor
+	// cap (#458) have `originalSeverity` set. Before #458, a model-emitted
+	// `critical` → `high` would have appeared under 🔴; after the downgrade
+	// it lands under 🟡 and the operator can't tell from the header alone.
+	// We detect these and surface the context in the first line — "lectura
+	// parcial del sensor — X hallazgos originalmente críticos" — so the
+	// alert declares its limitation upfront (per #459, what goes at the end
+	// gets cut).
+	const sensorCappedCriticals = findings.filter(
+		(f) => f.viewPartial && f.originalSeverity === "critical",
+	);
 	let emoji: string;
 	let headerLabel: string;
 	if (criticals.length > 0) {
@@ -410,6 +424,19 @@ function renderWithFindings(
 	}
 
 	let text = `${emoji} [idu-pi] ${headerLabel} · supervisor ${time}\n`;
+
+	// Append the sensor-cap declaration when the header's 🟡
+	// (high) contains findings that were originally `critical`
+	// before the #458 downgrade. Placed immediately after the
+	// header so it's BEFORE the detail descriptions — #459 taught
+	// us that what goes at the end gets cut.
+	if (sensorCappedCriticals.length > 0) {
+		const partialLabel =
+			sensorCappedCriticals.length === 1
+				? "  → 1 de estos hallazgos viene de una lectura parcial del sensor (menos de 4000 chars leídos)"
+				: `  → ${sensorCappedCriticals.length} de estos hallazgos vienen de lecturas parciales del sensor (menos de 4000 chars leídos)`;
+		text += `${partialLabel}\n`;
+	}
 
 	// Detail blocks: criticals first, then highs.
 	// Each gets: title line (→ file — title), description (verbatim),

@@ -188,6 +188,8 @@ describe("formatBugFindingDetail", () => {
 		dedupeKey: "protocol-drift:reverse-check",
 		specialty: "tools",
 		recurrenceCount: 1,
+		viewPartial: false,
+		originalSeverity: "" as BugFinding["originalSeverity"],
 	};
 
 	test("includes every column from the BugFinding row", () => {

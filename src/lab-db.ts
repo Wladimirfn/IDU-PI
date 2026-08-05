@@ -33,6 +33,22 @@ export type BugFindingInput = {
 	 * so two specialists reporting the same defect stay as two rows.
 	 */
 	specialty?: string;
+	/**
+	 * Issue #474: true when the finding came from a file whose content
+	 * was truncated by the sensor at MAX_FILE_CONTENT_CHARS (4000).
+	 * The escalation engine uses this to distinguish "genuine critical"
+	 * from "critical on partial content" without relying on prose
+	 * markers in `evidence`.
+	 */
+	viewPartial?: boolean;
+	/**
+	 * Issue #474: the finding's severity BEFORE the sensor-cap
+	 * downgrade (from #458). Only meaningful when `viewPartial` is
+	 * true; null otherwise. Stored so the escalation engine can fire
+	 * on a `critical` whose original severity was `critical` even
+	 * after the verdict downgrade.
+	 */
+	originalSeverity?: FindingSeverity;
 };
 
 export type BugFinding = Required<
@@ -48,6 +64,8 @@ export type BugFinding = Required<
 	dedupeKey: string;
 	specialty: string;
 	recurrenceCount: number;
+	viewPartial: boolean;
+	originalSeverity: FindingSeverity;
 };
 
 export type ProposalType = "fix" | "test" | "investigation" | "docs" | "memory";
@@ -119,7 +137,9 @@ CREATE TABLE IF NOT EXISTS bug_findings (
   specialty TEXT,
   recurrence_count INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  view_partial INTEGER NOT NULL DEFAULT 0,
+  original_severity TEXT
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS bug_findings_dedupe_idx
@@ -290,6 +310,27 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 		"bug_findings",
 		"recurrence_count",
 		"INTEGER NOT NULL DEFAULT 1",
+	);
+	// Issue #474: view_partial + original_severity for the sensor-cap
+	// escalation rule (#458 → #474). SQLite has no ALTER TABLE IF NOT
+	// EXISTS either; the path the codebase uses is PRAGMA table_info
+	// + ALTER TABLE ADD COLUMN. Without these two calls, existing DBs
+	// (any DB created before #474) would crash every read against
+	// `bug_findings` with "no such column" — the SELECT fails at
+	// prepare time, before COALESCE can soften it. The new DBs path
+	// (CREATE TABLE IF NOT EXISTS includes the columns) is the one CI
+	// exercises; the existing-DB path is the one production hits first.
+	ensureColumn(
+		dbPath,
+		"bug_findings",
+		"view_partial",
+		"INTEGER NOT NULL DEFAULT 0",
+	);
+	ensureColumn(
+		dbPath,
+		"bug_findings",
+		"original_severity",
+		"TEXT",
 	);
 	// B5 PR1: apply pending SQL migrations (model_invocation_log + future
 	// tables). applyMigrations is idempotent and reads the SQL files
@@ -538,7 +579,8 @@ export function recordBugFinding(dbPath: string, input: BugFindingInput): void {
 	const sql = `
 INSERT INTO bug_findings (
   id, project_id, title, description, severity, confidence, status,
-  evidence, suspected_cause, affected_files, dedupe_key, specialty, updated_at
+  evidence, suspected_cause, affected_files, dedupe_key, specialty, updated_at,
+  view_partial, original_severity
 ) VALUES (
   ${sqlString(input.id)},
   ${sqlString(input.projectId)},
@@ -552,7 +594,9 @@ INSERT INTO bug_findings (
   ${sqlString(affectedFiles)},
   ${sqlString(input.dedupeKey)},
   ${sqlOptionalString(input.specialty)},
-  strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+  strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+  ${input.viewPartial ? "1" : "0"},
+  ${input.originalSeverity ? sqlString(input.originalSeverity) : "NULL"}
 )
 ON CONFLICT(id) DO UPDATE SET
   title = excluded.title,
@@ -564,6 +608,8 @@ ON CONFLICT(id) DO UPDATE SET
   suspected_cause = excluded.suspected_cause,
   affected_files = excluded.affected_files,
   dedupe_key = excluded.dedupe_key,
+  view_partial = excluded.view_partial,
+  original_severity = excluded.original_severity,
   recurrence_count = recurrence_count + 1,
   updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 `;
@@ -708,7 +754,7 @@ export function listOpenFindings(
 	initLabDb(dbPath);
 	const output = runSql(
 		dbPath,
-		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey, COALESCE(specialty, '') AS specialty, COALESCE(recurrence_count, 1) AS recurrenceCount FROM bug_findings WHERE project_id = ${sqlString(projectId)} AND status NOT IN ('fixed','ignored','duplicate') ORDER BY severity, updated_at DESC;`,
+		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey, COALESCE(specialty, '') AS specialty, COALESCE(recurrence_count, 1) AS recurrenceCount, COALESCE(view_partial, 0) AS viewPartial, COALESCE(original_severity, '') AS originalSeverity FROM bug_findings WHERE project_id = ${sqlString(projectId)} AND status NOT IN ('fixed','ignored','duplicate') ORDER BY severity, updated_at DESC;`,
 	).trim();
 	if (!output) return [];
 	const rows = JSON.parse(output) as Array<{
@@ -725,6 +771,8 @@ export function listOpenFindings(
 		dedupeKey: string;
 		specialty: string;
 		recurrenceCount: number;
+		viewPartial: number;
+		originalSeverity: string;
 	}>;
 	return rows.map((row) => ({
 		id: row.id,
@@ -740,6 +788,8 @@ export function listOpenFindings(
 		dedupeKey: row.dedupeKey,
 		specialty: row.specialty,
 		recurrenceCount: row.recurrenceCount,
+		viewPartial: row.viewPartial !== 0,
+		originalSeverity: row.originalSeverity as FindingSeverity,
 	}));
 }
 
@@ -759,7 +809,7 @@ export function getBugFinding(
 	initLabDb(dbPath);
 	const output = runSql(
 		dbPath,
-		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey, COALESCE(specialty, '') AS specialty, COALESCE(recurrence_count, 1) AS recurrenceCount FROM bug_findings WHERE id = ${sqlString(id)} LIMIT 1;`,
+		`SELECT id, project_id, title, description, severity, confidence, status, COALESCE(evidence, '') AS evidence, COALESCE(suspected_cause, '') AS suspectedCause, affected_files AS affectedFiles, COALESCE(dedupe_key, '') AS dedupeKey, COALESCE(specialty, '') AS specialty, COALESCE(recurrence_count, 1) AS recurrenceCount, COALESCE(view_partial, 0) AS viewPartial, COALESCE(original_severity, '') AS originalSeverity FROM bug_findings WHERE id = ${sqlString(id)} LIMIT 1;`,
 	).trim();
 	if (!output) return null;
 	const rows = JSON.parse(output) as Array<{
@@ -776,6 +826,8 @@ export function getBugFinding(
 		dedupeKey: string;
 		specialty: string;
 		recurrenceCount: number;
+		viewPartial: number;
+		originalSeverity: string;
 	}>;
 	const row = rows[0];
 	if (!row) return null;
@@ -793,5 +845,7 @@ export function getBugFinding(
 		dedupeKey: row.dedupeKey,
 		specialty: row.specialty,
 		recurrenceCount: row.recurrenceCount,
+		viewPartial: row.viewPartial !== 0,
+		originalSeverity: row.originalSeverity as FindingSeverity,
 	};
 }
