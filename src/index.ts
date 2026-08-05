@@ -19,6 +19,7 @@ import {
 	MAX_MESSAGES_PER_HOUR,
 	type ResolvedFinding,
 	formatFindingCloseMessage,
+	formatBugFindingDetail,
 } from "./escalation-delivery.js";
 import {
 	AgentRouter,
@@ -161,7 +162,7 @@ import {
 	stripEngramNoise,
 	summarizeOutput,
 } from "./lab-reports.js";
-import { formatInitLabDbResult, initLabDb, runSql, sqlString, updateFindingStatus } from "./lab-db.js";
+import { formatInitLabDbResult, initLabDb, runSql, sqlString, updateFindingStatus, getBugFinding } from "./lab-db.js";
 import { LabDbRepository } from "./lab-db-repository.js";
 import {
 	buildSemanticAuditStatus,
@@ -3583,6 +3584,59 @@ bot.command("cerrar", async (ctx) => {
 			newStatus: result.newStatus,
 		});
 		await ctx.reply(msg ?? "Hallazgo cerrado.");
+	} catch (e) {
+		await ctx.reply(
+			`Error: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
+});
+
+// Issue #459: read twin of `/cerrar`. The alert truncates the
+// caveat at the per-finding budget (see `DESC_BUDGET` and the
+// per-finding division in `escalation-delivery.ts`); the operator
+// needs a way to recover the full row from the phone.
+//
+// Command name uses underscore because Telegram bot.command
+// rejects hyphens — the neighbor commands follow this rule
+// (`idu_status`, `idu_master_plan_status`, `idu_master_plan_approve`).
+// `cerrar` survives because it is a single word.
+//
+// Uses `commandArg` (src/index.ts:733) for the same reason as
+// `queue_approve` (line 3460) and other handlers: Telegram appends
+// `@BotName` to the command when it comes from a group, and a
+// raw `/command` regex misses that form. `commandArg` strips
+// `/command` and the optional `@BotName` together, leaving just
+// the args. Without this, `/idu_bug_finding_show <id>` works in
+// a private chat but `/idu_bug_finding_show@IduPiBot <id>` in a
+// group falls through to "Uso: ...". The owner verified this hole
+// is reachable: `isAllowedUser` filters by user, not by chat, so
+// nothing prevents writing to the bot from a group. `/cerrar` has
+// had the same hole since before #459 — same pattern, same fix.
+bot.command("idu_bug_finding_show", async (ctx) => {
+	if (!(await guard(ctx))) return;
+	const findingId = commandArg(ctx.message?.text ?? "");
+	if (!findingId) {
+		await ctx.reply(
+			"Uso: /idu_bug_finding_show <id>\n" +
+				"Ejemplo: /idu_bug_finding_show bf-idu-pi-v2:abc123",
+		);
+		return;
+	}
+	try {
+		const stateRoot = activeProjectStateRoot();
+		if (!stateRoot) {
+			await ctx.reply("Error: no hay proyecto activo.");
+			return;
+		}
+		const labDbPath = join(stateRoot, "lab.db");
+		const finding = getBugFinding(labDbPath, findingId);
+		if (!finding) {
+			await ctx.reply(
+				`No existe la fila ${findingId} en bug_findings. ¿La alerta referencia una fila ya triaged/fixed/deleted?`,
+			);
+			return;
+		}
+		await replyLong(ctx, formatBugFindingDetail(finding));
 	} catch (e) {
 		await ctx.reply(
 			`Error: ${e instanceof Error ? e.message : String(e)}`,

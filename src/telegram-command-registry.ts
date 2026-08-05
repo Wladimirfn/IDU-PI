@@ -18,6 +18,7 @@ export const PUBLIC_TELEGRAM_HANDLER_COMMANDS = [
 	"idu_supervisor_tick",
 	"idu_alerts_status",
 	"idu_alerts_tick",
+	"idu_bug_finding_show",
 	"idu_alerts_pause",
 	"idu_alerts_resume",
 	"idu_alerts_off",

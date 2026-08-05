@@ -644,6 +644,112 @@ describe("escalation-delivery planDelivery with resolvedFindings", () => {
 		ok(idPos > footPos, "ID should be after foot");
 	});
 
+	// Issue #459: the alert cuts the caveat at the per-finding budget.
+	// Without a footer line pointing at the read command, the operator
+	// has no reason to know `/idu_bug_finding_show <id>` exists from
+	// the alert alone (the command is in the catalog but `/comandos`
+	// is not what the operator reaches for in the moment). The
+	// footer line closes the loop: id + how to query.
+	test("each finding has a footer line pointing at /idu_bug_finding_show", () => {
+		const events = [
+			makeEvent({
+				id: "esc-1",
+				minutesAgo: 60,
+				critical: 2,
+				total: 2,
+				findingIds: ["f-1", "f-2"],
+			}),
+		];
+		const findings = [
+			finding({ id: "f-1", severity: "critical", title: "first" }),
+			finding({ id: "f-2", severity: "critical", title: "second" }),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		const text = plan.messages[0].text;
+
+		ok(
+			text.includes("→ fila completa: /idu_bug_finding_show f-1"),
+			"first finding footer present",
+		);
+		ok(
+			text.includes("→ fila completa: /idu_bug_finding_show f-2"),
+			"second finding footer present",
+		);
+		// The footer must sit immediately under the id (id first, then
+		// the hint line). This is the operator's reading order: id
+		// then "what can I do with it".
+		const idx1 = text.indexOf("f-1");
+		const hint1 = text.indexOf("→ fila completa: /idu_bug_finding_show f-1");
+		ok(
+			hint1 > idx1 && hint1 - idx1 < 40,
+			"first hint line sits right under the id",
+		);
+		const idx2 = text.indexOf("f-2");
+		const hint2 = text.indexOf("→ fila completa: /idu_bug_finding_show f-2");
+		ok(
+			hint2 > idx2 && hint2 - idx2 < 40,
+			"second hint line sits right under the id",
+		);
+	});
+
+	// The footer adds ~50 chars per finding. With 3 findings and
+	// fixed overhead (header + titles + foot + ids + 3 hint lines),
+	// the per-finding description budget tightens further from the
+	// 03:48 baseline (~190) to ~140 chars. The alert must still
+	// surface the truncation and the recovery hint even with a
+	// long description.
+	test("footer line survives the 800-char budget with a long description", () => {
+		const events = [
+			makeEvent({
+				id: "esc-1",
+				minutesAgo: 60,
+				critical: 3,
+				total: 3,
+				findingIds: ["f-1", "f-2", "f-3"],
+			}),
+		];
+		const findings = [
+			finding({
+				id: "f-1",
+				severity: "critical",
+				description: "A".repeat(500),
+			}),
+			finding({
+				id: "f-2",
+				severity: "critical",
+				description: "B".repeat(500),
+			}),
+			finding({
+				id: "f-3",
+				severity: "critical",
+				description: "C".repeat(500),
+			}),
+		];
+		const plan = planDelivery({
+			events,
+			deliveredIds: deliveredSet("esc-old"),
+			now: NOW,
+			resolvedFindings: findings,
+		});
+		const text = plan.messages[0].text;
+
+		ok(text.length <= 800, `Alert fits in budget (got ${text.length})`);
+		ok(text.includes("…"), "Description is cut at the per-finding budget");
+		// Every finding's footer is still present, even though the
+		// descriptions were truncated.
+		for (const id of ["f-1", "f-2", "f-3"]) {
+			ok(
+				text.includes(`→ fila completa: /idu_bug_finding_show ${id}`),
+				`footer for ${id} survives the cut`,
+			);
+		}
+	});
+
 	test("message stays under 800 chars budget", () => {
 		const events = [
 			makeEvent({ id: "esc-1", minutesAgo: 60, critical: 1, findingIds: ["f-1"] }),
