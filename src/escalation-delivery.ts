@@ -438,22 +438,20 @@ function renderWithFindings(
 		);
 	const footLine =
 		footParts.length > 0 ? `  ─ ${footParts.join(" · ")} ─\n` : "";
-	// Issue #459: each finding id is the return path back to the
-	// full row. The alert truncates the caveat at the per-finding
-	// budget, so we surface the recovery command next to the id.
-	// Without this footer line, the alert shows the cut but the
-	// operator has no way to know `/idu_bug_finding_show <id>`
-	// exists — the command is in the catalog and `/comandos`
-	// lists it, but you, looking at the alert on the phone, don't
-	// have a reason to go look. The footer closes the loop: the
-	// cut announces there's more, and tells you how to ask for it.
-	const idLines = detailFindings
-		.map(
-			(f) =>
-				`  ${f.id}\n` +
-				`  → fila completa: /idu_bug_finding_show ${f.id}\n`,
-		)
-		.join("");
+	// Issue #459: the ids are the return path back to the full row.
+	// The alert truncates the caveat at the per-finding budget, so
+	// we surface the recovery command once at the foot of the
+	// alert (NOT per finding — repeating the id under each finding
+	// cost ~150 chars in the 3-finding case and tightened the cut
+	// from ~190 to ~140 chars per finding, making the fix for "the
+	// alert cuts too much" cause the alert to cut MORE). One
+	// generic instruction line keeps the sign always present and
+	// gives the per-finding description budget back to ~190 chars.
+	// The operator picks the id from the list above and substitutes
+	// it into the placeholder.
+	const idLines =
+		detailFindings.map((f) => `  ${f.id}\n`).join("") +
+		`  → fila completa: /idu_bug_finding_show <id>\n`;
 	const fixedOverhead = text.length + footLine.length + idLines.length;
 	const descBudget = Math.max(
 		0,
