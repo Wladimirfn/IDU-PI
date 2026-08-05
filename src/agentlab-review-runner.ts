@@ -16,7 +16,7 @@ import type { AgentProfile } from "./config.js";
 import type { AgentRouter } from "./agent-router.js";
 import { loadLabProjectContext } from "./lab-context.js";
 import type { ModelInvocationRecord } from "./model-invocation-log.js";
-import type { FindingWithProposalInput } from "./lab-db.js";
+import type { FindingWithProposalInput, FindingSeverity } from "./lab-db.js";
 import type { LabRunRecord } from "./lab-reports.js";
 import {
 	buildAgentLabWorkloadEnvelope,
@@ -2010,6 +2010,17 @@ export function agentLabFindingToBugFinding(
 		affectedFiles[0] !== undefined
 			? `${affectedFiles[0]}: ${finding.title}`
 			: finding.title;
+	// Issue #474: downgradeFinding in sensor-impulses.ts attaches
+	// `viewPartial` and `originalSeverity` as write-once runtime
+	// properties on the finding object. They aren't part of the
+	// AgentLabFinding contract type but flow through here into
+	// bug_findings columns.
+	const viewPartial = (
+		finding as AgentLabFinding & { viewPartial?: unknown }
+	).viewPartial === true;
+	const originalSeverity = (
+		finding as AgentLabFinding & { originalSeverity?: unknown }
+	).originalSeverity as FindingSeverity | undefined;
 	return {
 		finding: {
 			id,
@@ -2023,6 +2034,8 @@ export function agentLabFindingToBugFinding(
 			affectedFiles,
 			dedupeKey,
 			...(input.specialty ? { specialty: input.specialty } : {}),
+			viewPartial,
+			...(originalSeverity ? { originalSeverity } : {}),
 		},
 	};
 }

@@ -4016,7 +4016,7 @@ async function runEscalationDelivery(): Promise<void> {
 			const idList = allFindingIds.map((id) => sqlString(id)).join(",");
 			const raw = runSql(
 				labDbPath,
-				`SELECT id, severity, title, description, affected_files, status FROM bug_findings WHERE id IN (${idList});`,
+				`SELECT id, severity, title, description, affected_files, status, COALESCE(view_partial, 0) AS viewPartial, COALESCE(original_severity, '') AS originalSeverity FROM bug_findings WHERE id IN (${idList});`,
 			);
 			const rows = JSON.parse(raw) as Array<{
 				id: string;
@@ -4025,6 +4025,8 @@ async function runEscalationDelivery(): Promise<void> {
 				description: string;
 				affected_files: string;
 				status: string;
+				viewPartial: number;
+				originalSeverity: string;
 			}>;
 			resolvedFindings = rows.map((row) => ({
 				id: row.id,
@@ -4034,6 +4036,8 @@ async function runEscalationDelivery(): Promise<void> {
 				filePath:
 					(JSON.parse(row.affected_files || "[]") as string[])[0] ?? "",
 				status: row.status as ResolvedFinding["status"],
+				viewPartial: row.viewPartial !== 0,
+				originalSeverity: row.originalSeverity || undefined,
 			}));
 		} catch {
 			// DB query failed — fall back to counts-only message

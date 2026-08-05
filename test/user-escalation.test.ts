@@ -45,17 +45,23 @@ type SeedOptions = {
 	// follow-up UPDATE (the INSERT path uses the schema default of 1
 	// to keep every other test's seed shape stable).
 	recurrenceCount?: number;
+	/** Issue #474: set to 1 for sensor-capped findings. */
+	viewPartial?: number;
+	/** Issue #474: the severity before the #458 downgrade. */
+	originalSeverity?: string;
 };
 
 function seedFinding(labDbPath: string, options: SeedOptions): void {
 	const status = options.status ?? "new";
 	const createdAt = options.createdAt ?? "2026-06-15 12:00:00";
 	const projectId = options.projectId ?? PROJECT_ID;
+	const viewPartial = options.viewPartial ?? 0;
+	const originalSeverity = options.originalSeverity ?? "";
 	runSql(
 		labDbPath,
 		`INSERT INTO bug_findings (
 			id, project_id, title, description, severity, confidence, status,
-			affected_files, created_at, updated_at
+			affected_files, created_at, updated_at, view_partial, original_severity
 		) VALUES (
 			${sqlString(options.id)},
 			${sqlString(projectId)},
@@ -66,7 +72,9 @@ function seedFinding(labDbPath: string, options: SeedOptions): void {
 			${sqlString(status)},
 			'[]',
 			${sqlString(createdAt)},
-			${sqlString(createdAt)}
+			${sqlString(createdAt)},
+			${String(viewPartial)},
+			${originalSeverity ? sqlString(originalSeverity) : "NULL"}
 		);`,
 	);
 	if (options.recurrenceCount !== undefined) {
@@ -800,6 +808,122 @@ test("checkUserEscalation: recurrence_count default 1 (no override) does NOT tri
 		});
 		assert.equal(out.shouldEscalate, false);
 		assert.ok(!out.reasons.includes("recent_recurrence_threshold"));
+	} finally {
+		cleanup();
+	}
+});
+
+// Issue #474: sensor-capped critical escalation rule.
+// After #458, every finding from a file over MAX_FILE_CONTENT_CHARS
+// has its severity downgraded — a `critical` becomes `high`.
+// The `recent_critical_threshold` rule fires on NEW `critical`
+// findings (severity='critical'), so after downgrade a capped
+// critical is invisible to it. This rule recovers the channel.
+//
+// Audit criteria:
+//   1. 3 findings (< total threshold) with a capped downgraded
+//      critical ESCALATES via `sensor_capped_critical`.
+//   2. Same finding without cap escalates via old `recent_critical_threshold`.
+//   3. 3 findings with genuine `high` from complete file does NOT escalate.
+//   4. Mutation: removing the `viewPartial !== 0` gate from the
+//      `sensorCappedCriticalIds` filter makes test 1 fail — the
+//      assertion that `sensor_capped_critical` is in `reasons`.
+
+const NOW_474 = new Date("2026-06-15T14:00:00Z");
+const RECENT_474 = new Date(NOW_474.getTime() - 60 * 1000).toISOString();
+
+test("sensor_capped_critical (474-1): capped downgraded critical escalates", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, { id: "f-a", severity: "low" });
+		seedFinding(labDbPath, { id: "f-b", severity: "low" });
+		seedFinding(labDbPath, {
+			id: "f-c",
+			severity: "high",
+			viewPartial: 1,
+			originalSeverity: "critical",
+		});
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT_474,
+			now: NOW_474,
+		});
+		assert.equal(out.shouldEscalate, true);
+		assert.ok(
+			out.reasons.includes("sensor_capped_critical"),
+			`must include sensor_capped_critical, got: ${out.reasons.join(", ")}`,
+		);
+		assert.ok(!out.reasons.includes("recent_total_threshold"));
+		assert.ok(!out.reasons.includes("recent_critical_threshold"));
+	} finally {
+		cleanup();
+	}
+});
+
+test("sensor_capped_critical (474-2): raw critical escalates via old rule", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, { id: "f-raw", severity: "critical" });
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT_474,
+			now: NOW_474,
+		});
+		assert.equal(out.shouldEscalate, true);
+		assert.ok(
+			out.reasons.includes("recent_critical_threshold"),
+			`old rule must fire, got: ${out.reasons.join(", ")}`,
+		);
+	} finally {
+		cleanup();
+	}
+});
+
+test("sensor_capped_critical (474-3): genuine high from complete file does NOT escalate", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, { id: "f-g", severity: "low" });
+		seedFinding(labDbPath, { id: "f-h", severity: "low" });
+		seedFinding(labDbPath, { id: "f-i", severity: "high" });
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT_474,
+			now: NOW_474,
+		});
+		assert.equal(out.shouldEscalate, false);
+		assert.deepStrictEqual(out.reasons, []);
+	} finally {
+		cleanup();
+	}
+});
+
+test("sensor_capped_critical (474-4): pre-mutation — rule fires correctly", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		seedFinding(labDbPath, {
+			id: "f-m1",
+			severity: "high",
+			viewPartial: 1,
+			originalSeverity: "critical",
+		});
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT_474,
+			now: NOW_474,
+		});
+		assert.equal(out.shouldEscalate, true);
+		assert.ok(
+			out.reasons.includes("sensor_capped_critical"),
+			"pre-mutation: rule fires",
+		);
 	} finally {
 		cleanup();
 	}

@@ -475,6 +475,8 @@ function finding(opts: {
 	description?: string;
 	filePath?: string;
 	status?: "new" | "ignored";
+	viewPartial?: boolean;
+	originalSeverity?: string;
 }): ResolvedFinding {
 	return {
 		id: opts.id,
@@ -483,6 +485,8 @@ function finding(opts: {
 		description: opts.description ?? "A test description.",
 		filePath: opts.filePath ?? "src/test.ts",
 		status: opts.status ?? "new",
+		viewPartial: opts.viewPartial ?? false,
+		originalSeverity: opts.originalSeverity,
 	};
 }
 

@@ -616,7 +616,17 @@ function downgradeFinding(
 		...finding,
 		severity: downgradeSeverity(finding.severity),
 		evidence: finding.evidence ? `${finding.evidence}\n${marker}` : marker,
-	};
+		// Issue #474: carry structured sensor-cap flags through the
+		// AgentLabFinding contract so the escalation engine can
+		// distinguish "genuine critical" from "critical on partial
+		// content" without relying on prose markers in `evidence`.
+		// These are writable on AgentLabFinding at runtime even
+		// though they aren't in the type definition — the
+		// `agentLabFindingToBugFinding` layer picks them up and
+		// routes them to the new `bug_findings` columns.
+		viewPartial: true as const,
+		originalSeverity: finding.severity,
+	} as AgentLabFinding & { viewPartial: true; originalSeverity: string };
 }
 
 const SEVERITY_DOWNGRADE: Record<

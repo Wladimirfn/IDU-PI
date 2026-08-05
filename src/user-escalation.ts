@@ -90,7 +90,8 @@ export const ESCALATION_THRESHOLDS = {
 export type EscalationReason =
 	| "recent_critical_threshold"
 	| "recent_total_threshold"
-	| "recent_recurrence_threshold";
+	| "recent_recurrence_threshold"
+	| "sensor_capped_critical";
 
 export type UserEscalationEvent = {
 	ts: string;
@@ -243,17 +244,11 @@ function readOpenFindingIds(
 	labDbPath: string,
 	projectId: string,
 	windowStart: Date,
-): { id: string; severity: string; recurrenceCount: number }[] {
+): { id: string; severity: string; recurrenceCount: number; viewPartial: number; originalSeverity: string }[] {
 	initLabDb(labDbPath);
-	// Alias `recurrence_count` to `recurrenceCount` so the JSON
-	// object the runner returns uses camelCase keys the rest of this
-	// file already uses. (SQLite column names are snake_case; without
-	// the alias `f.recurrenceCount` is `undefined` and the recurrence
-	// rule silently never fires — caught by the audit that produced
-	// #399's tests.)
 	const output = runSql(
 		labDbPath,
-		`SELECT id, severity, COALESCE(recurrence_count, 1) AS recurrenceCount FROM bug_findings
+		`SELECT id, severity, COALESCE(recurrence_count, 1) AS recurrenceCount, COALESCE(view_partial, 0) AS viewPartial, COALESCE(original_severity, '') AS originalSeverity FROM bug_findings
 		 WHERE project_id = ${sqlString(projectId)}
 		   AND status = 'new'
 		   AND created_at > ${sqlString(toSqliteDatetime(windowStart))};`,
@@ -263,6 +258,8 @@ function readOpenFindingIds(
 		id: string;
 		severity: string;
 		recurrenceCount: number;
+		viewPartial: number;
+		originalSeverity: string;
 	}>;
 }
 
@@ -468,6 +465,32 @@ export function checkUserEscalation(
 			recurrenceTriggered.add(id);
 			triggeredSet.add(id);
 		}
+	}
+
+	// Issue #474: SENSOR-CAPPED CRITICAL rule. After #458, every
+	// finding from a file over MAX_FILE_CONTENT_CHARS has its severity
+	// downgraded by one level — a model-emitted `critical` becomes
+	// `high`. The original severity is stored in `original_severity`
+	// (structured column, not prose in `evidence` — that would be the
+	// #465 "key depends on words" hole). This rule recovers the
+	// escalation channel lost by the downgrade: when 1+ finding came
+	// from a capped file AND the model classified it as `critical`
+	// before the downgrade, escalate with a message that declares
+	// the limitation upfront ("the reading was partial — the rest
+	// of the file may contain what counterbalances this finding").
+	// The operator gets the signal without the false certainty that
+	// bit the 03:48 alert.
+	const sensorCappedCriticalIds = openFindings
+		.filter(
+			(f) =>
+				f.viewPartial !== 0 &&
+				f.originalSeverity === "critical" &&
+				!alreadyEscalated.has(f.id),
+		)
+		.map((f) => f.id);
+	if (sensorCappedCriticalIds.length > 0) {
+		reasons.push("sensor_capped_critical");
+		for (const id of sensorCappedCriticalIds) triggeredSet.add(id);
 	}
 
 	// Inactivity is NOT a standalone escalation reason. It becomes a
