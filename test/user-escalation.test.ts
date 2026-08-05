@@ -928,3 +928,44 @@ test("sensor_capped_critical (474-4): pre-mutation — rule fires correctly", ()
 		cleanup();
 	}
 });
+
+// The owner called out #398 shape: "two branches that should read
+// the same state and one ignores it." If a future code path writes
+// `original_severity` without setting `view_partial` (a regression
+// of the writer), the rule must still demand `view_partial` to fire
+// — otherwise we'd be escalating findings the operator never saw
+// as "partial view." This test pins the rule's defensive check:
+// `original_severity='critical'` alone is not enough; the writer's
+// flag must agree.
+test("sensor_capped_critical (474-5): rule requires view_partial=1 even when original_severity is set", () => {
+	const { stateRoot, labDbPath, cleanup } = makeRoot();
+	try {
+		// Defensive: a row that has original_severity='critical'
+		// but view_partial=0 (i.e. the writer forgot to set the
+		// flag) must NOT escalate via the sensor_capped rule.
+		// The owner's audit criterion for this round:
+		// "si la regla escala mirando sólo originalSeverity === 'critical',
+		// entonces view_partial no participa del veredicto." The
+		// rule reads both columns; this test pins that.
+		// Use severity='high' (post-downgrade) so the OLD rule
+		// doesn't fire on its own — the only way this finding
+		// can escalate is via sensor_capped_critical.
+		seedFinding(labDbPath, {
+			id: "f-defensive",
+			severity: "high",
+			viewPartial: 0,
+			originalSeverity: "critical",
+		});
+		const out = checkUserEscalation({
+			stateRoot,
+			labDbPath,
+			projectId: PROJECT_ID,
+			lastUserInteractionAt: RECENT_474,
+			now: NOW_474,
+		});
+		assert.equal(out.shouldEscalate, false);
+		assert.deepEqual(out.reasons, []);
+	} finally {
+		cleanup();
+	}
+});

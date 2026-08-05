@@ -311,6 +311,27 @@ export function initLabDb(dbPath: string): InitLabDbResult {
 		"recurrence_count",
 		"INTEGER NOT NULL DEFAULT 1",
 	);
+	// Issue #474: view_partial + original_severity for the sensor-cap
+	// escalation rule (#458 → #474). SQLite has no ALTER TABLE IF NOT
+	// EXISTS either; the path the codebase uses is PRAGMA table_info
+	// + ALTER TABLE ADD COLUMN. Without these two calls, existing DBs
+	// (any DB created before #474) would crash every read against
+	// `bug_findings` with "no such column" — the SELECT fails at
+	// prepare time, before COALESCE can soften it. The new DBs path
+	// (CREATE TABLE IF NOT EXISTS includes the columns) is the one CI
+	// exercises; the existing-DB path is the one production hits first.
+	ensureColumn(
+		dbPath,
+		"bug_findings",
+		"view_partial",
+		"INTEGER NOT NULL DEFAULT 0",
+	);
+	ensureColumn(
+		dbPath,
+		"bug_findings",
+		"original_severity",
+		"TEXT",
+	);
 	// B5 PR1: apply pending SQL migrations (model_invocation_log + future
 	// tables). applyMigrations is idempotent and reads the SQL files
 	// from src/lab-db/migrations at runtime.
