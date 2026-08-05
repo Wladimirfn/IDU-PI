@@ -27,6 +27,7 @@ import {
 	type AgentRuntime,
 } from "./agent-router.js";
 import { chunkTelegramText } from "./chunk.js";
+import { parseBugFindingShowArgs } from "./bug-finding-show-args.js";
 import {
 	formatCommandCatalog,
 	formatHelpText,
@@ -3601,20 +3602,17 @@ bot.command("cerrar", async (ctx) => {
 // (`idu_status`, `idu_master_plan_status`, `idu_master_plan_approve`).
 // `cerrar` survives because it is a single word.
 //
-// Uses `commandArg` (src/index.ts:733) for the same reason as
-// `queue_approve` (line 3460) and other handlers: Telegram appends
-// `@BotName` to the command when it comes from a group, and a
-// raw `/command` regex misses that form. `commandArg` strips
-// `/command` and the optional `@BotName` together, leaving just
-// the args. Without this, `/idu_bug_finding_show <id>` works in
-// a private chat but `/idu_bug_finding_show@IduPiBot <id>` in a
-// group falls through to "Uso: ...". The owner verified this hole
-// is reachable: `isAllowedUser` filters by user, not by chat, so
-// nothing prevents writing to the bot from a group. `/cerrar` has
-// had the same hole since before #459 — same pattern, same fix.
+// Parsing is in `parseBugFindingShowArgs` (src/bug-finding-show-args.ts),
+// a pure exported function. Tests live in
+// `test/bug-finding-show-args.test.ts` and exercise the three
+// forms directly (private chat, group with @BotName suffix,
+// no id). The handler here is a thin glue layer: ask the parser
+// for the id, then dispatch to `getBugFinding` + `formatBugFindingDetail`.
+// If a future regression drops the @BotName handling, the parser
+// test catches it — the bot handler test is decoupled.
 bot.command("idu_bug_finding_show", async (ctx) => {
 	if (!(await guard(ctx))) return;
-	const findingId = commandArg(ctx.message?.text ?? "");
+	const findingId = parseBugFindingShowArgs(ctx.message?.text ?? "");
 	if (!findingId) {
 		await ctx.reply(
 			"Uso: /idu_bug_finding_show <id>\n" +

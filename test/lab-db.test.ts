@@ -110,26 +110,28 @@ test("getBugFinding returns null when the id is missing", () => {
 // the description at the per-finding budget, NOT at DESC_BUDGET = 800.
 // See escalation-delivery.ts around line 419-449:
 //   detailFindings = [...criticals, ...highs]
-//   fixedOverhead = header + title lines + foot + id lines + footer lines
+//   fixedOverhead = header + title lines + foot + id lines + footer line
 //   descBudget    = max(0, DESC_BUDGET - fixedOverhead)
 //   perDesc       = floor(descBudget / detailFindings.length)
 // The alert then slices each description at `perDesc - prefixLen - 1`
 // and appends `…`.
 //
 // In the 03:48 CI run the alert carried 3 findings. fixedOverhead
-// was approximately:
-//   header    ≈ 45  ("⚠️ [idu-pi] 3 hallazgos · supervisor 03:48\n")
-//   titles    ≈ 60  (3 × "   → path — title\n")
-//   idLines   ≈ 90  (3 × "  bf-idu-pi-v2:abcdef\n")
-//   footLines ≈150  (3 × "  → fila completa: /idu_bug_finding_show <id>\n")
-//   foot      ≈ 25  ("  ─ N warnings · N info ─\n")
-//                              total ≈ 370
-// So perDesc = floor((800 - 370) / 3) = floor(143) = 143 chars,
-// minus 2 (descPrefix) minus 1 (the ellipsis) = 140 chars per
-// finding. The footer line added by the #459 close-the-loop fix
-// tightens the cut further (from ~190 to ~140 chars at 3 findings).
-// The operator sees the caveat cut whenever the description is
-// longer than that.
+// is approximately:
+//   header      ≈ 45  ("⚠️ [idu-pi] 3 hallazgos · supervisor 03:48\n")
+//   titles      ≈ 60  (3 × "   → path — title\n")
+//   idLines     ≈ 90  (3 × "  bf-idu-pi-v2:abcdef\n")
+//   footerLine  ≈ 50  (1 × "  → fila completa: /idu_bug_finding_show <id>\n")
+//   foot        ≈ 25  ("  ─ N warnings · N info ─\n")
+//                              total ≈ 270
+// So perDesc = floor((800 - 270) / 3) = floor(176) = 176 chars,
+// minus 2 (descPrefix) minus 1 (the ellipsis) = 173 chars per
+// finding. The footer is ONE generic instruction line at the foot
+// of the alert, NOT per finding — earlier drafts repeated the id
+// under each finding (cost ~150 chars), tightening the cut from
+// ~190 to ~140 chars. The single-footer design recovers ~33 chars
+// per finding (~100 total across 3 findings) while keeping the
+// "more available, here's how" sign always present.
 //
 // This test seeds a description of ~340 chars (well over the
 // per-finding cut for 3 findings, well under 800 so the test
@@ -140,8 +142,8 @@ test("getBugFinding returns the full description byte-by-byte when longer than t
 	initLabDb(dbPath);
 
 	// Per-finding cut at the 03:48 3-finding run with the issue
-	// #459 footer line included (see comment above).
-	const PER_FINDING_CUT_AT_3 = 140;
+	// #459 single-footer-line form (see comment above).
+	const PER_FINDING_CUT_AT_3 = 173;
 	const caveat =
 		" — caveat: if the alias column is missing from the table, the script returns 0 instead of failing. Not visible in the truncated alert body; verify against the column list before triaging.";
 	const filler = "Body text. ";

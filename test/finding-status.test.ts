@@ -4,9 +4,8 @@
 // formatFindingCloseMessage (the return-loop Telegram message).
 
 import { test, describe } from "node:test";
-import assert, { strictEqual, ok, throws } from "node:assert";
+import { strictEqual, ok, throws } from "node:assert";
 import { makeTempDir } from "./helpers/temp.js";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
 	initLabDb,
@@ -269,47 +268,13 @@ describe("formatBugFindingDetail", () => {
 	});
 });
 
-// Issue #459 wiring: the bot command must accept the
-// `/idu_bug_finding_show@BotName <id>` form that Telegram sends
-// from groups, not just the bare command. The owner verified this
-// hole is reachable (`isAllowedUser` filters by user, not chat).
-// We grep src/index.ts rather than spin up the bot because the
-// parser pattern (`commandArg`) is the established convention with
-// 29 callers; the test pins that this new command joins the
-// convention instead of rolling a raw regex like the original
-// (which had the same hole `/cerrar` has had).
-describe("idu_bug_finding_show bot wiring", () => {
-	test("bot command is registered", () => {
-		const source = readFileSync("src/index.ts", "utf8");
-		assert.match(
-			source,
-			/bot\.command\("idu_bug_finding_show"/u,
-		);
-	});
-
-	test("command parses args via commandArg (handles the @BotName group suffix)", () => {
-		const source = readFileSync("src/index.ts", "utf8");
-		const start = source.indexOf('bot.command("idu_bug_finding_show"');
-		assert.notEqual(start, -1, "idu_bug_finding_show handler must exist");
-		// Bound the block to the next bot.command registration so we
-		// don't match against the same helper used by other handlers.
-		const next = source.indexOf("bot.command(", start + 1);
-		const block = source.slice(start, next === -1 ? undefined : next);
-
-		// The handler must call commandArg(...) to extract the id —
-		// that helper strips `/command` and the optional `@BotName`
-		// suffix together, so the same code path serves private chats
-		// and groups. A raw regex like `^/idu_bug_finding_show\s+...`
-		// misses the group form.
-		assert.match(
-			block,
-			/commandArg\(ctx\.message\?\.text\s*\?\?\s*""\)/u,
-			"handler must use commandArg to parse the message (so @BotName group suffix is stripped)",
-		);
-		assert.doesNotMatch(
-			block,
-			/text\.match\(\s*\/\^\\\/idu_bug_finding_show/u,
-			"handler must not roll a raw /idu_bug_finding_show regex (that misses the @BotName suffix)",
-		);
-	});
-});
+// The bot-side behavior of /idu_bug_finding_show is verified
+// end-to-end through `parseBugFindingShowArgs` in
+// test/bug-finding-show-args.test.ts. Wiring tests that grep
+// `src/index.ts` for `bot.command("idu_bug_finding_show"` and
+// match against `commandArg(...)` inside the handler block used
+// to live here. They were removed in #468 because they proved
+// spelling, not behavior: a discarded `commandArg(...)` call
+// still matched the regex, and a rename or formatter line-break
+// could fail the regex without failing the behavior. See the
+// parser test file for the real coverage.
