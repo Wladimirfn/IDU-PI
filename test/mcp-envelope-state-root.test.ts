@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import {
 	callIduMcpTool,
 	listIduMcpTools,
 	type IduMcpProjectResolution,
 } from "../src/mcp-server.js";
 import type { CliRuntime } from "../src/cli.js";
+import { configureIduSessionStore } from "../src/idu-session.js";
 
 // RED test parametrizado para REQ-EI-4 (P5): `stateRoot` debe propagarse
 // en el envelope compartido de CADA tool MCP.
@@ -164,6 +165,27 @@ const LIFECYCLE_TOOLS = new Set<string>([
 const TOOLS = listIduMcpTools().filter(
 	(tool) => !LIFECYCLE_TOOLS.has(tool.name),
 );
+
+// Configure IduSessionStore against a tempDir before any handler runs.
+// The tests exercise `stateRoot: ""` as a sentinel to verify the
+// envelope's `stateRoot: null` branch; that sentinel propagates to the
+// handler chain which calls `getIduSessionStatus(runtime.projectId)`. The
+// shared `defaultStore` must NOT silently fall back to `process.cwd()` —
+// IduSessionStore's constructor now rejects the empty-string sentinel.
+// Pointing the store at a tempDir keeps state writes hermetic while
+// preserving the sentinel semantics the tests assert.
+const STORE_TEMP_DIR = mkdtempSync(
+	join(tmpdir(), "mcp-envelope-state-root-store-"),
+);
+before(() => {
+	configureIduSessionStore({
+		workspaceRoot: STORE_TEMP_DIR,
+		filePath: join(STORE_TEMP_DIR, "idu-session-state.json"),
+	});
+});
+after(() => {
+	rmSync(STORE_TEMP_DIR, { recursive: true, force: true });
+});
 
 for (const tool of TOOLS) {
 	test(`[${tool.name}] envelope propagates stateRoot when resolver provides it`, async () => {

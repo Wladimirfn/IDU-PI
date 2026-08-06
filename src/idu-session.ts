@@ -42,6 +42,16 @@ export class IduSessionStore {
 	private state: IduSessionState;
 
 	constructor(options: IduSessionStoreOptions = {}) {
+		if (options.workspaceRoot === "") {
+			throw new Error(
+				"IduSessionStore requires a non-empty workspaceRoot; use configureIduSessionStore({ workspaceRoot: stateRoot, filePath: ... }) instead of relying on the default. Tests that pass `stateRoot: \"\"` as a sentinel must configure the store with a tempDir stateRoot before invoking handlers.",
+			);
+		}
+		if (options.filePath === "") {
+			throw new Error(
+				"IduSessionStore requires a non-empty filePath; use configureIduSessionStore({ workspaceRoot: stateRoot, filePath: ... }) instead of relying on the default. Tests that pass `filePath: \"\"` as a sentinel must configure the store with a tempDir filePath before invoking handlers.",
+			);
+		}
 		this.workspaceRoot = options.workspaceRoot ?? process.cwd();
 		this.filePath =
 			options.filePath ?? resolveIduSessionStatePath(this.workspaceRoot);
