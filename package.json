@@ -22,7 +22,7 @@
     "mcp": "tsc -p tsconfig.json && node dist/src/mcp-server.js",
     "start": "node dist/src/index.js",
     "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
-    "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js dist/test/**/*.test.js",
+    "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js dist/test/**/*.test.js && node scripts/check-repo-root-untracked.mjs",
     "test:guarded": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node scripts/run-tests-with-leak-guard.mjs",
     "check:protocol-drift": "node scripts/check-protocol-tool-drift.mjs --strict-coverage",
     "check:cluster-drift": "node scripts/check-cluster-map-drift.mjs",
