@@ -15,11 +15,15 @@
 //
 // What this does:
 //   Runs `git ls-files --others --exclude-standard` against the repo root
-//   (the current working directory). Any output line whose basename matches a
-//   state-machine pattern (idu-session-state, lab.db*, role-rails, role-engine,
-//   master-plan-cache, lab-cache, *.db, *.db-journal, *.db-shm, *.db-wal,
-//   *.sqlite, *.sqlite-journal, *.sqlite-shm, *.sqlite-wal) makes this script
-//   exit 1 with a clear error message that names the leaked file.
+//   (the current working directory). Each untracked file is checked against
+//   (a) exact state-machine basenames and (b) state-machine extensions. No
+//   substring matching: substring matches false-positive on legitimate
+//   source files whose names happen to contain the token (e.g.
+//   `src/role-engine-guard.ts` matched `role-engine` and made the guard a
+//   paper tiger that would get loosened the first time it blocked real
+//   work). The match is exact on the basename for the precise signal, and
+//   extension-based for the *.db / *.sqlite families. A hit makes this
+//   script exit 1 with a clear error message that names the leaked file.
 //
 // Why `git ls-files --others --exclude-standard` (not `git status --porcelain`):
 //   - `ls-files` is the exact, deterministic set of files git would add on the
@@ -43,7 +47,7 @@
 //                                                   assertion, with the
 //                                                   log lines
 //                                                   "[repo-root-leak-guard]
-//                                                   checking repo root…"
+//                                                   checking repo root..."
 //                                                   and
 //                                                   "[repo-root-leak-guard]
 //                                                   no leaks"
@@ -55,42 +59,50 @@
 
 import { spawnSync } from "node:child_process";
 
-// Filename patterns that indicate a state-machine leak into the repo root.
-// Each entry is matched against the basename of every untracked file via
-// `String.prototype.includes` (substring) or a regex (anchored).
-const SUBSTRING_PATTERNS = [
-	"idu-session-state",
-	"lab.db", // also catches lab.db-journal / lab.db-shm / lab.db-wal via substring
-	"role-rails",
-	"role-engine",
-	"master-plan-cache",
-	"lab-cache",
-];
+// Exact basenames that are themselves state-machine output. Matched first
+// (the more specific signal) so the error message names the leak precisely.
+const EXACT_BASENAMES = new Set([
+	"idu-session-state.json",
+	"lab.db", // also caught by the EXTENSIONS check below; included here so the
+	// error message can name it precisely if it ever appears untracked.
+	"role-rails.json",
+	"role-engine-config.json",
+	"role-engine-status.json",
+	"master-plan-cache.json",
+	"lab-cache.json",
+	"trigger-engine-config.json",
+]);
 
-const REGEX_PATTERNS = [
-	/\.db$/u,
-	/\.db-journal$/u,
-	/\.db-shm$/u,
-	/\.db-wal$/u,
-	/\.sqlite$/u,
-	/\.sqlite-journal$/u,
-	/\.sqlite-shm$/u,
-	/\.sqlite-wal$/u,
-];
-
-function matchesStateMachinePattern(basename) {
-	for (const needle of SUBSTRING_PATTERNS) {
-		if (basename.includes(needle)) return true;
-	}
-	for (const re of REGEX_PATTERNS) {
-		if (re.test(basename)) return true;
-	}
-	return false;
-}
+// File extensions that always indicate state-machine output. A file's
+// extension is the part after the LAST dot, lower-cased; so `foo.bar.db`
+// has extension `db`, `foo.db-journal` has extension `db-journal`. The
+// SQLite suffixes (sqlite, sqlite-journal, sqlite-shm, sqlite-wal) cover
+// the same family in case the lab.db ever migrates to SQLite.
+const EXTENSIONS = new Set([
+	"db",
+	"db-journal",
+	"db-shm",
+	"db-wal",
+	"sqlite",
+	"sqlite-journal",
+	"sqlite-shm",
+	"sqlite-wal",
+]);
 
 function basename(filepath) {
 	const idx = Math.max(filepath.lastIndexOf("/"), filepath.lastIndexOf("\\"));
 	return idx >= 0 ? filepath.slice(idx + 1) : filepath;
+}
+
+function extensionOf(basename) {
+	const idx = basename.lastIndexOf(".");
+	return idx >= 0 ? basename.slice(idx + 1).toLowerCase() : "";
+}
+
+function isStateMachine(basename) {
+	if (EXACT_BASENAMES.has(basename)) return true;
+	if (EXTENSIONS.has(extensionOf(basename))) return true;
+	return false;
 }
 
 const git = spawnSync(
@@ -116,7 +128,7 @@ if (git.status !== 0) {
 const untracked = git.stdout.split(/\r?\n/u).filter((line) => line.length > 0);
 
 const leaks = untracked.filter((filepath) =>
-	matchesStateMachinePattern(basename(filepath)),
+	isStateMachine(basename(filepath)),
 );
 
 if (leaks.length === 0) {
