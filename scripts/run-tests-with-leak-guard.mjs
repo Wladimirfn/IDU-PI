@@ -35,10 +35,22 @@
 // The threshold env var lets CI tolerate a small number of "expected"
 // leaks during a partial migration. Default is 0 (any leak fails the gate).
 //
-// After the $TMPDIR assertion passes, the wrapper also runs the repo-root
-// untracked-leak guard (scripts/check-repo-root-untracked.mjs). That guard
-// is the second layer: even if a test wrote a state-machine file to the
-// repo root, the wrapper will fail the gate before CI sees a green run.
+// Guard ordering:
+//   The wrapper runs three independent checks and reports ALL of them on
+//   every run, regardless of which (if any) fail:
+//     1. Suite — node --test spawns each file in its own process, in parallel.
+//     2. $TMPDIR leak — set-difference of tmpdir entries before/after.
+//     3. Repo-root untracked-leak — scripts/check-repo-root-untracked.mjs.
+//
+//   The repo-root guard runs AFTER `node --test` has returned AND AFTER the
+//   $TMPDIR snapshot/compare, REGARDLESS of either outcome. The two leak
+//   guards are independent surfaces (different directories, different
+//   checks): a $TMPDIR leak must not hide a repo-root leak from the
+//   operator or from CI, and vice versa. Both guards ALWAYS run.
+//
+//   The final exit code is the worst of the three outcomes (suite status,
+//   $TMPDIR threshold breach, repo-root status), so a single failing guard
+//   cannot mask another.
 
 import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -97,6 +109,7 @@ const result = spawnSync(
 	{ stdio: "inherit" },
 );
 const suiteFailed = result.status !== 0;
+const suiteExitCode = result.status ?? 1;
 
 const after = snapshotTmpdir();
 const newEntries = [...after].filter((e) => !before.has(e));
@@ -113,13 +126,11 @@ console.log(
 
 if (suiteFailed) {
 	console.error(
-		`[leak-guard] suite failed with status ${
-			result.status ?? 1
-		}; skipping leak assertion (the suite already failed).`,
+		`[leak-guard] suite failed with status ${suiteExitCode}; leak guards still running below.`,
 	);
-	process.exit(result.status ?? 1);
 }
 
+let tmpdirExitCode = 0;
 if (delta > THRESHOLD) {
 	console.error(
 		`[leak-guard] LEAK DETECTED: ${delta} new entries in ${tmpdir()} (threshold ${THRESHOLD}).`,
@@ -129,16 +140,30 @@ if (delta > THRESHOLD) {
 	console.error(
 		`[leak-guard] Inspect recent test changes; new mkdtemp calls must go through test/helpers/temp.ts.`,
 	);
-	process.exit(1);
+	tmpdirExitCode = 1;
+} else if (newEntries.length > 0 && process.env.LEAK_GUARD_VERBOSE !== "0") {
+	// When the guard passes but there are new entries, log their names so the
+	// migration campaign has a directed map instead of blind churn. Set
+	// LEAK_GUARD_VERBOSE=0 to suppress.
+	console.log(
+		`[leak-guard] ${newEntries.length} new entries (names for migration targeting):`,
+	);
+	for (const e of newEntries) console.log(`  ${e}`);
 }
 
-// Repo-root untracked-leak guard. Runs AFTER the $TMPDIR leak assertion above
-// (so $TMPDIR noise doesn't mask a repo-root leak) and AFTER `node --test` has
-// returned (so every test child has flushed its state writes to disk; see the
-// race-safety claim in scripts/check-repo-root-untracked.mjs lines 31-36).
+// Repo-root untracked-leak guard. Runs AFTER the suite has returned AND
+// AFTER the $TMPDIR snapshot/compare, REGARDLESS of either outcome. The
+// two leak guards are independent surfaces (different directories,
+// different checks): a $TMPDIR leak must not hide a repo-root leak from
+// the operator or from CI. node:test spawns each test file in its own
+// child process and waits for all children to exit before returning, so
+// by the time this guard runs every test has finished and any state write
+// has hit disk (see the race-safety claim in
+// scripts/check-repo-root-untracked.mjs lines 31-36).
+//
 // Spawned as a separate process so the guard's own argv, stderr, and exit
-// codes stay self-contained — no risk of accidentally catching the wrapper's
-// own temp-dir noise.
+// codes stay self-contained — no risk of accidentally catching the
+// wrapper's own temp-dir noise.
 console.log(
 	"[repo-root-leak-guard] checking repo root for untracked state-machine files...",
 );
@@ -147,20 +172,19 @@ const repoRootGuard = spawnSync(
 	[join(SCRIPT_DIR, "check-repo-root-untracked.mjs")],
 	{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
 );
-if (repoRootGuard.status !== 0) {
+const repoRootExitCode = repoRootGuard.status ?? 1;
+if (repoRootExitCode !== 0) {
 	if (repoRootGuard.stderr) process.stderr.write(repoRootGuard.stderr);
-	process.exit(repoRootGuard.status ?? 1);
-}
-console.log("[repo-root-leak-guard] no leaks");
-
-// When the guard passes but there are new entries, log their names so the
-// migration campaign has a directed map instead of blind churn. Set
-// LEAK_GUARD_VERBOSE=0 to suppress.
-if (newEntries.length > 0 && process.env.LEAK_GUARD_VERBOSE !== "0") {
-	console.log(
-		`[leak-guard] ${newEntries.length} new entries (names for migration targeting):`,
-	);
-	for (const e of newEntries) console.log(`  ${e}`);
+} else {
+	console.log("[repo-root-leak-guard] no leaks");
 }
 
-process.exit(0);
+// Final exit code: worst of (suite, $TMPDIR, repo-root). Each guard is an
+// independent surface; a single failing guard must not mask another.
+const exitCode = Math.max(
+	suiteFailed ? suiteExitCode : 0,
+	tmpdirExitCode,
+	repoRootExitCode,
+);
+
+process.exit(exitCode);
