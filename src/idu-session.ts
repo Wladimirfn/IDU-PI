@@ -31,8 +31,8 @@ export type IduSessionStoreOptions = {
 
 const emptyState = (): IduSessionState => ({ version: 1, projects: {} });
 
-export function resolveIduSessionStatePath(workspaceRoot: string): string {
-	return join(workspaceRoot, "reports", "idu-session-state.json");
+export function resolveIduSessionStatePath(stateRoot: string): string {
+	return join(stateRoot, "idu-session-state.json");
 }
 
 export class IduSessionStore {

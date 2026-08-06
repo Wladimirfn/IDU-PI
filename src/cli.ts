@@ -1033,14 +1033,15 @@ export function createCliRuntime(
 	const labDbPath =
 		projectStatePaths?.labDbPath ??
 		join(config.agentWorkspaceRoot, "reports", "lab.db");
-	configureIduSessionStore(
-		projectStatePaths
-			? {
-					workspaceRoot: runtimeWorkspaceRoot,
-					filePath: projectStatePaths.sessionStatePath,
-				}
-			: { workspaceRoot: runtimeWorkspaceRoot },
-	);
+	configureIduSessionStore({
+		workspaceRoot: runtimeWorkspaceRoot,
+		// #471: always pass an explicit filePath derived from the project stateRoot.
+		// The path-less fallback silently produced <stateRoot>/reports/idu-session-state.json
+		// which is the bug we're fixing.
+		filePath: projectStatePaths
+			? projectStatePaths.sessionStatePath
+			: join(runtimeWorkspaceRoot, "idu-session-state.json"),
+	});
 	const structuredTaskQueue = new StructuredTaskQueue(
 		projectStatePaths
 			? { filePath: projectStatePaths.taskQueuePath }
@@ -2059,14 +2060,20 @@ async function runCliCommandInner(
 					command !== "status" && command !== "idu-run-cron-preflight",
 				requireTelegramConfig: false,
 			});
-		configureIduSessionStore(
-			activeRuntime.sessionStatePath
-				? {
-						workspaceRoot: activeRuntime.workspaceRoot,
-						filePath: activeRuntime.sessionStatePath,
-					}
-				: { workspaceRoot: activeRuntime.workspaceRoot },
-		);
+		configureIduSessionStore({
+			workspaceRoot: activeRuntime.workspaceRoot ?? process.cwd(),
+			// #471: always pass an explicit filePath. The runtime exposes
+			// sessionStatePath when the project is registered; otherwise we
+			// derive it from the runtime's workspaceRoot (which by then IS the
+			// project stateRoot) so the store never falls back to the legacy
+			// <workspaceRoot>/reports/idu-session-state.json path.
+			filePath:
+				activeRuntime.sessionStatePath ??
+				join(
+					activeRuntime.workspaceRoot ?? process.cwd(),
+					"idu-session-state.json",
+				),
+		});
 		const naturalMasterPlanDecision = normalizedArgs.join(" ").trim();
 		if (naturalMasterPlanDecision && activeRuntime.masterPlanNaturalDecision) {
 			const decision = activeRuntime.masterPlanNaturalDecision(
