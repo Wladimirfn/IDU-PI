@@ -35,11 +35,18 @@
 //   finished and any state write that happened in a test has already hit
 //   disk.
 //
-// Usage (wired into `pnpm test`):
+// Usage (wired into `pnpm test:guarded`):
 //   1. tsc -p tsconfig.json
 //   2. node scripts/copy-migrations.mjs
-//   3. node --test dist/test/*.test.js dist/test/**/*.test.js
-//   4. node scripts/check-repo-root-untracked.mjs   ← this script
+//   3. node scripts/run-tests-with-leak-guard.mjs   ← spawns this script
+//                                                   after the $TMPDIR leak
+//                                                   assertion, with the
+//                                                   log lines
+//                                                   "[repo-root-leak-guard]
+//                                                   checking repo root…"
+//                                                   and
+//                                                   "[repo-root-leak-guard]
+//                                                   no leaks"
 //
 // Exit codes:
 //   0 — no leaks

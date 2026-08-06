@@ -34,10 +34,19 @@
 //
 // The threshold env var lets CI tolerate a small number of "expected"
 // leaks during a partial migration. Default is 0 (any leak fails the gate).
+//
+// After the $TMPDIR assertion passes, the wrapper also runs the repo-root
+// untracked-leak guard (scripts/check-repo-root-untracked.mjs). That guard
+// is the second layer: even if a test wrote a state-machine file to the
+// repo root, the wrapper will fail the gate before CI sees a green run.
 
 import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 const DENYLIST_PATTERNS = [
 	// Docker Desktop updater leaves these around.
@@ -122,6 +131,27 @@ if (delta > THRESHOLD) {
 	);
 	process.exit(1);
 }
+
+// Repo-root untracked-leak guard. Runs AFTER the $TMPDIR leak assertion above
+// (so $TMPDIR noise doesn't mask a repo-root leak) and AFTER `node --test` has
+// returned (so every test child has flushed its state writes to disk; see the
+// race-safety claim in scripts/check-repo-root-untracked.mjs lines 31-36).
+// Spawned as a separate process so the guard's own argv, stderr, and exit
+// codes stay self-contained — no risk of accidentally catching the wrapper's
+// own temp-dir noise.
+console.log(
+	"[repo-root-leak-guard] checking repo root for untracked state-machine files...",
+);
+const repoRootGuard = spawnSync(
+	process.execPath,
+	[join(SCRIPT_DIR, "check-repo-root-untracked.mjs")],
+	{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+);
+if (repoRootGuard.status !== 0) {
+	if (repoRootGuard.stderr) process.stderr.write(repoRootGuard.stderr);
+	process.exit(repoRootGuard.status ?? 1);
+}
+console.log("[repo-root-leak-guard] no leaks");
 
 // When the guard passes but there are new entries, log their names so the
 // migration campaign has a directed map instead of blind churn. Set
