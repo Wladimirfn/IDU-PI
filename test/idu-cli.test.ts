@@ -3464,12 +3464,7 @@ test("idu-birth-general-spec-derive reports a clear no-project error", async () 
 		});
 
 		assert.equal(result.exitCode, 1);
-		// After the IduSessionStore empty-workspaceRoot sentinel fix, the
-		// `runCliCommand` session-store configuration throws before the
-		// handler-level "active project" check fires. The new error is
-		// still a "no-project" error (workspaceRoot is empty → no active
-		// project); just produced at a different layer.
-		assert.match(result.stderr, /non-empty workspaceRoot/i);
+		assert.match(result.stderr, /active project/i);
 	});
 });
 
@@ -3481,8 +3476,7 @@ test("idu-birth-general-spec reports a clear no-project error", async () => {
 		});
 
 		assert.equal(result.exitCode, 1);
-		// See comment on the derive sibling above.
-		assert.match(result.stderr, /non-empty workspaceRoot/i);
+		assert.match(result.stderr, /active project/i);
 	});
 });
 

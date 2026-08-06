@@ -2060,20 +2060,27 @@ async function runCliCommandInner(
 					command !== "status" && command !== "idu-run-cron-preflight",
 				requireTelegramConfig: false,
 			});
-		configureIduSessionStore({
-			workspaceRoot: activeRuntime.workspaceRoot ?? process.cwd(),
-			// #471: always pass an explicit filePath. The runtime exposes
-			// sessionStatePath when the project is registered; otherwise we
-			// derive it from the runtime's workspaceRoot (which by then IS the
-			// project stateRoot) so the store never falls back to the legacy
-			// <workspaceRoot>/reports/idu-session-state.json path.
-			filePath:
-				activeRuntime.sessionStatePath ??
-				join(
-					activeRuntime.workspaceRoot ?? process.cwd(),
-					"idu-session-state.json",
-				),
-		});
+		// #471: only configure the session store when there IS a project
+		// stateRoot to bind it to. When the runtime has no active project,
+		// `activeRuntime.workspaceRoot` is the empty sentinel — substituting
+		// `process.cwd()` here (the c1f89bd shape) would silently leak the
+		// repo's cwd into the session store, and the IduSessionStore
+		// constructor now rejects that case with a throw (a6baab7). Skipping
+		// the call lets the downstream handler-level "active project"
+		// check produce the user-facing error instead.
+		if (activeRuntime.workspaceRoot) {
+			configureIduSessionStore({
+				workspaceRoot: activeRuntime.workspaceRoot,
+				// #471: always pass an explicit filePath. The runtime exposes
+				// sessionStatePath when the project is registered; otherwise we
+				// derive it from the runtime's workspaceRoot (which by then IS
+				// the project stateRoot) so the store never falls back to the
+				// legacy <workspaceRoot>/reports/idu-session-state.json path.
+				filePath:
+					activeRuntime.sessionStatePath ??
+					join(activeRuntime.workspaceRoot, "idu-session-state.json"),
+			});
+		}
 		const naturalMasterPlanDecision = normalizedArgs.join(" ").trim();
 		if (naturalMasterPlanDecision && activeRuntime.masterPlanNaturalDecision) {
 			const decision = activeRuntime.masterPlanNaturalDecision(
