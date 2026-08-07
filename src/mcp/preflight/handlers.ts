@@ -111,6 +111,15 @@ export async function handlePreflight(
 					: [],
 			recommendedAction: report.recommendedNext,
 			requiresHumanConfirmation: report.requiresHumanConfirmation,
+			// Issue #445: humanIntent is already computed in every preflight
+			// (src/project-preflight.ts:155) and stored on report.humanIntent.
+			// Promote it to top-level data so consumers don't have to dig
+			// into data.report. The full report is still attached for
+			// backward compatibility. v1 is inform-only — the orchestrator
+			// advisory reads the relevant fields (emotion, urgency,
+			// recommendedHandling) for the summary, the rest is exposed
+			// here for downstream consumers that want to branch on it.
+			humanIntent: report.humanIntent,
 			report,
 		},
 		safeNotes: [
