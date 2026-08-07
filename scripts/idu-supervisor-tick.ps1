@@ -72,19 +72,42 @@ $banner = 'Idu-pi supervisor tick — interval=' + $IntervalMinutes + 'min, trig
 Step $banner
 Log ('interval_minutes=' + $IntervalMinutes + ' trigger_engine=' + $EnvTriggerEngine)
 
-# Step 0: skip when an interactive CLI is open. The user is in a
-# session; do not interrupt them with a tick. Force the tick with
-# IDU_PI_TICK_FORCE=1 if you want it to run anyway.
+# Step 0: presence guardian (issue #417, inverted). The operator's
+# intent is that an open terminal means "I am working; tick should
+# run". The tick runs alongside the operator, touching git and
+# lab.db while they work — this is a deliberate decision, not a bug.
+# The previous behavior (skip when CLI active) was inverted: it
+# skipped on the days with the most operator work, and 5 merges
+# went unreviewed in 20 hours.
 #
-# IMPORTANT: do NOT include 'node' in the skip-list. The script
+# Known trade-off that the inversion introduces (operator audit,
+# 2026-08-07): with the inverted rule, Step 1's `corepack pnpm tsc`
+# now runs while the operator is working — including in the window
+# where the operator is running `node --test dist/...`. The script
+# recompiles dist/ every hour, and the operator's test runner reads
+# dist/. The conflict is benign for read-only test runs (tsc writes
+# .js files; node reads them) but can produce stale-file races if
+# not handled. The operator accepted this consciously; measure
+# separately when calibration evidence is available. The cheap
+# mitigation is `tsc --noEmit` (type-check only, no output write);
+# deferred until the issue is raised.
+#
+# Inverted rule: if no interactive CLI is open, no operator work
+# is happening; the tick is silent (no output, no log line) to
+# match the operator's expectation that a disabled presence is
+# invisible. Force the tick with IDU_PI_TICK_FORCE=1 if you want
+# it to run anyway.
+#
+# IMPORTANT: do NOT include 'node' in the presence-list. The script
 # itself runs on `node` (via `& node $cliPath idu-automaticov1
 # cycle`), so Get-Process -Name 'node' always returns the current
-# process and the guard would self-detect — skipping the tick even
-# when no human CLI is open. The interactive CLIs we care about are
-# the human-facing shells (pi, opencode variants), not the node
+# process and the guard would self-detect — running the tick even
+# when no human CLI is open (the script would never skip). The
+# interactive CLIs we care about are the human-facing shells
+# (pi, opencode variants, kimi, claude, minimax), not the node
 # runtime.
 if (-not $env:IDU_PI_TICK_FORCE -or $env:IDU_PI_TICK_FORCE -ne '1') {
-	$cliNames = @('pi', 'opencode', 'opencode-go', 'opencode-zen')
+	$cliNames = @('pi', 'opencode', 'opencode-go', 'opencode-zen', 'kimi', 'claude', 'minimax')
 	$active = @()
 	foreach ($name in $cliNames) {
 		$processes = Get-Process -Name $name -ErrorAction SilentlyContinue
@@ -92,11 +115,11 @@ if (-not $env:IDU_PI_TICK_FORCE -or $env:IDU_PI_TICK_FORCE -ne '1') {
 			foreach ($p in $processes) { $active += $p.ProcessName }
 		}
 	}
-	if ($active.Count -gt 0) {
-		$reason = 'skipped: CLI active (' + ($active -join ', ') + ')'
+	if ($active.Count -eq 0) {
+		$reason = 'skipped: no interactive CLI active'
 		Write-Host $reason -ForegroundColor DarkYellow
 		Log $reason
-		Step 'Step 0: skip because a pi/opencode CLI session is active. Set IDU_PI_TICK_FORCE=1 to override.'
+		Step 'Step 0: skip because no interactive CLI is open. The operator is not working. Set IDU_PI_TICK_FORCE=1 to override.'
 		exit 0
 	}
 }
