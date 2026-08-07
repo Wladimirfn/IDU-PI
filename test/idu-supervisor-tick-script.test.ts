@@ -357,7 +357,7 @@ test("IDU_PI_TICK_FORCE=1 bypasses the inverted presence guardian (override stil
 	}
 });
 
-test("script skips with 'no interactive CLI active' when no CLI is open (issue #417 inverted — defends the eq 0 polarity)", async () => {
+test("script skips with 'no interactive CLI active' when no CLI is open (issue #417 inverted — defends the eq 0 polarity)", async (t) => {
 	// Behavioral defense for the inversion: in CI (windows-latest) no
 	// pi/opencode/kimi/claude/minimax processes are running. The script
 	// (no force) must skip at Step 0 with "no interactive CLI active".
@@ -371,15 +371,17 @@ test("script skips with 'no interactive CLI active' when no CLI is open (issue #
 	// Environment-dependency: this test's premise is "no CLI active".
 	// In dev where the operator has a real `pi` / `opencode` running,
 	// the script proceeds (correctly) and the test's assertion
-	// (the script skipped) is invalid. The guard below skips the
-	// test in that case — the test still runs in CI, which is the
-	// intended environment. The companion test below spawns a fake
-	// CLI process to defend the active-CLI branch regardless of the
-	// dev environment.
+	// (the script skipped) is invalid. The guard below uses `t.skip`
+	// so the runner reports `skipped: 1` rather than `pass` — the
+	// difference matters if the test ever stops running in CI and
+	// silently turns into a pass here. The test still runs in CI,
+	// which is the intended environment. The companion test below
+	// spawns a fake CLI process to defend the active-CLI branch
+	// regardless of the dev environment.
 	if (isAnyPresenceListCliRunning()) {
-		console.log(
-			"SKIP: presence-list CLI (pi/opencode/claude/...) is running in the test environment. " +
-				"This test only runs in CI (windows-latest) where no presence-list CLI is open. " +
+		t.skip(
+			"presence-list CLI (pi/opencode/claude/...) is running in the test environment; " +
+				"this test only runs in CI (windows-latest) where no presence-list CLI is open. " +
 				"See Test B (script proceeds past Step 0 when a CLI is active) for the active-CLI defense.",
 		);
 		return;
@@ -447,5 +449,59 @@ test("script proceeds past Step 0 when a CLI is active (issue #417 inverted — 
 	} finally {
 		fakeCli.cleanup();
 		cleanup();
+	}
+});
+
+test("presence-list contents include all expected CLIs and exclude 'node' (issue #417 membership)", () => {
+	// Static check on the configuration of the presence-list. The
+	// list is a fact, not executed code — this check is NOT circular
+	// the way the polarity check was. The mutation the operator
+	// wants caught is: removing one of the member names from the
+	// array literal. Measured on 536b527: removing 'kimi', 'claude',
+	// or 'minimax' makes the suite pass 6/6 — these three are the
+	// ones #417 exists to add, and the membership check is the only
+	// thing that defends them.
+	//
+	// The polarity (`eq 0` vs `gt 0`) is defended behaviorally by
+	// Test A (script skips with 'no interactive CLI active' when no
+	// CLI open). This structural check is independent: it inspects
+	// the data, not the logic.
+	assert.ok(
+		existsSync(SCRIPT_PATH),
+		`expected ${SCRIPT_PATH} to exist for the static membership check`,
+	);
+	const source = readFileSync(SCRIPT_PATH, "utf8");
+	const match = source.match(/\$cliNames\s*=\s*@\(\s*([\s\S]+?)\s*\)/u);
+	assert.ok(
+		match,
+		"could not find $cliNames array literal in the script",
+	);
+	const raw = match[1];
+	const names = raw
+		.split(/,\s*/u)
+		.map((entry) =>
+			entry
+				.trim()
+				.replace(/^['"]|['"]$/gu, "")
+				.trim(),
+		)
+		.filter(Boolean);
+	assert.ok(
+		!names.includes("node"),
+		`regression: 'node' must NOT be in the presence-list (it would self-match the script's own child process). Got: [${names.join(", ")}]`,
+	);
+	for (const expected of [
+		"pi",
+		"opencode",
+		"opencode-go",
+		"opencode-zen",
+		"kimi",
+		"claude",
+		"minimax",
+	]) {
+		assert.ok(
+			names.includes(expected),
+			`expected '${expected}' in presence-list, got: [${names.join(", ")}]`,
+		);
 	}
 });
