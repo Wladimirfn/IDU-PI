@@ -80,6 +80,18 @@ Log ('interval_minutes=' + $IntervalMinutes + ' trigger_engine=' + $EnvTriggerEn
 # skipped on the days with the most operator work, and 5 merges
 # went unreviewed in 20 hours.
 #
+# Known trade-off that the inversion introduces (operator audit,
+# 2026-08-07): with the inverted rule, Step 1's `corepack pnpm tsc`
+# now runs while the operator is working — including in the window
+# where the operator is running `node --test dist/...`. The script
+# recompiles dist/ every hour, and the operator's test runner reads
+# dist/. The conflict is benign for read-only test runs (tsc writes
+# .js files; node reads them) but can produce stale-file races if
+# not handled. The operator accepted this consciously; measure
+# separately when calibration evidence is available. The cheap
+# mitigation is `tsc --noEmit` (type-check only, no output write);
+# deferred until the issue is raised.
+#
 # Inverted rule: if no interactive CLI is open, no operator work
 # is happening; the tick is silent (no output, no log line) to
 # match the operator's expectation that a disabled presence is
