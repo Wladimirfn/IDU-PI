@@ -87,7 +87,13 @@ function copyScriptToTempRoot(): {
 	};
 }
 
-test("skip-list does NOT include 'node' (regression: self-matching bug)", () => {
+test("presence-list does NOT include 'node' (regression: self-matching bug) — issue #417 inverted the guard", () => {
+	// Issue #417 inverted the presence guardian. The list is now
+	// the "presence-list" (CLIs whose presence means the operator is
+	// working), not the "skip-list". The behavioural direction
+	// flipped — see the next test for the inversion condition.
+	// `node` is still excluded because the script runs on node and
+	// would self-detect.
 	assert.ok(
 		existsSync(SCRIPT_PATH),
 		`expected ${SCRIPT_PATH} to exist for the static check`,
@@ -107,14 +113,49 @@ test("skip-list does NOT include 'node' (regression: self-matching bug)", () => 
 		.filter(Boolean);
 	assert.ok(
 		!names.includes("node"),
-		`regression: 'node' must NOT be in the skip-list (it would self-match the script's own child process). Got: [${names.join(", ")}]`,
+		`regression: 'node' must NOT be in the presence-list (it would self-match the script's own child process). Got: [${names.join(", ")}]`,
 	);
-	for (const expected of ["pi", "opencode", "opencode-go", "opencode-zen"]) {
+	for (const expected of [
+		"pi",
+		"opencode",
+		"opencode-go",
+		"opencode-zen",
+		"kimi",
+		"claude",
+		"minimax",
+	]) {
 		assert.ok(
 			names.includes(expected),
-			`expected '${expected}' in skip-list, got: [${names.join(", ")}]`,
+			`expected '${expected}' in presence-list, got: [${names.join(", ")}]`,
 		);
 	}
+});
+
+test("presence guardian is inverted (issue #417): skip when no CLI active, not when CLI active", () => {
+	// Issue #417 inverted the guard. The OLD rule was "skip when CLI
+	// active" (`if ($active.Count -gt 0)`). The NEW rule is "skip when
+	// no CLI active" (`if ($active.Count -eq 0)`). The list of
+	// presence names is the same (covered by the previous test); the
+	// behavioural direction is what changed. This static check guards
+	// against a regression that flips the polarity back. If either
+	// direction slips, the test fails with a clear message.
+	const source = readFileSync(SCRIPT_PATH, "utf8");
+	assert.ok(
+		source.includes("if ($active.Count -eq 0)"),
+		`regression: presence guardian must be inverted; skip when no CLI active. Script must contain 'if ($active.Count -eq 0)'.`,
+	);
+	assert.ok(
+		!source.includes("if ($active.Count -gt 0)"),
+		`regression: the old 'skip when CLI active' condition must be removed. Script still contains 'if ($active.Count -gt 0)'.`,
+	);
+	assert.ok(
+		source.includes("skipped: no interactive CLI active"),
+		`regression: inverted skip message must be present. Script must contain 'skipped: no interactive CLI active'.`,
+	);
+	assert.ok(
+		!source.includes("skipped: CLI active ("),
+		`regression: the old 'skipped: CLI active (...)' message must be removed. Script still contains 'skipped: CLI active ('.`,
+	);
 });
 
 test("script honours the trigger-disabled opt-in and exits silently (no output, no log)", async () => {
