@@ -2550,6 +2550,433 @@ test("idu_task_context propagates perception: shouldAskClarification forces enve
 	assert.equal(envD.requiresHuman, true);
 });
 
+test("idu_preflight exposes humanIntent on envelope data so consumers don't have to dig into data.report (issue #445)", async () => {
+	// Issue #445: classifyHumanIntent runs in every preflight and the
+	// result lands on report.humanIntent, but no consumer of the envelope
+	// read it. The first wiring piece is to promote humanIntent to
+	// top-level data so the model reading the envelope can see it
+	// alongside risk and recommendedAction. The full report is still
+	// attached for backward compatibility.
+	function fakeHumanIntentFor(overrides: {
+		emotion?: string;
+		urgency?: number;
+		recommendedHandling?: string;
+	}): unknown {
+		return {
+			originalText: "no funciona, urgente",
+			normalizedText: "no funciona urgente",
+			languageHints: "spanish",
+			intent: "bug_report",
+			taskCategory: "bug",
+			concepts: [],
+			riskHints: [],
+			confidence: "high",
+			matchedEvidence: ["no funciona", "urgente"],
+			ambiguity: [],
+			shouldAskClarification: false,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: overrides.recommendedHandling ?? "preflight",
+			kind: "bug_report",
+			action: "none",
+			riskHint: "low",
+			requiresHumanConfirmation: false,
+			emotion: overrides.emotion ?? "urgente",
+			urgency: overrides.urgency ?? 5,
+			evidence: ["no funciona", "urgente"],
+		};
+	}
+
+	function preflightWithIntent(humanIntent: unknown): ProjectPreflightReport {
+		return {
+			risk: "low",
+			okToProceed: true,
+			request: "no funciona, urgente",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas: ["tarea simple"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext: "Continuar con subagentes normales.",
+			requiresHumanConfirmation: false,
+			shouldRunAgentLab: false,
+			humanIntent: humanIntent as never,
+		};
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	const result = await callIduMcpTool(
+		"idu_preflight",
+		{ request: "no funciona, urgente" },
+		{
+			runtimeFactory: () =>
+				({
+					...fakeRuntime(),
+					preflight: () => preflightWithIntent(fakeHumanIntentFor({})),
+				}) as CliRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(result.ok, true);
+	const humanIntent = result.data.humanIntent as {
+		emotion: string;
+		urgency: number;
+		recommendedHandling: string;
+	};
+	assert.equal(
+		humanIntent.emotion,
+		"urgente",
+		`data.humanIntent must surface emotion without digging into data.report, got ${humanIntent.emotion}`,
+	);
+	assert.equal(
+		humanIntent.urgency,
+		5,
+		`data.humanIntent must surface urgency without digging into data.report, got ${humanIntent.urgency}`,
+	);
+	assert.equal(
+		humanIntent.recommendedHandling,
+		"preflight",
+		`data.humanIntent must surface recommendedHandling without digging into data.report, got ${humanIntent.recommendedHandling}`,
+	);
+	// The full report is still attached for backward compatibility.
+	assert.ok(
+		(result.data.report as ProjectPreflightReport).humanIntent,
+		`data.report must still carry humanIntent for backward compatibility`,
+	);
+});
+
+test("idu_preflight alignmentAdvisory.summary mentions human state when emotion detects urgency >= 4 (issue #445)", async () => {
+	// Issue #445: the second wiring piece is to make the orchestrator
+	// advisory branch on the perception signal so the summary reflects it.
+	// v1 is inform-only: the recommendation and severity logic above is
+	// intact; the perception state only flows into the summary text. If
+	// the perceptionPhrase branch is removed, this regex fails.
+	function fakeHumanIntentDetected(): unknown {
+		return {
+			originalText: "no funciona, urgente",
+			normalizedText: "no funciona urgente",
+			languageHints: "spanish",
+			intent: "bug_report",
+			taskCategory: "bug",
+			concepts: [],
+			riskHints: [],
+			confidence: "high",
+			matchedEvidence: ["no funciona", "urgente"],
+			ambiguity: [],
+			shouldAskClarification: false,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: "preflight",
+			kind: "bug_report",
+			action: "none",
+			riskHint: "low",
+			requiresHumanConfirmation: false,
+			emotion: "urgente",
+			urgency: 5,
+			evidence: ["no funciona", "urgente"],
+		};
+	}
+
+	function preflightWithDetectedHumanIntent(): ProjectPreflightReport {
+		return {
+			risk: "low",
+			okToProceed: true,
+			request: "no funciona, urgente",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas: ["tarea simple"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext: "Continuar con subagentes normales.",
+			requiresHumanConfirmation: false,
+			shouldRunAgentLab: false,
+			humanIntent: fakeHumanIntentDetected() as never,
+		};
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	const result = await callIduMcpTool(
+		"idu_preflight",
+		{ request: "no funciona, urgente" },
+		{
+			runtimeFactory: () =>
+				({
+					...fakeRuntime(),
+					preflight: () => preflightWithDetectedHumanIntent(),
+				}) as CliRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(result.ok, true);
+	const advisory = result.data.alignmentAdvisory as { summary: string };
+	assert.match(
+		advisory.summary,
+		/Estado del humano detectado: urgente \(urgency 5\/5\)/u,
+		`summary must mention the detected human state when emotion is non-neutral + urgency >= 4, got: ${advisory.summary}`,
+	);
+});
+
+test("idu_preflight alignmentAdvisory.summary mentions human state when emotion is non-neutral but urgency is low, defending the || in perceptionHasSomethingToSay (issue #445)", async () => {
+	// Issue #445 follow-up (operator audit): the perceptionHasSomethingToSay
+	// gate is `emotion !== "neutral" || urgency >= 4`. The existing tests
+	// cover both-sides-true (urgente/urgency 5) and both-sides-false
+	// (neutral/urgency 1). The mixed case was uncovered, so a mutation
+	// changing || to && would slip past the whole suite. Real lexer cases
+	// like "cansado" (emotion non-neutral, urgency 3) sit on the
+	// left-true/right-false edge: || fires, && does not. If this test
+	// ever passes with the mutant, the gate has been narrowed and a real
+	// human state is now silent.
+	function fakeHumanIntentCansado(): unknown {
+		return {
+			originalText: "estoy cansado, esto sigue fallando",
+			normalizedText: "estoy cansado esto sigue fallando",
+			languageHints: "spanish",
+			intent: "bug_report",
+			taskCategory: "bug",
+			concepts: ["recurring_failure"],
+			riskHints: [],
+			confidence: "high",
+			matchedEvidence: ["cansado"],
+			ambiguity: [],
+			shouldAskClarification: false,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: "preflight",
+			kind: "bug_report",
+			action: "none",
+			riskHint: "low",
+			requiresHumanConfirmation: false,
+			emotion: "cansado",
+			urgency: 3,
+			evidence: ["cansado"],
+		};
+	}
+
+	function preflightWithCansado(): ProjectPreflightReport {
+		return {
+			risk: "low",
+			okToProceed: true,
+			request: "estoy cansado, esto sigue fallando",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas: ["tarea simple"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext: "Continuar con subagentes normales.",
+			requiresHumanConfirmation: false,
+			shouldRunAgentLab: false,
+			humanIntent: fakeHumanIntentCansado() as never,
+		};
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	const result = await callIduMcpTool(
+		"idu_preflight",
+		{ request: "estoy cansado, esto sigue fallando" },
+		{
+			runtimeFactory: () =>
+				({
+					...fakeRuntime(),
+					preflight: () => preflightWithCansado(),
+				}) as CliRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(result.ok, true);
+	const advisory = result.data.alignmentAdvisory as { summary: string };
+	assert.match(
+		advisory.summary,
+		/Estado del humano detectado: cansado \(urgency 3\/5\)/u,
+		`summary must mention the human state when emotion is non-neutral even at low urgency (defends || over &&), got: ${advisory.summary}`,
+	);
+});
+
+test("idu_preflight alignmentAdvisory.summary stays silent on perception when human state is neutral + low urgency (issue #445)", async () => {
+	// Issue #445: the default path (neutral emotion, low urgency) must
+	// remain silent. Most preflight calls have no detectable emotion and
+	// surfacing the perception on every preflight would pollute the summary
+	// for the common case where the human state is unremarkable. If the
+	// perceptionHasSomethingToSay gate is removed, this assertion fails.
+	function fakeHumanIntentNeutral(): unknown {
+		return {
+			originalText: "agregar un campo a la tabla users",
+			normalizedText: "agregar un campo a la tabla users",
+			languageHints: "spanish",
+			intent: "feature_request",
+			taskCategory: "feature",
+			concepts: ["database", "schema"],
+			riskHints: ["db_change"],
+			confidence: "high",
+			matchedEvidence: ["agregar"],
+			ambiguity: [],
+			shouldAskClarification: false,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: "preflight",
+			kind: "feature_request",
+			action: "none",
+			riskHint: "medium",
+			requiresHumanConfirmation: false,
+			emotion: "neutral",
+			urgency: 1,
+			evidence: ["agregar"],
+		};
+	}
+
+	function preflightWithNeutralHumanIntent(): ProjectPreflightReport {
+		return {
+			risk: "low",
+			okToProceed: true,
+			request: "agregar un campo a la tabla users",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas: ["datos"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext: "Continuar con subagentes normales.",
+			requiresHumanConfirmation: false,
+			shouldRunAgentLab: false,
+			humanIntent: fakeHumanIntentNeutral() as never,
+		};
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	const result = await callIduMcpTool(
+		"idu_preflight",
+		{ request: "agregar un campo a la tabla users" },
+		{
+			runtimeFactory: () =>
+				({
+					...fakeRuntime(),
+					preflight: () => preflightWithNeutralHumanIntent(),
+				}) as CliRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(result.ok, true);
+	const advisory = result.data.alignmentAdvisory as { summary: string };
+	assert.doesNotMatch(
+		advisory.summary,
+		/Estado del humano detectado/u,
+		`summary must stay silent on perception when emotion is neutral + urgency is low, got: ${advisory.summary}`,
+	);
+});
+
+test("idu_preflight adds handling:<value> to alignmentAdvisory.evidenceRefs when recommendedHandling is non-default (issue #445)", async () => {
+	// Issue #445: the recommendedHandling is one of
+	// {record_only, preflight, needs_confirmation, safe_to_execute,
+	// ask_clarification}. The default values (record_only, preflight,
+	// safe_to_execute) are silently equivalent to no-handling. The
+	// non-default values (needs_confirmation, ask_clarification) become
+	// evidenceRefs entries so the consumer can distinguish "the classifier
+	// recommended handling" from "the risk analyzer escalated". ask_clarification
+	// is already covered by shouldAskClarification → requiresHuman; we test
+	// needs_confirmation here. If the perceptionHandlingRef branch is removed,
+	// this assertion fails.
+	function fakeHumanIntentNeedsConfirmation(): unknown {
+		return {
+			originalText: "modify the login table",
+			normalizedText: "modify the login table",
+			languageHints: "english",
+			intent: "change_request",
+			taskCategory: "refactor",
+			concepts: ["auth", "database"],
+			riskHints: ["auth_change", "db_change"],
+			confidence: "high",
+			matchedEvidence: ["login"],
+			ambiguity: [],
+			shouldAskClarification: false,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: "needs_confirmation",
+			kind: "change_request",
+			action: "require_confirmation",
+			riskHint: "high",
+			requiresHumanConfirmation: true,
+			emotion: "neutral",
+			urgency: 1,
+			evidence: ["login"],
+		};
+	}
+
+	function preflightWithNeedsConfirmation(): ProjectPreflightReport {
+		return {
+			risk: "high",
+			okToProceed: false,
+			request: "modify the login table",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas: ["auth/seguridad", "login"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext: "Pedir confirmación humana antes de implementar.",
+			requiresHumanConfirmation: true,
+			shouldRunAgentLab: false,
+			humanIntent: fakeHumanIntentNeedsConfirmation() as never,
+		};
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	const result = await callIduMcpTool(
+		"idu_preflight",
+		{ request: "modify the login table" },
+		{
+			runtimeFactory: () =>
+				({
+					...fakeRuntime(),
+					preflight: () => preflightWithNeedsConfirmation(),
+				}) as CliRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(result.ok, true);
+	const advisory = result.data.alignmentAdvisory as { evidenceRefs: string[] };
+	assert.ok(
+		advisory.evidenceRefs.some((ref) => ref === "handling:needs_confirmation"),
+		`evidenceRefs must include handling:needs_confirmation when recommendedHandling is non-default, got: ${JSON.stringify(advisory.evidenceRefs)}`,
+	);
+});
+
 test("idu_task_context reflects unacked blocking injection in the decision envelope (issue #428)", async () => {
 	// Issue #428: the `blocking` field on the envelope response is a
 	// signal of an unacked blocking injection (graph_drift_finding,
