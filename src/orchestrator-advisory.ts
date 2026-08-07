@@ -48,12 +48,27 @@ export function buildPreflightOrchestratorAdvisory(
 	// into the summary text and evidenceRefs. Raising severity from a
 	// detected emotion is more powerful and more risky — a false positive
 	// stops legitimate work — and belongs to a future change with
-	// calibration evidence. Two adjacent questions are deferred:
+	// calibration evidence.
+	//
+	// Deferred follow-ups:
 	//   - Q3: registering the classification in the turn event for later
 	//     measurement (paired events from #425 already provide a slot in
 	//     role-events.ts:148; we don't change the event schema here).
 	//   - Q4: connecting recommendedHandling:"needs_confirmation" to the
 	//     confirmation gate from #430 (separate issue).
+	//
+	// Recorded design decision (operator audit, v1):
+	//   When `requiresHuman` is true and `perceptionUnclear` is false
+	//   (the risk-driven confirmation path), the perception phrase is
+	//   dropped from the summary. A human with a detected emotion who
+	//   triggers a high-risk request sees only "Supervisor detectó
+	//   riesgo antes de ejecutar." — the perception state is not
+	//   surfaced. The trade-off: the risk verdict already carries the
+	//   human-confirmation ask; raising the perception's visibility on
+	//   the risk path is a separate decision with calibration
+	//   implications. Surfacing the phrase on this path is the natural
+	//   extension once we have calibration data — recorded here so the
+	//   asymmetry is explicit, not a silent omission.
 	const perceptionUnclear = report.humanIntent?.shouldAskClarification === true;
 	const perceptionAmbiguity = report.humanIntent?.ambiguity ?? [];
 	const perceptionEmotion = report.humanIntent?.emotion ?? "neutral";
@@ -62,7 +77,10 @@ export function buildPreflightOrchestratorAdvisory(
 
 	// The neutral + low-urgency path is the default and must remain silent;
 	// surfacing the perception on every preflight would pollute the summary
-	// for the common case where the human state is unremarkable.
+	// for the common case where the human state is unremarkable. The ||
+	// here is the binding rule — tested with the mixed edge in
+	// `alignmentAdvisory.summary mentions human state when emotion is
+	// non-neutral but urgency is low` (issue #445 follow-up).
 	const perceptionHasSomethingToSay =
 		perceptionEmotion !== "neutral" || perceptionUrgency >= 4;
 
@@ -94,10 +112,12 @@ export function buildPreflightOrchestratorAdvisory(
 		? Math.min(confidenceFromRisk(report.risk), 0.4)
 		: confidenceFromRisk(report.risk);
 
-	// The perception phrase is appended only when the perception layer has
-	// something to say AND the existing summary would not already call it
-	// out (the "Perception no entendió" path). Keeping the existing summary
-	// intact when unclear avoids double-stating the perception.
+	// The perception phrase is appended only on the "no requiere humano"
+	// branch. On the "requires human" branch the phrase is dropped by
+	// design (see the recorded decision above): the perceptionUnclear path
+	// already calls out the perception explicitly, and the risk-driven
+	// path keeps the perception out of v1. Surfacing the phrase on the
+	// risk path is the natural extension once there is calibration data.
 	const summary = requiresHuman
 		? perceptionUnclear
 			? "Perception no entendió la intención; pedir aclaración antes de ejecutar."

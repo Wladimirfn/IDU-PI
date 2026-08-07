@@ -2732,6 +2732,89 @@ test("idu_preflight alignmentAdvisory.summary mentions human state when emotion 
 	);
 });
 
+test("idu_preflight alignmentAdvisory.summary mentions human state when emotion is non-neutral but urgency is low, defending the || in perceptionHasSomethingToSay (issue #445)", async () => {
+	// Issue #445 follow-up (operator audit): the perceptionHasSomethingToSay
+	// gate is `emotion !== "neutral" || urgency >= 4`. The existing tests
+	// cover both-sides-true (urgente/urgency 5) and both-sides-false
+	// (neutral/urgency 1). The mixed case was uncovered, so a mutation
+	// changing || to && would slip past the whole suite. Real lexer cases
+	// like "cansado" (emotion non-neutral, urgency 3) sit on the
+	// left-true/right-false edge: || fires, && does not. If this test
+	// ever passes with the mutant, the gate has been narrowed and a real
+	// human state is now silent.
+	function fakeHumanIntentCansado(): unknown {
+		return {
+			originalText: "estoy cansado, esto sigue fallando",
+			normalizedText: "estoy cansado esto sigue fallando",
+			languageHints: "spanish",
+			intent: "bug_report",
+			taskCategory: "bug",
+			concepts: ["recurring_failure"],
+			riskHints: [],
+			confidence: "high",
+			matchedEvidence: ["cansado"],
+			ambiguity: [],
+			shouldAskClarification: false,
+			shouldBlockIfIduActive: false,
+			recommendedHandling: "preflight",
+			kind: "bug_report",
+			action: "none",
+			riskHint: "low",
+			requiresHumanConfirmation: false,
+			emotion: "cansado",
+			urgency: 3,
+			evidence: ["cansado"],
+		};
+	}
+
+	function preflightWithCansado(): ProjectPreflightReport {
+		return {
+			risk: "low",
+			okToProceed: true,
+			request: "estoy cansado, esto sigue fallando",
+			projectId: "sistema_de_mantencion",
+			projectPath: "C:/projects/sistema",
+			connectionStatus: "ready",
+			affectedAreas: ["tarea simple"],
+			missingContext: [],
+			warnings: [],
+			recommendedNext: "Continuar con subagentes normales.",
+			requiresHumanConfirmation: false,
+			shouldRunAgentLab: false,
+			humanIntent: fakeHumanIntentCansado() as never,
+		};
+	}
+
+	const resolution = {
+		status: "registered_project",
+		projectId: "sistema_de_mantencion",
+		projectPath: "C:/projects/sistema",
+		stateRoot: fakeStateRoot,
+		safeNotes: [],
+		errors: [],
+	} as IduMcpProjectResolution;
+
+	const result = await callIduMcpTool(
+		"idu_preflight",
+		{ request: "estoy cansado, esto sigue fallando" },
+		{
+			runtimeFactory: () =>
+				({
+					...fakeRuntime(),
+					preflight: () => preflightWithCansado(),
+				}) as CliRuntime,
+			projectResolver: () => resolution,
+		},
+	);
+	assert.equal(result.ok, true);
+	const advisory = result.data.alignmentAdvisory as { summary: string };
+	assert.match(
+		advisory.summary,
+		/Estado del humano detectado: cansado \(urgency 3\/5\)/u,
+		`summary must mention the human state when emotion is non-neutral even at low urgency (defends || over &&), got: ${advisory.summary}`,
+	);
+});
+
 test("idu_preflight alignmentAdvisory.summary stays silent on perception when human state is neutral + low urgency (issue #445)", async () => {
 	// Issue #445: the default path (neutral emotion, low urgency) must
 	// remain silent. Most preflight calls have no detectable emotion and
