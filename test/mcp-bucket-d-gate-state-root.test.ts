@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { before, test } from "node:test";
 import type { CliRuntime } from "../src/cli.js";
 import {
 	callIduMcpTool,
 	type IduMcpProjectResolution,
 	type IduMcpRuntimeFactory,
 } from "../src/mcp-server.js";
+import { configureIduSessionStore } from "../src/idu-session.js";
 
 // Test-of-record for the 13 BUCKET-D "master-plan / supervisor gate" sites.
 // Phase 2 (issue #257, type:fix). The gate branch now propagates the real
@@ -47,6 +48,24 @@ const GATE_PROJECT_ID = "bucket-d-phase-1b-gate-probe";
 const GATE_STATE_ROOT = mkdtempSync(
 	join(tmpdir(), "idu-bucket-d-phase-1b-gate-"),
 );
+
+// Configure IduSessionStore against the same tempDir the runtime
+// factory exposes as `workspaceRoot`. The 13 gate sites use the gate
+// branch (`envelope({ stateRoot: resolution.stateRoot })`), but the
+// runtime projectId ("bucket-d-phase-1b-gate-probe") still resolves
+// through `defaultStore` via `getIduSessionStatus` (read-only here —
+// no write happens because none of the 13 sites call activate/deactivate).
+// Without this hook the shared `defaultStore` would silently fall back
+// to `process.cwd()` and (after the empty-string sentinel fix in
+// IduSessionStore) throw "IduSessionStore requires a non-empty
+// workspaceRoot" if any future site mutates the session. Pointing the
+// store at the real tempDir keeps state writes hermetic.
+before(() => {
+	configureIduSessionStore({
+		workspaceRoot: GATE_STATE_ROOT,
+		filePath: join(GATE_STATE_ROOT, "idu-session-state.json"),
+	});
+});
 
 /**
  * A REGISTERED resolution carrying a real tmpdir stateRoot. This is the key

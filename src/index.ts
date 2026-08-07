@@ -377,11 +377,20 @@ import {
 
 const config = loadConfig();
 process.env.AGENT_WORKSPACE_ROOT ??= config.agentWorkspaceRoot;
-configureIduSessionStore({ workspaceRoot: config.agentWorkspaceRoot });
 const bot = new Bot(config.telegramBotToken);
 const registry = loadRegistry(config.defaultCwd, config.allowedRoots);
 let sessionNames = loadSessionNames();
 const activeProject = getActiveProject(registry);
+// #471: configure the session store with the active project's stateRoot so the
+// bridge process reads the file the wizard/MCP/process wrote, NOT a sibling file
+// at <agentWorkspaceRoot>/reports/idu-session-state.json that nothing else uses.
+configureIduSessionStore({
+	workspaceRoot: activeProjectStateRoot(),
+	filePath: join(
+		activeProjectStateRoot(),
+		"idu-session-state.json",
+	),
+});
 
 let currentCwd = activeProject?.path ?? config.defaultCwd;
 const agentRouter = new AgentRouter({

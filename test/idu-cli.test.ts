@@ -2255,6 +2255,55 @@ test("cli natural approval only acts with pending Master Plan action", async () 
 	});
 });
 
+test("#471 bridge entry configures session store with project stateRoot (no reports subdir)", async () => {
+	// #471 acceptance: after activating via the CLI, the session state file MUST live at
+	// <workspaceRoot>/idu-session-state.json (the project stateRoot) and NOT at
+	// <workspaceRoot>/reports/idu-session-state.json. The session store must be readable
+	// after the CLI runtime is reconstructed — this is the contract the bridge entry uses.
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		runtime.projectId = "idu-pi";
+		runtime.sessionStatePath = join(workspaceRoot, "idu-session-state.json");
+		const result = await runCliCommand(["idu"], runtime);
+
+		assert.equal(result.exitCode, 0);
+		// The state file lives directly under the project stateRoot.
+		assert.equal(
+			existsSync(join(workspaceRoot, "idu-session-state.json")),
+			true,
+		);
+		// The legacy reports/ path MUST NOT be written.
+		assert.equal(
+			existsSync(join(workspaceRoot, "reports", "idu-session-state.json")),
+			false,
+		);
+		// Survives a fresh store construction (simulates a bridge restart reading the file).
+		configureIduSessionStore({
+			workspaceRoot,
+			filePath: join(workspaceRoot, "idu-session-state.json"),
+		});
+		assert.equal(getIduSessionStatus("idu-pi").active, true);
+	});
+});
+
+test("#471 CLI runtime always passes explicit filePath when project is registered", async () => {
+	// #471 acceptance: the CLI must ALWAYS pass an explicit filePath to configureIduSessionStore,
+	// derived from the project stateRoot. The path-less fallback that allows the store to
+	// pick its own path is exactly the bug we're fixing — it lets the bridge drift toward
+	// the wrong file when the runtime says one stateRoot and the store resolves another.
+	await withRuntime(async (runtime, { workspaceRoot }) => {
+		runtime.projectId = "idu-pi";
+		// Simulate the contract: every CLI runtime exposes sessionStatePath.
+		runtime.sessionStatePath = join(workspaceRoot, "idu-session-state.json");
+		await runCliCommand(["idu"], runtime);
+
+		// After activation, the store's status must point at the same path.
+		assert.equal(
+			getIduSessionStatus("idu-pi").sessionStatePath,
+			join(workspaceRoot, "idu-session-state.json"),
+		);
+	});
+});
+
 test("cli idu activa sesión persistente", async () => {
 	await withRuntime(async (runtime, { workspaceRoot }) => {
 		runtime.supervisorOnIduActivation = () => ({
@@ -2281,8 +2330,13 @@ test("cli idu activa sesión persistente", async () => {
 			/Arranque supervisor:\ncompleted — Supervisor startup check completed\./u,
 		);
 		assert.equal(
-			existsSync(join(workspaceRoot, "reports", "idu-session-state.json")),
+			existsSync(join(workspaceRoot, "idu-session-state.json")),
 			true,
+		);
+		// #471 — the legacy reports/idu-session-state.json path MUST NOT be written.
+		assert.equal(
+			existsSync(join(workspaceRoot, "reports", "idu-session-state.json")),
+			false,
 		);
 		assert.equal(
 			existsSync(join(workspaceRoot, "reports", "idu-usage-events.jsonl")),

@@ -31,7 +31,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import {
 	callIduMcpTool,
 	listIduMcpTools,
@@ -39,6 +39,7 @@ import {
 } from "../src/mcp-server.js";
 import type { CliRuntime } from "../src/cli.js";
 import { resolveSkillsDirPath } from "../src/mcp/session/handlers.js";
+import { configureIduSessionStore } from "../src/idu-session.js";
 
 // =====================================================================
 // Hermetic tmpdir helpers
@@ -267,6 +268,30 @@ test("[idu_status integration] repoPath y stateRootPath caen a null cuando works
 	assert.equal(result.data.repoPath, null);
 	assert.equal(result.data.stateRootPath, null);
 	assert.equal(result.data.skillsDirPath, null);
+});
+
+// Configure IduSessionStore against a tempDir before any handler runs.
+// The integration tests exercise `idu_status` which calls
+// `getIduSessionStatus(runtime.projectId)`. Without this hook, the
+// shared `defaultStore` would silently fall back to `process.cwd()` and
+// (after the empty-string sentinel fix in IduSessionStore) throw
+// "IduSessionStore requires a non-empty workspaceRoot". Pointing the
+// store at a tempDir keeps state writes hermetic while the second
+// integration test still exercises the `repoPath: null` /
+// `stateRootPath: null` branches of `handleStatus` (the sentinel
+// semantics are preserved via the empty `runtime.workspaceRoot` and
+// `runtime.projectPath` fields the test passes).
+const STORE_TEMP_DIR = mkdtempSync(
+	join(tmpdir(), "mcp-idu-status-paths-store-"),
+);
+before(() => {
+	configureIduSessionStore({
+		workspaceRoot: STORE_TEMP_DIR,
+		filePath: join(STORE_TEMP_DIR, "idu-session-state.json"),
+	});
+});
+after(() => {
+	rmSync(STORE_TEMP_DIR, { recursive: true, force: true });
 });
 
 // Mantener `listIduMcpTools` importado para que el test parametriza-

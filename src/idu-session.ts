@@ -31,8 +31,8 @@ export type IduSessionStoreOptions = {
 
 const emptyState = (): IduSessionState => ({ version: 1, projects: {} });
 
-export function resolveIduSessionStatePath(workspaceRoot: string): string {
-	return join(workspaceRoot, "reports", "idu-session-state.json");
+export function resolveIduSessionStatePath(stateRoot: string): string {
+	return join(stateRoot, "idu-session-state.json");
 }
 
 export class IduSessionStore {
@@ -42,6 +42,16 @@ export class IduSessionStore {
 	private state: IduSessionState;
 
 	constructor(options: IduSessionStoreOptions = {}) {
+		if (options.workspaceRoot === "") {
+			throw new Error(
+				"IduSessionStore requires a non-empty workspaceRoot; use configureIduSessionStore({ workspaceRoot: stateRoot, filePath: ... }) instead of relying on the default. Tests that pass `stateRoot: \"\"` as a sentinel must configure the store with a tempDir stateRoot before invoking handlers.",
+			);
+		}
+		if (options.filePath === "") {
+			throw new Error(
+				"IduSessionStore requires a non-empty filePath; use configureIduSessionStore({ workspaceRoot: stateRoot, filePath: ... }) instead of relying on the default. Tests that pass `filePath: \"\"` as a sentinel must configure the store with a tempDir filePath before invoking handlers.",
+			);
+		}
 		this.workspaceRoot = options.workspaceRoot ?? process.cwd();
 		this.filePath =
 			options.filePath ?? resolveIduSessionStatePath(this.workspaceRoot);
