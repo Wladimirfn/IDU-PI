@@ -40,6 +40,15 @@ if (-not (Test-Path (Join-Path $DeploymentRoot 'node_modules'))) {
 
 corepack pnpm tsc -p tsconfig.json
 
+# Issue #487: never print "ready" for a compile that cannot boot its
+# config. Run the deployed copy's own verification script (the clone
+# carries it on main) and stop hard on failure.
+& "$DeploymentRoot\scripts\verify-deploy.ps1"
+if ($LASTEXITCODE -ne 0) {
+	Write-Error "Deployment verification failed (exit code $LASTEXITCODE). The deployed CLI cannot boot its config (e.g. install without .env); fix before re-running."
+	exit $LASTEXITCODE
+}
+
 Write-Host ''
 Write-Host "Deployment directory ready at: $DeploymentRoot" -ForegroundColor Green
 Write-Host ''

@@ -65,6 +65,20 @@ test("bootstrap sets the three environment variables the script depends on", () 
 	}
 });
 
+test("bootstrap sets IDU_PI_DOTENV_PATH to the operator's single .env (issue #487)", () => {
+	// Issue #487: the deployment directory never carries its own .env
+	// (gitignored), so the compiled CLI's default dotenv resolution
+	// fails the tick with "Missing required env var: DEFAULT_CWD". The
+	// bootstrap points the loader at the operator's single .env — never
+	// a copied deploy-side .env that would drift on token rotation.
+	const source = readFileSync(BOOTSTRAP_PATH, "utf8");
+	assert.match(
+		source,
+		/\$env:IDU_PI_DOTENV_PATH\s*=\s*"C:\\Users\\elmas\\pi-telegram-bridge\\.env"/u,
+		`regression: bootstrap must point IDU_PI_DOTENV_PATH at the operator's single .env. Source: ${source}`,
+	);
+});
+
 test("bootstrap invokes the script in its own directory (behavioral defense against bypass mutations)", async () => {
 	// Behavioral defense (issue #483). The static check on
 	// $PSScriptRoot covers the "bootstrap uses $PSScriptRoot" case.
