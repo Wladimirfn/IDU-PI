@@ -22,6 +22,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	realpathSync,
 	rmSync,
 	writeFileSync,
 } from "node:fs";
@@ -88,7 +89,16 @@ test("IDU_PI_DOTENV_PATH override resolves and provides the config", async () =>
 		existsSync(CONFIG_JS),
 		`expected compiled ${CONFIG_JS} to exist (run the build first)`,
 	);
-	const root = mkdtempSync(join(tmpdir(), "idu-dotenv-override-ok-"));
+	// Canonicalize the root once so expected values (envDir, overridePath)
+	// are born in long path form. canonicalDirectory expands defaults via
+	// realpathSync.native (src/config.ts:142), and on GitHub runners
+	// tmpdir() returns the short 8.3 form (C:\Users\RUNNER~1\...); without
+	// this the assertion depends on the username length — "elmas" (5 chars)
+	// never shortens, "runneradmin" (11 chars) does, so the comparison is
+	// fragile across machines. Both sides now share the expanded form.
+	const root = realpathSync.native(
+		mkdtempSync(join(tmpdir(), "idu-dotenv-override-ok-")),
+	);
 	try {
 		const envDir = join(root, "env");
 		const workspace = join(root, "workspace");
