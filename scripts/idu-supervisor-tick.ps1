@@ -209,13 +209,55 @@ try {
 			$lastSha = (Get-Content $shaFile -Raw -ErrorAction SilentlyContinue).Trim()
 		}
 		$currentSha = git rev-parse HEAD 2>$null
+		# #484: $watermarkBase is the diff base actually used this tick and
+		# is logged on every run so the next measurement can be done per
+		# tick (the SHA was never logged before — the historical
+		# distribution was only knowable by snapshot). $advanceWatermark
+		# is turned off only when the base is unrecoverable (row 1 below).
+		$watermarkBase = $null
+		$advanceWatermark = $true
 		if ($lastSha -and $currentSha -and ($lastSha -ne $currentSha)) {
-			# Normal path: diff from the last processed commit to HEAD.
-			# This catches ALL commits since the last tick, not just one.
-			$diffOutput = git diff --name-only $lastSha HEAD 2>$null
+			# Validate the watermark before diffing from it. `git diff
+			# --name-only <bad-sha> HEAD` does NOT throw under Stop — it
+			# returns empty with exit 128, and the old code silently read
+			# that as "no changes", advancing the watermark and losing the
+			# range. Row 1 must be detected explicitly with cat-file on
+			# the peeled commit object.
+			git cat-file -e "$lastSha^{commit}" 2>$null
+			if ($LASTEXITCODE -ne 0) {
+				# Row 1: the watermark object is gone. The base cannot be
+				# reconstructed — do NOT fall back to HEAD~1..HEAD (that
+				# drops every commit in the middle: the same hole HEAD~1
+				# had for burst merges, and what #225 fixed). Do not
+				# advance; log firmly so the operator repairs the file.
+				$advanceWatermark = $false
+				$watermarkBase = $lastSha
+				Log ('watermark_OBJECT_MISSING: sha=' + $lastSha + ' (diff base unrecoverable; watermark NOT advanced)')
+				$diffOutput = $null
+			} else {
+				# Object exists. Row 2: it may not be an ancestor of HEAD
+				# (a pre-squash fix-branch SHA written into the watermark
+				# by a tick that ran from the operator's checkout).
+				git merge-base --is-ancestor "$lastSha" HEAD
+				if ($LASTEXITCODE -eq 0) {
+					# Healthy: the watermark is in HEAD's history.
+					$watermarkBase = $lastSha
+					$diffOutput = git diff --name-only $watermarkBase HEAD 2>$null
+				} else {
+					# Row 2: orphan. Recover the FULL range via merge-base
+					# instead of diffing from the orphan SHA (which yields
+					# a wrong/partial range).
+					$watermarkBase = git merge-base "$lastSha" HEAD
+					Log ('watermark_ORPHAN: sha=' + $lastSha + ' -> merge-base ' + $watermarkBase + ' (recovered full range)')
+					$diffOutput = git diff --name-only $watermarkBase HEAD 2>$null
+				}
+			}
 		} elseif (-not $lastSha -and $currentSha) {
-			# First run (no state file yet): fall back to HEAD~1..HEAD
-			# so we don't dump the entire history on the first tick.
+			# True first run (no prior watermark): diff the last commit
+			# only so we don't dump the entire history on the first tick.
+			# This fallback is ONLY reachable when no watermark exists, so
+			# it cannot drop a silently-missing range.
+			$watermarkBase = 'HEAD~1'
 			$diffOutput = git diff --name-only HEAD~1 HEAD 2>$null
 		} else {
 			# No changes since last tick (lastSha === currentSha) or
@@ -252,7 +294,7 @@ try {
 	} finally {
 		$ErrorActionPreference = $prevEAP
 	}
-	Log ('cron_preflight_exit=' + $preflightExit + ' changed_files=' + $changedFiles.Count)
+	Log ('cron_preflight_exit=' + $preflightExit + ' changed_files=' + $changedFiles.Count + ' watermark_sha=' + $lastSha + ' watermark_base=' + $watermarkBase)
 	Log ('cron_preflight_output: ' + ($preflightOutput -join ' | '))
 	Write-Host $preflightOutput
 	# Advance the watermark ONLY if the preflight succeeded. If the
@@ -260,15 +302,18 @@ try {
 	# at the previous SHA so the next tick retries the same range.
 	# A persistent failure will show repeated log entries with the
 	# same changed_files count — the operator notices and fixes.
-	if ($preflightExit -eq 0) {
+	if ($preflightExit -eq 0 -and $advanceWatermark) {
 		$shaFile = if ($StateRoot) { Join-Path $StateRoot 'cron-last-sha.txt' } else { $null }
 		$currentSha = git rev-parse HEAD 2>$null
 		if ($shaFile -and $currentSha) {
 			Set-Content -Path $shaFile -Value $currentSha.Trim() -NoNewline -ErrorAction SilentlyContinue
 		}
-	} else {
+	} elseif ($preflightExit -ne 0) {
 		Log ('watermark_NOT_advanced: preflightExit=' + $preflightExit + ' (next tick will retry the same range)')
 	}
+	# When $advanceWatermark is false (row 1: watermark_OBJECT_MISSING),
+	# the reason was already logged and the watermark is left untouched;
+	# no extra line here to avoid double-logging the same incident.
 } catch {
 	Write-Host ('cron preflight falló: ' + $_) -ForegroundColor Red
 	Log ('cron_preflight_failed: ' + $_)
