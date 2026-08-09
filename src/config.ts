@@ -4,8 +4,27 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Issue #487: the deployment directory (C:\idu-pi-deploy) never carries
+// its own .env — it resolves .env relative to the compiled module, so a
+// deploy without .env fails with "Missing required env var: DEFAULT_CWD".
+// IDU_PI_DOTENV_PATH points the loader at the operator's single .env (set
+// by the deploy's bootstrap script), keeping one source of truth and
+// failing early when that file is missing instead of failing later with a
+// confusing config error.
+const dotenvPathOverride = process.env.IDU_PI_DOTENV_PATH;
+const dotenvPath = dotenvPathOverride
+	? resolve(dotenvPathOverride)
+	: resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", ".env");
+
+if (dotenvPathOverride && !existsSync(dotenvPath)) {
+	throw new Error(
+		`IDU_PI_DOTENV_PATH points to a file that does not exist: ${dotenvPath}. ` +
+			"Set it to the operator's single .env or unset it to keep the default resolution.",
+	);
+}
+
 loadDotenv({
-	path: resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", ".env"),
+	path: dotenvPath,
 	quiet: true,
 });
 

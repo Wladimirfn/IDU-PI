@@ -21,4 +21,13 @@ git pull origin main
 corepack pnpm install
 corepack pnpm tsc -p tsconfig.json
 
+# Issue #487: never print "updated" for a compile that cannot boot its
+# config. Run the deployed copy's own verification script and stop hard
+# on failure.
+& "$DeploymentRoot\scripts\verify-deploy.ps1"
+if ($LASTEXITCODE -ne 0) {
+	Write-Error "Deployment verification failed (exit code $LASTEXITCODE). The deployed CLI cannot boot its config (e.g. install without .env); fix before reporting success."
+	exit $LASTEXITCODE
+}
+
 Write-Host "Deployment directory updated at: $DeploymentRoot" -ForegroundColor Green

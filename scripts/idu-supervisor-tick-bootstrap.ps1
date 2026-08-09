@@ -1,6 +1,8 @@
 ﻿$env:IDU_PI_TICK_STATE_ROOT = "C:\Users\elmas\Documents\bridge-agents\projects\idu-pi"
 $env:AGENT_WORKSPACE_ROOT = "C:\Users\elmas\Documents\bridge-agents"
 $env:IDU_PI_REGISTRY_PATH = "C:\Users\elmas\Documents\bridge-agents\registry\projects.json"
+# Issue #487: deploy reads the operator's single .env via IDU_PI_DOTENV_PATH; never copies it.
+$env:IDU_PI_DOTENV_PATH = "C:\Users\elmas\pi-telegram-bridge\.env"
 # Issue #483: the bootstrap must be locatable from the deployment
 # directory, not the operator's working checkout. $PSScriptRoot is the
 # directory of this script; the cron task's WorkingDir points to the
