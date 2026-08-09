@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import {
@@ -90,6 +90,13 @@ describe("Supervisor Tick health classification", () => {
 		strictEqual(result.health, "HEALTHY");
 	});
 
+	test("Queued with a valid future NextRunTime is HEALTHY", () => {
+		// Queued is the normal state between a trigger firing and execution
+		// starting. It must be treated as healthy, never DOWN.
+		const result = classifySupervisorTickSnapshot({ ...HEALTHY, state: "Queued" }, NOW);
+		strictEqual(result.health, "HEALTHY");
+	});
+
 	test("missing task is DOWN", () => {
 		const result = classifySupervisorTickSnapshot({ exists: false }, NOW);
 		strictEqual(result.health, "DOWN");
@@ -105,8 +112,16 @@ describe("Supervisor Tick health transitions", () => {
 		deepStrictEqual(h.messages, []);
 	});
 
-	test("initial DOWN sends once and includes scheduler evidence", async () => {
+	test("single DOWN observation does not alert (debounce)", async () => {
 		const h = harness(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
+		deepStrictEqual(h.messages, []);
+	});
+
+	test("initial DOWN alerts on the second consecutive observation", async () => {
+		const h = harness(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
+		strictEqual(h.messages.length, 0);
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "sent");
 		strictEqual(h.messages.length, 1);
 		match(h.messages[0], new RegExp(SUPERVISOR_TICK_TASK_NAME, "u"));
@@ -116,10 +131,12 @@ describe("Supervisor Tick health transitions", () => {
 		match(h.messages[0], /MissedRuns: 2/u);
 	});
 
-	test("HEALTHY to DOWN sends once", async () => {
+	test("HEALTHY to DOWN alerts on the second consecutive DOWN observation", async () => {
 		const h = harness(observation("HEALTHY"));
 		await h.monitor.check({ stateRoot: h.stateRoot, now: NOW });
 		h.setObservation(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
+		strictEqual(h.messages.length, 0);
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "sent");
 		strictEqual(h.messages.length, 1);
 	});
@@ -127,12 +144,15 @@ describe("Supervisor Tick health transitions", () => {
 	test("repeated DOWN sends nothing after successful delivery", async () => {
 		const h = harness(observation("DOWN"));
 		await h.monitor.check({ stateRoot: h.stateRoot, now: NOW });
+		await h.monitor.check({ stateRoot: h.stateRoot, now: NOW });
+		strictEqual(h.messages.length, 1);
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "none");
 		strictEqual(h.messages.length, 1);
 	});
 
-	test("DOWN to HEALTHY sends one recovery", async () => {
+	test("DOWN to HEALTHY sends one recovery once DOWN was delivered", async () => {
 		const h = harness(observation("DOWN"));
+		await h.monitor.check({ stateRoot: h.stateRoot, now: NOW });
 		await h.monitor.check({ stateRoot: h.stateRoot, now: NOW });
 		h.setObservation(observation("HEALTHY"));
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "sent");
@@ -147,8 +167,9 @@ describe("Supervisor Tick health transitions", () => {
 		deepStrictEqual(h.messages, []);
 	});
 
-	test("failed send leaves the DOWN transition retryable", async () => {
+	test("failed send leaves the debounced DOWN transition retryable", async () => {
 		const h = harness(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
 		h.failNextSend();
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "sent");
@@ -156,13 +177,15 @@ describe("Supervisor Tick health transitions", () => {
 		strictEqual(h.successfulMessages, 1);
 	});
 
-	test("shared throttle leaves the DOWN transition pending", async () => {
+	test("shared throttle leaves the debounced DOWN transition pending", async () => {
 		const h = harness(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
 		h.setAllowed(false);
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
 		deepStrictEqual(h.messages, []);
 		h.setAllowed(true);
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "sent");
+		strictEqual(h.messages.length, 1);
 	});
 
 	test("UNKNOWN does not alert or mutate persisted state", async () => {
@@ -187,11 +210,16 @@ describe("Supervisor Tick health transitions", () => {
 			sendMessage: async (text) => {
 				messages.push(text);
 			},
-			writeState: () => {
+			writeState: (path, value) => {
 				writes++;
-				if (writes === 2) throw new Error("disk full");
+				// write #1 = observation 1, #2 = observation 2, #3 = post-send ack.
+				if (writes === 3) throw new Error("disk full");
+				// Persist for real so readState sees the debounce counter advance
+				// (mirrors atomicWriteJson's contract).
+				writeFileSync(path, JSON.stringify(value));
 			},
 		});
+		strictEqual((await monitor.check({ stateRoot, now: NOW })).action, "pending");
 		strictEqual((await monitor.check({ stateRoot, now: NOW })).action, "disabled");
 		strictEqual((await monitor.check({ stateRoot, now: NOW })).action, "disabled");
 		strictEqual(messages.length, 1);

@@ -52,6 +52,8 @@ type PersistedSupervisorTickHealth = {
 	lastNotifiedAt?: string;
 	lastNotifiedEvidence?: SupervisorTickSnapshot;
 	lastNotifiedReason?: string;
+	/** Consecutive DOWN observations seen. Used for the 2-observation debounce. */
+	consecutiveDown?: number;
 };
 
 type ExecFile = (
@@ -68,6 +70,16 @@ export type SupervisorTickHealthCheckResult = {
 const HEALTH_STATE_FILE = "supervisor-tick-health.json";
 const NEXT_RUN_HORIZON_MS = 75 * 60_000;
 const QUERY_TIMEOUT_MS = 10_000;
+
+/**
+ * A single DOWN observation must not alert. Queued (the normal state between
+ * a trigger firing and execution starting), a wake-from-suspend, or a slow
+ * WMI query could each be captured at the wrong instant; two consecutive DOWN
+ * observations are required before alerting. Cost: one 15-minute interval on
+ * a task that runs hourly — free. Recovery stays immediate (a false
+ * "recovered" costs nothing), so it is not debounced.
+ */
+const DOWN_DEBOUNCE_OBSERVATIONS = 2;
 
 function optionalDate(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
@@ -126,7 +138,11 @@ export function classifySupervisorTickSnapshot(
 	if (!snapshot.exists) {
 		return { health: "DOWN", reason: "La tarea no existe.", snapshot };
 	}
-	if (snapshot.state !== "Ready" && snapshot.state !== "Running") {
+	if (
+		snapshot.state !== "Ready" &&
+		snapshot.state !== "Running" &&
+		snapshot.state !== "Queued"
+	) {
 		return {
 			health: "DOWN",
 			reason: `State inesperado: ${snapshot.state ?? "N/A"}.`,
@@ -136,6 +152,8 @@ export function classifySupervisorTickSnapshot(
 
 	// NextRunTime is required because this is specifically the hourly Supervisor
 	// Tick. Logon tasks such as Telegram Bridge legitimately have no next run.
+	// Queued is a healthy state: it is the normal bridge between a trigger
+	// firing and execution starting, so it joins Ready/Running here.
 	if (!snapshot.nextRunTime) {
 		return { health: "DOWN", reason: "NextRunTime no está disponible.", snapshot };
 	}
@@ -251,15 +269,21 @@ export class SupervisorTickHealthMonitor {
 		const path = join(args.stateRoot, HEALTH_STATE_FILE);
 		const previous = readState(path);
 		const observedAt = now.toISOString();
+		const consecutiveDown =
+			observation.health === "DOWN"
+				? (previous?.consecutiveDown ?? 0) + 1
+				: 0;
 		const nextState: PersistedSupervisorTickHealth = {
 			...previous,
 			observedHealth: observation.health,
 			observedAt,
 			evidence: observation.snapshot,
 			reason: observation.reason,
+			consecutiveDown,
 		};
 		const writeState = this.deps.writeState ?? atomicWriteJson;
 
+		// First-ever HEALTHY: baseline only, no message.
 		if (!previous && observation.health === "HEALTHY") {
 			nextState.lastNotifiedHealth = "HEALTHY";
 			nextState.lastNotifiedAt = observedAt;
@@ -269,12 +293,45 @@ export class SupervisorTickHealthMonitor {
 			return { health: observation.health, action: "baseline" };
 		}
 
-		writeState(path, nextState);
-		const lastNotified = previous?.lastNotifiedHealth;
-		if (lastNotified === observation.health) {
+		// No change from what was last notified (repeated HEALTHY, or repeated
+		// DOWN after DOWN was delivered): nothing to report.
+		if (previous?.lastNotifiedHealth === observation.health) {
 			return { health: observation.health, action: "none" };
 		}
-		if (observation.health === "HEALTHY" && lastNotified !== "DOWN") {
+
+		// Recovery: DOWN was delivered, now HEALTHY. Immediate — the cost of a
+		// false "recovered" is zero, so recovery is not debounced.
+		if (
+			observation.health === "HEALTHY" &&
+			previous?.lastNotifiedHealth === "DOWN"
+		) {
+			if (!this.deps.canSend()) {
+				return { health: observation.health, action: "pending" };
+			}
+			try {
+				await this.deps.sendMessage(
+					formatMessage(observation.health, observation.reason, observation.snapshot),
+				);
+			} catch {
+				return { health: observation.health, action: "pending" };
+			}
+			this.deps.onMessageSent();
+			nextState.lastNotifiedHealth = "HEALTHY";
+			nextState.lastNotifiedAt = observedAt;
+			nextState.lastNotifiedEvidence = observation.snapshot;
+			nextState.lastNotifiedReason = observation.reason;
+			try {
+				writeState(path, nextState);
+			} catch {
+				this.disabled = true;
+				return { health: observation.health, action: "disabled" };
+			}
+			return { health: observation.health, action: "sent" };
+		}
+
+		// HEALTHY while DOWN was never delivered (lastNotified is undefined):
+		// record healthy, no message (no spurious recovery).
+		if (observation.health === "HEALTHY") {
 			nextState.lastNotifiedHealth = "HEALTHY";
 			nextState.lastNotifiedAt = observedAt;
 			nextState.lastNotifiedEvidence = observation.snapshot;
@@ -282,10 +339,20 @@ export class SupervisorTickHealthMonitor {
 			writeState(path, nextState);
 			return { health: observation.health, action: "baseline" };
 		}
+
+		// DOWN path. Persist the observation (advancing the debounce counter)
+		// before deciding whether to alert.
+		writeState(path, nextState);
+
+		if (consecutiveDown < DOWN_DEBOUNCE_OBSERVATIONS) {
+			return { health: observation.health, action: "pending" };
+		}
+		if (previous?.lastNotifiedHealth === "DOWN") {
+			return { health: observation.health, action: "none" };
+		}
 		if (!this.deps.canSend()) {
 			return { health: observation.health, action: "pending" };
 		}
-
 		try {
 			await this.deps.sendMessage(
 				formatMessage(observation.health, observation.reason, observation.snapshot),
@@ -294,15 +361,13 @@ export class SupervisorTickHealthMonitor {
 			return { health: observation.health, action: "pending" };
 		}
 		this.deps.onMessageSent();
-		nextState.lastNotifiedHealth = observation.health;
+		nextState.lastNotifiedHealth = "DOWN";
 		nextState.lastNotifiedAt = observedAt;
 		nextState.lastNotifiedEvidence = observation.snapshot;
 		nextState.lastNotifiedReason = observation.reason;
 		try {
 			writeState(path, nextState);
 		} catch {
-			// The Telegram message was sent but cannot be acknowledged. Disable only
-			// this monitor so a later cycle cannot duplicate the transition.
 			this.disabled = true;
 			return { health: observation.health, action: "disabled" };
 		}
