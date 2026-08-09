@@ -70,7 +70,36 @@ if ($Action -eq 'restart') {
   Log 'Restart requested.'
   Start-Sleep -Seconds 2
   Stop-BridgeProcesses
-  Log 'Starting bridge via scripts/start-bridge.ps1'
-  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'scripts/start-bridge.ps1')
-  exit $LASTEXITCODE
+  Log 'Starting bridge via scripts/start-bridge.ps1 (detached)'
+  $startBridge = Join-Path $Root 'scripts/start-bridge.ps1'
+  Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$startBridge) -WindowStyle Hidden
+
+  $pidfile = Join-Path $Root 'bridge.pid'
+  $deadline = (Get-Date).AddSeconds(50)
+  $alivePid = $null
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Path $pidfile) {
+      try {
+        $candidate = [int](Get-Content $pidfile -Raw -ErrorAction Stop).Trim()
+      } catch {
+        $candidate = 0
+      }
+      if ($candidate -gt 0) {
+        $proc = Get-Process -Id $candidate -ErrorAction SilentlyContinue
+        if ($proc) {
+          $alivePid = $candidate
+          break
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+
+  if ($alivePid) {
+    Log "Bridge alive PID $alivePid"
+    exit 0
+  }
+
+  Log 'Bridge did not come up within the deadline (no live pidfile).'
+  exit 1
 }
