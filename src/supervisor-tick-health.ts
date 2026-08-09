@@ -296,6 +296,12 @@ export class SupervisorTickHealthMonitor {
 		// No change from what was last notified (repeated HEALTHY, or repeated
 		// DOWN after DOWN was delivered): nothing to report.
 		if (previous?.lastNotifiedHealth === observation.health) {
+			// Persist anyway: the debounce counter must reset on HEALTHY and the
+			// observedAt/evidence must stay fresh during steady state. Without
+			// this, a HEALTHY check discards consecutiveDown=0 and a later
+			// transient DOWN counts against the stale value — two isolated
+			// transients with a clean recovery between them would alert.
+			writeState(path, nextState);
 			return { health: observation.health, action: "none" };
 		}
 

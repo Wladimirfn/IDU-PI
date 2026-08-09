@@ -167,6 +167,22 @@ describe("Supervisor Tick health transitions", () => {
 		deepStrictEqual(h.messages, []);
 	});
 
+	test("interleaved DOWN recovery resets the debounce counter", async () => {
+		// The full sequence, not a single case: two isolated DOWN transients
+		// with a clean HEALTHY recovery between them must NOT alert as if they
+		// were consecutive. Regression for the reorder that dropped the persist
+		// on the "none" path (consecutiveDown was computed but discarded).
+		const h = harness(observation("HEALTHY"));
+		await h.monitor.check({ stateRoot: h.stateRoot, now: NOW }); // baseline, cd=0
+		h.setObservation(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending"); // cd=1
+		h.setObservation(observation("HEALTHY"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "none"); // resets cd=0
+		h.setObservation(observation("DOWN"));
+		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending"); // cd=1 again
+		deepStrictEqual(h.messages, []);
+	});
+
 	test("failed send leaves the debounced DOWN transition retryable", async () => {
 		const h = harness(observation("DOWN"));
 		strictEqual((await h.monitor.check({ stateRoot: h.stateRoot, now: NOW })).action, "pending");
