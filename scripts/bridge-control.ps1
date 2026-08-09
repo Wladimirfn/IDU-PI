@@ -72,6 +72,14 @@ if ($Action -eq 'restart') {
   Stop-BridgeProcesses
   Log 'Starting bridge via scripts/start-bridge.ps1 (detached)'
   $startBridge = Join-Path $Root 'scripts/start-bridge.ps1'
+  # Record the launch time so we can tell the NEW bridge's pidfile apart from a
+  # stale one. #493: Stop-Process -Force does not run graceful shutdown, so
+  # deletePidfile (src/bridge-pidfile.ts) never fires and the old bridge.pid
+  # survives on disk. Its PID was just freed — if Windows recycles it, the PID
+  # alone would falsely read as alive before the bridge starts. The project
+  # already trusts pidfile mtime freshness for liveness (HEARTBEAT_INTERVAL_MIN
+  # in src/bridge-pidfile.ts); apply the same convention here.
+  $startedAt = Get-Date
   Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$startBridge) -WindowStyle Hidden
 
   $pidfile = Join-Path $Root 'bridge.pid'
@@ -79,16 +87,27 @@ if ($Action -eq 'restart') {
   $alivePid = $null
   while ((Get-Date) -lt $deadline) {
     if (Test-Path $pidfile) {
+      # Reject a stale pidfile: it must have been WRITTEN after we launched.
+      # A recycled PID or a leftover file cannot satisfy this, so a freed-and-
+      # recycled PID cannot produce a false success.
+      $fresh = $false
       try {
-        $candidate = [int](Get-Content $pidfile -Raw -ErrorAction Stop).Trim()
+        $fresh = (Get-Item $pidfile).LastWriteTime -gt $startedAt
       } catch {
-        $candidate = 0
+        $fresh = $false
       }
-      if ($candidate -gt 0) {
-        $proc = Get-Process -Id $candidate -ErrorAction SilentlyContinue
-        if ($proc) {
-          $alivePid = $candidate
-          break
+      if ($fresh) {
+        try {
+          $candidate = [int](Get-Content $pidfile -Raw -ErrorAction Stop).Trim()
+        } catch {
+          $candidate = 0
+        }
+        if ($candidate -gt 0) {
+          $proc = Get-Process -Id $candidate -ErrorAction SilentlyContinue
+          if ($proc) {
+            $alivePid = $candidate
+            break
+          }
         }
       }
     }
@@ -100,6 +119,6 @@ if ($Action -eq 'restart') {
     exit 0
   }
 
-  Log 'Bridge did not come up within the deadline (no live pidfile).'
+  Log 'Bridge did not come up within the deadline (no fresh live pidfile).'
   exit 1
 }

@@ -8,7 +8,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { execFile as execFileCb, execSync as execSyncCb } from "node:child_process";
+import { execFile as execFileCb, execSync as execSyncCb, spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -227,6 +227,41 @@ test("restart reports failure (exit 1) when the bridge does not come up (no live
 			`restart must not claim success when the bridge failed to come up, got: ${result.stdout}`,
 		);
 	} finally {
+		cleanup();
+	}
+});
+
+test("restart does not falsely report success on a stale pidfile with a live (recycled) PID", async () => {
+	// Reproduces the #493 false-success hole: Stop-Process -Force does not run
+	// graceful shutdown, so deletePidfile never fires and the old bridge.pid
+	// survives on disk. Its PID was just freed — if Windows recycles it, the
+	// PID alone reads as alive. We pre-seed a STALE bridge.pid pointing at a
+	// live dummy process, and the fake bridge never comes up (no fresh
+	// pidfile). The mtime-freshness check must reject the stale file and exit
+	// 1; the old Get-Process-only logic would falsely exit 0.
+	const { root, fakeBin, cleanup } = buildFakeRoot({ fakeKind: "no-pidfile" });
+	const dummy = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+		detached: true,
+		stdio: "ignore",
+		windowsHide: true,
+	});
+	const dummyPid = dummy.pid;
+	writeFileSync(join(root, "bridge.pid"), String(dummyPid), "utf8");
+	try {
+		const result = await runScript(join(root, "scripts", "bridge-control.ps1"), fakeBin);
+		assert.equal(
+			result.code,
+			1,
+			`restart must NOT report success on a stale pidfile with a live recycled PID, got ${result.code}; stdout=${result.stdout}`,
+		);
+		assert.doesNotMatch(
+			result.stdout,
+			/Bridge alive/u,
+			`restart must not claim success when only a stale pidfile is present, got: ${result.stdout}`,
+		);
+	} finally {
+		if (dummyPid) hardKillProcessTree(dummyPid);
+		killRootProcesses(root, []);
 		cleanup();
 	}
 });
