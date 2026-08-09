@@ -21,6 +21,7 @@ import {
 	formatFindingCloseMessage,
 	formatBugFindingDetail,
 } from "./escalation-delivery.js";
+import { SupervisorTickHealthMonitor } from "./supervisor-tick-health.js";
 import {
 	AgentRouter,
 	formatAgentProfiles,
@@ -3960,28 +3961,64 @@ let deliveryDisabled = false;
 let deliveryMessagesSent = 0;
 let deliveryHourStart = Date.now();
 
-async function runEscalationDelivery(): Promise<void> {
-	// LOCK: a previous cycle couldn't write the delivery log. Stop.
-	if (deliveryDisabled) return;
-
-	const repoRoot = resolvePackageRoot();
-	const flagPath = join(repoRoot, "escalation-delivery.json");
-	if (!existsSync(flagPath)) return; // default OFF
+function isEscalationDeliveryEnabled(): boolean {
+	const flagPath = join(resolvePackageRoot(), "escalation-delivery.json");
+	if (!existsSync(flagPath)) return false;
 	try {
 		const flag = JSON.parse(readFileSync(flagPath, "utf8")) as {
 			enabled?: boolean;
 		};
-		if (flag.enabled !== true) return;
+		return flag.enabled === true;
 	} catch {
-		return;
+		return false;
 	}
+}
 
-	// IN-MEMORY CEILING: reset on hour boundary, then enforce.
+function hasDeliveryBudget(): boolean {
 	if (Date.now() - deliveryHourStart > 3600_000) {
 		deliveryMessagesSent = 0;
 		deliveryHourStart = Date.now();
 	}
-	if (deliveryMessagesSent >= MAX_MESSAGES_PER_HOUR) return;
+	return deliveryMessagesSent < MAX_MESSAGES_PER_HOUR;
+}
+
+const supervisorTickHealthMonitor = new SupervisorTickHealthMonitor({
+	canSend: hasDeliveryBudget,
+	sendMessage: async (text) => {
+		await bot.api.sendMessage(config.allowedUserId, text);
+	},
+	onMessageSent: () => {
+		deliveryMessagesSent++;
+	},
+});
+
+async function runSupervisorTickHealthCheck(): Promise<void> {
+	if (!isEscalationDeliveryEnabled() || !config.allowedUserId) return;
+	const stateRoot = activeProjectStateRoot();
+	if (!stateRoot) return;
+	// The bridge watches the tick. If this bridge dies, tick-health reporting
+	// also dies; the existing bridge pidfile/TUI liveness is the watcher of this
+	// watcher. This improves today's coverage without recursive supervision.
+	await supervisorTickHealthMonitor.check({ stateRoot });
+}
+
+async function runDeliveryChecks(): Promise<void> {
+	await runEscalationDelivery().catch((e) =>
+		console.error("[A1e] delivery check failed:", e),
+	);
+	await runSupervisorTickHealthCheck().catch((e) =>
+		console.error("[tick-health] scheduler check failed:", e),
+	);
+}
+
+async function runEscalationDelivery(): Promise<void> {
+	// LOCK: a previous cycle couldn't write the delivery log. Stop.
+	if (deliveryDisabled) return;
+
+	if (!isEscalationDeliveryEnabled()) return; // default OFF
+
+	// IN-MEMORY CEILING: reset on hour boundary, then enforce.
+	if (!hasDeliveryBudget()) return;
 
 	const chatId = config.allowedUserId;
 	if (!chatId) return;
@@ -4102,13 +4139,9 @@ void bot.start({
 		// A1e: opt-in escalation delivery to Telegram. Default OFF.
 		// Fire immediately on startup (catch anything that accumulated
 		// while the bridge was down), then every DELIVERY_CHECK_INTERVAL_MIN.
-		void runEscalationDelivery().catch((e) =>
-			console.error("[A1e] delivery check failed:", e),
-		);
+		void runDeliveryChecks();
 		const deliveryTimer = setInterval(() => {
-			void runEscalationDelivery().catch((e) =>
-				console.error("[A1e] delivery check failed:", e),
-			);
+			void runDeliveryChecks();
 		}, DELIVERY_CHECK_INTERVAL_MIN * 60_000);
 		deliveryTimer.unref();
 	},
