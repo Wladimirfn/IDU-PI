@@ -158,6 +158,7 @@ const EXPECTED_CATALOG: readonly string[] = [
 	"idu-supervisor-learning-rules-status",
 	"idu-supervisor-learning-rules-test",
 	"idu-supervisor-tick",
+	"idu-supervisor-tick-last",
 	"idu-supervisor-trigger",
 	"idu-supervisor-responses",
 	"idu-task",
@@ -241,6 +242,7 @@ const EXPECTED_CATALOG: readonly string[] = [
 	"supervisor-learning-rules-status",
 	"supervisor-learning-rules-test",
 	"supervisor-tick",
+	"supervisor-tick-last",
 	"supervisor-trigger",
 	"supervisor-responses",
 	"task",
@@ -278,7 +280,7 @@ function parseCaseLabels(src: string): string[] {
 	return labels;
 }
 
-test("cli.ts command catalog: 223 case labels, set frozen", () => {
+test("cli.ts command catalog: 225 case labels, set frozen", () => {
 	const cli = readFileSync(
 		join(process.cwd(), "src", "cli.ts"),
 		"utf8",

@@ -305,6 +305,7 @@ Nada se aplica automáticamente.
 | Comando | Uso |
 | --- | --- |
 | `idu-pi idu-supervisor-tick` | Ejecuta ciclo supervisor seguro si `/idu` está activo. |
+| `idu-pi idu-supervisor-tick-last [--log <ruta>] [--verbose]` | Resumen compacto del último tick leído del `supervisor-tick.log` (usa `IDU_PI_TICK_LOG` o `--log`). No toca el tick en vivo. |
 
 El tick puede observar, auditar, compactar y proponer. No aplica cambios críticos sin aprobación humana.
 

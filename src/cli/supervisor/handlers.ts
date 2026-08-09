@@ -48,6 +48,12 @@ import {
 	getSupervisorTriggerStatus,
 } from "../../supervisor-trigger.js";
 import { formatLiveness } from "../../liveness-check.js";
+import { existsSync, readFileSync } from "node:fs";
+import {
+	formatLastTick,
+	parseLastTick,
+	TickParseError,
+} from "../../supervisor-tick-last.js";
 
 export async function handleRunCronPreflight(
 	runtime: CliRuntime,
@@ -135,6 +141,53 @@ export function handleSupervisorTick(runtime: CliRuntime): CliResult {
 	return ok(
 		runtime.formatSupervisorTick(runtime.supervisorTick()),
 	);
+}
+
+export function handleSupervisorTickLast(rest: string[] = []): CliResult {
+	// Issue #424. Read-only: parses the LAST COMPLETE tick from the
+	// configured supervisor-tick.log and renders a compact hierarchy.
+	// Does not touch the live tick output.
+	//
+	// Log resolution is CONFIGURABLE ONLY (--log or IDU_PI_TICK_LOG).
+	// No default: since #483 the tick writes to the deploy's log, not the
+	// CLI checkout's, whose supervisor-tick.log is frozen. Silently
+	// defaulting to the checkout log would report a stale tick as current
+	// (the #490 family). If neither is set, fail with an actionable error.
+	const verbose = rest.includes("--verbose");
+	let logPath: string | undefined;
+	const logIdx = rest.indexOf("--log");
+	if (logIdx >= 0) {
+		const value = rest[logIdx + 1];
+		if (typeof value === "string" && value.length > 0) logPath = value;
+	}
+	logPath = logPath ?? process.env.IDU_PI_TICK_LOG?.trim();
+	if (!logPath) {
+		return fail(
+			"No configuraste el log del tick (IDU_PI_TICK_LOG o --log).\n\n" +
+				"El tick ya no escribe en el log del checkout del CLI: desde el PR #483 corre desde el " +
+				"directorio de deploy, y el supervisor-tick.log del checkout quedó congelado. " +
+				"Leer ese log daría el último tick viejo (p. ej. de hace días) y lo reportaría como si fuera " +
+				"el actual — una mentira silenciosa.\n\n" +
+				"Establecé la variable IDU_PI_TICK_LOG apuntando al supervisor-tick.log del deploy (la ruta " +
+				"real de tu máquina) o pasá --log <ruta>.",
+		);
+	}
+	if (!existsSync(logPath)) {
+		return fail(`No existe el archivo de log del tick: ${logPath}`);
+	}
+	let text: string;
+	try {
+		text = readFileSync(logPath, "utf8");
+	} catch (err) {
+		return fail(`No pude leer el log del tick (${logPath}): ${(err as Error).message}`);
+	}
+	try {
+		const tick = parseLastTick(text);
+		return ok(formatLastTick(tick, { verbose }));
+	} catch (err) {
+		if (err instanceof TickParseError) return fail(err.message);
+		throw err;
+	}
 }
 
 export function handleSupervisorImprovementsReview(

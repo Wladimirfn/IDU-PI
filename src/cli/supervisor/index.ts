@@ -14,6 +14,7 @@ export {
 	handleCheckUserEscalation,
 	handleCheckLiveness,
 	handleSupervisorTick,
+	handleSupervisorTickLast,
 	handleSupervisorImprovementsReview,
 	handleSupervisorImprovementsCreate,
 	handleSupervisorImprovementsStatus,
