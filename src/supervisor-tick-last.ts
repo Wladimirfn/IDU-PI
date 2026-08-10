@@ -130,7 +130,8 @@ export function parseLastTick(logText: string): LastTick {
 
 	if (!startedAt) {
 		throw new TickParseError("El último tick no tiene timestamp legible en su inicio.");
-	}	if (automaticov1 === undefined) {
+	}
+	if (automaticov1 === undefined) {
 		throw new TickParseError("El último tick está incompleto: falta automaticov1_exit.");
 	}
 	if (cronExit === undefined) {

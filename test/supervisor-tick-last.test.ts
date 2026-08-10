@@ -104,6 +104,11 @@ test("lenient parse: watermark + unknown cron field + unknown output field don't
 });
 
 test("formatting: first line is timestamp+age; three lines in order", () => {
+	// TZ WARNING: the display comes from the log line's own wall-clock
+	// components (startedAtWall), NOT from host-local Date getters. This
+	// test passes green with the TZ bug reverted on any -04:00 machine —
+	// only a UTC runner (CI) catches it. Do not "simplify" back to
+	// formatTimestamp(local getters).
 	const log = buildLog(buildTick(START_TS, { changedFiles: 3, sensorImpulses: 3 }));
 	const tick = parseLastTick(log);
 	const out = formatLastTick(tick, { now: new Date(NOW_TS) });
@@ -144,6 +149,62 @@ test("incomplete last block (missing cron_preflight_exit) → fail hard", () => 
 
 test("log with no tick block at all → fail hard", () => {
 	assert.throws(() => parseLastTick("irrelevant noise line\n"), TickParseError);
+});
+
+// --- Fail-hard guards: EVERY required field has a live test ------------------
+// Audit #495: only 3 of 8 guards had coverage. The automaticov1_exit guard
+// is not theoretical — it fires on 1 of 45 real blocks in the deploy log.
+// Mutating any of these guards to `?? 0` must kill one of these tests.
+// Each test pins the guard's message so we know WHICH guard fires; if a
+// case ever throws a different guard's message, that is a real hole, not a
+// test to adjust.
+
+function throwsGuard(fn: () => unknown, msg: RegExp): void {
+	assert.throws(fn, (err: unknown) => err instanceof TickParseError && msg.test((err as Error).message));
+}
+
+test("bloque sin automaticov1_exit → fail hard", () => {
+	const mangled = buildTick(START_TS, {})
+		.filter((l) => !l.includes("automaticov1_exit="))
+		.join("\n");
+	throwsGuard(() => parseLastTick(mangled), /falta automaticov1_exit/);
+});
+
+test("bloque sin changed_files (solo ese token) → fail hard", () => {
+	// Remove ONLY the token, keeping cron_preflight_exit=0, so the guard
+	// under test is the changed_files one and not the cron one.
+	const mangled = buildLog(buildTick(START_TS, {})).replace(" changed_files=0", "");
+	throwsGuard(() => parseLastTick(mangled), /falta changed_files/);
+});
+
+test("bloque sin sensorImpulses (solo ese token) → fail hard", () => {
+	const mangled = buildLog(buildTick(START_TS, {})).replace(" sensorImpulses=0", "");
+	throwsGuard(() => parseLastTick(mangled), /falta sensorImpulses/);
+});
+
+test("bloque sin línea user_escalation_output → fail hard", () => {
+	const mangled = buildTick(START_TS, {})
+		.filter((l) => !l.includes("user_escalation_output:"))
+		.join("\n");
+	throwsGuard(() => parseLastTick(mangled), /falta la línea de user_escalation/);
+});
+
+test("bloque con timestamp ilegible en la línea de inicio → fail hard", () => {
+	// Keeps interval_minutes= (the marker guard does NOT fire); the guard
+	// under test is the timestamp one.
+	const mangled = buildTick(START_TS, {})
+		.map((l) => (l.includes("interval_minutes=") ? l.replace(START_TS, "not-a-timestamp") : l))
+		.join("\n");
+	throwsGuard(() => parseLastTick(mangled), /no tiene timestamp legible/);
+});
+
+test("bloque sin línea interval_minutes → fail hard (guard del marcador)", () => {
+	// The STEP line remains but has no `interval_minutes=` — this case
+	// documents that the START-MARKER guard fires here, not the timestamp one.
+	const mangled = buildTick(START_TS, {})
+		.filter((l) => !l.includes("interval_minutes=60 trigger_engine=0"))
+		.join("\n");
+	throwsGuard(() => parseLastTick(mangled), /no hay ningún bloque de tick/);
 });
 
 test("actionable: info hygiene/objective_reminder are NOT actionable", () => {
