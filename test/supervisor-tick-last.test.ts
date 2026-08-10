@@ -13,6 +13,13 @@ import {
 const START_TS = "2026-08-09T14:46:48-04:00";
 const NOW_TS = "2026-08-09T14:49:48-04:00";
 
+// Hermetic env for the in-process CLI: loadConfig fails fast with
+// "Missing required env var: DEFAULT_CWD" (#487) before the handler can
+// run. Locally a developer shell already has it; clean CI does not.
+// Point it at a temp dir so the tests never touch the real checkout.
+process.env.DEFAULT_CWD = process.env.DEFAULT_CWD ?? join(tmpdir(), "tick-last-cwd");
+process.env.ALLOWED_ROOTS = process.env.ALLOWED_ROOTS ?? process.env.DEFAULT_CWD;
+
 function makeTempLog(content: string): string {
 	const dir = mkdtempSync(join(tmpdir(), "tick-last-"));
 	const path = join(dir, "supervisor-tick.log");

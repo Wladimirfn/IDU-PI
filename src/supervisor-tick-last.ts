@@ -34,8 +34,12 @@ export type TickInjection = {
 };
 
 export type LastTick = {
-	/** Timestamp of the tick start (the `interval_minutes=` line). */
+	/** Absolute instant of the tick start — used only for age math. */
 	startedAt: Date;
+	/** Wall-clock rendering captured from the log line itself
+	 *  ("YYYY-MM-DD HH:mm"). Display must NOT depend on the host timezone:
+	 *  the log's own wall time is what the operator saw. */
+	startedAtWall: string;
 	automaticov1Exit: number;
 	cronPreflightExit: number;
 	changedFiles: number;
@@ -65,13 +69,20 @@ const ESCALATION_RE = /User escalation: shouldEscalate=(\w+) critical=(\d+) tota
  *  never double-counted as an extra injection. */
 const INJECTION_RE = /-\s+([a-zA-Z0-9_]+)\s+severity=(\w+)/g;
 const RESIDUAL_RE = /cron_preflight_output:|pending_injections_query:|user_escalation_output:/;
-const TIMESTAMP_RE = /(\d{4}-\d{2}-\d{2}T[\d:.]+[+\-]\d{2}:\d{2})/;
+const TIMESTAMP_RE =
+	/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})[:\d.]*([+\-]\d{2}:\d{2})/;
 
-function parseTimestamp(line: string): Date | undefined {
+type ParsedTimestamp = { at: Date; wall: string };
+
+function parseTimestamp(line: string): ParsedTimestamp | undefined {
 	const m = line.match(TIMESTAMP_RE);
 	if (!m) return undefined;
-	const d = new Date(m[1]);
-	return Number.isNaN(d.getTime()) ? undefined : d;
+	const d = new Date(m[0]);
+	if (Number.isNaN(d.getTime())) return undefined;
+	// Wall clock comes from the log string, never from local getters:
+	// a Date rendered with getHours()/etc. shifts with the host timezone
+	// (CI rendered 18:46 for a 14:46 -04:00 tick and broke the test).
+	return { at: d, wall: `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}` };
 }
 
 function numeric(text: string, re: RegExp): number | undefined {
@@ -119,8 +130,7 @@ export function parseLastTick(logText: string): LastTick {
 
 	if (!startedAt) {
 		throw new TickParseError("El último tick no tiene timestamp legible en su inicio.");
-	}
-	if (automaticov1 === undefined) {
+	}	if (automaticov1 === undefined) {
 		throw new TickParseError("El último tick está incompleto: falta automaticov1_exit.");
 	}
 	if (cronExit === undefined) {
@@ -148,7 +158,8 @@ export function parseLastTick(logText: string): LastTick {
 		.map((l) => l.replace(/^\S+\s/, "").trim());
 
 	return {
-		startedAt,
+		startedAt: startedAt.at,
+		startedAtWall: startedAt.wall,
 		automaticov1Exit: automaticov1,
 		cronPreflightExit: cronExit,
 		changedFiles: changed,
@@ -175,14 +186,6 @@ const SEV_LABEL: Record<string, string> = {
 	critical: "crítica",
 	warning: "advertencia",
 };
-
-function pad(n: number): string {
-	return String(n).padStart(2, "0");
-}
-
-function formatTimestamp(d: Date): string {
-	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function formatAge(ms: number): string {
 	const min = Math.floor(ms / 60000);
@@ -218,7 +221,7 @@ export function formatLastTick(
 	const now = opts.now ?? new Date();
 	const lines: string[] = [];
 	lines.push(
-		`último tick: ${formatTimestamp(tick.startedAt)} (${formatAge(now.getTime() - tick.startedAt.getTime())})`,
+		`último tick: ${tick.startedAtWall} (${formatAge(now.getTime() - tick.startedAt.getTime())})`,
 	);
 	lines.push(
 		`automaticov1_exit=${tick.automaticov1Exit} cron_preflight_exit=${tick.cronPreflightExit}`,
