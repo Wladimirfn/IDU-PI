@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { runCliCommand } from "../src/cli.js";
 import {
 	formatLastTick,
@@ -20,6 +20,18 @@ const NOW_TS = "2026-08-09T14:49:48-04:00";
 const HERMETIC_CWD = mkdtempSync(join(tmpdir(), "tick-last-cwd-"));
 process.env.DEFAULT_CWD = process.env.DEFAULT_CWD ?? HERMETIC_CWD;
 process.env.ALLOWED_ROOTS = process.env.ALLOWED_ROOTS ?? HERMETIC_CWD;
+
+// Clean up all tick-last-* temp dirs created by this test file (both the
+// hermetic CWD and the per-test log dirs from makeTempLog). The leak-guard
+// in CI fails the suite if temp entries grow without cleanup.
+after(() => {
+	const entries = readdirSync(tmpdir());
+	for (const entry of entries) {
+		if (entry.startsWith("tick-last-")) {
+			rmSync(join(tmpdir(), entry), { recursive: true, force: true });
+		}
+	}
+});
 
 function makeTempLog(content: string): string {
 	const dir = mkdtempSync(join(tmpdir(), "tick-last-"));
