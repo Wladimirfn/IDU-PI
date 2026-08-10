@@ -141,7 +141,12 @@ test("incomplete last block (truncated, no next_run) → fail hard", () => {
 	assert.throws(() => parseLastTick(truncated), TickParseError);
 });
 
-test("incomplete last block (missing cron_preflight_exit) → fail hard", () => {
+test("incomplete last block (missing whole cron_preflight line) → fail hard", () => {
+	// Removes the ENTIRE cron line (which also carries changed_files=).
+	// This proves a structurally-mangled block fails hard via SOME guard;
+	// it does NOT attribute the throw to the cron guard specifically —
+	// with the cron guard dead, the changed_files guard catches it instead.
+	// Attribution for the cron guard lives in the token-level test below.
 	const lines = buildTick(START_TS, {});
 	const missing = lines.filter((l) => !/cron_preflight_exit=/.test(l)).join("\n");
 	assert.throws(() => parseLastTick(missing), TickParseError);
@@ -168,6 +173,15 @@ test("bloque sin automaticov1_exit → fail hard", () => {
 		.filter((l) => !l.includes("automaticov1_exit="))
 		.join("\n");
 	throwsGuard(() => parseLastTick(mangled), /falta automaticov1_exit/);
+});
+
+test("bloque sin cron_preflight_exit (solo ese token) → fail hard", () => {
+	// Remove ONLY the token, keeping changed_files=0 on the same line.
+	// Line-level filtering also removes changed_files= and would be caught
+	// by that guard instead — killing the cron guard alone stays green
+	// under a line-level test (found by single-guard mutation, audit #495).
+	const mangled = buildLog(buildTick(START_TS, {})).replace("cron_preflight_exit=0 ", "");
+	throwsGuard(() => parseLastTick(mangled), /falta cron_preflight_exit/);
 });
 
 test("bloque sin changed_files (solo ese token) → fail hard", () => {
