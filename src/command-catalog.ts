@@ -839,6 +839,10 @@ export const CLI_COMMANDS: LocalCommandEntry[] = [
 		command: "corepack pnpm cli -- idu-supervisor-tick",
 	},
 	{
+		label: "Idu supervisor tick last",
+		command: "corepack pnpm cli -- idu-supervisor-tick-last --log <ruta-supervisor-tick.log>",
+	},
+	{
 		label: "Supervisor trigger enable",
 		command: "corepack pnpm cli -- idu-supervisor-trigger enable",
 	},

@@ -485,6 +485,7 @@ import {
 	handleCheckUserEscalation,
 	handleCheckLiveness,
 	handleSupervisorTick,
+	handleSupervisorTickLast,
 	handleSupervisorImprovementsReview,
 	handleSupervisorImprovementsCreate,
 	handleSupervisorImprovementsStatus,
@@ -2284,6 +2285,9 @@ async function runCliCommandInner(
 			case "idu-supervisor-tick":
 			case "supervisor-tick":
 				return handleSupervisorTick(activeRuntime);
+			case "idu-supervisor-tick-last":
+			case "supervisor-tick-last":
+				return handleSupervisorTickLast(rest);
 			case "idu-execution-director-tick":
 			case "execution-director-tick":
 				return handleExecutionDirectorTick(activeRuntime);
