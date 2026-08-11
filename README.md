@@ -204,6 +204,16 @@ scripts\stop-bridge.ps1               # detiene el proceso; la tarea sigue regis
 scripts\uninstall-scheduled-task.ps1  # quita el arranque automático
 ```
 
+Para operar el proceso en caliente sin tocar la tarea programada:
+
+```powershell
+scripts\bridge-control.ps1 -Action status    # PID vivo según el pidfile
+scripts\bridge-control.ps1 -Action restart   # relanza en segundo plano y confirma que quedó vivo
+scripts\bridge-control.ps1 -Action stop
+```
+
+`restart` lanza el bridge desacoplado de la consola y después verifica el pidfile: si el proceso no quedó arriba, falla en vez de reportar éxito.
+
 Para levantarlo a mano sin tarea programada, en una ventana que hay que dejar abierta:
 
 ```powershell
@@ -213,6 +223,33 @@ corepack pnpm serve
 ```
 
 **El bridge compila el árbol de trabajo al arrancar.** `start-bridge.ps1` ejecuta `pnpm build` sobre la rama que esté checkouteada, así que si esa rama no compila, el bridge no levanta — tampoco en el siguiente inicio de sesión. Si vas a dejar la máquina sola, dejala en una rama que compile.
+
+### El supervisor tick como tarea programada
+
+El tick es la segunda tarea programada del sistema, separada del bridge: `Idu-pi Supervisor Tick`. Corre el preflight, los sensores y la escalación en un intervalo fijo.
+
+**El tick no corre desde tu checkout de trabajo.** Corre desde un directorio de deploy aparte (`C:\idu-pi-deploy`), clonado y siempre en `main`. Esa separación es deliberada: antes, cualquier rama que tuvieras checkouteada al momento del tick era código de producción — sin CI, sin review, sin merge.
+
+```powershell
+scripts\install-deploy-tick.ps1       # crea el deploy, clona, checkout main, build inicial
+scripts\install-supervisor-tick.ps1   # registra la tarea Idu-pi Supervisor Tick
+scripts\update-deploy-tick.ps1        # pull de main + rebuild — corré esto en cada merge
+scripts\uninstall-supervisor-tick.ps1
+```
+
+Después de instalar el deploy hay que re-registrar la tarea a mano con `WorkingDir: C:\idu-pi-deploy` y acción `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\idu-supervisor-tick-bootstrap.ps1`. La tarea vive en tu máquina, no en el repo: mergear no alcanza.
+
+Si te olvidás de actualizar el deploy después de un merge, el tick sigue corriendo el commit anterior. No se pierden commits — el watermark avanza sólo cuando el preflight tiene éxito — pero los procesa dos veces.
+
+Para leer el resultado del último tick sin abrir el log a mano:
+
+```powershell
+idu-pi idu-supervisor-tick-last --log C:\idu-pi-deploy\logs\supervisor-tick.log
+```
+
+Devuelve timestamp y antigüedad, códigos de salida, archivos vistos y qué requiere acción. Es read-only: no toca el tick en vivo. La ruta del log es configurable a propósito (`--log` o `IDU_PI_TICK_LOG`) y no tiene default, porque el `supervisor-tick.log` del checkout quedó congelado cuando el tick se mudó al deploy: leerlo por defecto reportaría un tick viejo como si fuera el actual.
+
+Detalle completo: [`docs/tick-deployment.md`](docs/tick-deployment.md).
 
 Para configurar MCP y enrolar proyectos externos:
 
@@ -401,6 +438,14 @@ AGENT_WORKSPACE_ROOT=/ruta/absoluta/a/bridge-agents
 AGENT_WORKSPACE_MODE=clone
 ```
 
+Variables opcionales de operación:
+
+| Variable | Para qué |
+| --- | --- |
+| `IDU_PI_DOTENV_PATH` | Ruta absoluta al `.env` único del operador. El directorio de deploy no lleva `.env` propio: resuelve el archivo relativo al módulo compilado, así que sin esta variable arranca y falla con `Missing required env var: DEFAULT_CWD`. Si apunta a un archivo inexistente, falla de entrada con esa ruta en el mensaje en vez de fallar más tarde con un error de config confuso. |
+| `IDU_PI_TICK_LOG` | Ruta al `supervisor-tick.log` que lee `idu-supervisor-tick-last`. Sin esto (o sin `--log`), el comando falla y te dice por qué; no adivina. |
+| `IDU_PI_TRIGGER_ENGINE` | Activa el trigger engine (`1`). Ver [Living Loop Triggers](#living-loop-triggers-opt-in). |
+
 ## Camino inicial recomendado
 
 Desde Telegram:
@@ -443,6 +488,16 @@ corepack pnpm build
 corepack pnpm test
 ```
 
+**`pnpm test` no es lo que corre CI.** La puerta que decide el merge corre:
+
+```bash
+corepack pnpm test:guarded          # tests + leak guard (LEAK_GUARD_THRESHOLD=62)
+corepack pnpm check:protocol-drift
+corepack pnpm check:cluster-drift:verify
+```
+
+El leak guard cuenta las entradas nuevas en el directorio temporal del sistema al terminar la suite y falla con exit 1 aunque no falle ningún test. Un test que crea directorios temporales y no los limpia pasa con `pnpm test` y rompe en CI. Antes de abrir un PR, corré `test:guarded`.
+
 ## Documentación
 
 - [`docs/quickstart-install.md`](docs/quickstart-install.md) — primera instalación segura con bootstrap installer.
@@ -455,6 +510,7 @@ corepack pnpm test
 - [`docs/project-map-workflow.md`](docs/project-map-workflow.md) — workflow de Project Core, blueprint y flows.
 - [`docs/lab-agent-best-practices.md`](docs/lab-agent-best-practices.md) — checklist operativo para AgentLabs.
 - [`docs/living-loop-triggers.md`](docs/living-loop-triggers.md) — bus de eventos, inyecciones, disparadores y activación (`IDU_PI_TRIGGER_ENGINE=1`).
+- [`docs/tick-deployment.md`](docs/tick-deployment.md) — por qué el tick corre desde `C:\idu-pi-deploy` y no desde tu checkout, y cómo mantenerlo en sync.
 
 ## Spec-Driven Development (OpenSpec)
 
