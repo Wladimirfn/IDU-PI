@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { runCliCommand } from "../src/cli.js";
 import {
 	formatLastTick,
@@ -21,8 +21,33 @@ const HERMETIC_CWD = mkdtempSync(join(tmpdir(), "tick-last-cwd-"));
 process.env.DEFAULT_CWD = process.env.DEFAULT_CWD ?? HERMETIC_CWD;
 process.env.ALLOWED_ROOTS = process.env.ALLOWED_ROOTS ?? HERMETIC_CWD;
 
+// Clean up the temp dirs THIS FILE created — tracked by path, never by
+// globbing tmpdir() for a prefix. A prefix sweep deletes directories the
+// run does not own: with two concurrent runs of this file (a mutation
+// battery alongside `pnpm test`), one run empties the other's in-use dirs
+// and the failure surfaces with no visible cause. Measured: a foreign
+// `tick-last-*` dir created before the suite was gone after it.
+// The leak-guard in CI fails the suite if temp entries grow without cleanup.
+const createdTempDirs: string[] = [HERMETIC_CWD];
+
+after(() => {
+	for (const dir of createdTempDirs) {
+		try {
+			rmSync(dir, { recursive: true });
+		} catch (err) {
+			// Not `force: true`: that swallows ENOTEMPTY/EBUSY, which in this
+			// repo is the known shape of a deferred write rehydrating a
+			// directory after teardown. The leak-guard is the enforcement
+			// layer; this line is the diagnosis.
+			const code = (err as NodeJS.ErrnoException).code ?? "UNKNOWN";
+			process.stderr.write(`[tick-last-cleanup] ${code}: ${dir}\n`);
+		}
+	}
+});
+
 function makeTempLog(content: string): string {
 	const dir = mkdtempSync(join(tmpdir(), "tick-last-"));
+	createdTempDirs.push(dir);
 	const path = join(dir, "supervisor-tick.log");
 	writeFileSync(path, content);
 	return path;
@@ -141,7 +166,12 @@ test("incomplete last block (truncated, no next_run) → fail hard", () => {
 	assert.throws(() => parseLastTick(truncated), TickParseError);
 });
 
-test("incomplete last block (missing cron_preflight_exit) → fail hard", () => {
+test("incomplete last block (missing whole cron_preflight line) → fail hard", () => {
+	// Removes the ENTIRE cron line (which also carries changed_files=).
+	// This proves a structurally-mangled block fails hard via SOME guard;
+	// it does NOT attribute the throw to the cron guard specifically —
+	// with the cron guard dead, the changed_files guard catches it instead.
+	// Attribution for the cron guard lives in the token-level test below.
 	const lines = buildTick(START_TS, {});
 	const missing = lines.filter((l) => !/cron_preflight_exit=/.test(l)).join("\n");
 	assert.throws(() => parseLastTick(missing), TickParseError);
@@ -168,6 +198,15 @@ test("bloque sin automaticov1_exit → fail hard", () => {
 		.filter((l) => !l.includes("automaticov1_exit="))
 		.join("\n");
 	throwsGuard(() => parseLastTick(mangled), /falta automaticov1_exit/);
+});
+
+test("bloque sin cron_preflight_exit (solo ese token) → fail hard", () => {
+	// Remove ONLY the token, keeping changed_files=0 on the same line.
+	// Line-level filtering also removes changed_files= and would be caught
+	// by that guard instead — killing the cron guard alone stays green
+	// under a line-level test (found by single-guard mutation, audit #495).
+	const mangled = buildLog(buildTick(START_TS, {})).replace("cron_preflight_exit=0 ", "");
+	throwsGuard(() => parseLastTick(mangled), /falta cron_preflight_exit/);
 });
 
 test("bloque sin changed_files (solo ese token) → fail hard", () => {
