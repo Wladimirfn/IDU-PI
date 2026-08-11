@@ -32,6 +32,31 @@ import { test } from "node:test";
 const execFile = promisify(execFileCb);
 
 const VERIFY_PATH = resolve("scripts/verify-deploy.ps1");
+const SCRIPTS_PATH = resolve("scripts");
+
+const WINDOWS_POWERSHELL_PARSE_ALL = String.raw`
+if ($PSVersionTable.PSVersion.Major -ne 5) {
+	Write-Error ("Expected Windows PowerShell 5.x, got {0}" -f $PSVersionTable.PSVersion)
+	exit 2
+}
+$failures = @()
+Get-ChildItem -LiteralPath $env:IDU_PI_PS_SCRIPTS_PATH -Filter *.ps1 -Recurse | ForEach-Object {
+	$errors = $null
+	$tokens = $null
+	[System.Management.Automation.Language.Parser]::ParseFile(
+		$_.FullName,
+		[ref]$tokens,
+		[ref]$errors
+	) | Out-Null
+	if ($errors.Count -gt 0) {
+		$failures += ("{0}:{1}: {2}" -f $_.FullName, $errors[0].Extent.StartLineNumber, $errors[0].Message)
+	}
+}
+if ($failures.Count -gt 0) {
+	$failures | ForEach-Object { Write-Error $_ }
+	exit 1
+}
+`;
 
 const FAKE_NODE_SHIM = [
 	"@echo off",
@@ -52,6 +77,25 @@ type VerifyResult = {
 	stderr: string;
 	code: number | null;
 };
+
+test("every scripts/*.ps1 file parses under production Windows PowerShell 5.1", async () => {
+	try {
+		await execFile(
+			"powershell.exe",
+			["-NoProfile", "-NonInteractive", "-Command", WINDOWS_POWERSHELL_PARSE_ALL],
+			{
+				env: { ...process.env, IDU_PI_PS_SCRIPTS_PATH: SCRIPTS_PATH },
+				timeout: 30_000,
+				windowsHide: true,
+			},
+		);
+	} catch (err) {
+		const e = err as { stdout?: string; stderr?: string };
+		assert.fail(
+			`PowerShell 5.1 parser rejected scripts/*.ps1:\n${e.stderr ?? e.stdout ?? String(err)}`,
+		);
+	}
+});
 
 function fakeDeployRoot(): {
 	fakeRoot: string;
