@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -21,20 +21,33 @@ const HERMETIC_CWD = mkdtempSync(join(tmpdir(), "tick-last-cwd-"));
 process.env.DEFAULT_CWD = process.env.DEFAULT_CWD ?? HERMETIC_CWD;
 process.env.ALLOWED_ROOTS = process.env.ALLOWED_ROOTS ?? HERMETIC_CWD;
 
-// Clean up all tick-last-* temp dirs created by this test file (both the
-// hermetic CWD and the per-test log dirs from makeTempLog). The leak-guard
-// in CI fails the suite if temp entries grow without cleanup.
+// Clean up the temp dirs THIS FILE created — tracked by path, never by
+// globbing tmpdir() for a prefix. A prefix sweep deletes directories the
+// run does not own: with two concurrent runs of this file (a mutation
+// battery alongside `pnpm test`), one run empties the other's in-use dirs
+// and the failure surfaces with no visible cause. Measured: a foreign
+// `tick-last-*` dir created before the suite was gone after it.
+// The leak-guard in CI fails the suite if temp entries grow without cleanup.
+const createdTempDirs: string[] = [HERMETIC_CWD];
+
 after(() => {
-	const entries = readdirSync(tmpdir());
-	for (const entry of entries) {
-		if (entry.startsWith("tick-last-")) {
-			rmSync(join(tmpdir(), entry), { recursive: true, force: true });
+	for (const dir of createdTempDirs) {
+		try {
+			rmSync(dir, { recursive: true });
+		} catch (err) {
+			// Not `force: true`: that swallows ENOTEMPTY/EBUSY, which in this
+			// repo is the known shape of a deferred write rehydrating a
+			// directory after teardown. The leak-guard is the enforcement
+			// layer; this line is the diagnosis.
+			const code = (err as NodeJS.ErrnoException).code ?? "UNKNOWN";
+			process.stderr.write(`[tick-last-cleanup] ${code}: ${dir}\n`);
 		}
 	}
 });
 
 function makeTempLog(content: string): string {
 	const dir = mkdtempSync(join(tmpdir(), "tick-last-"));
+	createdTempDirs.push(dir);
 	const path = join(dir, "supervisor-tick.log");
 	writeFileSync(path, content);
 	return path;
