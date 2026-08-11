@@ -44,6 +44,6 @@ try {
 }
 
 if ($exitCode -ne 0) {
-	Write-Host "Deployed CLI failed to boot with exit code $exitCode. The deployment is not ready — its config would not load (e.g. missing .env)." -ForegroundColor Red
+	Write-Host "Deployed CLI failed to boot with exit code $exitCode. The deployment is not ready - its config would not load (e.g. missing .env)." -ForegroundColor Red
 	exit $exitCode
 }
