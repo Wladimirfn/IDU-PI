@@ -71,6 +71,7 @@ function seedLabDb(opts: {
 		new_status: string;
 		actor: string;
 		note: string | null;
+		created_at?: string;
 	}>;
 }): string {
 	const projectId = opts.stateRootProjectId;
@@ -123,12 +124,15 @@ function seedLabDb(opts: {
 			e.old_status === null ? "NULL" : `'${e.old_status}'`;
 		const notePart =
 			e.note === null ? "NULL" : `'${e.note.replace(/'/gu, "''")}'`;
+		const createdAtPart = e.created_at
+			? `'${e.created_at.replace(/'/gu, "''")}'`
+			: "datetime('now')";
 		execFileSync(
 			"sqlite3",
 			[
 				db,
-				`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note)
-				 VALUES ('${e.finding_id}', ${oldPart}, '${e.new_status}', '${e.actor}', ${notePart});`,
+				`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note, created_at)
+				 VALUES ('${e.finding_id}', ${oldPart}, '${e.new_status}', '${e.actor}', ${notePart}, ${createdAtPart});`,
 			],
 			{ stdio: "ignore" },
 		);
@@ -171,6 +175,35 @@ describe("buildSupervisorMemory — structural", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildSupervisorMemory — Recent verdicts section", () => {
+	test("keeps newest verdicts first and drops the oldest when the section is truncated", () => {
+		const stateRoot = seedLabDb({
+			stateRootProjectId: 'idu-pi',
+			findings: [{ id: "bf-ordered", severity: "high" }],
+			events: Array.from({ length: 6 }, (_, index) => ({
+				finding_id: "bf-ordered",
+				old_status: "new",
+				new_status: "fixed",
+				actor: `operator-${index}`,
+				note: `verdict-${index}-${"x".repeat(110)}`,
+				created_at: `2026-01-0${index + 1}T00:00:00Z`,
+			})),
+		});
+		const result = buildSupervisorMemory({
+			stateRoot,
+			engramFn: engramFnNull,
+		});
+
+		const newest = result.indexOf("verdict-5-");
+		const nextNewest = result.indexOf("verdict-4-");
+		ok(newest >= 0, `Newest verdict missing. Output:\n${result}`);
+		ok(nextNewest > newest, `Newest verdicts are not first. Output:\n${result}`);
+		ok(
+			!result.includes("verdict-0-"),
+			`Oldest verdict should be dropped first. Output:\n${result}`,
+		);
+		strictEqual(result.split("\n\n")[0]?.split("\n").at(-1), "…");
+	});
+
 	test("appears when finding_status_events has rows for the project", () => {
 		const stateRoot = seedLabDb({
 			stateRootProjectId: 'idu-pi',
