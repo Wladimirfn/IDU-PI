@@ -10,7 +10,10 @@ import { strictEqual, ok } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { buildSupervisorMemory } from "../src/supervisor-memory.js";
+import {
+	buildSupervisorMemory,
+	joinSupervisorMemorySections,
+} from "../src/supervisor-memory.js";
 import { buildConsultPrompt } from "../src/supervisor-consult.js";
 import { makeTempDir } from "./helpers/temp.js";
 
@@ -507,6 +510,51 @@ describe("buildSupervisorMemory — section ordering", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildSupervisorMemory — budget enforcement", () => {
+	test("three saturated sections fit the 2000-char budget including separators", () => {
+		const result = joinSupervisorMemorySections([
+			`## Project narrative (from Engram)\n${Array(2000).fill("E").join("\n")}`,
+			`## Recent verdicts\n${Array(2000).fill("V").join("\n")}`,
+			`## Open findings (excluding fixed/ignored)\n${Array(2000).fill("O").join("\n")}`,
+		]);
+		const sectionLengths = result.split("\n\n").map((section) => section.length);
+
+		ok(result.includes("## Project narrative (from Engram)"));
+		ok(result.includes("## Recent verdicts"));
+		ok(result.includes("## Open findings (excluding fixed/ignored)"));
+		strictEqual(sectionLengths.length, 3);
+		ok(sectionLengths[0] <= 798, `Engram allocation ignored separator: ${sectionLengths[0]}`);
+		ok(sectionLengths[1] <= 698, `Verdict allocation ignored separator: ${sectionLengths[1]}`);
+		ok(sectionLengths[2] <= 500, `Open-findings allocation exceeded: ${sectionLengths[2]}`);
+		ok(
+			result.length <= 2000,
+			`Section allocations plus separators exceeded the budget: ${result.length}/2000`,
+		);
+	});
+
+	test("truncated verdicts keep complete newest-first entries", () => {
+		const verdictLines = Array.from(
+			{ length: 8 },
+			(_, index) => `verdict-${index}: ${"x".repeat(180)}`,
+		);
+		const result = joinSupervisorMemorySections([
+			null,
+			`## Recent verdicts\n${verdictLines.join("\n")}`,
+			null,
+		]);
+		const lines = result.split("\n");
+
+		strictEqual(lines[0], "## Recent verdicts");
+		strictEqual(lines.at(-1), "…");
+		ok(lines.includes(verdictLines[0]), "newest verdict must survive");
+		ok(!lines.includes(verdictLines.at(-1) ?? ""), "oldest verdict should be dropped first");
+		for (const line of lines.slice(1, -1)) {
+			ok(
+				verdictLines.includes(line),
+				`Truncation produced a partial verdict line: ${line}`,
+			);
+		}
+	});
+
 	test("REGRESSION: total never exceeds MEMORY_BUDGET_CHARS (2000)", () => {
 		// Generate huge Engram output to stress the budget.
 		const huge = Array(100).fill(
@@ -550,6 +598,11 @@ describe("buildSupervisorMemory — budget enforcement", () => {
 		});
 		ok(result.includes("## Project narrative"));
 		ok(result.length <= 2000);
+		strictEqual(
+			result.split("\n").at(-1),
+			"…",
+			"truncated Engram narrative must disclose omission with a standalone ellipsis",
+		);
 	});
 });
 // ---------------------------------------------------------------------------
