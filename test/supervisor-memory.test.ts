@@ -10,7 +10,10 @@ import { strictEqual, ok } from "node:assert";
 import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { buildSupervisorMemory } from "../src/supervisor-memory.js";
+import {
+	buildSupervisorMemory,
+	joinSupervisorMemorySections,
+} from "../src/supervisor-memory.js";
 import { buildConsultPrompt } from "../src/supervisor-consult.js";
 import { makeTempDir } from "./helpers/temp.js";
 
@@ -68,6 +71,7 @@ function seedLabDb(opts: {
 		new_status: string;
 		actor: string;
 		note: string | null;
+		created_at?: string;
 	}>;
 }): string {
 	const projectId = opts.stateRootProjectId;
@@ -120,12 +124,15 @@ function seedLabDb(opts: {
 			e.old_status === null ? "NULL" : `'${e.old_status}'`;
 		const notePart =
 			e.note === null ? "NULL" : `'${e.note.replace(/'/gu, "''")}'`;
+		const createdAtPart = e.created_at
+			? `'${e.created_at.replace(/'/gu, "''")}'`
+			: "datetime('now')";
 		execFileSync(
 			"sqlite3",
 			[
 				db,
-				`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note)
-				 VALUES ('${e.finding_id}', ${oldPart}, '${e.new_status}', '${e.actor}', ${notePart});`,
+				`INSERT INTO finding_status_events (finding_id, old_status, new_status, actor, note, created_at)
+				 VALUES ('${e.finding_id}', ${oldPart}, '${e.new_status}', '${e.actor}', ${notePart}, ${createdAtPart});`,
 			],
 			{ stdio: "ignore" },
 		);
@@ -168,6 +175,35 @@ describe("buildSupervisorMemory — structural", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildSupervisorMemory — Recent verdicts section", () => {
+	test("keeps newest verdicts first and drops the oldest when the section is truncated", () => {
+		const stateRoot = seedLabDb({
+			stateRootProjectId: 'idu-pi',
+			findings: [{ id: "bf-ordered", severity: "high" }],
+			events: Array.from({ length: 6 }, (_, index) => ({
+				finding_id: "bf-ordered",
+				old_status: "new",
+				new_status: "fixed",
+				actor: `operator-${index}`,
+				note: `verdict-${index}-${"x".repeat(110)}`,
+				created_at: `2026-01-0${index + 1}T00:00:00Z`,
+			})),
+		});
+		const result = buildSupervisorMemory({
+			stateRoot,
+			engramFn: engramFnNull,
+		});
+
+		const newest = result.indexOf("verdict-5-");
+		const nextNewest = result.indexOf("verdict-4-");
+		ok(newest >= 0, `Newest verdict missing. Output:\n${result}`);
+		ok(nextNewest > newest, `Newest verdicts are not first. Output:\n${result}`);
+		ok(
+			!result.includes("verdict-0-"),
+			`Oldest verdict should be dropped first. Output:\n${result}`,
+		);
+		strictEqual(result.split("\n\n")[0]?.split("\n").at(-1), "…");
+	});
+
 	test("appears when finding_status_events has rows for the project", () => {
 		const stateRoot = seedLabDb({
 			stateRootProjectId: 'idu-pi',
@@ -507,6 +543,51 @@ describe("buildSupervisorMemory — section ordering", () => {
 // ---------------------------------------------------------------------------
 
 describe("buildSupervisorMemory — budget enforcement", () => {
+	test("three saturated sections fit the 2000-char budget including separators", () => {
+		const result = joinSupervisorMemorySections([
+			`## Project narrative (from Engram)\n${Array(2000).fill("E").join("\n")}`,
+			`## Recent verdicts\n${Array(2000).fill("V").join("\n")}`,
+			`## Open findings (excluding fixed/ignored)\n${Array(2000).fill("O").join("\n")}`,
+		]);
+		const sectionLengths = result.split("\n\n").map((section) => section.length);
+
+		ok(result.includes("## Project narrative (from Engram)"));
+		ok(result.includes("## Recent verdicts"));
+		ok(result.includes("## Open findings (excluding fixed/ignored)"));
+		strictEqual(sectionLengths.length, 3);
+		ok(sectionLengths[0] <= 798, `Engram allocation ignored separator: ${sectionLengths[0]}`);
+		ok(sectionLengths[1] <= 698, `Verdict allocation ignored separator: ${sectionLengths[1]}`);
+		ok(sectionLengths[2] <= 500, `Open-findings allocation exceeded: ${sectionLengths[2]}`);
+		ok(
+			result.length <= 2000,
+			`Section allocations plus separators exceeded the budget: ${result.length}/2000`,
+		);
+	});
+
+	test("truncated verdicts keep complete newest-first entries", () => {
+		const verdictLines = Array.from(
+			{ length: 8 },
+			(_, index) => `verdict-${index}: ${"x".repeat(180)}`,
+		);
+		const result = joinSupervisorMemorySections([
+			null,
+			`## Recent verdicts\n${verdictLines.join("\n")}`,
+			null,
+		]);
+		const lines = result.split("\n");
+
+		strictEqual(lines[0], "## Recent verdicts");
+		strictEqual(lines.at(-1), "…");
+		ok(lines.includes(verdictLines[0]), "newest verdict must survive");
+		ok(!lines.includes(verdictLines.at(-1) ?? ""), "oldest verdict should be dropped first");
+		for (const line of lines.slice(1, -1)) {
+			ok(
+				verdictLines.includes(line),
+				`Truncation produced a partial verdict line: ${line}`,
+			);
+		}
+	});
+
 	test("REGRESSION: total never exceeds MEMORY_BUDGET_CHARS (2000)", () => {
 		// Generate huge Engram output to stress the budget.
 		const huge = Array(100).fill(
@@ -550,6 +631,11 @@ describe("buildSupervisorMemory — budget enforcement", () => {
 		});
 		ok(result.includes("## Project narrative"));
 		ok(result.length <= 2000);
+		strictEqual(
+			result.split("\n").at(-1),
+			"…",
+			"truncated Engram narrative must disclose omission with a standalone ellipsis",
+		);
 	});
 });
 // ---------------------------------------------------------------------------

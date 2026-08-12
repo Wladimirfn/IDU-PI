@@ -102,10 +102,9 @@ function defaultEngramQuery(
 	}
 }
 
-function compactEngram(raw: string, maxChars: number): string {
+function compactEngram(raw: string): string {
 	const lines = raw.split("\n");
 	const compact: string[] = [];
-	let used = 0;
 	for (const line of lines) {
 		const isTitle =
 			line.includes("—") &&
@@ -113,9 +112,7 @@ function compactEngram(raw: string, maxChars: number): string {
 		const isContent =
 			line.trim().startsWith("**") || line.trim().length > 20;
 		if (!isTitle && !isContent) continue;
-		if (used + line.length > maxChars) break;
 		compact.push(line.trim());
-		used += line.length + 1;
 	}
 	return compact.join("\n");
 }
@@ -258,7 +255,7 @@ export function buildSupervisorMemory(input: {
 		3,
 	);
 	const engram = engramRaw
-		? `## Project narrative (from Engram)\n${compactEngram(engramRaw, ENGRAM_SECTION_CHARS)}`
+		? `## Project narrative (from Engram)\n${compactEngram(engramRaw)}`
 		: null;
 
 	// Section 2: recent verdicts
@@ -273,7 +270,7 @@ export function buildSupervisorMemory(input: {
 		? `## Open findings (excluding fixed/ignored)\n${openSummaryRaw}`
 		: null;
 
-	return joinSections([engram, verdicts, openSummary]);
+	return joinSupervisorMemorySections([engram, verdicts, openSummary]);
 }
 
 /**
@@ -288,22 +285,51 @@ export function buildSupervisorMemory(input: {
  *
  * Total budget: 2000. Sum of allocations: 2000.
  */
-function joinSections(sections: Array<string | null>): string {
+export function joinSupervisorMemorySections(
+	sections: Array<string | null>,
+): string {
 	const limits = [
 		ENGRAM_SECTION_CHARS,
 		VERDICTS_SECTION_CHARS,
 		OPEN_FINDINGS_SECTION_CHARS,
 	];
+	const presentIndexes = sections
+		.map((section, index) => (section ? index : -1))
+		.filter((index) => index >= 0);
 	const kept: string[] = [];
 	for (let i = 0; i < sections.length; i++) {
 		const s = sections[i];
 		if (!s) continue;
-		const limit = limits[i] ?? 0;
-		if (s.length <= limit) {
-			kept.push(s);
-		} else {
-			kept.push(s.substring(0, limit - 1) + "…");
-		}
+		const isLastPresent = i === presentIndexes[presentIndexes.length - 1];
+		const separatorChars = isLastPresent ? 0 : 2;
+		const limit = Math.max(0, (limits[i] ?? 0) - separatorChars);
+		kept.push(truncateSectionByLines(s, limit));
 	}
 	return kept.join("\n\n");
+}
+
+/**
+ * Keep complete entries in source order and use an ellipsis as its own line.
+ * Recent verdicts arrive newest-first from SQL, so dropping tail lines drops
+ * the oldest evidence first. Headers are always preserved when a section is
+ * present; callers own the per-section allocation policy.
+ */
+function truncateSectionByLines(section: string, maxChars: number): string {
+	if (section.length <= maxChars) return section;
+	const [header, ...entries] = section.split("\n");
+	if (!header || maxChars <= 0) return "";
+	if (header.length >= maxChars) {
+		return header.substring(0, Math.max(0, maxChars - 1)) + "…";
+	}
+
+	const kept = [header];
+	let used = header.length;
+	for (const entry of entries) {
+		// Reserve one newline plus a standalone ellipsis for truncation.
+		if (used + 1 + entry.length + 2 > maxChars) break;
+		kept.push(entry);
+		used += 1 + entry.length;
+	}
+	kept.push("…");
+	return kept.join("\n");
 }
