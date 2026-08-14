@@ -712,6 +712,37 @@ test("syncNecessarySkills copies only necessary skills and writes a simple index
 	assert.match(formatSkillsSyncResult(result), /Skills sincronizadas/);
 });
 
+test("syncNecessarySkills overwrites a stale necessary skill from bundle", () => {
+	const projectPath = tempDir();
+	const stateRoot = tempStateRoot();
+	const sourceSkillsDir = join(tempDir(), "source-skills");
+	const sourceSkill = join(sourceSkillsDir, "bug-hunter", "SKILL.md");
+	const destinationSkill = join(
+		projectPath,
+		".idu",
+		"skills",
+		"bug-hunter",
+		"SKILL.md",
+	);
+	const userSkill = join(projectPath, ".idu", "skills", "user-skill", "NOTES.md");
+	mkdirSync(join(sourceSkillsDir, "bug-hunter"), { recursive: true });
+	mkdirSync(join(projectPath, ".idu", "skills", "bug-hunter"), {
+		recursive: true,
+	});
+	mkdirSync(join(projectPath, ".idu", "skills", "user-skill"), {
+		recursive: true,
+	});
+	writeFileSync(sourceSkill, "# current bundle version\n", "utf8");
+	writeFileSync(destinationSkill, "# stale deployed version\n", "utf8");
+	writeFileSync(userSkill, "user-owned content\n", "utf8");
+
+	const result = syncNecessarySkills(sourceSkillsDir, projectPath, stateRoot);
+
+	assert.equal(readFileSync(destinationSkill, "utf8"), readFileSync(sourceSkill, "utf8"));
+	assert.deepEqual(result.existing, ["bug-hunter"]);
+	assert.equal(readFileSync(userSkill, "utf8"), "user-owned content\n");
+});
+
 test("syncNecessarySkills INDEX header marks .idu/skills/ as the SOURCE and paths stay under .idu", () => {
 	// F2 (lab.db id 73) regression guard: the generated INDEX must (a) carry the
 	// SOURCE header that documents the .idu/skills/ vs host-mirror contract, and

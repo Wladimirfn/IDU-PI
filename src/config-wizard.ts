@@ -772,12 +772,13 @@ export function syncNecessarySkills(
 			result.missing.push(skill);
 			continue;
 		}
-		if (existsSync(destination)) {
-			result.existing.push(skill);
-			continue;
-		}
+		const existed = existsSync(destination);
 		cpSync(source, destination, { recursive: true });
-		result.copied.push(skill);
+		if (existed) {
+			result.existing.push(skill);
+		} else {
+			result.copied.push(skill);
+		}
 	}
 	result.indexPath = writeLocalSkillIndex(projectPath);
 	return result;
@@ -930,7 +931,7 @@ export function formatSkillsSyncResult(result: SkillsSyncResult): string {
 	const missing = result.missing.length
 		? result.missing.map((skill) => `- ${skill}`).join("\n")
 		: "- ninguna";
-	return `Skills sincronizadas\n\nOrigen:\n${result.sourceSkillsDir}\n\nCopiadas:\n${copied}\n\nYa existían:\n${existing}\n\nFaltantes en origen:\n${missing}\n\nÍndice actualizado:\n${result.indexPath}`;
+	return `Skills sincronizadas\n\nOrigen:\n${result.sourceSkillsDir}\n\nCopiadas:\n${copied}\n\nActualizadas (ya existían):\n${existing}\n\nFaltantes en origen:\n${missing}\n\nÍndice actualizado:\n${result.indexPath}`;
 }
 
 export function formatInitAssetsResult(result: InitAssetsResult): string {
