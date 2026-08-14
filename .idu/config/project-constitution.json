@@ -64,20 +64,6 @@
         }
       },
       {
-        "id": "unbounded-daemon-periodic",
-        "summary": "Unbounded autonomous daemons — periodic setInterval schedulers",
-        "category": "stack",
-        "detection": {
-          "behaviorPattern": "periodic"
-        },
-        "severity": "high",
-        "rationale": "Catches setInterval( calls regardless of shutdown wiring. LLM-discretion clause: orchestrator may flag additional patterns as 'unbounded' (e.g. while-true loops without a stop condition, dynamic tick schedulers). behaviorPattern is advisory-grade — false negatives possible if cleanup logic lives in a comment or string literal.",
-        "messages": {
-          "blocked": "Rechazado por Project Core (item 1): setInterval detectado sin evidencia de cleanup.",
-          "warning": "Posible rechazo (advisory, item 1, periodic): setInterval visible — verificar shutdown wiring."
-        }
-      },
-      {
         "id": "mcp-write-entrypoint",
         "summary": "MCP tools that implement code or authorize changes — MCP server entrypoint",
         "category": "security",

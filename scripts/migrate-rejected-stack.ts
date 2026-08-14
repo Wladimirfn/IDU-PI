@@ -135,23 +135,6 @@ const PROPOSED_REJECTED_RULES: RejectedRule[] = [
 				"Posible rechazo (advisory, item 1, long-running): proceso sin SIGTERM/SIGINT/clearInterval visible.",
 		},
 	},
-	{
-		id: "unbounded-daemon-periodic",
-		summary:
-			"Unbounded autonomous daemons — periodic setInterval schedulers",
-		category: "stack",
-		detection: { behaviorPattern: "periodic" },
-		severity: "high",
-		rationale:
-			"Catches setInterval( calls regardless of shutdown wiring. " +
-			LLM_DISCRETION_CLAUSE_ITEM_1,
-		messages: {
-			blocked:
-				"Rechazado por Project Core (item 1): setInterval detectado sin evidencia de cleanup.",
-			warning:
-				"Posible rechazo (advisory, item 1, periodic): setInterval visible — verificar shutdown wiring.",
-		},
-	},
 
 	// ----- Item 2 — MCP tools that implement code (PARTIAL, high) -----
 	{

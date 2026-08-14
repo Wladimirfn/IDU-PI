@@ -375,7 +375,7 @@ describe("U2 integration — compiled CLI (TST-RSP-002/003/004)", () => {
 			technologyRules: { rejectedStack: Array<RejectedRule | string> };
 		};
 		const stack = parsed.technologyRules.rejectedStack;
-		assert.equal(stack.length, PROPOSED_REJECTED_STACK.length, "13 entries (12 rules + 1 string)");
+		assert.equal(stack.length, PROPOSED_REJECTED_STACK.length, "12 entries (11 rules + 1 string)");
 		assert.equal(stack[stack.length - 1], ITEM_6_STRING, "trailing item-6 string preserved");
 
 		for (const id of TARGET_RULE_IDS) {
@@ -1116,7 +1116,7 @@ describe("U2 pathGuards fix — processLayout (TST-FIX-002/003/004)", () => {
 		);
 		assert.equal(result.alreadyMigrated, false, "alreadyMigrated must be false");
 
-		// Proposed must carry the full predicate migration (13 entries) AND
+		// Proposed must carry the full predicate migration (12 entries) AND
 		// pathGuards on the 3 targets.
 		const proposedParsed = JSON.parse(result.proposedRaw) as {
 			technologyRules: { rejectedStack: Array<RejectedRule | string> };
