@@ -31,6 +31,10 @@ import {
 	reviewMasterPlan,
 } from "../src/master-plan.js";
 import { addSourceLibraryItem } from "../src/source-library.js";
+import {
+	recordBugFinding,
+	updateFindingStatus,
+} from "../src/lab-db.js";
 
 function tempRoot(): string {
 	return mkdtempSync(join(tmpdir(), "idu-master-plan-"));
@@ -1097,6 +1101,154 @@ test("genera Plan Maestro canónico en stateRoot sin modificar repo del usuario"
 			/# Plan Maestro Idu-pi/u,
 		);
 		assert.deepEqual(listRelativeFiles(projectPath), before);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("Plan Maestro integra sólo findings critical/high abiertos y bloquea reliability", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const stateRoot = join(root, "state", "projects", "demo");
+		const dbPath = join(stateRoot, "lab.db");
+		mkdirSync(projectPath, { recursive: true });
+		writeSmallProject(projectPath);
+		const findings = [
+			["critical-new", "critical", "new"],
+			["critical-triaged", "critical", "triaged"],
+			["high-accepted", "high", "accepted"],
+			["high-deferred", "high", "deferred"],
+			["medium-open", "medium", "accepted"],
+			["critical-fixed", "critical", "fixed"],
+			["critical-ignored", "critical", "ignored"],
+			["critical-duplicate", "critical", "duplicate"],
+		] as const;
+		for (const [id, severity, status] of findings) {
+			recordBugFinding(dbPath, {
+				id,
+				projectId: "demo",
+				title: `Finding ${id}`,
+				description: `Description ${id}`,
+				severity,
+				confidence: "high",
+				status,
+				evidence: `Evidence ${id}`,
+				affectedFiles: ["src/index.ts"],
+				dedupeKey: id,
+			});
+		}
+
+		const draft = generateMasterPlanDraft({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+		});
+		const corpusRisks = draft.plan.criticalRisks.filter((risk) =>
+			risk.startsWith("bug_finding:"),
+		);
+		assert.deepEqual([...corpusRisks].sort(), [
+			"bug_finding:critical-new [critical/new] Finding critical-new",
+			"bug_finding:critical-triaged [critical/triaged] Finding critical-triaged",
+			"bug_finding:high-accepted [high/accepted] Finding high-accepted",
+			"bug_finding:high-deferred [high/deferred] Finding high-deferred",
+		]);
+		assert.equal(draft.bugFindingCorpus.openCriticalCount, 2);
+		assert.deepEqual(
+			reviewMasterPlan({ stateRoot, pathOrLatest: "latest" })
+				.bugFindingCorpus.criticalRisks,
+			corpusRisks,
+		);
+
+		approveMasterPlan({
+			stateRoot,
+			pathOrLatest: "latest",
+			source: "cli",
+		});
+		const ensured = ensureMasterPlanForIdu({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+		});
+		assert.equal("status" in ensured, true);
+		if (!("status" in ensured) || !ensured.plan)
+			throw new Error("expected existing plan");
+		ensured.plan.criticalRisks = [];
+		ensured.plan.qualityRisks = [];
+		const report = formatIduSupervisorPlanReport({
+			bootstrap: { project: { id: "demo" }, criticalDecisions: [] },
+			masterPlan: ensured,
+			reviewHandled: false,
+		});
+		assert.doesNotMatch(
+			report,
+			/Plan fiable y actualizado/u,
+			"persistent critical findings must independently block reliable=true",
+		);
+
+		for (const id of [
+			"critical-new",
+			"critical-triaged",
+			"high-accepted",
+			"high-deferred",
+		]) {
+			updateFindingStatus(dbPath, id, "fixed", "test", "closed in test");
+		}
+		const closedReview = reviewMasterPlan({
+			stateRoot,
+			pathOrLatest: "latest",
+		});
+		assert.doesNotMatch(closedReview.markdown, /bug_finding:/u);
+		const refreshed = ensureMasterPlanForIdu({
+			projectId: "demo",
+			projectPath,
+			stateRoot,
+		});
+		assert.equal("status" in refreshed, true);
+		if (!("status" in refreshed) || !refreshed.plan)
+			throw new Error("expected refreshed plan");
+		assert.deepEqual(
+			refreshed.plan.criticalRisks.filter((risk) =>
+				risk.startsWith("bug_finding:"),
+			),
+			[],
+			"closed and medium findings must not remain in the plan",
+		);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("Plan Maestro treats missing corpus as empty and unreadable corpus as blocking", () => {
+	const root = tempRoot();
+	try {
+		const projectPath = join(root, "project");
+		const missingStateRoot = join(root, "state", "projects", "missing");
+		const unreadableStateRoot = join(root, "state", "projects", "unreadable");
+		mkdirSync(projectPath, { recursive: true });
+		writeSmallProject(projectPath);
+
+		const missing = generateMasterPlanDraft({
+			projectId: "missing",
+			projectPath,
+			stateRoot: missingStateRoot,
+		});
+		assert.equal(missing.bugFindingCorpus.status, "missing");
+		assert.equal(existsSync(join(missingStateRoot, "lab.db")), false);
+
+		mkdirSync(unreadableStateRoot, { recursive: true });
+		writeFileSync(join(unreadableStateRoot, "lab.db"), "not sqlite", "utf8");
+		const unreadable = generateMasterPlanDraft({
+			projectId: "unreadable",
+			projectPath,
+			stateRoot: unreadableStateRoot,
+		});
+		assert.equal(unreadable.bugFindingCorpus.status, "unreadable");
+		assert.equal(unreadable.bugFindingCorpus.blocksReliability, true);
+		assert.match(
+			unreadable.plan.criticalRisks.join("\n"),
+			/^bug_finding:corpus_unreadable/mu,
+		);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
