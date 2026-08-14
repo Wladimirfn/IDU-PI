@@ -25,6 +25,11 @@ import type { AgentLabSpecialty } from "./agentlab-supervisor-contract.js";
 import type { AgentLabReviewRunResult } from "./agentlab-review-runner.js";
 import { getSourceLibraryStatus } from "./source-library.js";
 import { invalidateMasterPlanObjectiveCache } from "./master-plan-objective-cache.js";
+import {
+	integrateMasterPlanBugFindingRisks,
+	readMasterPlanBugFindingCorpus,
+	type MasterPlanBugFindingCorpus,
+} from "./master-plan-bug-findings.js";
 
 export type MasterPlanStatus =
 	| "draft"
@@ -417,6 +422,7 @@ export type MasterPlanMemory = {
 
 export type MasterPlanDraftResult = {
 	plan: MasterPlan;
+	bugFindingCorpus: MasterPlanBugFindingCorpus;
 	current: MasterPlanCurrent;
 	memory: MasterPlanMemory;
 	jsonPath: string;
@@ -447,6 +453,7 @@ export type MasterPlanStatusResult =
 
 export type MasterPlanReview = {
 	plan: MasterPlan;
+	bugFindingCorpus: MasterPlanBugFindingCorpus;
 	current?: MasterPlanCurrent;
 	markdown: string;
 	revisionAntesDeZarpar: MasterPlanRevisionAntesDeZarpar;
@@ -609,6 +616,10 @@ export function generateMasterPlanDraft(input: {
 		observedReality,
 		source,
 	);
+	const bugFindingCorpus = readMasterPlanBugFindingCorpus(
+		stateRoot,
+		input.projectId,
+	);
 	const plan: MasterPlan = {
 		version: "1.0.0",
 		schemaVersion: MASTER_PLAN_SCHEMA_VERSION,
@@ -655,7 +666,10 @@ export function generateMasterPlanDraft(input: {
 		toolingDetected: signals.toolingDetected,
 		ignoredTooling: signals.ignoredTooling,
 		userRoles: inferUserRoles(signals),
-		criticalRisks: inferCriticalRisks(autoDepth, source, signals),
+		criticalRisks: integrateMasterPlanBugFindingRisks(
+			inferCriticalRisks(autoDepth, source, signals),
+			bugFindingCorpus,
+		),
 		qualityRisks: inferQualityRisks(signals),
 		securityRisks: inferSecurityRisks(signals),
 		architectureRisks: inferArchitectureRisks(source, signals),
@@ -716,7 +730,7 @@ export function generateMasterPlanDraft(input: {
 		status: "ok",
 		message: "Artefactos guardados; repo real sin cambios automáticos",
 	});
-	return { plan, current, memory, jsonPath, markdownPath };
+	return { plan, bugFindingCorpus, current, memory, jsonPath, markdownPath };
 }
 
 export function getMasterPlanStatus(input: {
@@ -761,6 +775,10 @@ export function recordMasterPlanLabReviewDone(input: {
 	const planPath = safePlanPath(stateRoot, current.currentPlanJson);
 	const plan = readPlan(planPath);
 	if (!plan) return undefined;
+	const bugFindingCorpus = readMasterPlanBugFindingCorpus(
+		stateRoot,
+		plan.projectId,
+	);
 	const generatedAt = new Date().toISOString();
 	const qualityWarnings = input.run.runs.flatMap(
 		(run) => run.qualityWarnings ?? [],
@@ -794,7 +812,10 @@ export function recordMasterPlanLabReviewDone(input: {
 			"Ejecuté o reutilicé deep review AgentLab en sandbox/clone.",
 			"Consolidé hallazgos AgentLab sin modificar el repo real.",
 		]),
-		criticalRisks: dedupeStrings([...plan.criticalRisks, ...highFindings]),
+		criticalRisks: integrateMasterPlanBugFindingRisks(
+			dedupeStrings([...plan.criticalRisks, ...highFindings]),
+			bugFindingCorpus,
+		),
 		qualityRisks: dedupeStrings([...plan.qualityRisks, ...qualityWarnings]),
 		architectureRisks: dedupeStrings([
 			...plan.architectureRisks,
@@ -863,6 +884,7 @@ export function recordMasterPlanLabReviewDone(input: {
 	const memory = writeMemory(stateRoot, nextPlan, nextCurrent);
 	return {
 		plan: nextPlan,
+		bugFindingCorpus,
 		current: nextCurrent,
 		memory,
 		jsonPath: planPath,
@@ -897,16 +919,27 @@ export function reviewMasterPlan(input: {
 			jsonPath,
 		);
 	}
-	const plan = normalizeMasterPlan(raw);
+	const bugFindingCorpus = readMasterPlanBugFindingCorpus(
+		stateRoot,
+		raw.projectId ?? current?.projectId ?? "unknown",
+	);
+	const plan = refreshPlanBugFindingRisks(
+		normalizeMasterPlan(raw),
+		bugFindingCorpus,
+	);
+	const bugFindingRisksChanged =
+		JSON.stringify(raw.criticalRisks ?? []) !==
+		JSON.stringify(plan.criticalRisks);
 	const markdownPath =
 		current?.currentPlanJson === relativeFromState(stateRoot, jsonPath)
 			? safePathInsideState(stateRoot, current.currentPlanMd)
 			: jsonPath.replace(/\.json$/u, ".md");
-	const markdown = existsSync(markdownPath)
+	const markdown = !bugFindingRisksChanged && existsSync(markdownPath)
 		? readFileSync(markdownPath, "utf8")
 		: formatMasterPlanMarkdown(plan);
 	return {
 		plan,
+		bugFindingCorpus,
 		current,
 		markdown,
 		revisionAntesDeZarpar: buildRevisionAntesDeZarpar(plan, stateRoot),
@@ -966,7 +999,11 @@ export function ensureMasterPlanForIdu(input: {
 	onProgress?: (event: MasterPlanProgressEvent) => void;
 }):
 	| MasterPlanDraftResult
-	| { status: MasterPlanStatusResult; plan?: MasterPlan } {
+	| {
+			status: MasterPlanStatusResult;
+			plan?: MasterPlan;
+			bugFindingCorpus: MasterPlanBugFindingCorpus;
+	  } {
 	const status = getMasterPlanStatus({
 		stateRoot: input.stateRoot,
 		currentGitHead: input.gitHead,
@@ -984,12 +1021,27 @@ export function ensureMasterPlanForIdu(input: {
 				"Plan Maestro anterior incompatible con esquema actual; generé nuevo draft",
 		};
 	}
-	const plan = status.currentPlanJson
+	const storedPlan = status.currentPlanJson
 		? readPlan(safePlanPath(input.stateRoot, status.currentPlanJson))
 		: undefined;
+	const bugFindingCorpus = readMasterPlanBugFindingCorpus(
+		input.stateRoot,
+		storedPlan?.projectId ?? input.projectId,
+	);
+	const plan = storedPlan
+		? refreshPlanBugFindingRisks(storedPlan, bugFindingCorpus)
+		: undefined;
+	if (
+		storedPlan &&
+		plan &&
+		JSON.stringify(storedPlan.criticalRisks) !==
+			JSON.stringify(plan.criticalRisks)
+	) {
+		persistRefreshedBugFindingRisks(input.stateRoot, status, plan);
+	}
 	if (status.status === "draft")
 		writeMasterPlanPendingAction(input.stateRoot, status);
-	return { status, plan };
+	return { status, plan, bugFindingCorpus };
 }
 
 export function handleMasterPlanNaturalDecision(input: {
@@ -1046,7 +1098,11 @@ export function formatIduSupervisorPlanReport(input: {
 	bootstrap: { project: { id: string }; criticalDecisions: string[] };
 	masterPlan:
 		| MasterPlanDraftResult
-		| { status: MasterPlanStatusResult; plan?: MasterPlan };
+		| {
+				status: MasterPlanStatusResult;
+				plan?: MasterPlan;
+				bugFindingCorpus: MasterPlanBugFindingCorpus;
+		  };
 	reviewHandled: boolean;
 }): string {
 	const { bootstrap, masterPlan, reviewHandled } = input;
@@ -1068,10 +1124,13 @@ export function formatIduSupervisorPlanReport(input: {
 	const criticalCount = plan?.criticalRisks.length ?? 0;
 	const qualityCount = plan?.qualityRisks.length ?? 0;
 	const architectureCount = plan?.architectureRisks.length ?? 0;
+	const bugFindingCorpusBlocksReliability =
+		masterPlan.bugFindingCorpus?.blocksReliability ?? false;
 	const requiresHumanCore = bootstrap.criticalDecisions.length > 0;
 	const reliable =
 		status === "approved" &&
 		!requiresHumanCore &&
+		!bugFindingCorpusBlocksReliability &&
 		criticalCount === 0 &&
 		qualityCount === 0;
 	const filesSignal = plan ? signalValue(plan, "files") : "?";
@@ -2640,9 +2699,17 @@ function incompatibleReview(
 	reason: string,
 	jsonPath = "",
 ): MasterPlanReview {
-	const diagnosticPlan = diagnosticMasterPlan(stateRoot, current, reason);
+	const bugFindingCorpus = readMasterPlanBugFindingCorpus(
+		stateRoot,
+		current?.projectId ?? "unknown",
+	);
+	const diagnosticPlan = refreshPlanBugFindingRisks(
+		diagnosticMasterPlan(stateRoot, current, reason),
+		bugFindingCorpus,
+	);
 	return {
 		plan: diagnosticPlan,
+		bugFindingCorpus,
 		current,
 		jsonPath,
 		revisionAntesDeZarpar: buildRevisionAntesDeZarpar(
@@ -2755,7 +2822,15 @@ function updatePlanDecision(
 	const stateRoot = resolve(stateRootInput);
 	const current = readCurrent(stateRoot);
 	const jsonPath = resolvePlanPath(stateRoot, pathOrLatest, current);
-	const plan = update(requirePlan(jsonPath));
+	const originalPlan = requirePlan(jsonPath);
+	const bugFindingCorpus = readMasterPlanBugFindingCorpus(
+		stateRoot,
+		originalPlan.projectId,
+	);
+	const plan = refreshPlanBugFindingRisks(
+		update(originalPlan),
+		bugFindingCorpus,
+	);
 	writeFileSync(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
 	// Invalidate the cached objective snapshot so the next read picks up
 	// the new status (e.g. approved after a prior draft/incompatible cache).
@@ -2778,7 +2853,46 @@ function updatePlanDecision(
 	});
 	writeMasterPlanPendingAction(stateRoot, nextCurrent);
 	const memory = writeMemory(stateRoot, plan, nextCurrent);
-	return { plan, current: nextCurrent, memory, jsonPath, markdownPath };
+	return {
+		plan,
+		bugFindingCorpus,
+		current: nextCurrent,
+		memory,
+		jsonPath,
+		markdownPath,
+	};
+}
+
+function refreshPlanBugFindingRisks(
+	plan: MasterPlan,
+	corpus: MasterPlanBugFindingCorpus,
+): MasterPlan {
+	return {
+		...plan,
+		criticalRisks: integrateMasterPlanBugFindingRisks(
+			plan.criticalRisks,
+			corpus,
+		),
+	};
+}
+
+function persistRefreshedBugFindingRisks(
+	stateRootInput: string,
+	current: MasterPlanCurrent,
+	plan: MasterPlan,
+): void {
+	const stateRoot = resolve(stateRootInput);
+	writeFileSync(
+		safePlanPath(stateRoot, current.currentPlanJson),
+		`${JSON.stringify(plan, null, 2)}\n`,
+		"utf8",
+	);
+	writeFileSync(
+		safePathInsideState(stateRoot, current.currentPlanMd),
+		`${formatMasterPlanMarkdown(plan)}\n`,
+		"utf8",
+	);
+	writeMemory(stateRoot, plan, current);
 }
 
 type ProjectSignals = {
