@@ -213,12 +213,9 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 	});
 
 	// -----------------------------------------------------------------------
-	// T5: behaviorPattern — `unbounded-daemon-long-running` AND
-	//     `unbounded-daemon-periodic` fire on `setInterval(` without a
-	//     SIGTERM handler. Both rules apply: long-running has the
-	//     NOT-shutdown branch, periodic has no branch.
+	// T5: the sole item-1 guard fires on `setInterval(` without shutdown.
 	// -----------------------------------------------------------------------
-	it("T5: unbounded-daemon-{long-running,periodic} fire on setInterval without SIGTERM handler", () => {
+	it("T5: unbounded-daemon-long-running fires high on setInterval without shutdown", () => {
 		const constitution = buildConstitutionFromRejectedStack(
 			PROPOSED_REJECTED_RULES,
 		);
@@ -236,22 +233,19 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 			{ readContent },
 		);
 		const ids = hits.map((h) => h.rule.id);
-		assert.ok(
-			ids.includes("unbounded-daemon-long-running"),
-			`unbounded-daemon-long-running MUST fire; got: ${ids.join(",")}`,
+		const hit = hits.find(
+			(candidate) => candidate.rule.id === "unbounded-daemon-long-running",
 		);
-		assert.ok(
-			ids.includes("unbounded-daemon-periodic"),
-			`unbounded-daemon-periodic MUST fire; got: ${ids.join(",")}`,
-		);
+		assert.ok(hit, `unbounded-daemon-long-running MUST fire; got: ${ids.join(",")}`);
+		assert.equal(hit.rule.severity, "high");
 	});
 
-	it("T5b: unbounded-daemon-long-running does NOT fire when SIGTERM handler is present (periodic still fires)", () => {
+	it("T5b: bounded setInterval with SIGTERM cleanup does not trigger daemon rejection", () => {
 		const constitution = buildConstitutionFromRejectedStack(
 			PROPOSED_REJECTED_RULES,
 		);
 		const content =
-			"setInterval(() => console.log('tick'), 1000);\n" +
+			"const handle = setInterval(() => console.log('tick'), 1000);\n" +
 			"process.on('SIGTERM', () => { clearInterval(handle); process.exit(0); });\n";
 		const map: Record<string, string> = { "src/daemons/graceful.ts": content };
 		const readContent = (file: string): string | undefined => map[file];
@@ -264,15 +258,34 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 			{ readContent },
 		);
 		const ids = hits.map((h) => h.rule.id);
-		assert.ok(
-			!ids.includes("unbounded-daemon-long-running"),
-			`unbounded-daemon-long-running MUST NOT fire when SIGTERM handler is present; got: ${ids.join(",")}`,
+		assert.equal(
+			ids.some((id) => id.startsWith("unbounded-daemon-")),
+			false,
+			`bounded timer MUST NOT trigger daemon rejection; got: ${ids.join(",")}`,
 		);
-		// `periodic` has no NOT-branch — `setInterval(` always fires it.
-		// This is the documented advisory-grade nuance of `behaviorPattern`.
-		assert.ok(
-			ids.includes("unbounded-daemon-periodic"),
-			`unbounded-daemon-periodic STILL fires on setInterval( regardless of shutdown; got: ${ids.join(",")}`,
+	});
+
+	it("T5c: harmless change to a file with a pre-existing bounded timer does not block", () => {
+		const constitution = buildConstitutionFromRejectedStack(
+			PROPOSED_REJECTED_RULES,
+		);
+		const probeFile = "src/daemons/graceful.ts";
+		const content =
+			"const handle = setInterval(() => console.log('tick'), 1000);\n" +
+			"process.on('SIGTERM', () => { clearInterval(handle); process.exit(0); });\n";
+		const hits = hasRejection(
+			{
+				request: "rename a log label without changing timer lifecycle",
+				changedFiles: [probeFile],
+				constitution,
+			},
+			normalizeRejectedRules(constitution.technologyRules.rejectedStack),
+			{ readContent: () => content },
+		);
+		assert.equal(
+			hits.some((hit) => hit.rule.id.startsWith("unbounded-daemon-")),
+			false,
+			"setInterval presence alone must not block a harmless change",
 		);
 	});
 
@@ -541,6 +554,7 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 			// Item 1 is severity high (PARTIAL). The gate normalizes "high"
 			// to itself.
 			assert.equal(hit!.severity, "high");
+			assert.equal(gateResult.requiresHumanConfirmation, true);
 			// The message must mention item 1 (or the rule summary).
 			assert.match(hit!.message, /item 1/u);
 		} finally {
@@ -609,7 +623,7 @@ describe("R3.4 integration — proposed RejectedRule[] drives the R3.3 gate", ()
 		const stack = (
 			parsed as { technologyRules: { rejectedStack: unknown[] } }
 		).technologyRules.rejectedStack;
-		assert.equal(stack.length, 13);
+		assert.equal(stack.length, 12);
 		// Validate via the project's own validator.
 		const v = validateProjectConstitution(parsed);
 		assert.equal(v.ok, true, `errors: ${JSON.stringify(v.ok ? [] : v.errors)}`);

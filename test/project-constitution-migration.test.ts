@@ -144,15 +144,38 @@ after(() => {
 
 describe("R3.4 proposed rejectedStack array", () => {
 	test("contains 11 RejectedRule objects + 1 trailing string (item 6)", () => {
-		assert.equal(PROPOSED_REJECTED_STACK.length, 13);
+		assert.equal(PROPOSED_REJECTED_STACK.length, 12);
 		const objectEntries = PROPOSED_REJECTED_STACK.filter(
 			(e) => e && typeof e === "object",
 		);
 		const stringEntries = PROPOSED_REJECTED_STACK.filter(
 			(e) => typeof e === "string",
 		);
-		assert.equal(objectEntries.length, 12, "12 RejectedRule objects");
+		assert.equal(objectEntries.length, 11, "11 RejectedRule objects");
 		assert.equal(stringEntries.length, 1, "1 trailing string");
+	});
+
+	test("proposed and active rules omit the redundant unbounded-daemon-periodic rule", () => {
+		assert.equal(
+			PROPOSED_REJECTED_RULES.some(
+				(rule) => rule.id === "unbounded-daemon-periodic",
+			),
+			false,
+			"proposed rules must omit unbounded-daemon-periodic",
+		);
+		const active = JSON.parse(
+			readFileSync(
+				join(process.cwd(), ".idu", "config", "project-constitution.json"),
+				"utf8",
+			),
+		) as { technologyRules: { rejectedStack: Array<{ id?: string } | string> } };
+		assert.equal(
+			active.technologyRules.rejectedStack.some(
+				(entry) => typeof entry === "object" && entry.id === "unbounded-daemon-periodic",
+			),
+			false,
+			"active rules must omit unbounded-daemon-periodic",
+		);
 	});
 
 	test("item 6 is the LAST element (auditor Q4 decision)", () => {
@@ -174,7 +197,7 @@ describe("R3.4 proposed rejectedStack array", () => {
 				if (rule.id.startsWith(prefix)) counts[prefix] += 1;
 			}
 		}
-		assert.equal(counts["unbounded-daemon-"], 2, "item 1 = 2 rules");
+		assert.equal(counts["unbounded-daemon-"], 1, "item 1 = 1 rule");
 		assert.equal(counts["mcp-write-"], 4, "item 2 = 4 rules");
 		assert.equal(counts["agentlabs-edit-"], 3, "item 3 = 3 rules");
 		assert.equal(counts["uncontrolled-search-"], 2, "item 4 = 2 rules");
@@ -220,7 +243,7 @@ describe("R3.4 proposed rejectedStack array", () => {
 				r.id.startsWith("mcp-write-") ||
 				r.id.startsWith("uncontrolled-search-"),
 		);
-		assert.equal(partials.length, 8, "2 unbounded + 4 mcp + 2 search = 8 high rules");
+		assert.equal(partials.length, 7, "1 unbounded + 4 mcp + 2 search = 7 high rules");
 		for (const rule of partials) {
 			assert.equal(rule.severity, "high", `${rule.id} must be high (NOT blocker)`);
 			assert.ok(
@@ -379,7 +402,7 @@ describe("R3.4 replaceRejectedStack byte preservation", () => {
 				technologyRules: { rejectedStack: Array<Record<string, unknown> | string> };
 			};
 			const stack = parsed.technologyRules.rejectedStack;
-			assert.equal(stack.length, 13);
+			assert.equal(stack.length, 12);
 			assert.equal(stack[stack.length - 1], ITEM_6_STRING);
 			for (let i = 0; i < stack.length - 1; i++) {
 				assert.ok(
@@ -467,13 +490,13 @@ describe("R3.4 layoutPaths resolution", () => {
 // =========================================================================
 
 describe("R3.4 processLayout end-to-end on fixture (no real brain)", () => {
-	test("Layout A fixture: 6 strings → 13 entries (12 rules + 1 string), byte diff isolated to rejectedStack", () => {
+	test("Layout A fixture: 6 strings → 12 entries (11 rules + 1 string), byte diff isolated to rejectedStack", () => {
 		const root = makeStateRoot();
 		const { path } = fixtureBrain("A", root);
 		const result = processLayout("A", path);
 		assert.equal(result.alreadyMigrated, false);
 		assert.equal(result.currentArrayLen, 6);
-		assert.equal(result.proposedArrayLen, 13);
+		assert.equal(result.proposedArrayLen, 12);
 		assert.equal(result.nonTargetBytesEqual, true);
 
 		// Validate the proposed shape via the project validator.
@@ -495,7 +518,7 @@ describe("R3.4 processLayout end-to-end on fixture (no real brain)", () => {
 		const result = processLayout("B", path);
 		assert.equal(result.alreadyMigrated, false);
 		assert.equal(result.currentArrayLen, 6);
-		assert.equal(result.proposedArrayLen, 13);
+		assert.equal(result.proposedArrayLen, 12);
 		// Non-target bytes equal: validate by deep-equal of the sentinel trick.
 		const cur = JSON.parse(result.currentRaw) as Record<string, unknown>;
 		const pro = JSON.parse(result.proposedRaw) as Record<string, unknown>;
@@ -761,7 +784,7 @@ describe("R3.4 --apply flag (write path)", () => {
 		}
 	});
 
-	test("--apply on a fixture writes the proposed array (12 rules + 1 string) and preserves non-target bytes", () => {
+	test("--apply on a fixture writes the proposed array (11 rules + 1 string) and preserves non-target bytes", () => {
 		const { workspaceRoot, projectId, stateRoot } = makeRegisteredStateRoot();
 		const { path } = fixtureBrain("A", stateRoot);
 		const beforeRaw = readFileSync(path, "utf8");
@@ -801,9 +824,9 @@ describe("R3.4 --apply flag (write path)", () => {
 		const afterParsed = JSON.parse(afterRaw) as Record<string, unknown>;
 		const stack = (afterParsed as { technologyRules: { rejectedStack: unknown[] } })
 			.technologyRules.rejectedStack;
-		assert.equal(stack.length, 13, "12 rules + 1 string");
+		assert.equal(stack.length, 12, "11 rules + 1 string");
 		assert.equal(stack[stack.length - 1], ITEM_6_STRING, "item 6 is a trailing string");
-		assert.equal(typeof stack[stack.length - 2], "object", "entry 11 must be an object");
+		assert.equal(typeof stack[stack.length - 2], "object", "entry 10 must be an object");
 
 		// Non-target bytes must be preserved (deep-equal with sentinel trick).
 		const before = JSON.parse(beforeRaw) as Record<string, unknown>;
