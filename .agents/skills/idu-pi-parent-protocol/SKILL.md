@@ -14,10 +14,6 @@ description: |
 # idu-pi Parent Protocol (v4)
 
 > **Audience**: parent/orchestrator model (MiniMax, Claude, Qwen, KM5) in a Pi CLI or OpenCode session.
-> **Path**: this file lives in three places (must stay byte-identical):
->   - `C:\Users\elmas\pi-telegram-bridge\.pi\skills\idu-pi-parent-protocol\SKILL.md` (Pi project)
->   - `C:\Users\elmas\.pi\agent\skills\idu-pi-parent-protocol\SKILL.md` (Pi global)
->   - `C:\Users\elmas\pi-telegram-bridge\.agents\skills\idu-pi-parent-protocol\SKILL.md` (OpenCode project)
 > **Triggers**: any mention of idu-pi, supervisor, Proyecto actual, preflight, postflight, AgentLab, master plan, or MCP audit on the idu-pi project.
 
 ## Tool name prefix — pick by harness
@@ -52,32 +48,100 @@ Idu-pi is a **normative supervisor/auditor** exposed through MCP. It does NOT im
 | Base tool | When |
 |---|---|
 | `idu_status` | session start, before/after any work. Pass `projectPath` if the active project is not the default. |
+| `idu_prepare` | only when status reports stale/needs-understanding, or bootstrap recommends prepare; it can create stateRoot drafts and review tasks |
 | `idu_supervisor_context_pack` | before delegating implementation. Pass `projectPath` if needed. |
 | `idu_preflight` | before risky/structural changes |
 | `idu_postflight` | after a diff, before commit |
-| `idu_advisory` | quick advisory |
+| `idu_advisory` | quick advisory derived from preflight state. Lighter alternative to `idu_preflight` when you only need the next-action summary. |
 | `idu_task_context` | per-task advisory fallback |
 | `idu_task_package_create` | create a task package for the orchestrator to govern |
 | `idu_master_plan_status` | check Plan Maestro state |
 | `idu_master_plan_review` | review latest plan |
 | `idu_master_plan_approve` | approve a draft plan |
 | `idu_proposal_outbox` | list pending proposals |
-| `idu_bibliotecario_proactive_advisory` | coordinated evidence from local sources + external registry |
+| `idu_bibliotecario_proactive_advisory` | before dependency, ecosystem, or source-backed decisions; coordinates local sources + external registry |
 | `idu_autonomous_alerts_status` | check the autonomous alert engine |
 | `idu_autonomous_alerts_tick` | run an advisory tick |
 | `idu_pending_injections` | list pending trigger injections |
 | `idu_subscribe_triggers` | subscribe to trigger emissions |
-| `idu_orchestrator_procedure` | official procedure for a given purpose |
-| `idu_agentlab_request_create` | create an audit-only request |
+| `idu_orchestrator_procedure` | fallback when an explicit plan/procedure must be discovered; not a routine setup step |
+| `idu_agentlab_request_create` | after an explicit audit need or prepare/postflight recommendation; creates a request but does not run the audit |
 | `idu_agentlab_review_run` | run an audit (orchestrator explicit) |
-| `idu_project_enroll` | register a project (see ⚠️ warning below) |
-| `idu_project_status` | inspect a registered project (path + stateRoot) |
+| `idu_agentlab_review_status` | read AgentLab review status |
+| `idu_project_enroll` | rare, one-time explicit project registration (see ⚠️ warning below) |
+| `idu_project_status` | diagnose registration/stateRoot before enrollment or when project resolution is uncertain |
+| `idu_start` | enter/activate an already-enrolled project and show startup/dashboard; it does not enroll |
+| `idu_birth_status` | birth pipeline status (also auto-fired by `idu-supervisor-tick.ps1` → `idu-automaticov1 cycle`) |
+| `idu_birth_general_spec` | write the general spec for a birth project |
+| `idu_birth_prototype_master` | manage the birth prototype (`action`: draft / approve / reject) |
+| `idu_birth_repo_plan` | produce the repo plan for a birth project |
+| `idu_birth_validate` | run birth validation; chains bibliotecario discovery + status |
+| `idu_birth_bibliotecario_discovery` | discover project sources for the birth pipeline (advisory; not auto-fired) |
+| `idu_supervisor_consult` | ask the supervisor a question (multi-consumer: CLI, sensors, MCP) |
+| `idu_supervisor_tick` | run a supervisor tick (manual via CLI / Telegram bot; the scheduled tick does not call this) |
+| `idu_semantic_audit_status` | read the semantic audit status (advisory; not auto-fired) |
+| `idu_objective_status` | read the objective injection status (also read by the PISO envelope gate) |
+| `idu_master_plan_create` | create a new master plan |
+| `idu_task` | fetch a queued task |
+| `idu_genesis_mission_draft` | draft a genesis mission from project blueprints |
+| `idu_genesis_mission_confirm` | confirm a drafted genesis mission |
+| `idu_ack_advisory` | acknowledge a pending advisory injection (`injectionId` + `reason`) |
+| `idu_skill_draft_from_lessons` | draft a skill from past lessons (auto-fired by `idu-automaticov1 cycle` only when `--allow-skill-proposals` is set) |
+| `idu_source_add` | register a source path for the bibliotecario |
+| `idu_source_remove` | unregister a source by `sourceId` |
+| `idu_source_refresh` | re-pull a registered source (manual; the bibliotecario does not auto-fire) |
+| `idu_source_read` | read a source's content by `sourceId` |
+| `idu_source_chunk_read` | read a single chunk of a source (`sourceId`, `chunkId`) |
+| `idu_source_extract` | extract structured content from a source |
+| `idu_source_digest` | generate a digest of a source |
+| `idu_source_status` | read the source registry status (will be routed via `idu_status` facade with `scope: "source"`) |
+| `idu_source_digest_status` | read the digest pipeline status (will be routed via `idu_status` facade with `scope: "source_digest"`) |
+| `idu_source_report` | source report by `sourceId` |
+| `idu_source_research_report` | research report for a query (web-backed) |
+| `idu_source_recommend_for_task` | recommend a source for a task (`request`) |
+| `idu_source_required_actions` | list required actions for the source cluster |
+| `idu_source_skill_candidates_create` | create skill candidates from sources (`selector`) |
+| `idu_source_skill_candidates_review` | review skill candidates (`pathOrLatest`) |
+| `idu_external_source_recommend` | recommend external sources for a task (`request`, `domains`, `language`, `framework`, `maxMatches`) |
+| `idu_external_intelligence_report` | external intelligence report (`sourceIds`) |
+| `idu_activate` | enable idu-pi guardrails for a project (CLI/MCP) |
+| `idu_deactivate` | disable idu-pi guardrails for a project |
+| `idu_bootstrap_project` | bootstrap a project (`allowCreateDrafts`, `activate`) |
+| `idu_project_reset_state` | reset a project's runtime state (`confirm`) |
+| `idu_architectural_pruning_plan` | build the architectural pruning plan (4+ static candidates) |
+| `idu_context_pruning_advisory` | build the context pruning advisory report (501-line impl reading context events) |
+| `idu_autonomous_alerts_control` | enable/disable/pause the autonomous alert engine (`action`, `domain`, `pauseMinutes`, `reason`) |
+| `idu_bibliotecario_init` | initialize the bibliotecario for a project |
+| `idu_birth_existing_scan` | scan an existing project for birth-readiness |
+| `idu_birth_general_spec_derive` | derive general spec fragments from project files |
+| `idu_continuation_proposal` | build a continuation proposal (`request`, `autonomyWindowMinutes`, `maxScope`) |
+| `idu_execution_director_tick` | run an execution director tick |
+| `idu_automaticov1_cycle` | run an automaticov1 cycle (`allowTaskCreation`, `allowExternalFetch`, `allowSkillProposals`) |
+| `idu_hygiene_migrate` | migrate the hygiene layout (Layout A ↔ B) |
+| `idu_hygiene_sweep` | run a hygiene sweep |
+| `idu_master_plan_reject` | reject a master plan draft (`selector`, `reason`) |
+| `idu_model_invocation_status` | read the model invocation log status (`role`, `limit`) |
+| `idu_next_advisory_action` | build the next advisory action (`request`, `mode`, `maxScope`) |
+| `idu_outbox_prune` | prune the proposal outbox (`olderThanDays`, `confirm`) |
+| `idu_plan_snapshot` | read a plan snapshot by `selector` |
+| `idu_proposal_detail` | read a proposal by `id` |
+| `idu_queue_complete` | mark a queue task done (`taskId`, `evidence`) |
+| `idu_queue_detail` | read the queue tasks |
+| `idu_role_engine_control` | role engine control (`action`, `role`) |
+| `idu_role_engine_status` | read the role engine config status |
+| `idu_skill_for_task` | load skills for a task (`request`) |
+| `idu_skill_rating` | rate a skill proposal (`proposalId`, `score`) |
+| `idu_supervisor_cron_plan` | build the supervisor cron plan |
+| `idu_supervisor_responses` | read supervisor response history (`limit`) |
+| `idu_supervisor_self_maintenance_advisory` | build the runtime self-maintenance report |
+| `idu_supervisor_trigger` | supervisor trigger control (`action`) |
+| `idu_trigger_engine` | trigger engine control (`action`) |
 
 ## ⚠️ Enrolling a project without orphaning the confirmed state
 
 Verified in `src/idu-installer.ts:533` (`projectEnroll`):
 
-- **No `idu_project_list` exists**. To inspect registered projects, use `idu_project_status` / `idu_status`, or read the registry file directly.
+- **Do not guess project-discovery tool names.** Diagnose registration with the real status tools or read the registry file directly.
 - **`idu_project_enroll` does NOT accept a `stateRoot` argument**. It derives it from `workspaceRoot + projectId` via `resolveProjectStatePaths`.
 - **The default `projectId` is the slug of the last directory segment of the repo path**. For `C:\Users\elmas\pi-telegram-bridge` the default becomes `pi-telegram-bridge` — that yields a **fresh/empty stateRoot**, NOT the confirmed `<workspace>/projects/idu-pi/` where the Project Core lives.
 - **To reuse the confirmed state**: pass `projectId: "idu-pi"` explicitly AND verify that the MCP's `workspaceRoot` points to the workspace that contains `projects/idu-pi`.
@@ -107,7 +171,7 @@ Two layouts coexist; some files are migrated, others are not.
 
 - ❌ Calling idu-pi from a worker subagent. The worker does not have the MCP tool surface.
 - ❌ Treating `node dist/src/cli.js idu-postflight` as equivalent to `idu_postflight`. CLI does not register in "Proyecto actual".
-- ❌ Inventing tool names like `idu_status_check`, `idu_get_context`, `mcp_idu_status`. Use the **base names** in the table; never invent.
+- ❌ Inventing plausible-looking tool names. Use the **base names** in the table; never invent.
 - ❌ Treating AgentLabs as workers. AgentLabs are audit-only. They are **white-hat hackers** that write tests to find vulnerabilities, NOT workers that implement.
 - ❌ Saying "idu-pi says X" without having actually called the tool.
 - ❌ Skipping `idu_supervisor_context_pack` because you "already know the project".
@@ -161,14 +225,14 @@ idu_supervisor_context_pack({
 })
 ```
 
-### 2. "No proposals, no injections, no librarian news"
+### 2. "Need evidence for a dependency or ecosystem decision"
 
-If `idu_proposal_outbox` is empty, `idu_pending_injections` is 0, and `idu_bibliotecario_proactive_advisory` returns `pressure: high` with `review_resource_and_semantic_debt_before_adding_more_context`, the **setup is incomplete**. Check:
+Before deciding on a dependency, ecosystem change, or source-backed claim, call `idu_bibliotecario_proactive_advisory`. If it reports `pressure: high` with `review_resource_and_semantic_debt_before_adding_more_context`, review that evidence debt before the decision; do not use this advisory as a generic setup-health ritual.
 
 1. `idu_status` → `connection.workspace.labDbExists`. If false, init with `idu-task` (creates tasks.jsonl) or via the lab init flow if available.
-2. `idu_status` → `connection.alignmentStatus`. If `stale`, run `idu_prepare` or `idu-master-plan-redraft` then re-approve.
+2. `idu_status` → `connection.alignmentStatus`. Only if it is `stale` or reports needs-understanding, run `idu_prepare` or redraft then re-approve. `idu_prepare` may create stateRoot drafts and review tasks.
 3. `idu_proposal_outbox` → if there are pending proposals, you must `idu-supervisor-improvements-approve` or `-reject` them. Procrastinating keeps them in `proposed`.
-4. `idu_lab_review_plan postflight` → close the lab review plan that the last `idu-prepare` flagged.
+4. If prepare/postflight recommends an audit, call `idu_agentlab_request_create`, then explicitly use `idu_agentlab_review_run`; use `idu_agentlab_review_status` to inspect progress. Creating the request does not run it.
 
 ### 3. "Tasks stuck in `proposed` or `paused`"
 
@@ -180,7 +244,7 @@ If `idu_proposal_outbox` is empty, `idu_pending_injections` is 0, and `idu_bibli
 
 ### 4. "Trigger engine not firing"
 
-The trigger engine is **opt-in**. It only runs when the env var `IDU_PI_TRIGGER_ENGINE=1` is set, AND when the alert scheduler tick runs. The Windows Task Scheduler runs the tick every 15 min via `scripts/idu-supervisor-tick.ps1`. If you do not see fresh injections, check:
+The trigger engine is **opt-in**. It only runs when the env var `IDU_PI_TRIGGER_ENGINE=1` is set, AND when the alert scheduler tick runs. The Windows Task Scheduler runs the tick via `scripts/idu-supervisor-tick.ps1` on the interval set at install time (currently `PT1H`; check with `Get-ScheduledTask -TaskName "Idu-pi Supervisor Tick"`). If you do not see fresh injections, check:
 
 1. The task is installed: `Get-ScheduledTask -TaskName "Idu-pi Supervisor Tick"`.
 2. The env var is set in the script or the parent process.
@@ -194,21 +258,7 @@ If `idu_preflight` warns `bitacora no está confirmado en project-flows` (or sim
 2. `idu_orchestrator_procedure({ purpose: "create_plan", projectPath, request })` to get the create_plan procedure.
 3. Approve the resulting plan + flows.
 
-## Setup checklist (run before slice 2 / auto-learning)
-
-Run this sequence once per project to make the loop live:
-
-```text
-1. idu_status                             # confirm project resolution
-2. idu_supervisor_context_pack            # learn objective + risks
-3. idu_proposal_outbox                    # list any pending proposals
-4. idu_pending_injections                 # check trigger pipeline
-5. idu_lab_review_plan postflight         # close lab review plan
-6. idu-master-plan-redraft latest         # if plan is stale
-7. idu-master-plan-approve latest         # re-approve
-8. idu_prepare                            # realign
-9. idu-postflight                         # leave evidence
-```
+Use `idu_status` and `idu_supervisor_context_pack` first; all other tools remain condition-triggered as defined above, with `idu_postflight` after a diff.
 
 ## Worked example: "add caching to the API"
 
@@ -228,11 +278,7 @@ Run this sequence once per project to make the loop live:
 
 ## Locations
 
-This skill is available in three locations (must stay byte-identical):
-
-- `C:\Users\elmas\pi-telegram-bridge\.pi\skills\idu-pi-parent-protocol\SKILL.md` — Pi project
-- `C:\Users\elmas\.pi\agent\skills\idu-pi-parent-protocol\SKILL.md` — Pi global, shared across projects
-- `C:\Users\elmas\pi-telegram-bridge\.agents\skills\idu-pi-parent-protocol\SKILL.md` — OpenCode project
+Canonical: `skills-bundle/idu-pi-parent-protocol/SKILL.md`; tracked mirrors: `.pi/skills/idu-pi-parent-protocol/SKILL.md` and `.agents/skills/idu-pi-parent-protocol/SKILL.md`. All three must stay byte-identical.
 
 In **Pi CLI**: type `/skills` and pick `idu-pi-parent-protocol`, or it auto-loads on the trigger words above.
 In **OpenCode**: the `skill` tool lists this skill; load it via `skill({ name: "idu-pi-parent-protocol" })`.

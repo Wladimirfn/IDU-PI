@@ -22,10 +22,14 @@
 //     legitimate is coverage drifting silently, so the gap must be declared
 //     in the allowlist below and the count is printed on every run.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 const SERVER = "src/mcp-server.ts";
 const PROTOCOL = "skills-bundle/idu-pi-parent-protocol/SKILL.md";
+const DEPLOYED_PROTOCOLS = [
+	".agents/skills/idu-pi-parent-protocol/SKILL.md",
+	".pi/skills/idu-pi-parent-protocol/SKILL.md",
+];
 
 // Registered tools the protocol intentionally does not document. Adding a
 // name here is a decision ("the orchestrator should not reach for this"),
@@ -40,23 +44,6 @@ const PROTOCOL = "skills-bundle/idu-pi-parent-protocol/SKILL.md";
 // at the bottom will print a warning to remove it.
 const INTENTIONALLY_UNDOCUMENTED = new Set([]);
 
-// Names the protocol mentions ON PURPOSE as things that do NOT exist — its
-// "never invent a tool name" section teaches by counter-example:
-//
-//   "No `idu_project_list` exists"
-//   "❌ Inventing tool names like `idu_status_check`, `idu_get_context`"
-//
-// A naive scan reads those as prescriptions and reports the protocol as
-// broken for being correct. So they are declared here — and the declaration
-// is load-bearing in BOTH directions: if any of these ever becomes a real
-// registered tool, the protocol's warning turns into a lie and this script
-// fails. That is the reverse check below. Keep it sorted.
-const DOCUMENTED_AS_NONEXISTENT = new Set([
-	"idu_get_context",
-	"idu_project_list",
-	"idu_status_check",
-]);
-
 // Matches the registration call in both its single-line and wrapped forms:
 //   tool("idu_status", "...", {
 //   tool(
@@ -67,12 +54,14 @@ const REGISTRATION = /\btool\(\s*["'`](idu_[a-z0-9_]+)["'`]/g;
 // the base name.
 const MENTION = /idu_[a-z0-9_]+/g;
 
-function read(path) {
-	if (!existsSync(path)) {
-		console.error(`[protocol-drift] missing file: ${path}`);
+function readRequired(path) {
+	try {
+		return readFileSync(path);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		console.error(`[protocol-drift] missing or unreadable required copy: ${path}\n  ${detail}`);
 		process.exit(2);
 	}
-	return readFileSync(path, "utf8");
 }
 
 function uniqueSorted(values) {
@@ -81,11 +70,22 @@ function uniqueSorted(values) {
 
 const strictCoverage = process.argv.includes("--strict-coverage");
 
+const canonicalProtocol = readRequired(PROTOCOL);
+const mismatchedProtocols = DEPLOYED_PROTOCOLS.filter(
+	(path) => !canonicalProtocol.equals(readRequired(path)),
+);
+if (mismatchedProtocols.length > 0) {
+	console.error(
+		`[protocol-drift] FAIL: deployed protocol copy mismatch (canonical: ${PROTOCOL}):\n  ${mismatchedProtocols.join("\n  ")}`,
+	);
+	process.exit(1);
+}
+
 const registered = uniqueSorted(
-	[...read(SERVER).matchAll(REGISTRATION)].map((m) => m[1]),
+	[...readRequired(SERVER).toString("utf8").matchAll(REGISTRATION)].map((m) => m[1]),
 );
 const documented = uniqueSorted(
-	[...read(PROTOCOL).matchAll(MENTION)].map((m) => m[0]),
+	[...canonicalProtocol.toString("utf8").matchAll(MENTION)].map((m) => m[0]),
 );
 
 if (registered.length === 0) {
@@ -103,14 +103,7 @@ if (registered.length === 0) {
 const registeredSet = new Set(registered);
 const documentedSet = new Set(documented);
 
-const phantom = documented.filter(
-	(name) => !registeredSet.has(name) && !DOCUMENTED_AS_NONEXISTENT.has(name),
-);
-// Reverse check: a counter-example that became real. The protocol would then
-// be actively teaching that an existing tool does not exist.
-const resurrected = [...DOCUMENTED_AS_NONEXISTENT].filter((name) =>
-	registeredSet.has(name),
-);
+const phantom = documented.filter((name) => !registeredSet.has(name));
 const undocumented = registered.filter(
 	(name) => !documentedSet.has(name) && !INTENTIONALLY_UNDOCUMENTED.has(name),
 );
@@ -142,15 +135,6 @@ if (phantom.length > 0) {
 		`\n[protocol-drift] FAIL: ${phantom.length} documented tool(s) are not registered by the server.\n` +
 			`An orchestrator following the protocol would call these and get nothing:\n  ${phantom.join("\n  ")}\n` +
 			`Fix the protocol table (rename or remove), or register the tool.`,
-	);
-	failed = true;
-}
-
-if (resurrected.length > 0) {
-	console.error(
-		`\n[protocol-drift] FAIL: ${resurrected.length} tool(s) are registered but the protocol ` +
-			`teaches they do not exist:\n  ${resurrected.join("\n  ")}\n` +
-			`Remove them from DOCUMENTED_AS_NONEXISTENT and document them properly.`,
 	);
 	failed = true;
 }
