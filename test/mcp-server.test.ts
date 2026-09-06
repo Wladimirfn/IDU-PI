@@ -217,3 +217,27 @@ test("matchesExpectedFile precision and runPostflight records audit decision", a
 		assert.equal(resEmpty.unexpectedFiles.length, resEmpty.observedChangedCount);
 	}
 });
+
+test("parsePorcelainLine accurately extracts paths preserving fixed XY prefix", async () => {
+	const { parsePorcelainLine } = await import("../src/quality.js");
+
+	// Unstaged modification with leading space (Claude Opus repro case)
+	assert.equal(parsePorcelainLine(" M a.txt"), "a.txt");
+	assert.equal(parsePorcelainLine(" M src/quality.ts"), "src/quality.ts");
+
+	// Staged modification
+	assert.equal(parsePorcelainLine("M  src/mcp-server.ts"), "src/mcp-server.ts");
+
+	// Untracked file
+	assert.equal(parsePorcelainLine("?? new-file.ts"), "new-file.ts");
+
+	// Rename: XY old -> new
+	assert.equal(parsePorcelainLine("R  old-name.ts -> new-name.ts"), "new-name.ts");
+
+	// Quoted paths
+	assert.equal(parsePorcelainLine(' M "path with spaces/file.txt"'), "path with spaces/file.txt");
+
+	// Empty or invalid lines
+	assert.equal(parsePorcelainLine(""), null);
+	assert.equal(parsePorcelainLine("   "), null);
+});
