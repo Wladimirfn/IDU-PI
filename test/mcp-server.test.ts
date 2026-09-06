@@ -108,6 +108,22 @@ test("MCP schema validation rejects missing required arguments and invalid enums
 	})) as { isError?: boolean; content: Array<{ text: string }> };
 	assert.equal(resType.isError, true);
 	assert.ok(resType.content[0].text.includes("must be a string"));
+
+	// Unknown parameter rejected (strict closed schema)
+	const resUnknown = (await handleMcpMethod("tools/call", {
+		name: "idu_status",
+		arguments: { project_path: process.cwd(), bogus_param: "x" },
+	})) as { isError?: boolean; content: Array<{ text: string }> };
+	assert.equal(resUnknown.isError, true);
+	assert.ok(resUnknown.content[0].text.includes("Unknown parameter 'bogus_param'"));
+
+	// Postflight missing required expected_files
+	const resPostMissing = (await handleMcpMethod("tools/call", {
+		name: "idu_postflight",
+		arguments: { task_id: "test-task" },
+	})) as { isError?: boolean; content: Array<{ text: string }> };
+	assert.equal(resPostMissing.isError, true);
+	assert.ok(resPostMissing.content[0].text.includes("Missing required parameter: 'expected_files'"));
 });
 
 test("buildWorkerArgs enforces fail-closed permissions", async () => {
@@ -193,4 +209,11 @@ test("matchesExpectedFile precision and runPostflight records audit decision", a
 
 	const decisions = listDecisions({ limit: 5 });
 	assert.ok(decisions.some((d) => d.targetId === taskId), "Postflight must record into decision ledger");
+
+	// 3. Postflight with empty expectedFiles flags any observed changes as blast-radius violation
+	const resEmpty = runPostflight({ taskId: "test-empty-expected", expectedFiles: [] });
+	if (resEmpty.observedChangedCount > 0) {
+		assert.equal(resEmpty.matchesIntent, false, "Empty expectedFiles with observed changes must fail intent");
+		assert.equal(resEmpty.unexpectedFiles.length, resEmpty.observedChangedCount);
+	}
 });
