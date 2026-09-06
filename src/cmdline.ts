@@ -78,6 +78,10 @@ export interface BuildWorkerArgsOptions {
 	fork?: boolean;
 }
 
+function hasWorkspacePermissions(profile: IduProfile): boolean {
+	return profile.permissions === "workspace";
+}
+
 export function buildWorkerArgs(
 	profile: IduProfile,
 	task: string,
@@ -108,7 +112,7 @@ export function buildWorkerArgs(
 				"--output-format", "stream-json",
 				"--verbose",
 			);
-			if (profile.permissions !== "read-only") {
+			if (hasWorkspacePermissions(profile)) {
 				args.push("--permission-mode", "bypassPermissions");
 			}
 
@@ -134,7 +138,7 @@ export function buildWorkerArgs(
 		}
 
 		case "opencode": {
-			const autoArgs = profile.permissions === "read-only" ? [] : ["--auto"];
+			const autoArgs = hasWorkspacePermissions(profile) ? ["--auto"] : [];
 			args.push("run", "--format", "json", ...autoArgs);
 			if (profile.model) {
 				const fullModel = profile.provider ? `${profile.provider}/${profile.model}` : profile.model;
@@ -192,7 +196,7 @@ export function buildWorkerArgs(
 				args.push("resume", sessionId);
 			}
 			args.push("--json");
-			if (profile.permissions !== "read-only") {
+			if (hasWorkspacePermissions(profile)) {
 				args.push("--dangerously-bypass-approvals-and-sandbox");
 			}
 			if (profile.model) {
@@ -207,7 +211,7 @@ export function buildWorkerArgs(
 			if (profile.model) {
 				args.push("-m", profile.model);
 			}
-			if (profile.permissions !== "read-only") {
+			if (hasWorkspacePermissions(profile)) {
 				args.push("--auto");
 			}
 			if (sessionId) {
@@ -222,7 +226,7 @@ export function buildWorkerArgs(
 			if (profile.model) {
 				args.push("-m", profile.model);
 			}
-			if (profile.permissions !== "read-only") {
+			if (hasWorkspacePermissions(profile)) {
 				args.push("-y");
 			}
 			if (sessionOptions.isResumed && sessionId) {

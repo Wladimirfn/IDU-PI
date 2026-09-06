@@ -84,3 +84,113 @@ test("MCP idu_session_list returns session array", async () => {
 	assert.ok(Array.isArray(list));
 });
 
+test("MCP schema validation rejects missing required arguments and invalid enums", async () => {
+	// Missing required "request"
+	const resMissing = (await handleMcpMethod("tools/call", {
+		name: "idu_preflight",
+		arguments: {},
+	})) as { isError?: boolean; content: Array<{ text: string }> };
+	assert.equal(resMissing.isError, true);
+	assert.ok(resMissing.content[0].text.includes("Missing required parameter: 'request'"));
+
+	// Invalid enum value
+	const resEnum = (await handleMcpMethod("tools/call", {
+		name: "idu_preflight",
+		arguments: { request: "Valid task", change_mode: "invalid_mode" },
+	})) as { isError?: boolean; content: Array<{ text: string }> };
+	assert.equal(resEnum.isError, true);
+	assert.ok(resEnum.content[0].text.includes("must be one of"));
+
+	// Invalid argument type
+	const resType = (await handleMcpMethod("tools/call", {
+		name: "idu_delegate",
+		arguments: { task: 12345, profile: "fast" },
+	})) as { isError?: boolean; content: Array<{ text: string }> };
+	assert.equal(resType.isError, true);
+	assert.ok(resType.content[0].text.includes("must be a string"));
+});
+
+test("buildWorkerArgs enforces fail-closed permissions", async () => {
+	const { buildWorkerArgs } = await import("../src/cmdline.js");
+	const baseConfig = {
+		version: "2.1.0",
+		oneOrchestratorRule: { enabled: true, allowRecursiveDelegation: false },
+		clis: {
+			claude: { command: "claude", argsTemplate: [] },
+			codex: { command: "codex", argsTemplate: [] },
+		},
+		defaultTimeoutMs: 300000,
+		maxConcurrentWorkers: 4,
+	};
+
+	// 1. Missing or undefined permissions -> NO bypass
+	const defaultProfile = { harness: "claude", model: "opus" };
+	const res1 = buildWorkerArgs(defaultProfile, "Test task", [], baseConfig);
+	assert.ok(!res1.args.includes("bypassPermissions"), "Undefined permissions must NOT bypass");
+
+	// 2. Read-only permissions -> NO bypass
+	const readOnlyProfile = { harness: "claude", model: "opus", permissions: "read-only" as const };
+	const res2 = buildWorkerArgs(readOnlyProfile, "Test task", [], baseConfig);
+	assert.ok(!res2.args.includes("bypassPermissions"), "Read-only permissions must NOT bypass");
+
+	// 3. Typo in permissions -> NO bypass
+	const typoProfile = { harness: "codex", permissions: "workspace-mode" as any };
+	const res3 = buildWorkerArgs(typoProfile, "Test task", [], baseConfig);
+	assert.ok(!res3.args.includes("--dangerously-bypass-approvals-and-sandbox"), "Typo must NOT bypass");
+
+	// 4. Strict workspace permissions -> Bypasses allowed
+	const wsProfile = { harness: "claude", permissions: "workspace" as const };
+	const res4 = buildWorkerArgs(wsProfile, "Test task", [], baseConfig);
+	assert.ok(res4.args.includes("bypassPermissions"), "Strict workspace must allow bypass");
+});
+
+test("Protocol Guard: SKILL.md documents exactly the 13 canonical tools with zero ghosts", async () => {
+	const { readFileSync } = await import("node:fs");
+	const { resolve } = await import("node:path");
+
+	const skillPath = resolve(".pi/skills/idu-pi-parent-protocol/SKILL.md");
+	const skillContent = readFileSync(skillPath, "utf8");
+
+	// Every real tool must be present in the skill
+	for (const tool of TOOLS) {
+		assert.ok(
+			skillContent.includes(`\`${tool.name}\``),
+			`Canonical tool ${tool.name} must be documented in SKILL.md`,
+		);
+	}
+
+	// Zero ghost tools: extract all `idu_*` mentions from the table
+	const toolTableMatch = skillContent.match(/## Canonical Tool Catalog[\s\S]*?##/);
+	assert.ok(toolTableMatch, "Canonical Tool Catalog section must exist");
+	const tableText = toolTableMatch[0];
+	const mentionedTools = Array.from(tableText.matchAll(/`idu_[a-z0-9_]+`/g)).map((m) => m[0].replace(/`/g, ""));
+	const uniqueMentioned = Array.from(new Set(mentionedTools));
+
+	assert.equal(uniqueMentioned.length, 13, `Expected exactly 13 unique tools in SKILL table, found: ${uniqueMentioned.length}`);
+
+	// Verify byte identity across copies
+	const agentsSkillPath = resolve(".agents/skills/idu-pi-parent-protocol/SKILL.md");
+	const p1 = readFileSync(skillPath);
+	const p2 = readFileSync(agentsSkillPath);
+	assert.ok(p1.equals(p2), "Project-local SKILL.md copies must be byte-identical");
+});
+
+test("matchesExpectedFile precision and runPostflight records audit decision", async () => {
+	const { matchesExpectedFile, runPostflight } = await import("../src/quality.js");
+	const { listDecisions } = await import("../src/decision-ledger.js");
+
+	// 1. Precision matches
+	assert.equal(matchesExpectedFile("src/quality.ts", "src/quality.ts"), true);
+	assert.equal(matchesExpectedFile("src/quality.ts", "quality.ts"), true);
+	assert.equal(matchesExpectedFile("src/quality.ts", "src/"), true);
+	assert.equal(matchesExpectedFile("src/mcp-server.ts", "src/quality.ts"), false);
+	assert.equal(matchesExpectedFile("src", "src/quality.ts"), false);
+
+	// 2. Postflight records audit in decision ledger
+	const taskId = "test-postflight-audit-" + Date.now();
+	const res = runPostflight({ taskId, expectedFiles: ["package.json"] });
+	assert.ok(res.summary);
+
+	const decisions = listDecisions({ limit: 5 });
+	assert.ok(decisions.some((d) => d.targetId === taskId), "Postflight must record into decision ledger");
+});
