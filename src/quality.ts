@@ -48,6 +48,20 @@ function getGitStatus(cwd: string): string[] {
 	}
 }
 
+export function parsePorcelainLine(line: string): string | null {
+	if (!line || line.length < 4) return null;
+	// git status --porcelain format: XY <path> or XY <path1> -> <path2>
+	// Col 0: index status, Col 1: worktree status, Col 2: separator space, Col 3+: file path
+	let filePath = line.slice(3).trim();
+	if (filePath.includes(" -> ")) {
+		filePath = filePath.split(" -> ")[1].trim();
+	}
+	if (filePath.startsWith('"') && filePath.endsWith('"')) {
+		filePath = filePath.slice(1, -1);
+	}
+	return filePath ? filePath.replace(/\\/g, "/") : null;
+}
+
 export function getObservedChangedFiles(cwd: string): string[] {
 	const set = new Set<string>();
 
@@ -64,17 +78,14 @@ export function getObservedChangedFiles(cwd: string): string[] {
 		// Git repository might be empty or HEAD unavailable
 	}
 
-	// 2. Untracked and staged files from porcelain status
+	// 2. Untracked and staged/unstaged files from porcelain status
 	try {
-		const statusOut = execSync("git status --porcelain -uall", { cwd, encoding: "utf8" }).trim();
+		const statusOut = execSync("git status --porcelain -uall", { cwd, encoding: "utf8" });
 		if (statusOut) {
 			statusOut.split(/\r?\n/).forEach((line) => {
-				const cleanLine = line.trim();
-				if (!cleanLine) return;
-				const filePath = cleanLine.slice(3).trim();
-				const finalPath = filePath.includes(" -> ") ? filePath.split(" -> ")[1].trim() : filePath;
-				if (finalPath) {
-					set.add(finalPath.replace(/\\/g, "/"));
+				const parsed = parsePorcelainLine(line);
+				if (parsed) {
+					set.add(parsed);
 				}
 			});
 		}
