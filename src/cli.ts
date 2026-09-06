@@ -66,6 +66,22 @@ async function waitRunCommand(
 		await new Promise((r) => setTimeout(r, options.intervalMs));
 	}
 
+	// Double check status before declaring timeout in case process completed during final tick
+	status = manager.getStatus(runId);
+	if (status && status.status !== "running" && status.status !== "pending") {
+		streamLog();
+		const result = manager.getResult(runId, options.verbose);
+		if (!options.follow) {
+			console.log(JSON.stringify(result, null, 2));
+		} else {
+			console.log(`\n=== IDU RUN FINISHED: ${status.status.toUpperCase()} (code: ${status.exitCode}) ===`);
+			if (status.resultSummary) {
+				console.log(`Summary:\n${status.resultSummary}`);
+			}
+		}
+		process.exit(status.status === "completed" ? 0 : 1);
+	}
+
 	console.error(`\nWait timed out after ${options.timeoutMs}ms. Worker is still running in background.`);
 	process.exit(124);
 }
@@ -129,12 +145,14 @@ async function main(): Promise<void> {
 
 			let timeoutIndex = args.indexOf("--timeout");
 			if (timeoutIndex === -1) timeoutIndex = args.indexOf("--timeout-ms");
-			const timeoutMs = timeoutIndex !== -1 ? parseInt(args[timeoutIndex + 1], 10) : 14_400_000;
+			const parsedTimeout = timeoutIndex !== -1 ? parseInt(args[timeoutIndex + 1], 10) : NaN;
+			const timeoutMs = (!isNaN(parsedTimeout) && parsedTimeout > 0) ? parsedTimeout : 14_400_000;
 			const follow = args.includes("--follow") || args.includes("-f");
 			const verbose = args.includes("--verbose");
 
 			let intervalIndex = args.indexOf("--interval");
-			const intervalMs = intervalIndex !== -1 ? parseInt(args[intervalIndex + 1], 10) : 1000;
+			const parsedInterval = intervalIndex !== -1 ? parseInt(args[intervalIndex + 1], 10) : NaN;
+			const intervalMs = (!isNaN(parsedInterval) && parsedInterval > 0) ? parsedInterval : 1000;
 
 			await waitRunCommand(runId, { timeoutMs, follow, verbose, intervalMs });
 			break;

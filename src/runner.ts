@@ -381,5 +381,20 @@ function cleanupFiles(spec: RunnerSpec): void {
 
 runDaemon().catch((err) => {
 	console.error("Fatal runner daemon error:", err);
+	try {
+		const specPath = parseArgs();
+		if (existsSync(specPath)) {
+			const spec = JSON.parse(readFileSync(specPath, "utf8"));
+			if (spec.sessionPath && existsSync(spec.sessionPath)) {
+				const rec = JSON.parse(readFileSync(spec.sessionPath, "utf8"));
+				rec.status = "failed";
+				rec.error = `Fatal runner daemon error: ${err?.message || err}`;
+				rec.completedAt = new Date().toISOString();
+				writeJsonAtomic(spec.sessionPath, rec);
+			}
+		}
+	} catch {
+		// best effort
+	}
 	process.exit(1);
 });
