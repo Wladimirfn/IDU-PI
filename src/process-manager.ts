@@ -8,9 +8,11 @@ import {
 	openSync,
 	closeSync,
 	renameSync,
+	mkdirSync,
 	createWriteStream,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	IDU_LOCKS_DIR,
 	IDU_LOGS_DIR,
@@ -28,24 +30,80 @@ import type {
 	DelegateResult,
 	RunRecord,
 	RunStatus,
+	RunnerSpec,
 	SessionTreeEntry,
 } from "./types.js";
 
-const activeProcesses = new Map<string, { process: ChildProcess; record: RunRecord }>();
+const activeProcesses = new Map<string, { process?: ChildProcess; record: RunRecord }>();
 const SESSION_TREE_PATH = join(IDU_SESSIONS_DIR, "tree.json");
 
-export function killProcessTree(child: ChildProcess, reason = "termination"): void {
-	if (!child.pid) return;
+export function writeJsonAtomic(filePath: string, data: any): void {
+	const dir = dirname(filePath);
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+	writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
+
+	let retries = 5;
+	while (retries > 0) {
+		try {
+			renameSync(tmpPath, filePath);
+			return;
+		} catch (err: any) {
+			retries--;
+			if (retries === 0) {
+				try {
+					writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+					try {
+						unlinkSync(tmpPath);
+					} catch {}
+					return;
+				} catch {
+					throw err;
+				}
+			}
+			const start = Date.now();
+			while (Date.now() - start < 15) {}
+		}
+	}
+}
+
+export function isProcessAlive(pid: number): boolean {
+	if (!pid || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err: any) {
+		if (err.code === "EPERM") return true;
+		if (err.code === "ESRCH") return false;
+		return false;
+	}
+}
+
+export function getRunnerScriptPath(): string {
+	const jsPath = fileURLToPath(new URL("./runner.js", import.meta.url));
+	if (existsSync(jsPath)) return jsPath;
+	const distJsPath = resolve(process.cwd(), "dist/src/runner.js");
+	if (existsSync(distJsPath)) return distJsPath;
+	return jsPath;
+}
+
+export function killProcessTree(child: ChildProcess | number, reason = "termination"): void {
+	const pid = typeof child === "number" ? child : child.pid;
+	if (!pid) return;
 
 	if (process.platform === "win32") {
 		// Reliable process tree termination on Windows (cmd.exe wrapper + child processes)
 		try {
-			execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+			execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
 		} catch {
-			try {
-				child.kill("SIGKILL");
-			} catch {
-				// best effort
+			if (typeof child !== "number") {
+				try {
+					child.kill("SIGKILL");
+				} catch {
+					// best effort
+				}
 			}
 		}
 		return;
@@ -53,25 +111,23 @@ export function killProcessTree(child: ChildProcess, reason = "termination"): vo
 
 	// POSIX: process group kill with escalation
 	try {
-		process.kill(-child.pid, "SIGTERM");
+		process.kill(-pid, "SIGTERM");
 	} catch {
 		try {
-			child.kill("SIGTERM");
+			process.kill(pid, "SIGTERM");
 		} catch {
 			// best effort
 		}
 	}
 
 	const escalationTimer = setTimeout(() => {
-		if (child.exitCode === null && child.signalCode === null) {
+		try {
+			process.kill(-pid, "SIGKILL");
+		} catch {
 			try {
-				process.kill(-child.pid!, "SIGKILL");
+				process.kill(pid, "SIGKILL");
 			} catch {
-				try {
-					child.kill("SIGKILL");
-				} catch {
-					// best effort
-				}
+				// best effort
 			}
 		}
 	}, 5_000);
@@ -111,9 +167,7 @@ export function loadSessionTree(): Record<string, SessionTreeEntry> {
 
 export function saveSessionTree(tree: Record<string, SessionTreeEntry>): void {
 	ensureIduDirectories();
-	const tmpPath = `${SESSION_TREE_PATH}.${randomUUID()}.tmp`;
-	writeFileSync(tmpPath, JSON.stringify(tree, null, 2), "utf8");
-	renameSync(tmpPath, SESSION_TREE_PATH);
+	writeJsonAtomic(SESSION_TREE_PATH, tree);
 }
 
 export interface SessionLockHandle {
@@ -447,6 +501,8 @@ export class CrossCliProcessManager {
 		const logPath = join(IDU_LOGS_DIR, `${runId}.log`);
 		const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
 		const pidPath = join(IDU_RUNTIME_DIR, `${runId}.pid`);
+		const runnerPidPath = join(IDU_RUNTIME_DIR, `${runId}.runner.pid`);
+		const specPath = join(IDU_RUNTIME_DIR, `${runId}.spec.json`);
 
 		const record: RunRecord = {
 			runId,
@@ -457,18 +513,17 @@ export class CrossCliProcessManager {
 			profile,
 			command,
 			args,
-			status: "pending",
+			status: "running",
 			exitCode: null,
 			startedAt,
 			logPath,
 		};
 
-		// 5. Acquire session concurrency lock (prevent race conditions on the same session in workingDir)
+		// 6. Acquire session concurrency lock (prevent race conditions on the same session in workingDir)
 		const sessionLock = acquireSessionLock(effectiveSessionId, workingDir, process.pid);
 
-		// 6. Setup environment with ONE ORCHESTRATOR RULE markers
-		const env = {
-			...process.env,
+		// 7. Setup environment overrides with ONE ORCHESTRATOR RULE markers
+		const runnerEnv: Record<string, string> = {
 			IDU_WORKER: "true",
 			IDU_PARENT: request.parentOrchestrator || "idu-router",
 			IDU_ALLOW_DELEGATION: "false",
@@ -476,55 +531,6 @@ export class CrossCliProcessManager {
 			IDU_PROFILE: request.profile,
 			IDU_SESSION_ID: effectiveSessionId,
 		};
-
-		// 7. Initialize log file
-		ensureIduDirectories();
-		const logStream = createWriteStream(logPath, { flags: "a" });
-		const header = [
-			`=== IDU RUN START: ${runId} ===`,
-			`Time: ${startedAt}`,
-			`Session: ${effectiveSessionId} (Resumed: ${isResumed}, Parent: ${parentSessionId || "none"})`,
-			`Harness: ${profile.harness} | Model: ${profile.model || "default"}`,
-			`Command: ${command} ${args.join(" ")}`,
-			`WorkingDir: ${workingDir}`,
-			`===========================================`,
-			"",
-			"",
-		].join("\n");
-		logStream.write(header);
-
-		let stdoutBuffer = "";
-		let stderrBuffer = "";
-
-		let child: ChildProcess;
-		try {
-			child = spawn(command, args, {
-				cwd: workingDir,
-				env,
-				stdio: ["ignore", "pipe", "pipe"],
-				shell: isShell,
-				windowsHide: true,
-			});
-		} catch (spawnErr: any) {
-			sessionLock.release();
-			record.status = "failed";
-			record.error = spawnErr.message;
-			record.completedAt = new Date().toISOString();
-			writeFileSync(sessionPath, JSON.stringify(record, null, 2), "utf8");
-			throw spawnErr;
-		}
-
-		record.pid = child.pid;
-		record.status = "running";
-		writeFileSync(sessionPath, JSON.stringify(record, null, 2), "utf8");
-
-		if (child.pid) {
-			writeFileSync(pidPath, child.pid.toString(), "utf8");
-			// Update lock file with actual child PID
-			sessionLock.updatePid?.(child.pid);
-		}
-
-		activeProcesses.set(runId, { process: child, record });
 
 		const effectiveTimeoutMs = request.timeoutMs ?? profile.timeoutMs ?? config.defaultTimeoutMs;
 		const effectiveIdleTimeoutMs = profile.idleTimeoutMs ?? (profile.streams ? 300_000 : 0);
@@ -537,137 +543,67 @@ export class CrossCliProcessManager {
 			effectiveHardCapMs = Math.max(effectiveTimeoutMs, 14_400_000); // 4 hours default
 		}
 		const startupGraceMs = profile.startupGraceMs ?? Math.max(effectiveIdleTimeoutMs, 120_000);
-		const startMs = new Date(startedAt).getTime();
 
-		const MAX_BUFFER = 8 * 1024 * 1024; // 8MB memory cap
-		let lastActivityTime = Date.now();
-		let firstByteReceived = false;
-		let totalBytesEmitted = 0;
-		let lastDiskSyncTime = 0;
-
-		const onChunkReceived = (chunk: Buffer, isStderr: boolean) => {
-			const text = chunk.toString();
-			if (isStderr) {
-				stderrBuffer += text;
-				if (stderrBuffer.length > MAX_BUFFER) {
-					stderrBuffer = stderrBuffer.slice(-MAX_BUFFER);
-				}
-			} else {
-				stdoutBuffer += text;
-				if (stdoutBuffer.length > MAX_BUFFER) {
-					stdoutBuffer = stdoutBuffer.slice(-MAX_BUFFER);
-				}
-			}
-			logStream.write(chunk);
-
-			totalBytesEmitted += chunk.length;
-			lastActivityTime = Date.now();
-			firstByteReceived = true;
-			record.lastActivityAt = new Date().toISOString();
-			record.bytesEmitted = totalBytesEmitted;
-
-			// Throttled heartbeat to session file on disk (every 10s)
-			const now = Date.now();
-			if (now - lastDiskSyncTime > 10_000) {
-				lastDiskSyncTime = now;
-				try {
-					writeFileSync(sessionPath, JSON.stringify(record, null, 2), "utf8");
-				} catch {
-					// best effort
-				}
-			}
+		// 8. Build runner spec
+		const spec: RunnerSpec = {
+			runId,
+			sessionId: effectiveSessionId,
+			parentSessionId,
+			harness: profile.harness,
+			command,
+			args,
+			workingDir,
+			env: runnerEnv,
+			logPath,
+			sessionPath,
+			pidPath,
+			runnerPidPath,
+			specPath,
+			lockPath: sessionLock.lockPath,
+			startedAt,
+			timeoutMs: effectiveTimeoutMs,
+			idleTimeoutMs: effectiveIdleTimeoutMs,
+			hardCapMs: effectiveHardCapMs,
+			startupGraceMs,
+			streams: profile.streams,
+			verbose: request.verbose,
+			shell: isShell,
 		};
 
-		child.stdout?.on("data", (chunk: Buffer) => onChunkReceived(chunk, false));
-		child.stderr?.on("data", (chunk: Buffer) => onChunkReceived(chunk, true));
+		ensureIduDirectories();
+		writeJsonAtomic(specPath, spec);
+		writeJsonAtomic(sessionPath, record);
 
-		const completionPromise = new Promise<DelegateResult>((resolve) => {
-			let watchdogTimer: NodeJS.Timeout | null = null;
-			let fallbackKillTimer: NodeJS.Timeout | null = null;
-			let isResolved = false;
-
-			const finishWithResult = () => {
-				if (isResolved) return;
-				isResolved = true;
-				if (watchdogTimer) clearInterval(watchdogTimer);
-				if (fallbackKillTimer) clearTimeout(fallbackKillTimer);
-				this.cleanupRun(runId, pidPath, sessionPath, record, sessionLock, stdoutBuffer);
-				resolve(this.buildResult(record, stdoutBuffer, stderrBuffer, Boolean(request.verbose)));
-			};
-
-			const triggerTimeout = (reason: string) => {
-				if (record.status !== "running") return;
-				record.status = "timeout";
-				record.error = `Execution timed out: ${reason}`;
-				killProcessTree(child, reason);
-
-				// Fallback safety: force resolve if process does not emit close within 10s of kill
-				fallbackKillTimer = setTimeout(() => {
-					if (!isResolved) {
-						record.completedAt = new Date().toISOString();
-						finishWithResult();
-					}
-				}, 10_000);
-				fallbackKillTimer.unref();
-			};
-
-			// Setup watchdog interval
-			watchdogTimer = setInterval(() => {
-				if (record.status !== "running") return;
-				const now = Date.now();
-				const elapsedTotal = now - startMs;
-
-				// 1. Mandatory Hard Cap check (if enabled > 0)
-				if (effectiveHardCapMs > 0 && elapsedTotal > effectiveHardCapMs) {
-					triggerTimeout(`exceeded hard cap of ${effectiveHardCapMs}ms (${Math.round(effectiveHardCapMs / 60000)}m)`);
-					return;
-				}
-
-				// 2. Profiles with streaming enabled: check inactivity
-				if (profile.streams && effectiveIdleTimeoutMs > 0) {
-					const allowedSilence = firstByteReceived ? effectiveIdleTimeoutMs : startupGraceMs;
-					const silentDuration = now - lastActivityTime;
-					if (silentDuration > allowedSilence) {
-						triggerTimeout(`inactivity for ${silentDuration}ms without output (idle limit ${allowedSilence}ms)`);
-						return;
-					}
-				} else if (!profile.streams && effectiveTimeoutMs > 0) {
-					// Non-streaming profiles: check total elapsed duration against profile/request timeout
-					if (elapsedTotal > effectiveTimeoutMs) {
-						triggerTimeout(`reached timeout limit of ${effectiveTimeoutMs}ms`);
-						return;
-					}
-				}
-			}, 5_000);
-			watchdogTimer.unref();
-
-			child.on("error", (err) => {
-				record.status = "failed";
-				record.error = err.message;
-				record.completedAt = new Date().toISOString();
-				logStream.write(`\n\n=== PROCESS ERROR: ${err.message} ===\n`);
-				logStream.end();
-				finishWithResult();
+		// 9. Spawn detached runner daemon
+		const runnerScript = getRunnerScriptPath();
+		let runnerProcess: ChildProcess;
+		try {
+			runnerProcess = spawn(process.execPath, [runnerScript, "--spec", specPath], {
+				cwd: workingDir,
+				detached: true,
+				stdio: "ignore",
+				windowsHide: true,
 			});
+			runnerProcess.unref();
+		} catch (spawnErr: any) {
+			sessionLock.release();
+			record.status = "failed";
+			record.error = spawnErr.message;
+			record.completedAt = new Date().toISOString();
+			writeJsonAtomic(sessionPath, record);
+			throw spawnErr;
+		}
 
-			child.on("close", (code) => {
-				record.exitCode = code;
-				if (record.status !== "timeout") {
-					record.status = code === 0 ? "completed" : "failed";
-				}
-				record.completedAt = new Date().toISOString();
-				const cleanSummary = extractCleanSummary(stdoutBuffer, profile.harness);
-				if (record.status !== "timeout") {
-					record.resultSummary =
-						cleanSummary || stdoutBuffer.slice(-2000).trim() || `Process exited with code ${code}`;
-				}
-				logStream.write(`\n\n=== PROCESS CLOSED WITH CODE ${code} ===\n`);
-				logStream.end();
-				finishWithResult();
-			});
-		});
+		record.runnerPid = runnerProcess.pid;
+		writeJsonAtomic(sessionPath, record);
+		if (runnerProcess.pid) {
+			sessionLock.updatePid?.(runnerProcess.pid);
+		}
+
+		activeProcesses.set(runId, { process: runnerProcess, record });
 
 		if (asyncExecution) {
+			const instructionMsg = `Worker process is RUNNING in background daemon (runId: ${runId}). DO NOT end your turn saying you will check back later. Execute this command now in your terminal tool to stay blocked and stream live logs until completion:\nnode dist/src/cli.js wait ${runId} --follow`;
 			return {
 				runId,
 				sessionId: effectiveSessionId,
@@ -678,13 +614,16 @@ export class CrossCliProcessManager {
 				model: profile.model,
 				status: "running",
 				exitCode: null,
-				summary: `Worker started in background with PID ${child.pid}`,
+				summary: `Worker started in background daemon with runner PID ${runnerProcess.pid || "unknown"}. Stream live logs or wait using:\n  node dist/src/cli.js wait ${runId} --follow`,
 				startedAt,
 				logPath,
+				instruction: instructionMsg,
 			};
 		}
 
-		return await completionPromise;
+		const waitTimeout = (effectiveHardCapMs > 0 ? effectiveHardCapMs : effectiveTimeoutMs) || 900_000;
+		const result = await this.waitForCompletion(runId, waitTimeout, request.verbose);
+		return result || this.buildResult(record, "", "", Boolean(request.verbose));
 	}
 
 	public getStatus(runId: string): RunRecord | null {
@@ -703,21 +642,37 @@ export class CrossCliProcessManager {
 			}
 		}
 
-		if (record && record.status === "running" && record.pid) {
-			try {
-				process.kill(record.pid, 0);
-			} catch (err: any) {
-				if (err.code === "ESRCH") {
-					record.status = "failed";
-					record.completedAt = record.completedAt || new Date().toISOString();
-					record.error = record.error || "Process PID no longer exists";
-					const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
+		if (record && (record.status === "running" || record.status === "pending")) {
+			const runnerAlive = record.runnerPid ? isProcessAlive(record.runnerPid) : false;
+			const workerAlive = record.pid ? isProcessAlive(record.pid) : false;
+
+			if ((record.runnerPid || record.pid) && !runnerAlive && !workerAlive) {
+				let recoveredCode: number | null = null;
+				let logText = "";
+				if (existsSync(record.logPath)) {
 					try {
-						writeFileSync(sessionPath, JSON.stringify(record, null, 2), "utf8");
+						logText = readFileSync(record.logPath, "utf8");
+						const match = logText.match(/=== PROCESS CLOSED WITH CODE (\d+) ===/);
+						if (match) {
+							recoveredCode = parseInt(match[1], 10);
+						}
 					} catch {
-						// ignore
+						// best effort
 					}
 				}
+
+				if (recoveredCode !== null) {
+					record.exitCode = recoveredCode;
+					record.status = recoveredCode === 0 ? "completed" : "failed";
+					const clean = extractCleanSummary(logText, record.profile?.harness || "");
+					record.resultSummary = clean || `Process exited with code ${recoveredCode}`;
+				} else {
+					record.status = "failed";
+					record.error = record.error || "Worker process terminated unexpectedly";
+				}
+				record.completedAt = record.completedAt || new Date().toISOString();
+				const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
+				writeJsonAtomic(sessionPath, record);
 			}
 		}
 
@@ -791,7 +746,7 @@ export class CrossCliProcessManager {
 			}
 		}
 		try {
-			writeFileSync(sessionPath, JSON.stringify(record, null, 2), "utf8");
+			writeJsonAtomic(sessionPath, record);
 		} catch {
 			// best effort
 		}
