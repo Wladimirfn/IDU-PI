@@ -640,3 +640,89 @@ test("getStatus recovers from log when process closed with CODE null (POSIX sign
 		try { unlinkSync(mockLogPath); } catch {}
 	}
 });
+
+test("CLI wait command exits with 124 on timeout and 0 on completion with silent compact JSON", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join, resolve } = await import("node:path");
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const execFileAsync = promisify(execFile);
+
+	const cliPath = resolve("dist/src/cli.js");
+
+	// 1. Test timeout (code 124) when process is still running
+	const timeoutRunId = "IDU-test-wait-timeout-001";
+	const timeoutSessionPath = join(IDU_SESSIONS_DIR, `${timeoutRunId}.json`);
+	const timeoutLogPath = join(IDU_LOGS_DIR, `${timeoutRunId}.log`);
+
+	const runningRecord: RunRecord = {
+		runId: timeoutRunId,
+		sessionId: "sess-wait-timeout",
+		request: { task: "Wait timeout test", profile: "fast" },
+		profile: { harness: "claude" },
+		command: "claude.cmd",
+		args: ["-p", "test"],
+		pid: 999991,
+		runnerPid: process.pid, // alive so getStatus reports running
+		status: "running",
+		exitCode: null,
+		startedAt: new Date().toISOString(),
+		logPath: timeoutLogPath,
+	};
+
+	writeFileSync(timeoutSessionPath, JSON.stringify(runningRecord, null, 2), "utf8");
+	writeFileSync(timeoutLogPath, "mock log line\n", "utf8");
+
+	try {
+		let timedOut = false;
+		try {
+			await execFileAsync(process.execPath, [cliPath, "wait", timeoutRunId, "--timeout", "200", "--interval", "50"]);
+		} catch (err: any) {
+			timedOut = true;
+			assert.equal(err.code, 124, "CLI wait must exit with code 124 on timeout");
+			assert.ok(err.stderr.includes("Wait timed out after 200ms. Worker is still running in background."));
+		}
+		assert.ok(timedOut, "Process should have exited with timeout code 124");
+	} finally {
+		try { unlinkSync(timeoutSessionPath); } catch {}
+		try { unlinkSync(timeoutLogPath); } catch {}
+	}
+
+	// 2. Test completion returns 0 and compact JSON
+	const completedRunId = "IDU-test-wait-completed-002";
+	const completedSessionPath = join(IDU_SESSIONS_DIR, `${completedRunId}.json`);
+	const completedLogPath = join(IDU_LOGS_DIR, `${completedRunId}.log`);
+
+	const completedRecord: RunRecord = {
+		runId: completedRunId,
+		sessionId: "sess-wait-completed",
+		request: { task: "Wait completed test", profile: "fast" },
+		profile: { harness: "claude" },
+		command: "claude.cmd",
+		args: ["-p", "test"],
+		pid: 999992,
+		runnerPid: 999990,
+		status: "completed",
+		exitCode: 0,
+		startedAt: new Date(Date.now() - 5000).toISOString(),
+		completedAt: new Date().toISOString(),
+		logPath: completedLogPath,
+		resultSummary: "Task completed successfully",
+	};
+
+	writeFileSync(completedSessionPath, JSON.stringify(completedRecord, null, 2), "utf8");
+	writeFileSync(completedLogPath, "mock log line\n", "utf8");
+
+	try {
+		const { stdout, stderr } = await execFileAsync(process.execPath, [cliPath, "wait", completedRunId, "--timeout", "5000"]);
+		assert.equal(stderr, "");
+		const parsed = JSON.parse(stdout);
+		assert.equal(parsed.status, "completed");
+		assert.equal(parsed.runId, completedRunId);
+		assert.equal(parsed.summary, "Task completed successfully");
+	} finally {
+		try { unlinkSync(completedSessionPath); } catch {}
+		try { unlinkSync(completedLogPath); } catch {}
+	}
+});
+

@@ -241,3 +241,17 @@ test("parsePorcelainLine accurately extracts paths preserving fixed XY prefix", 
 	assert.equal(parsePorcelainLine(""), null);
 	assert.equal(parsePorcelainLine("   "), null);
 });
+
+test("MCP idu_delegate and idu_worker_wait descriptions mandate silent 540s wait and forbid --follow", () => {
+	const delegateTool = TOOLS.find((t) => t.name === "idu_delegate");
+	assert.ok(delegateTool, "idu_delegate must exist");
+	const asyncProp = (delegateTool.inputSchema as any).properties.async;
+	assert.ok(asyncProp.description.includes("--timeout 540000"), "idu_delegate async description must mention --timeout 540000");
+	assert.ok(asyncProp.description.includes("do NOT use --follow"), "idu_delegate async description must forbid --follow");
+
+	const waitTool = TOOLS.find((t) => t.name === "idu_worker_wait");
+	assert.ok(waitTool, "idu_worker_wait must exist");
+	assert.ok(waitTool.description.includes("--timeout 540000"), "idu_worker_wait description must mention --timeout 540000");
+	assert.ok(!waitTool.description.includes("--follow"), "idu_worker_wait description must not suggest --follow");
+});
+

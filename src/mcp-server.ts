@@ -180,7 +180,7 @@ export const TOOLS = [
 				async: {
 					type: "boolean",
 					description:
-						"If true, starts worker in detached background daemon and returns run_id immediately. Recommended for tasks taking > 15s. IMPORTANT: After calling with async=true, stay listening by executing `node dist/src/cli.js wait <run_id> --follow` in terminal. DO NOT end turn prematurely.",
+						"If true, starts worker in detached background daemon and returns run_id immediately. Recommended for tasks taking > 15s. IMPORTANT: After calling with async=true, stay blocked in terminal by executing `node dist/src/cli.js wait <run_id> --timeout 540000` without token bloat (do NOT use --follow). DO NOT end turn prematurely.",
 				},
 				timeout_ms: {
 					type: "number",
@@ -278,7 +278,7 @@ export const TOOLS = [
 	{
 		name: "idu_worker_wait",
 		description:
-			"Blocks until a background delegated worker (run_id) finishes (completed, failed, or timeout) and returns the full final result. NOTE: If the wait expires before the worker finishes, the worker process is NOT terminated; it remains active in the background. The caller can safely re-invoke idu_worker_wait to continue waiting, inspect real-time progress via idu_worker_status, or execute `node dist/src/cli.js wait <run_id> --follow` in terminal.",
+			"Blocks until a background delegated worker (run_id) finishes (completed, failed, or timeout) and returns the full final result. NOTE: If the wait expires before the worker finishes, the worker process is NOT terminated; it remains active in the background. The caller can safely re-invoke idu_worker_wait to continue waiting, inspect real-time progress via idu_worker_status, or execute `node dist/src/cli.js wait <run_id> --timeout 540000` in terminal.",
 		inputSchema: {
 			type: "object",
 			properties: {

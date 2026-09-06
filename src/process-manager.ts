@@ -600,7 +600,7 @@ export class CrossCliProcessManager {
 		}
 
 		if (asyncExecution) {
-			const instructionMsg = `Worker process is RUNNING in background daemon (runId: ${runId}). DO NOT end your turn saying you will check back later. Execute this command now in your terminal tool to stay blocked and stream live logs until completion:\nnode dist/src/cli.js wait ${runId} --follow`;
+			const instructionMsg = `Worker process is RUNNING in background daemon (runId: ${runId}). DO NOT end your turn saying you will check back later. Execute this command now in your terminal tool to stay blocked without token bloat until completion:\nnode dist/src/cli.js wait ${runId} --timeout 540000\nIf the command exits with code 124 (timeout) and the worker is still healthy, re-invoke it to continue waiting. DO NOT use --follow (it dumps raw logs and bloats prompt tokens).`;
 			return {
 				runId,
 				sessionId: effectiveSessionId,
@@ -611,7 +611,7 @@ export class CrossCliProcessManager {
 				model: profile.model,
 				status: "running",
 				exitCode: null,
-				summary: `Worker started in background daemon with runner PID ${runnerProcess.pid || "unknown"}. Stream live logs or wait using:\n  node dist/src/cli.js wait ${runId} --follow`,
+				summary: `Worker started in background daemon with runner PID ${runnerProcess.pid || "unknown"}. Wait silently using:\n  node dist/src/cli.js wait ${runId} --timeout 540000`,
 				startedAt,
 				logPath,
 				instruction: instructionMsg,

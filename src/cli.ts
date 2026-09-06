@@ -146,7 +146,7 @@ async function main(): Promise<void> {
 			let timeoutIndex = args.indexOf("--timeout");
 			if (timeoutIndex === -1) timeoutIndex = args.indexOf("--timeout-ms");
 			const parsedTimeout = timeoutIndex !== -1 ? parseInt(args[timeoutIndex + 1], 10) : NaN;
-			const timeoutMs = (!isNaN(parsedTimeout) && parsedTimeout > 0) ? parsedTimeout : 14_400_000;
+			const timeoutMs = (!isNaN(parsedTimeout) && parsedTimeout > 0) ? parsedTimeout : 540_000;
 			const follow = args.includes("--follow") || args.includes("-f");
 			const verbose = args.includes("--verbose");
 
