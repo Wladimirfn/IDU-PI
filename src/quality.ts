@@ -142,7 +142,6 @@ export function runPostflight(input: PostflightInput): PostflightResult {
 	const expectedFiles = input.expectedFiles || [];
 
 	const unexpectedFiles = observedChangedFiles.filter((f) => {
-		if (expectedFiles.length === 0) return false;
 		return !expectedFiles.some((ef) => matchesExpectedFile(f, ef));
 	});
 

@@ -39,6 +39,10 @@ export const TOOLS = [
 					type: "string",
 					description: "Optional project path to check (defaults to current working directory).",
 				},
+				projectPath: {
+					type: "string",
+					description: "Alias for project_path.",
+				},
 			},
 		},
 	},
@@ -48,9 +52,13 @@ export const TOOLS = [
 		inputSchema: {
 			type: "object",
 			properties: {
+				project_path: {
+					type: "string",
+					description: "Optional project path to check (defaults to current working directory).",
+				},
 				projectPath: {
 					type: "string",
-					description: "Optional project path.",
+					description: "Alias for project_path.",
 				},
 			},
 		},
@@ -113,6 +121,7 @@ export const TOOLS = [
 					description: "Alias for working_dir.",
 				},
 			},
+			required: ["task_id", "expected_files"],
 		},
 	},
 	{
@@ -163,6 +172,10 @@ export const TOOLS = [
 				working_dir: {
 					type: "string",
 					description: "Working directory for the target CLI process.",
+				},
+				cwd: {
+					type: "string",
+					description: "Alias for working_dir.",
 				},
 				async: {
 					type: "boolean",
@@ -325,11 +338,14 @@ export function validateToolInput(
 		}
 	}
 
-	// 2. Types and enums
+	// 2. Types, enums, and rejection of unknown parameters (strict closed schema)
 	for (const [key, val] of Object.entries(args)) {
-		if (val === undefined || val === null) continue;
+		if (val === undefined) continue;
 		const propDef = properties[key];
-		if (!propDef) continue;
+		if (!propDef) {
+			errors.push(`Unknown parameter '${key}' is not permitted for this tool`);
+			continue;
+		}
 
 		if (propDef.type) {
 			switch (propDef.type) {
@@ -516,7 +532,7 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 			if (name === "idu_delegate") {
 				const task = String(args.task || "");
 				const profile = String(args.profile || "");
-				const workingDir = args.working_dir ? String(args.working_dir) : undefined;
+				const workingDir = args.working_dir ? String(args.working_dir) : (args.cwd ? String(args.cwd) : undefined);
 				const asyncExec = Boolean(args.async);
 				const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : undefined;
 				const contextFiles = Array.isArray(args.context_files) ? args.context_files.map(String) : [];
