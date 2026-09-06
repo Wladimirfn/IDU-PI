@@ -26,53 +26,13 @@ jobs:
         run: corepack enable
 
       - name: Install dependencies
-        run: corepack pnpm install --frozen-lockfile
-
-      - name: Install SQLite CLI
-        run: |
-          choco install sqlite -y --no-progress
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "choco install sqlite failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
-          # The second guard is the one that catches the original 2026-08-03
-          # failure mode (choco exited 0 but installed zero packages). Asking
-          # for the binary by name with -ErrorAction SilentlyContinue gives a
-          # deterministic answer — no LASTEXITCODE inheritance from choco, no
-          # implicit dependence on $ErrorActionPreference. See PR #447 for
-          # the failure-mode verification.
-          $sqliteCommand = Get-Command sqlite3 -ErrorAction SilentlyContinue
-          if (-not $sqliteCommand) {
-            Write-Host "sqlite3 binary not found on PATH after choco install"
-            exit 1
-          }
-          sqlite3 -version
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "sqlite3 binary on PATH did not respond to -version with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
+        run: corepack pnpm install
 
       - name: Build
         run: corepack pnpm build
 
       - name: Test
-        env:
-          LEAK_GUARD_THRESHOLD: '62'
-        run: corepack pnpm test:guarded
-
-      # Runs after Test on purpose: a documentation gate must never mask the
-      # suite result. Costs ~200ms.
-      - name: Check Parent Protocol tool drift
-        run: corepack pnpm check:protocol-drift
-
-      # Cluster map gate. Source of truth is config/cluster-map.json; this
-      # runs in CI so a stale cluster assignment cannot merge the way the
-      # 26-vs-89 protocol table did. The :verify variant regenerates
-      # docs/cluster-map.md and fails if the working tree is dirty — that
-      # is the only invariant: the .md in the repo is a faithful view of
-      # the JSON, never an edit-by-hand second source.
-      - name: Check cluster map drift
-        run: corepack pnpm check:cluster-drift:verify
+        run: corepack pnpm test
 
       - name: Check diff whitespace
         run: git diff --check

@@ -1,173 +1,63 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { initLabDb, runSql } from "./lab-db.js";
+import { join } from "node:path";
+import { IDU_HOME, ensureIduDirectories } from "./config.js";
 
-export type DecisionRecord = {
+export interface DecisionRecord {
+	id?: number;
 	projectId: string;
-	decidedAt: string;
+	decidedAt?: string;
 	decidedBy: string;
 	decision: string;
 	targetKind: string;
 	targetId: string;
 	rationale?: string;
 	profileRef?: string;
-};
+}
 
-export type DecisionRow = DecisionRecord & {
-	id: number;
-};
-
-export type ListDecisionsOptions = {
-	projectId: string;
-	since?: string;
+export interface ListDecisionsOptions {
+	projectId?: string;
 	limit?: number;
-};
-
-const DEFAULT_LIMIT = 50;
-
-function sqlString(value: string | undefined | null): string {
-	if (value === undefined || value === null) return "NULL";
-	const escaped = value.replace(/'/g, "''");
-	return `'${escaped}'`;
 }
 
-function ensureSchema(dbPath: string): void {
-	if (!existsSync(dbPath)) {
-		mkdirSync(dirname(dbPath), { recursive: true });
-	}
-	initLabDb(dbPath);
-	const sql = `
-		CREATE TABLE IF NOT EXISTS decision_ledger (
-			id              INTEGER PRIMARY KEY AUTOINCREMENT,
-			project_id      TEXT    NOT NULL,
-			decided_at      TEXT    NOT NULL,
-			decided_by      TEXT    NOT NULL,
-			decision        TEXT    NOT NULL,
-			target_kind     TEXT    NOT NULL,
-			target_id       TEXT    NOT NULL,
-			rationale       TEXT,
-			profile_ref     TEXT
-		);
-		CREATE INDEX IF NOT EXISTS idx_decision_ledger_project_time
-			ON decision_ledger (project_id, decided_at);
-	`;
-	runSql(dbPath, sql);
+function getLedgerPath(): string {
+	ensureIduDirectories();
+	return join(IDU_HOME, "decision_ledger.json");
 }
 
-export function recordDecision(
-	dbPath: string,
-	record: DecisionRecord,
-): DecisionRow {
-	ensureSchema(dbPath);
-	const sql = `
-		INSERT INTO decision_ledger
-			(project_id, decided_at, decided_by, decision, target_kind, target_id, rationale, profile_ref)
-		VALUES (
-			${sqlString(record.projectId)},
-			${sqlString(record.decidedAt)},
-			${sqlString(record.decidedBy)},
-			${sqlString(record.decision)},
-			${sqlString(record.targetKind)},
-			${sqlString(record.targetId)},
-			${sqlString(record.rationale ?? null)},
-			${sqlString(record.profileRef ?? null)}
-		);
-	`;
-	runSql(dbPath, sql);
-	const idOutput = runSql(dbPath, "SELECT last_insert_rowid() AS id;").trim();
-	// last_insert_rowid is per-connection; since runSql spawns a
-	// fresh sqlite3 process for each call, the rowid does not
-	// survive between calls. As a fallback, count rows for the
-	// decision_ledger table — a brand-new id is the next MAX+1.
-	const parsed = (() => {
-		try {
-			return JSON.parse(idOutput) as Array<{ id: number | string }>;
-		} catch {
-			return [];
-		}
-	})();
-	let id = Number(parsed[0]?.id ?? 0);
-	if (id === 0) {
-		// Fallback: each runSql spawns a fresh sqlite3 process, so
-		// last_insert_rowid() does not survive between calls. The
-		// next-id is the current MAX(id)+1; COALESCE handles the
-		// empty-table case (returns 1). MAX is the right choice
-		// over COUNT(*) because rows may have been deleted, making
-		// the count diverge from the highest assigned id.
-		const maxOut = runSql(
-			dbPath,
-			"SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM decision_ledger;",
-		).trim();
-		const maxParsed = JSON.parse(maxOut) as Array<{ next_id: number }>;
-		id = Number(maxParsed[0]?.next_id ?? 1);
-	}
-	return { ...record, id };
-}
+export function recordDecision(record: DecisionRecord): DecisionRecord {
+	const filePath = getLedgerPath();
+	const list = listDecisions({});
+	const nextId = list.length > 0 ? Math.max(...list.map((d) => d.id || 0)) + 1 : 1;
 
-export function listDecisions(
-	dbPath: string,
-	options: ListDecisionsOptions,
-): DecisionRow[] {
-	if (!existsSync(dbPath)) return [];
-	ensureSchema(dbPath);
-	const where: string[] = [];
-	if (options.projectId) {
-		where.push(`project_id = ${sqlString(options.projectId)}`);
-	}
-	if (options.since) {
-		where.push(`decided_at >= ${sqlString(options.since)}`);
-	}
-	const limit = options.limit ?? DEFAULT_LIMIT;
-	const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
-	const sql = `SELECT * FROM decision_ledger
-		${whereClause}
-		ORDER BY decided_at DESC, id DESC
-		LIMIT ${Number(limit)};`;
-	const output = runSql(dbPath, sql).trim();
-	if (!output) return [];
-	const rows = JSON.parse(output) as Array<Record<string, unknown>>;
-	return rows.map((row) => ({
-		id: Number(row.id),
-		projectId: String(row.project_id ?? ""),
-		decidedAt: String(row.decided_at ?? ""),
-		decidedBy: String(row.decided_by ?? ""),
-		decision: String(row.decision ?? ""),
-		targetKind: String(row.target_kind ?? ""),
-		targetId: String(row.target_id ?? ""),
-		rationale: typeof row.rationale === "string" ? row.rationale : undefined,
-		profileRef:
-			typeof row.profile_ref === "string" ? row.profile_ref : undefined,
-	}));
-}
-
-export function appendDecisionToFile(
-	path: string,
-	record: DecisionRecord,
-): void {
-	const dir = dirname(path);
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-	const line = `${JSON.stringify({
-		...record,
-		decidedAt: record.decidedAt,
+	const entry: DecisionRecord = {
+		id: nextId,
+		projectId: record.projectId,
+		decidedAt: record.decidedAt || new Date().toISOString(),
+		decidedBy: record.decidedBy,
+		decision: record.decision,
+		targetKind: record.targetKind,
+		targetId: record.targetId,
+		rationale: record.rationale,
 		profileRef: record.profileRef,
-	})}\n`;
-	if (existsSync(path)) {
-		writeFileSync(path, readFileSync(path, "utf8") + line, "utf8");
-	} else {
-		writeFileSync(path, line, "utf8");
+	};
+
+	list.unshift(entry);
+	writeFileSync(filePath, JSON.stringify(list, null, 2), "utf8");
+	return entry;
+}
+
+export function listDecisions(options: ListDecisionsOptions = {}): DecisionRecord[] {
+	const filePath = getLedgerPath();
+	if (!existsSync(filePath)) return [];
+	try {
+		const raw = readFileSync(filePath, "utf8");
+		let list = JSON.parse(raw) as DecisionRecord[];
+		if (options.projectId) {
+			list = list.filter((d) => d.projectId === options.projectId);
+		}
+		const limit = options.limit ?? 20;
+		return list.slice(0, limit);
+	} catch {
+		return [];
 	}
 }
-
-export function readDecisionsFromFile(path: string): DecisionRecord[] {
-	if (!existsSync(path)) return [];
-	return readFileSync(path, "utf8")
-		.split(/\r?\n/u)
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as DecisionRecord);
-}
-
-export const decisionLedgerPath = (stateRoot: string): string =>
-	join(stateRoot, "decision-ledger.jsonl");

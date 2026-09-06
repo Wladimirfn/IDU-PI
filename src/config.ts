@@ -1,254 +1,186 @@
-import { config as loadDotenv } from "dotenv";
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import type { IduConfig, IduProfile, ProfilesConfig } from "./types.js";
 
-// Issue #487: the deployment directory (C:\idu-pi-deploy) never carries
-// its own .env — it resolves .env relative to the compiled module, so a
-// deploy without .env fails with "Missing required env var: DEFAULT_CWD".
-// IDU_PI_DOTENV_PATH points the loader at the operator's single .env (set
-// by the deploy's bootstrap script), keeping one source of truth and
-// failing early when that file is missing instead of failing later with a
-// confusing config error.
-const dotenvPathOverride = process.env.IDU_PI_DOTENV_PATH;
-const dotenvPath = dotenvPathOverride
-	? resolve(dotenvPathOverride)
-	: resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", ".env");
+export const IDU_HOME = join(homedir(), ".idu");
+export const IDU_CONFIG_PATH = join(IDU_HOME, "config.json");
+export const IDU_PROFILES_PATH = join(IDU_HOME, "profiles.json");
+export const IDU_RUNTIME_DIR = join(IDU_HOME, "runtime");
+export const IDU_SESSIONS_DIR = join(IDU_HOME, "sessions");
+export const IDU_LOCKS_DIR = join(IDU_HOME, "locks");
+export const IDU_LOGS_DIR = join(IDU_HOME, "logs");
 
-if (dotenvPathOverride && !existsSync(dotenvPath)) {
-	throw new Error(
-		`IDU_PI_DOTENV_PATH points to a file that does not exist: ${dotenvPath}. ` +
-			"Set it to the operator's single .env or unset it to keep the default resolution.",
-	);
-}
-
-loadDotenv({
-	path: dotenvPath,
-	quiet: true,
-});
-
-export type AgentProfile = {
-	id: string;
-	label: string;
-	provider: "pi";
-	piArgs: string[];
-};
-
-export type AgentWorkspaceMode = "direct" | "clone";
-// Default and supported production mode is advisory: Idu-pi informs/audits/recommends
-// while the orchestrator owns final decisions. "strict" is reserved for explicit
-// future critical-hazard deployments and currently only surfaces as configuration data.
-export type IduMcpAuthorityMode = "advisory" | "strict";
-export type IduAgentLabMode = "audit_only";
-export type IduWorkspaceOwner = "orchestrator";
-
-export type IduGovernanceConfig = {
-	mcpAuthorityMode: IduMcpAuthorityMode;
-	agentLabMode: IduAgentLabMode;
-	workspaceOwner: IduWorkspaceOwner;
-	autoRefreshLabProfiles: boolean;
-};
-
-/**
- * Governance config payload emitted on MCP response builders. Carries the
- * iduGovernance block plus the principle text.
- */
-export type GovernanceConfigPayload = IduGovernanceConfig & {
-	principle: string;
-};
-
-/**
- * Principle text shared by every governance config payload.
- */
-export const IDU_GOVERNANCE_PRINCIPLE =
-	"Idu-pi MCP informa, audita y recomienda; el orquestador decide, ejecuta y comunica.";
-
-/**
- * Pure helper: derive the governance config payload from an already-loaded
- * BridgeConfig. No env reads, no filesystem access. Used by createCliRuntime
- * to populate CliRuntime.governanceConfig so the migrated MCP response
- * builders no longer need DEFAULT_CWD (issue #263).
- */
-export function governanceConfigFromConfig(
-	config: BridgeConfig,
-): GovernanceConfigPayload {
-	return { ...config.iduGovernance, principle: IDU_GOVERNANCE_PRINCIPLE };
-}
-
-export type BridgeConfig = {
-	telegramBotToken: string;
-	allowedUserId: number;
-	defaultCwd: string;
-	allowedRoots: string[];
-	piBin: string;
-	piArgs: string[];
-	agentProfiles: AgentProfile[];
-	agentWorkspaceRoot: string;
-	agentWorkspaceMode: AgentWorkspaceMode;
-	iduGovernance: IduGovernanceConfig;
-};
-
-function required(name: string): string {
-	const value = process.env[name]?.trim();
-	if (!value) throw new Error(`Missing required env var: ${name}`);
-	return value;
-}
-
-function parseRequiredPositiveInteger(name: string): number {
-	const raw = required(name);
-	const value = Number(raw);
-	if (!Number.isInteger(value) || value <= 0)
-		throw new Error(`Env var ${name} must be a positive integer`);
-	return value;
-}
-
-function normalizeForCompare(path: string): string {
-	return process.platform === "win32" ? path.toLowerCase() : path;
-}
-
-function splitArgs(input: string): string[] {
-	return input.trim().split(/\s+/u).filter(Boolean);
-}
-
-export function parseAgentProfiles(raw?: string): AgentProfile[] {
-	const source = raw?.trim();
-	if (!source) {
-		return [{ id: "default", label: "Pi default", provider: "pi", piArgs: [] }];
-	}
-
-	const seen = new Set<string>();
-	return source.split(";").map((entry) => {
-		const [rawId, rawLabel, rawArgs = ""] = entry.split("|");
-		const id = rawId?.trim();
-		if (!id || !/^[a-z0-9_-]+$/iu.test(id))
-			throw new Error(`Invalid PI_AGENT_PROFILES id: ${rawId ?? ""}`);
-		if (seen.has(id)) throw new Error(`Duplicate PI_AGENT_PROFILES id: ${id}`);
-		seen.add(id);
-		return {
-			id,
-			label: rawLabel?.trim() || id,
-			provider: "pi",
-			piArgs: splitArgs(rawArgs),
-		};
-	});
-}
-
-export function canonicalDirectory(path: string): string {
-	const resolved = resolve(path);
-	const stat = statSync(resolved);
-	if (!stat.isDirectory())
-		throw new Error(`Path is not a directory: ${resolved}`);
-	return realpathSync.native(resolved);
-}
-
-function ensureDirectory(path: string): string {
-	const resolved = resolve(path);
-	if (!existsSync(resolved)) mkdirSync(resolved, { recursive: true });
-	return canonicalDirectory(resolved);
-}
-
-function parseWorkspaceMode(raw?: string): AgentWorkspaceMode {
-	const value = raw?.trim().toLowerCase() || "clone";
-	if (value === "direct" || value === "clone") return value;
-	throw new Error("AGENT_WORKSPACE_MODE must be direct or clone");
-}
-
-function parseIduMcpAuthorityMode(raw?: string): IduMcpAuthorityMode {
-	const value = raw?.trim().toLowerCase() || "advisory";
-	if (value === "advisory" || value === "strict") return value;
-	throw new Error("IDU_MCP_AUTHORITY_MODE must be advisory or strict");
-}
-
-function parseBooleanEnv(
-	raw: string | undefined,
-	defaultValue: boolean,
-): boolean {
-	const value = raw?.trim().toLowerCase();
-	if (!value) return defaultValue;
-	if (["1", "true", "yes", "on"].includes(value)) return true;
-	if (["0", "false", "no", "off"].includes(value)) return false;
-	throw new Error("Boolean env var must be true/false/1/0/yes/no/on/off");
-}
-
-export type LoadConfigOptions = {
-	requireTelegram?: boolean;
-};
-
-export function loadConfig(options: LoadConfigOptions = {}): BridgeConfig {
-	const requireTelegram = options.requireTelegram ?? true;
-	const defaultCwd = canonicalDirectory(required("DEFAULT_CWD"));
-	const allowedRootsRaw = process.env.ALLOWED_ROOTS?.trim();
-	const allowedRoots = (
-		allowedRootsRaw ? allowedRootsRaw.split(";") : [defaultCwd]
-	)
-		.map((entry) => entry.trim())
-		.filter(Boolean)
-		.map((entry) => canonicalDirectory(entry));
-
-	if (!isAllowedCwd(defaultCwd, allowedRoots)) {
-		throw new Error(`DEFAULT_CWD must be inside ALLOWED_ROOTS: ${defaultCwd}`);
-	}
-
-	const piCliJs = process.env.PI_CLI_JS?.trim();
-	const piExtraArgs = splitArgs(
-		process.env.PI_EXTRA_ARGS?.trim() || "--no-skill-registry --no-lens",
-	);
-
-	return {
-		telegramBotToken: requireTelegram ? required("TELEGRAM_BOT_TOKEN") : "",
-		allowedUserId: requireTelegram
-			? parseRequiredPositiveInteger("ALLOWED_USER_ID")
-			: 0,
-		defaultCwd,
-		allowedRoots,
-		piBin: process.env.PI_BIN?.trim() || (piCliJs ? "node" : "pi"),
-		piArgs: [...(piCliJs ? [piCliJs] : []), ...piExtraArgs],
-		agentProfiles: parseAgentProfiles(process.env.PI_AGENT_PROFILES),
-		agentWorkspaceRoot: ensureDirectory(
-			process.env.AGENT_WORKSPACE_ROOT?.trim() ||
-				join(homedir(), "Documents", "bridge-agents"),
-		),
-		agentWorkspaceMode: parseWorkspaceMode(process.env.AGENT_WORKSPACE_MODE),
-		iduGovernance: {
-			mcpAuthorityMode: parseIduMcpAuthorityMode(
-				process.env.IDU_MCP_AUTHORITY_MODE,
-			),
-			agentLabMode: "audit_only",
-			workspaceOwner: "orchestrator",
-			autoRefreshLabProfiles: parseBooleanEnv(
-				process.env.IDU_AGENTLAB_AUTO_REFRESH_PROFILES,
-				true,
-			),
-		},
-	};
-}
-
-export function isAllowedCwd(
-	candidate: string,
-	allowedRoots: string[],
-): boolean {
-	let canonicalCandidate: string;
-	try {
-		canonicalCandidate = canonicalDirectory(candidate);
-	} catch {
-		return false;
-	}
-
-	const normalizedCandidate = normalizeForCompare(canonicalCandidate);
-	return allowedRoots.some((root) => {
-		let canonicalRoot: string;
-		try {
-			canonicalRoot = canonicalDirectory(root);
-		} catch {
-			return false;
+export function ensureIduDirectories(): void {
+	const dirs = [IDU_HOME, IDU_RUNTIME_DIR, IDU_SESSIONS_DIR, IDU_LOCKS_DIR, IDU_LOGS_DIR];
+	for (const dir of dirs) {
+		if (!existsSync(dir)) {
+			mkdirSync(dir, { recursive: true });
 		}
+	}
+}
 
-		const normalizedRoot = normalizeForCompare(canonicalRoot);
-		const relativePath = relative(normalizedRoot, normalizedCandidate);
-		return (
-			relativePath === "" ||
-			(!relativePath.startsWith("..") && !isAbsolute(relativePath))
-		);
-	});
+export const DEFAULT_PROFILES: ProfilesConfig = {
+	profiles: {
+		"cheap-explore": {
+			harness: "opencode",
+			provider: "minimax",
+			model: "MiniMax-M3",
+			permissions: "read-only",
+			description: "Exploración económica de repositorios grandes y lectura de código",
+			streams: true,
+			timeoutMs: 1800000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 7200000,
+			startupGraceMs: 300000,
+		},
+		"cheap-debug": {
+			harness: "opencode",
+			provider: "opencode-go",
+			model: "deepseek-v4-flash",
+			permissions: "workspace",
+			description: "Ejecución de tests locales, búsqueda de errores y reproducción de bugs",
+			streams: true,
+			timeoutMs: 1800000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 7200000,
+			startupGraceMs: 300000,
+		},
+		coding: {
+			harness: "codex",
+			provider: "openai",
+			model: "gpt-5.6-luna",
+			permissions: "workspace",
+			description: "Generación de código robusto, implementación de módulos y refactor directo",
+			streams: false,
+			timeoutMs: 3600000,
+			hardCapMs: 14400000,
+		},
+		architecture: {
+			harness: "claude",
+			provider: "anthropic",
+			model: "opus",
+			permissions: "read-only",
+			description: "Diseño arquitectónico, revisión de contratos de interfaz y análisis de blast radius",
+			streams: true,
+			timeoutMs: 3600000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 14400000,
+			startupGraceMs: 300000,
+		},
+		"deep-refactor": {
+			harness: "claude",
+			provider: "anthropic",
+			model: "sonnet",
+			permissions: "workspace",
+			description: "Refactorizaciones complejas preservando compatibilidad y comportamiento",
+			streams: true,
+			timeoutMs: 3600000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 14400000,
+			startupGraceMs: 300000,
+		},
+		fast: {
+			harness: "pi",
+			provider: "minimax",
+			model: "MiniMax-M3",
+			permissions: "workspace",
+			description: "Micro-tareas rápidas, transformaciones de texto y scripts atómicos",
+			streams: false,
+			timeoutMs: 180000,
+		},
+		kimi: {
+			harness: "kimi",
+			permissions: "workspace",
+			description: "Kimi Code CLI autónomo para refactorización profunda y comprensión de código",
+			streams: false,
+			timeoutMs: 1800000,
+		},
+		qwen: {
+			harness: "qwen",
+			permissions: "workspace",
+			description: "Qwen Code CLI oficial con motor Qwen 2.5 Coder",
+			streams: false,
+			timeoutMs: 1800000,
+		},
+		antigravity: {
+			harness: "antigravity",
+			model: "flash",
+			permissions: "workspace",
+			description: "Google DeepMind Antigravity agent en este entorno IDE",
+			streams: true,
+			timeoutMs: 1800000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 7200000,
+		},
+	},
+};
+
+const DEFAULT_CONFIG: IduConfig = {
+	version: "2.1.0",
+	oneOrchestratorRule: {
+		enabled: true,
+		allowRecursiveDelegation: false,
+	},
+	clis: {
+		claude: { command: "claude", argsTemplate: ["-p", "{task}"] },
+		opencode: { command: "opencode", argsTemplate: ["run", "--auto", "{task}"] },
+		codex: { command: "codex", argsTemplate: ["exec", "{task}"] },
+		pi: { command: "pi", argsTemplate: ["-p", "{task}"] },
+		kimi: { command: "kimi", argsTemplate: ["-p", "{task}"] },
+		qwen: { command: "qwen", argsTemplate: ["-p", "{task}"] },
+	},
+	defaultTimeoutMs: 300_000,
+	maxConcurrentWorkers: 4,
+};
+
+export function loadIduConfig(): IduConfig {
+	ensureIduDirectories();
+	if (!existsSync(IDU_CONFIG_PATH)) {
+		return DEFAULT_CONFIG;
+	}
+	try {
+		const raw = readFileSync(IDU_CONFIG_PATH, "utf8");
+		const parsed = JSON.parse(raw) as IduConfig;
+		return {
+			...DEFAULT_CONFIG,
+			...parsed,
+			clis: {
+				...DEFAULT_CONFIG.clis,
+				...(parsed.clis ?? {}),
+			},
+			oneOrchestratorRule: {
+				...DEFAULT_CONFIG.oneOrchestratorRule,
+				...(parsed.oneOrchestratorRule ?? {}),
+			},
+		};
+	} catch (err) {
+		console.error("Error loading IDU config, using default:", err);
+		return DEFAULT_CONFIG;
+	}
+}
+
+export function loadProfilesConfig(): ProfilesConfig {
+	ensureIduDirectories();
+	if (!existsSync(IDU_PROFILES_PATH)) {
+		return DEFAULT_PROFILES;
+	}
+	try {
+		const raw = readFileSync(IDU_PROFILES_PATH, "utf8");
+		const parsed = JSON.parse(raw) as ProfilesConfig;
+		return {
+			profiles: {
+				...DEFAULT_PROFILES.profiles,
+				...(parsed.profiles ?? {}),
+			},
+		};
+	} catch (err) {
+		console.error("Error loading IDU profiles, using default:", err);
+		return DEFAULT_PROFILES;
+	}
+}
+
+export function getProfile(name: string): IduProfile | null {
+	const { profiles } = loadProfilesConfig();
+	return profiles[name] ?? null;
 }

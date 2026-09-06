@@ -1,0 +1,3918 @@
+#!/usr/bin/env node
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { stdin, stdout } from "node:process";
+import { pathToFileURL } from "node:url";
+import {
+	canonicalDirectory,
+	isAllowedCwd,
+	loadConfig,
+} from "./config.js";
+import { createCliRuntime, type CliRuntime } from "./cli.js";
+import { runSensorImpulses } from "./sensor-impulses.js";
+import { categorizeFindings } from "./supervisor-categorize.js";
+import { readPendingBlockingInjection } from "./objective-injection.js";
+import { recordLifecycleEvent } from "./telemetry-lifecycle.js";
+import {
+	formatBibliotecarioInit,
+	runBibliotecarioInit,
+} from "./cli-bibliotecario-init.js";
+import {
+	buildModelInvocationStatusOrError,
+	formatModelInvocationStatus,
+} from "./cli-model-invocation-status.js";
+import { formatSkillRating, runSkillRating } from "./cli-skill-rating.js";
+import {
+	disableSupervisorTrigger,
+	enableSupervisorTrigger,
+	formatSupervisorTriggerResult,
+	formatSupervisorTriggerStatus,
+	getSupervisorTriggerStatus,
+} from "./supervisor-trigger.js";
+import {
+	disableTriggerEngineConfig,
+	enableTriggerEngineConfig,
+	formatTriggerEngineConfigResult,
+	formatTriggerEngineConfigStatus,
+	getTriggerEngineConfigStatus,
+} from "./trigger-engine-config.js";
+import {
+	DEFAULT_ROLE_ENGINE_CONFIG,
+	disableRoleEngineConfig,
+	enableRoleEngineConfig,
+	formatRoleEngineConfigResult,
+	getRoleEngineConfigStatus,
+} from "./role-engine-config.js";
+import type { IduModelRoleId } from "./model-assignments.js";
+import type { SkillDraftFromLessonsMode } from "./skill-draft-from-lessons.js";
+import { applyPackageEnvDefaults, resolveIduRegistryPath } from "./cli-home.js";
+import { runIduBootstrap } from "./idu-bootstrap.js";
+import {
+	migrateHygieneLayout,
+	type MigrationResult,
+} from "./hygiene-migrate.js";
+import { planSweep, type PlanSweepResult } from "./sweep-command.js";
+import { runHygieneSensor } from "./hygiene-sensor.js";
+import { ackAdvisory, type AckAdvisoryResult } from "./idu-ack-advisory.js";
+import {
+	projectEnroll,
+	projectInstallStatus,
+	type ProjectEnrollResult,
+} from "./idu-installer.js";
+import {
+	buildPreflightOrchestratorAdvisory,
+	buildProjectAdvisoryForOrchestrator,
+	buildSupervisorLoopOrchestratorAdvisory,
+} from "./orchestrator-advisory.js";
+import {
+	buildPhysicalEvidenceGateways,
+	buildPostflightEvidenceGateways,
+	buildPreflightEvidenceGateways,
+	buildSourceRequiredActionsEvidenceGateways,
+	buildTaskPackageEvidenceGateways,
+} from "./evidence-gateways.js";
+import {
+	buildDecisionEnvelope,
+	decisionEnvelopeFromAdvisory,
+	decisionEnvelopeFromEvidence,
+} from "./decision-envelope.js";
+import { buildPostflightTaskTrace } from "./postflight-core.js";
+import {
+	CONTEXT_BUDGETS,
+	createContextBudgetUsage,
+	mergeContextBudgetUsage,
+	sliceListToBudget,
+	sliceTextToBudget,
+	type ContextBudgetProfile,
+	type ContextBudgetUsage,
+} from "./context-budget.js";
+import { buildArchitecturalPruningPlan } from "./architectural-pruning-plan.js";
+import { buildContextPruningAdvisoryReport } from "./context-pruning-advisory.js";
+import { buildAutonomousAlertEngineReport } from "./autonomous-alert-engine.js";
+import { runAutomaticov1AdvisoryCycle } from "./automaticov1-cycle.js";
+import { buildIduExecutionReadiness } from "./idu-execution-readiness.js";
+import {
+	runGenesisMissionConfirm,
+	runGenesisMissionDraft,
+} from "./genesis-mission-tools.js";
+import {
+	loadSkillsForTask,
+	loadSkillsIndexFromLabDb,
+} from "./skills-index-runtime.js";
+import { packSkillsIndex } from "./skills-index.js";
+import { readTaxonomyGuide } from "./taxonomy-placement.js";
+import {
+	readPendingInjections,
+	markInjectionAcked,
+} from "./injection-store.js";
+import { applyPrune, planPrune } from "./idu-outbox-prune.js";
+import { listDecisions } from "./decision-ledger.js";
+import {
+	emitOrchestratorTurn,
+	emitOrchestratorTurnCompleted,
+	type OrchestratorTurnOutcome,
+} from "./role-events.js";
+import { TRIGGER_DEFINITIONS } from "./trigger-engine.js";
+import { readBirthArtifact } from "./birth-artifacts.js";
+import { buildMasterPlanTaskTree } from "./master-plan-task-tree.js";
+import {
+	appendAutonomousAlertDecision,
+	readAutonomousAlertEngineState,
+	updateAutonomousAlertControlState,
+} from "./autonomous-alert-engine-state.js";
+import {
+	buildSupervisorSelfMaintenanceAdvisory,
+	SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+} from "./supervisor-self-maintenance-advisory.js";
+import {
+	buildExternalIntelligenceReport,
+	writeExternalIntelligenceReport,
+} from "./external-intelligence.js";
+import {
+	recommendExternalSources,
+	type ExternalSourceDomain,
+} from "./external-source-registry.js";
+import { inferTaskTemplateKind } from "./task-templates.js";
+import {
+	activateIduSession,
+	configureIduSessionStore,
+	deactivateIduSession,
+	getIduSessionStatus,
+} from "./idu-session.js";
+import {
+	getActiveProject,
+	loadRegistry,
+	slugifyProjectId,
+} from "./projects.js";
+import type { ProjectRegistry } from "./projects.js";
+import type { StructuredTask } from "./structured-task-queue.js";
+import { loadProjectCore } from "./project-core.js";
+import { loadProjectConstitution } from "./project-constitution.js";
+import {
+	buildIduUsageReport,
+	filterRecentIduUsageEvents,
+	readIduUsageEvents,
+	recordIduUsageEvent,
+} from "./usage-events.js";
+import {
+	agentLabEffectivenessEventFromRequestPlan,
+	agentLabEffectivenessEventFromRunResult,
+	agentLabEffectivenessEventFromStatus,
+	buildAgentLabEffectivenessReport,
+	readAgentLabEffectivenessEvents,
+	recordAgentLabEffectivenessEventDeferred,
+} from "./agentlab-effectiveness-events.js";
+import {
+	contextQualityEventFromSupervisorContextPack,
+	recordContextQualityEventDeferred,
+} from "./context-quality-events.js";
+import {
+	AUTONOMY_GATE_TEXTS,
+	buildAutonomyGateTraces,
+} from "./autonomy-gates.js";
+import {
+	filterRecentSupervisorActivityEvents,
+	readSupervisorActivityEvents,
+	recordSupervisorActivityEventDeferred,
+	summarizeSupervisorActivityEvents,
+} from "./supervisor-activity-events.js";
+import {
+	buildAgentLabWorkloadEnvelope,
+	type AgentLabSpecialty,
+	type AgentLabWorkloadEnvelope,
+} from "./agentlab-supervisor-contract.js";
+import type {
+	AgentLabReviewRequestPlan,
+	AgentLabSourceLibraryEvidence,
+} from "./agentlab-review-requests.js";
+import type {
+	AgentLabReviewRunResult,
+	AgentLabReviewStatus,
+} from "./agentlab-review-runner.js";
+import type {
+	SourceRecommendationReport,
+	SourceRequiredActionsReport,
+} from "./source-digest.js";
+
+// PR 1 (Item 4): shared types and helpers (envelope, tool, arg parsers,
+// SAFE_BASE_NOTES, redact*, dedupe, isRecord) moved to src/mcp/_shared/.
+// They are the universal contract every tool handler will import.
+// NEVER re-define here — that would break the contract. mcp-server.ts
+// re-exports them so existing imports (mcp-server.js → IduMcpToolName,
+// JsonObject, etc.) keep working without changes.
+import {
+	handleBootstrapProject,
+	handleProjectEnroll,
+	handleProjectStatus,
+	handleStart,
+} from "./mcp/lifecycle/index.js";
+import {
+	handleActivate,
+	handleDeactivate,
+	handleProjectResetState,
+	handleStatus,
+} from "./mcp/session/index.js";
+import {
+	handleSupervisorSelfMaintenanceAdvisory,
+	handleSupervisorTrigger,
+	handleTriggerEngine,
+} from "./mcp/supervisor-trigger/index.js";
+import {
+	handleRoleEngineControl,
+	handleRoleEngineStatus,
+} from "./mcp/role/index.js";
+import {
+	handleOrchestratorProcedure,
+	handleSupervisorContextPack,
+	handleTaskContext,
+} from "./mcp/supervisor-context/index.js";
+import {
+	handleAdvisory,
+	handlePostflight,
+	handlePreflight,
+} from "./mcp/preflight/index.js";
+import {
+	handleExternalIntelligenceReport,
+	handleExternalSourceRecommend,
+} from "./mcp/external/index.js";
+import {
+	handleQueueComplete,
+	handleQueueDetail,
+	handleTask,
+} from "./mcp/task-queue/index.js";
+import { handleSemanticAuditStatus } from "./mcp/semantic/index.js";
+import {
+	handleAgentLabRequestCreate,
+	handleAgentLabReviewRun,
+	handleAgentLabReviewStatus,
+} from "./mcp/agentlab/index.js";
+import {
+	handleExecutionDirectorTick,
+	handleProposalDetail,
+	handleProposalOutbox,
+	handleSupervisorConsult,
+	handleSupervisorCronPlan,
+	handleSupervisorResponses,
+	handleSupervisorTick,
+} from "./mcp/supervisor-tick/index.js";
+import {
+	handleAutonomousAlertsControl,
+	handleAutonomousAlertsStatus,
+	handleAutonomousAlertsTick,
+	handleAutomaticov1Cycle,
+	handleObjectiveStatus,
+} from "./mcp/objective/index.js";
+import {
+	handleGenesisMissionConfirm,
+	handleGenesisMissionDraft,
+	handleSkillDraftFromLessons,
+	handleSkillForTask,
+} from "./mcp/genesis/index.js";
+import {
+	handleAckAdvisory,
+	handleHygieneMigrate,
+	handleHygieneSweep,
+	handleOutboxPrune,
+	handlePendingInjections,
+	handleSubscribeTriggers,
+} from "./mcp/injections/index.js";
+import {
+	handleBirthBibliotecarioDiscovery,
+	handleBirthExistingScan,
+	handleBirthGeneralSpec,
+	handleBirthGeneralSpecDerive,
+	handleBirthPrototypeMaster,
+	handleBirthRepoPlan,
+	handleBirthStatus,
+	handleBirthValidate,
+} from "./mcp/birth/index.js";
+import {
+	handleContinuationProposal,
+	handleMasterPlanApprove,
+	handleMasterPlanCreate,
+	handleMasterPlanReject,
+	handleMasterPlanReview,
+	handleMasterPlanStatus,
+	handleNextAdvisoryAction,
+	handlePlanSnapshot,
+	handleTaskPackageCreate,
+} from "./mcp/master-plan/index.js";
+import {
+	handleSourceAdd,
+	handleSourceChunkRead,
+	handleSourceDigest,
+	handleSourceDigestStatus,
+	handleSourceExtract,
+	handleSourceRead,
+	handleSourceRecommendForTask,
+	handleSourceRefresh,
+	handleSourceRemove,
+	handleSourceReport,
+	handleSourceRequiredActions,
+	handleSourceResearchReport,
+	handleSourceSkillCandidatesCreate,
+	handleSourceSkillCandidatesReview,
+	handleSourceStatus,
+} from "./mcp/source/index.js";
+import {
+	handleArchitecturalPruningPlan,
+	handleContextPruningAdvisory,
+} from "./mcp/pruning/index.js";
+import {
+	handleBibliotecarioInit,
+	handleBibliotecarioProactiveAdvisory,
+	handleModelInvocationStatus,
+	handlePrepare,
+	handleSkillRating,
+} from "./mcp/bibliotecario/index.js";
+import {
+	SAFE_BASE_NOTES,
+	asRecord,
+	booleanArg,
+	dedupe,
+	envelope,
+	isRecord,
+	optionalBoolean,
+	optionalEnum,
+	optionalObject,
+	optionalString,
+	optionalStringArray,
+	parseGeneralSpecSectionsArg,
+	positiveIntegerArg,
+	redactObject,
+	redactSecrets,
+	requiredEnum,
+	requiredJsonStringArray,
+	requiredOneOf,
+	requiredString,
+	requiredText,
+	stringArg,
+	stringListArg,
+	tool,
+} from "./mcp/_shared/index.js";
+import type {
+	IduMcpToolDefinition,
+	IduMcpToolName,
+	IduMcpToolResult,
+	JsonObject,
+} from "./mcp/_shared/index.js";
+
+export {
+	SAFE_BASE_NOTES,
+	asRecord,
+	booleanArg,
+	dedupe,
+	envelope,
+	isRecord,
+	optionalBoolean,
+	optionalEnum,
+	optionalObject,
+	optionalString,
+	optionalStringArray,
+	parseGeneralSpecSectionsArg,
+	positiveIntegerArg,
+	redactObject,
+	redactSecrets,
+	requiredEnum,
+	requiredJsonStringArray,
+	requiredOneOf,
+	requiredString,
+	requiredText,
+	stringArg,
+	stringListArg,
+	tool,
+} from "./mcp/_shared/index.js";
+export type {
+	IduMcpToolDefinition,
+	IduMcpToolName,
+	IduMcpToolResult,
+	JsonObject,
+} from "./mcp/_shared/index.js";
+
+export type IduMcpProjectResolutionStatus =
+	| "registered_project"
+	| "active_project"
+	| "unregistered_project"
+	| "invalid_project";
+
+export type IduMcpProjectResolution = {
+	status: IduMcpProjectResolutionStatus;
+	projectId: string;
+	projectPath: string;
+	stateRoot?: string;
+	// Worktree-aware resolution: when the requested path is a git worktree of
+	// a registered parent project, projectPath/stateRoot carry the parent's
+	// governance identity while effectiveCwd carries the canonical worktree
+	// path to use for git operations (postflight, HEAD reads). Absent on
+	// exact-match resolution and on unregistered/invalid results.
+	effectiveCwd?: string;
+	recommendedNext?: string;
+	safeNotes: string[];
+	errors: string[];
+};
+
+export type IduMcpRuntimeFactory = (projectPath?: string) => CliRuntime;
+export type IduMcpProjectResolver = (
+	projectPath?: string,
+) => IduMcpProjectResolution;
+
+export type IduMcpServerOptions = {
+	runtimeFactory?: IduMcpRuntimeFactory;
+	projectResolver?: IduMcpProjectResolver;
+};
+
+export type McpJsonRpcRequest = {
+	jsonrpc?: unknown;
+	id?: unknown;
+	method?: unknown;
+	params?: unknown;
+};
+
+export type McpJsonRpcResponse = {
+	jsonrpc: "2.0";
+	id: unknown;
+	result?: unknown;
+	error?: { code: number; message: string; data?: unknown };
+};
+
+const TOOLS: IduMcpToolDefinition[] = [
+	tool(
+		"idu_project_status",
+		"Inspecciona registro y estado aislado del proyecto sin escribir archivos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_project_enroll",
+		"Registra explícitamente un proyecto y crea estado aislado sin drafts ni scans.",
+		{
+			projectPath: requiredString("Ruta obligatoria del proyecto objetivo."),
+			projectId: optionalString("ID opcional del proyecto."),
+		},
+	),
+	tool(
+		"idu_project_reset_state",
+		"Borra todo el estado aislado del proyecto registrado sin desregistrar ni tocar el repo real. Requiere confirm=true.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			confirm: optionalBoolean(
+				"Debe ser true para ejecutar el borrado destructivo.",
+			),
+		},
+	),
+	tool(
+		"idu_bootstrap_project",
+		"Bootstrap explícito: enrola y crea drafts seguros sólo si allowCreateDrafts=true.",
+		{
+			projectPath: requiredString("Ruta obligatoria del proyecto objetivo."),
+			allowCreateDrafts: optionalBoolean(
+				"Permite crear Project Core/Constitution/blueprint/flows draft.",
+			),
+			activate: optionalBoolean("Activa guardrails después del bootstrap."),
+		},
+	),
+	tool(
+		"idu_start",
+		"Entrada cómoda para proyectos ya registrados: activa y muestra dashboard sin enrolar automáticamente.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool("idu_status", "Inspecta conexión, sesión y siguiente acción segura.", {
+		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+	}),
+	tool(
+		"idu_activate",
+		"Activa guardrails automáticos de Idu-pi sin scans pesados.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool("idu_deactivate", "Desactiva guardrails automáticos de Idu-pi.", {
+		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+	}),
+	tool(
+		"idu_objective_status",
+		"Lee el estado actual del PISO gate (objective reminder): blocking injection + reminderStatePath. Read-only mirror del CLI `idu-objective-status`.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool("idu_prepare", "Ejecuta prepare seguro sin IA ni AgentLabs.", {
+		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+	}),
+	tool(
+		"idu_bibliotecario_init",
+		"Inicializa lab.db y la skill bootstrap del Bibliotecario para el proyecto activo.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_model_invocation_status",
+		"Muestra el estado de invocaciones de modelos usando el lab.db resuelto del proyecto activo.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			role: optionalString("Rol opcional para filtrar invocaciones."),
+			limit: {
+				type: "number",
+				description: "Límite opcional de filas por rol.",
+			},
+		},
+	),
+	tool(
+		"idu_skill_rating",
+		"Registra un score para una propuesta de skill del Bibliotecario.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			proposalId: requiredString("ID de propuesta a calificar."),
+			score: {
+				type: "number",
+				description: "Score entero 0..10.",
+				__required: true,
+			},
+		},
+	),
+	tool(
+		"idu_supervisor_trigger",
+		"Activa, desactiva o consulta el opt-in del supervisor trigger programado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredEnum("Acción: enable, disable o status.", [
+				"enable",
+				"disable",
+				"status",
+			]),
+		},
+	),
+	tool(
+		"idu_trigger_engine",
+		"Activa, desactiva o consulta el opt-in persistente del trigger engine.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredEnum("Acción: enable, disable o status.", [
+				"enable",
+				"disable",
+				"status",
+			]),
+		},
+	),
+	tool(
+		"idu_role_engine_control",
+		"Activa o desactiva el RoleEngine global o una role específica. Advisory-only: no invoca modelos por sí mismo.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredEnum("Acción: enable o disable.", ["enable", "disable"]),
+			role: optionalString("Role opcional para cambiar sólo su flag."),
+		},
+	),
+	tool(
+		"idu_role_engine_status",
+		"Consulta configuración y estado del RoleEngine sin invocar modelos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			role: optionalString("Role opcional para inspección enfocada."),
+		},
+	),
+	tool(
+		"idu_master_plan_status",
+		"Lee estado y rutas del Plan Maestro sin regenerar ni modificar el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_master_plan_create",
+		"Crea o regenera un Plan Maestro normativo en stateRoot; separa documentación declarada, realidad construida y flujos permanentes.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			reason: optionalString("Motivo de regeneración."),
+		},
+	),
+	tool(
+		"idu_master_plan_review",
+		"Revisa el Plan Maestro actual o selector indicado y devuelve JSON estructurado más markdown.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+		},
+	),
+	tool(
+		"idu_master_plan_approve",
+		"Aprueba explícitamente el Plan Maestro seleccionado en stateRoot sin aplicar flows, ejecutar AgentLabs ni tocar el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+			reason: optionalString("Motivo/evidencia de aprobación."),
+		},
+	),
+	tool(
+		"idu_master_plan_reject",
+		"Rechaza explícitamente el Plan Maestro seleccionado en stateRoot sin borrar drafts ni tocar el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+			reason: optionalString("Motivo del rechazo."),
+		},
+	),
+	tool(
+		"idu_plan_snapshot",
+		"Devuelve snapshot compacto del Plan Maestro aprobado para que el orquestador cargue lineamientos sin reparsear todo el plan.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			selector: optionalString("Selector; usar latest por defecto."),
+		},
+	),
+	tool(
+		"idu_next_advisory_action",
+		"Propone una próxima acción candidata desde el Plan aprobado; no implementa ni ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: optionalString(
+				"Solicitud humana opcional para orientar la acción.",
+			),
+			mode: optionalString("Modo: from_plan o from_request."),
+			maxScope: optionalString("Alcance máximo sugerido: small o medium."),
+		},
+	),
+	tool(
+		"idu_continuation_proposal",
+		"Propone el próximo avance autónomo alineado al Plan Maestro y cola actual; advisory-only, no implementa ni ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: optionalString("Solicitud opcional para orientar continuidad."),
+			autonomyWindowMinutes: optionalString(
+				"Ventana de autonomía solicitada en minutos.",
+			),
+			maxScope: optionalString("Alcance máximo sugerido: small o medium."),
+		},
+	),
+	tool(
+		"idu_task_package_create",
+		"Crea paquete de tarea para subagentes normales con brief obligatorio de governance-review antes de codificar.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: requiredString("Solicitud o acción candidata a empaquetar."),
+			actionId: optionalString("ID opcional de acción candidata."),
+			includePlanSnapshot: optionalBoolean(
+				"Incluye snapshot compacto del plan.",
+			),
+		},
+	),
+	tool(
+		"idu_supervisor_context_pack",
+		"Compone un paquete compacto de objetivo, Plan Maestro, contratos, riesgos y gates para el orquestador/subagentes sin volcar docs largas.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: requiredString(
+				"Solicitud o decisión que necesita contexto supervisor.",
+			),
+			includePlanSnapshot: optionalBoolean(
+				"Incluye snapshot compacto del Plan Maestro.",
+			),
+		},
+	),
+	tool(
+		"idu_orchestrator_procedure",
+		"Devuelve procedimiento asesor para que el orquestador cree/actualice plan, implemente o audite sin que Idu-pi se imponga.",
+		{
+			purpose: requiredEnum("Propósito del procedimiento.", [
+				"create_plan",
+				"update_plan",
+				"implement_change",
+				"postflight_review",
+			]),
+			request: optionalString("Solicitud humana o resumen del cambio."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_task_context",
+		"Entrega contexto asesor para una tarea: contratos afectados, lecturas, labs audit-only y guía para subagentes del orquestador.",
+		{
+			request: requiredString("Texto de la tarea o cambio propuesto."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool("idu_preflight", "Evalúa riesgo e impacto de una solicitud humana.", {
+		request: requiredString("Texto humano a evaluar."),
+		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+	}),
+	tool("idu_advisory", "Genera advisory seguro desde preflight.", {
+		request: requiredString("Texto humano a asesorar."),
+		projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+	}),
+	tool(
+		"idu_postflight",
+		"Inspecciona cambios locales y gates sin aplicar cambios.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			actionId: optionalString(
+				"ID opcional de acción candidata para trazabilidad.",
+			),
+			taskPackageId: optionalString(
+				"ID opcional de paquete de tarea para trazabilidad.",
+			),
+			expectedContracts: optionalStringArray(
+				"Contratos esperados para comparar contra el postflight.",
+			),
+			expectedFiles: optionalStringArray(
+				"Archivos esperados para detectar áreas inesperadas.",
+			),
+			ignoredFiles: optionalStringArray(
+				"Archivos local-only/ignorados explícitamente para esta revisión postflight.",
+			),
+			expectedChangeMode: optionalString(
+				'Modo esperado del cambio: "no-op", "docs", "tests", "code" o "stateRoot".',
+			),
+		},
+	),
+	tool(
+		"idu_supervisor_tick",
+		"Ejecuta un tick seguro del supervisor según flags explícitos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			allowSemanticDraft: optionalBoolean(
+				"Permite draft semántico; default false.",
+			),
+			allowAgentTaskPlan: optionalBoolean(
+				"Permite plan de tareas; default false.",
+			),
+		},
+	),
+	tool(
+		"idu_supervisor_cron_plan",
+		"Propone un tick cron advisory-only del supervisor; no escribe, no crea drafts, no ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_supervisor_consult",
+		"Consulta un rol del role engine con un question concreto; devuelve respuesta real del modelo, respeta cooldowns y token budgets (rails).",
+		{
+			question: requiredString("Pregunta concreta para el rol."),
+			role: optionalString(
+				"Rol del role engine (default: supervisor-main). El rol debe estar habilitado en role-engine.json.",
+			),
+			context: optionalString("Contexto adicional para la pregunta."),
+		},
+	),
+	tool(
+		"idu_supervisor_responses",
+		"Lectura read-only del historial de respuestas del supervisor (stateRoot/reports/idu-supervisor-responses.jsonl). Espejo MCP del CLI `idu-supervisor-responses`.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			limit: {
+				type: "number",
+				description: "Límite opcional de entradas a devolver (default 10).",
+			},
+		},
+	),
+	tool(
+		"idu_execution_director_tick",
+		"Ejecuta un tick manual advisory-only del execution director y persiste propuestas flow-bound en stateRoot; no implementa ni ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_proposal_outbox",
+		"Lista propuestas flow-bound guardadas en stateRoot; sólo lectura, no toca el repo real.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_proposal_detail",
+		"Lee detalle de una propuesta flow-bound desde stateRoot.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			id: requiredString("ID de propuesta."),
+		},
+	),
+	tool(
+		"idu_birth_status",
+		"Lee el estado del Birth Pipeline desde stateRoot; readiness calculado a partir de contratos existentes (Project Core, Master Plan, Constitution, Bibliotecario, Prototype, General Spec).",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_existing_scan",
+		"Ejecuta un scan read-only del proyecto existente y persiste birth/existing-scan.json + birth/detected-specs.json en stateRoot. No marca Project Core ni Master Plan como aprobados.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_bibliotecario_discovery",
+		"Evalúa la postura Bibliotecario con base en fuentes locales detectadas y categorías externas pedidas. Ideas siempre idea_only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_validate",
+		"Corre scan + Bibliotecario + readiness en una sola pasada y devuelve el envelope agregado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_birth_repo_plan",
+		"Evalúa un plan de repo y otorga repoWritesAllowed solo si Project Core está confirmado, Master Plan aprobado y pushApproved=true. No ejecuta git.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			repoPlan: optionalObject(
+				"Plan de repo con repoName, visibility, owner, license, initialReadmePolicy, remoteProvider, pushApproved, branchPolicy, ciExpectation.",
+			),
+		},
+	),
+	tool(
+		"idu_birth_prototype_master",
+		"Crea, revisa o aprueba el Master Prototype / Pilot House. Persiste sólo en stateRoot/birth/prototype-master.json.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: optionalString(
+				"Acción: 'draft' | 'review' | 'approve'. Default 'review'.",
+			),
+			draft: optionalObject(
+				"Payload del prototype (sólo para action='draft').",
+			),
+			approvedBy: optionalString(
+				"Identificador del aprobador humano (sólo para action='approve').",
+			),
+		},
+	),
+	tool(
+		"idu_birth_general_spec",
+		"Aprueba explícitamente la General Spec provista por el owner y persiste stateRoot/birth/general-spec.json. No deriva contenido ni usa IA.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			sections: optionalObject(
+				"General Spec sections: navigation, baseComponents, pageStructureRules, dataRules, interactionRules, motionRules, accessibilityCriteria, performanceCriteria.",
+			),
+			approvedBy: optionalString("Identificador del aprobador humano."),
+		},
+	),
+	tool(
+		"idu_birth_general_spec_derive",
+		"Ejecuta derivación visual owner-invoked para General Spec usando agentlab-ui-ux. No se dispara automáticamente desde approveBirthGeneralSpec.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			uiFiles: optionalStringArray(
+				"Archivos UI permitidos para evidencia file:line del patch visual.",
+			),
+		},
+	),
+	tool(
+		"idu_genesis_mission_draft",
+		"Genera un mission draft no confirmado para el proyecto target; persiste mission-draft y devuelve el draft estructurado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_genesis_mission_confirm",
+		"Persiste un BlueprintArtifact confirmado a partir de un mission-draft existente; requiere owner explícito.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			owner: optionalString("Owner explícito que confirma la misión."),
+		},
+	),
+	tool(
+		"idu_skill_for_task",
+		"Recomienda skills del índice local del proyecto para una tarea. Read-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			request: requiredString("Tarea o intención para rankear skills."),
+		},
+	),
+	tool(
+		"idu_pending_injections",
+		"Lee inyecciones pendientes del stateRoot. Opcionalmente las marca como acked.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			ack: optionalBoolean(
+				"Si true (default), marca las inyecciones devueltas como acked.",
+			),
+		},
+	),
+	tool(
+		"idu_hygiene_migrate",
+		"Migración one-time desde <repo>/config/ y <repo>/.agents/skills/ legacy a <repo>/.idu/. Idempotente. Sin repoRoot usa el proyecto activo. Requiere confirm=true.",
+		{
+			projectPath: optionalString(
+				"Ruta opcional del repo a migrar; por defecto el proyecto activo.",
+			),
+			confirm: optionalBoolean(
+				"Debe ser true para ejecutar la migración destructiva.",
+			),
+		},
+	),
+	tool(
+		"idu_hygiene_sweep",
+		"Re-ejecuta el sensor de higiene y propone `rm <path>` por archivo exacto. ADVISORY ONLY — idu-pi NO borra; el orquestador corre los comandos. Paths dentro de <stateRoot>/**, <repo>/.git/**, <repo>/.idu/**, <repo>/node_modules/** son SKIP. Modo `auto` es interno y rechazado.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto a escanear."),
+		},
+	),
+	tool(
+		"idu_ack_advisory",
+		"Descarta explícitamente un advisory pendiente (escape hatch). Marca el injection como acked y emite el evento de lifecycle `dismissed`. Usar solo para dismissal deliberado; la decisión queda en el audit log.",
+		{
+			injectionId: optionalString("ID del injection a descartar."),
+			reason: optionalString(
+				"Razón opcional del dismissal (aparece en el audit log).",
+			),
+		},
+	),
+	tool(
+		"idu_outbox_prune",
+		"Archiva propuestas e inyecciones más viejas que N días. Sin confirm=true es dry-run. StateRoot-only writes.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			olderThanDays: optionalEnum("Días de antiguedad; default 30.", [
+				"7",
+				"14",
+				"30",
+				"60",
+				"90",
+			]),
+			confirm: optionalBoolean("Si true, aplica el archive; si no, dry-run."),
+		},
+	),
+	tool(
+		"idu_subscribe_triggers",
+		"Describe los disparadores disponibles y su contrato. Read-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_architectural_pruning_plan",
+		"Devuelve plan advisory-only de poda arquitectónica; no borra, no aprueba y no refactoriza.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_context_pruning_advisory",
+		"Devuelve reporte advisory-only de deuda semántica/context pruning; no borra, no archiva y no promueve contratos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_supervisor_self_maintenance_advisory",
+		"Devuelve reporte advisory-only de autocuidado supervisor: backlog, tareas stale y patrones repetidos; no escribe, no crea tareas y no ejecuta AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_status",
+		"Lee estado y reporte raw-honesty del motor de alertas autónomas; advisory-only y sin writes.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_tick",
+		"Evalúa alertas autónomas y devuelve decisiones advisory-only; creación de tareas se implementa en slice posterior.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			allowTaskCreation: optionalBoolean(
+				"Solicita crear tareas; Task 3 lo reporta sin crear tareas.",
+			),
+		},
+	),
+	tool(
+		"idu_autonomous_alerts_control",
+		"Activa, desactiva, pausa, reanuda o controla dominios de alertas autónomas con escritura stateRoot-only.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			action: requiredString(
+				"enable, disable, pause, resume, disable_domain o enable_domain.",
+			),
+			domain: optionalString("Dominio a activar/desactivar."),
+			pauseMinutes: optionalString("Minutos de pausa, default 60."),
+			reason: optionalString("Motivo humano/orquestador para auditoría."),
+		},
+	),
+	tool(
+		"idu_automaticov1_cycle",
+		"Ejecuta el primer ciclo autónomo bounded/advisory: alert scheduler, supervisor plan, Bibliotecario snapshot, external intelligence opcional y skill proposals opcionales.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			allowTaskCreation: optionalBoolean(
+				"Permite crear hasta 3 tareas rutinarias; default false.",
+			),
+			allowExternalFetch: optionalBoolean(
+				"Permite consultar fuentes externas exactas allowlist; default false.",
+			),
+			allowSkillProposals: optionalBoolean(
+				"Permite crear propuestas de skill reports-only; default false.",
+			),
+		},
+	),
+	tool(
+		"idu_bibliotecario_proactive_advisory",
+		"Coordina superficies Bibliotecario proactivas: plan, fuentes/ecosistema, skills y deuda semántica; advisory-only, sin writes ni AgentLabs.",
+		{
+			request: requiredString(
+				"Decisión, tarea o duda a fundamentar con Bibliotecario.",
+			),
+			domains: optionalStringArray(
+				"Dominios para registry externo no-fetch, e.g. security, web, database.",
+			),
+			language: optionalString("Lenguaje opcional, e.g. typescript."),
+			framework: optionalString("Framework/runtime opcional, e.g. node."),
+			maxMatches: optionalString(
+				"Máximo opcional de fuentes externas registry.",
+			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_external_intelligence_report",
+		"Consulta fuentes externas exactas/allowlist para inteligencia de ecosistema; guarda reporte stateRoot-only, advisory-only, sin updates ni AgentLabs.",
+		{
+			sourceIds: optionalStringArray(
+				"IDs exactos allowlist: nodejs-releases, nextjs-releases, npm-advisories. Default: todos.",
+			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_external_source_recommend",
+		"Recomienda fuentes externas desde registry no-fetch por tarea/dominio/lenguaje/framework; no consulta web ni promueve contratos.",
+		{
+			request: requiredString("Tarea o pregunta a contrastar con el registry."),
+			domains: optionalStringArray(
+				"Dominios transversales, e.g. programming_structure, web, security, database, standards, academic.",
+			),
+			language: optionalString("Lenguaje opcional, e.g. html, typescript."),
+			framework: optionalString(
+				"Framework opcional, e.g. nextjs, react, node.",
+			),
+			maxMatches: optionalString("Máximo opcional de recomendaciones (1-20)."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_task",
+		"Interpreta intención humana y registra tarea estructurada segura.",
+		{
+			text: requiredString("Texto humano de tarea."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_queue_detail",
+		"Devuelve cola estructurada con ids completos y guardStatus.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_queue_complete",
+		"Marca una tarea estructurada como completada con evidencia explícita; no ejecuta IA ni AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			taskId: requiredString("ID o prefijo de tarea a completar."),
+			evidence: requiredString(
+				"Evidencia de cierre: commit, tests, postflight o reviewer.",
+			),
+		},
+	),
+	tool(
+		"idu_semantic_audit_status",
+		"Lee estado/checkpoint de auditoría semántica.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_status",
+		"Lee estado de Source Library en stateRoot sin escribir ni promover contratos.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_add",
+		"Copia/registra documentación manual local en Source Library stateRoot; PDFs intentan conversión best-effort desde texto embebido, sin OCR ni contratos automáticos.",
+		{
+			path: requiredString("Ruta local .md, .txt o .pdf a registrar."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_remove",
+		"Remueve una fuente registrada de Source Library y sus copias en stateRoot; no toca contratos. Requiere confirm=true.",
+		{
+			sourceId: requiredString("ID de fuente a remover."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+			confirm: optionalBoolean(
+				"Debe ser true para ejecutar la remoción destructiva.",
+			),
+		},
+	),
+	tool(
+		"idu_source_read",
+		"Lee contenido acotado de una fuente registrada; PDFs convertidos pueden ser legibles y los no convertidos quedan metadata-only.",
+		{
+			sourceId: requiredString("ID de fuente a leer."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_extract",
+		"Extrae texto acotado para markdown/text y lee PDFs convertidos; PDFs sin texto embebido quedan metadata-only sin OCR.",
+		{
+			sourceId: requiredString("ID de fuente a extraer."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_report",
+		"Reporta metadata, estado y limitaciones de una fuente registrada.",
+		{
+			sourceId: requiredString("ID de fuente a reportar."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_research_report",
+		"Crea reporte advisory de investigación sobre fuentes registradas y texto extraído; sin web ni contratos automáticos.",
+		{
+			query: requiredString("Consulta a buscar en fuentes registradas."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_digest",
+		"Genera digest/chunks advisory para una fuente registrada; stateRoot only, sin web ni contratos automáticos.",
+		{
+			sourceId: requiredString("ID de fuente a digerir."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_digest_status",
+		"Lee estado de digests e índice bibliotecario sin escribir.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_chunk_read",
+		"Lee un chunk/tomo generado por Source Digest de forma acotada.",
+		{
+			sourceId: requiredString("ID de fuente."),
+			chunkId: requiredString("ID del chunk a leer."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_recommend_for_task",
+		"Recomienda fuentes/chunks relevantes para una tarea del orquestador desde el índice local; no implementa.",
+		{
+			request: requiredString(
+				"Tarea o solicitud a contrastar con la biblioteca.",
+			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_required_actions",
+		"Lista fuentes sin lectura real que requieren que el orquestador despache un lector bibliotecario/document-reader.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_skill_candidates_create",
+		"Genera reporte JSON de candidatas de skill derivadas de Source Library; reports-only, no instala skills ni promueve contratos.",
+		{
+			selector: optionalString("Selector de fuente o all; all por defecto."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_skill_candidates_review",
+		"Revisa un reporte de candidatas de skill derivadas de Source Library; latest por defecto.",
+		{
+			pathOrLatest: optionalString("Ruta de reporte o latest."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_skill_draft_from_lessons",
+		"Genera propuestas o drafts de skill desde fallos/lecciones registradas; reports-only, requiere aprobación humana y no instala skills.",
+		{
+			mode: optionalEnum("Modo: proposal-only o approved-only.", [
+				"proposal-only",
+				"approved-only",
+			]),
+			selector: optionalString(
+				"Selector de compaction/proposals; si se omite en proposal-only crea compaction nueva.",
+			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_source_refresh",
+		"Recalcula hashes/estado de Source Library sin tocar contratos ni ejecutar AgentLabs.",
+		{
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_agentlab_request_create",
+		"Crea solicitud formal AgentLab; no ejecuta AgentLabs.",
+		{
+			source: requiredEnum("Fuente de solicitud.", [
+				"postflight",
+				"master-plan",
+				"skill-draft",
+				"external-source-intelligence",
+				"specialist-audit-plan",
+			]),
+			selector: optionalString("Selector; usar latest por defecto."),
+			objective: optionalString("Objetivo acotado para specialist-audit-plan."),
+			context: optionalString("Contexto compacto para specialist-audit-plan."),
+			specialties: optionalStringArray(
+				"Especialidades explícitas para specialist-audit-plan.",
+			),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_agentlab_review_run",
+		"Ejecuta review AgentLab explícito respetando sandbox/clone guard.",
+		{
+			selector: optionalString("Selector; usar latest por defecto."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+	tool(
+		"idu_agentlab_review_status",
+		"Lee estado de revisión AgentLab sin ejecutar labs.",
+		{
+			selector: optionalString("Selector; usar latest por defecto."),
+			projectPath: optionalString("Ruta opcional del proyecto objetivo."),
+		},
+	),
+];
+
+export function listIduMcpTools(): IduMcpToolDefinition[] {
+	return TOOLS.map((toolDefinition) => ({ ...toolDefinition }));
+}
+
+// Worktree-aware project resolution overlay (A15): the canonical implementation
+// now lives in ./worktree-resolution.js. The symbols are re-exported here so the
+// public API of mcp-server is unchanged (test/worktree-resolution/overlay.test.ts
+// imports resolveWorktreeOverlay + WorktreeGitRunner from src/mcp-server.js).
+// The local import binding keeps the internal call site (resolveMcpProjectContext)
+// working without touching it.
+import {
+	resolveWorktreeOverlay,
+	type WorktreeGitRunner,
+	type WorktreeOverlayInput,
+	type WorktreeOverlayResult,
+} from "./worktree-resolution.js";
+export {
+	resolveWorktreeOverlay,
+	type WorktreeGitRunner,
+	type WorktreeOverlayInput,
+	type WorktreeOverlayResult,
+};
+
+export function resolveMcpProjectContext(
+	inputProjectPath?: string,
+): IduMcpProjectResolution {
+	try {
+		applyPackageEnvDefaults();
+		const config = loadConfig({ requireTelegram: false });
+		const registry = loadRegistry(config.defaultCwd, config.allowedRoots, {
+			createIfMissing: false,
+			registryPath: resolveIduRegistryPath(),
+		});
+		// PR-B Finding C: the workspace root is the canonical parent for
+		// project stateRoots. When a project does not have an explicit
+		// stateRoot registered, we derive the canonical one from this.
+		const workspaceRootForProject = config.agentWorkspaceRoot;
+		if (inputProjectPath?.trim()) {
+			const projectPath = canonicalDirectory(inputProjectPath.trim());
+			if (!isAllowedCwd(projectPath, config.allowedRoots)) {
+				return invalidProject(projectPath, [
+					`Ruta fuera de ALLOWED_ROOTS: ${projectPath}`,
+				]);
+			}
+			const registered = registry.projects.find((project) =>
+				samePath(project.path, projectPath),
+			);
+			if (!registered) {
+				// Exact-match missed: try the worktree-aware overlay before
+				// declaring the project unregistered. A worktree of an
+				// already-enrolled parent inherits the parent's governance
+				// identity with effectiveCwd set to the worktree path.
+				const overlay = resolveWorktreeOverlay({
+					candidatePath: projectPath,
+					registry,
+					workspaceRoot: workspaceRootForProject,
+				});
+				if (
+					overlay.resolved &&
+					overlay.projectId &&
+					overlay.projectPath
+				) {
+					return {
+						status: "registered_project",
+						projectId: overlay.projectId,
+						projectPath: overlay.projectPath,
+						stateRoot: overlay.stateRoot,
+						effectiveCwd: overlay.effectiveCwd,
+						safeNotes: [
+							"Resuelto vía overlay worktree: governance del proyecto padre, cwd efectivo es la worktree.",
+						],
+						errors: [],
+					};
+				}
+				return {
+					status: "unregistered_project",
+					projectId: slugifyProjectId(
+						projectPath.split(/[\\/]/u).at(-1) ?? "project",
+					),
+					projectPath,
+					recommendedNext:
+						"Registrá el proyecto en Idu-pi antes de usar MCP o pasá un projectPath ya registrado.",
+					safeNotes: ["No escribí el registry automáticamente."],
+					errors: [`Proyecto no registrado: ${projectPath}`],
+				};
+			}
+			return {
+				status: "registered_project",
+				projectId: registered.id,
+				projectPath: registered.path,
+				// PR-B Finding C: always set stateRoot. If the project
+				// registry has a stateRoot, use it; otherwise derive the
+				// canonical path (workspaceRoot/projects/<id>). This
+				// removes the `?? runtime.workspaceRoot` ambiguity in
+				// envelope() callers — read and write paths use the same
+				// canonical path.
+				stateRoot: registered.stateRoot
+					? registered.stateRoot
+					: join(workspaceRootForProject, "projects", registered.id),
+				safeNotes: [],
+				errors: [],
+			};
+		}
+		const activeProject = getActiveProject(registry);
+		if (activeProject) {
+			return {
+				status: "active_project",
+				projectId: activeProject.id,
+				projectPath: activeProject.path,
+				stateRoot: activeProject.stateRoot
+					? activeProject.stateRoot
+					: join(workspaceRootForProject, "projects", activeProject.id),
+				safeNotes: [],
+				errors: [],
+			};
+		}
+		const cwd = canonicalDirectory(process.cwd());
+		return {
+			status: "unregistered_project",
+			projectId: slugifyProjectId(cwd.split(/[\\/]/u).at(-1) ?? "project"),
+			projectPath: cwd,
+			recommendedNext:
+				"No hay proyecto activo registrado. Registrá el proyecto en Idu-pi o pasá projectPath explícito.",
+			safeNotes: [
+				"Usé process.cwd() solo como candidato; no escribí registry.",
+			],
+			errors: ["No hay active project en registry."],
+		};
+	} catch (error) {
+		const projectPath = inputProjectPath?.trim() || process.cwd();
+		return invalidProject(projectPath, [redactSecrets(errorMessage(error))]);
+	}
+}
+
+function isAgentLabReviewRequestPlan(
+	value: unknown,
+): value is AgentLabReviewRequestPlan {
+	return (
+		isRecord(value) &&
+		typeof value.generatedAt === "string" &&
+		typeof value.projectId === "string" &&
+		Array.isArray(value.requests) &&
+		Array.isArray(value.errors)
+	);
+}
+
+function isAgentLabReviewRunResult(
+	value: unknown,
+): value is AgentLabReviewRunResult {
+	return (
+		isRecord(value) &&
+		typeof value.generatedAt === "string" &&
+		typeof value.projectId === "string" &&
+		Array.isArray(value.runs) &&
+		Array.isArray(value.consolidatedFindings) &&
+		Array.isArray(value.safeNotes)
+	);
+}
+
+function isAgentLabReviewStatus(value: unknown): value is AgentLabReviewStatus {
+	return (
+		isRecord(value) &&
+		typeof value.path === "string" &&
+		typeof value.name === "string" &&
+		typeof value.valid === "boolean" &&
+		Array.isArray(value.errors)
+	);
+}
+
+function isAgentLabWorkloadEnvelope(
+	value: unknown,
+): value is AgentLabWorkloadEnvelope {
+	return (
+		isRecord(value) &&
+		value.authority === "advisory" &&
+		value.advisoryOnly === true &&
+		typeof value.status === "string"
+	);
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function booleanValue(value: unknown): boolean | undefined {
+	return typeof value === "boolean" ? value : undefined;
+}
+
+async function recordMcpUsage(
+	runtime: CliRuntime,
+	result: IduMcpToolResult,
+	durationMs: number,
+	stateRoot?: string,
+): Promise<void> {
+	if (!stateRoot) return;
+	const decisionEnvelope = isRecord(result.data.decisionEnvelope)
+		? result.data.decisionEnvelope
+		: undefined;
+	await recordIduUsageEvent(stateRoot, {
+		projectId: runtime.projectId,
+		surface: "mcp",
+		action: result.tool,
+		active: getIduSessionStatus(runtime.projectId).active,
+		risk: stringValue(result.data.risk),
+		recommendation: stringValue(decisionEnvelope?.recommendation),
+		allowedToProceed: booleanValue(decisionEnvelope?.allowedToProceed),
+		requiresHuman:
+			booleanValue(decisionEnvelope?.requiresHuman) ??
+			booleanValue(result.data.requiresHumanConfirmation),
+		durationMs,
+		ok: result.ok,
+	});
+}
+
+function recordMcpContextQuality(
+	runtime: CliRuntime,
+	result: IduMcpToolResult,
+	stateRoot?: string,
+): void {
+	if (
+		!stateRoot ||
+		result.tool !== "idu_supervisor_context_pack" ||
+		!result.ok
+	) {
+		return;
+	}
+	recordContextQualityEventDeferred(
+		stateRoot,
+		contextQualityEventFromSupervisorContextPack(
+			runtime.projectId,
+			result.data,
+			"mcp",
+		),
+	);
+}
+
+function recordMcpAgentLabEffectiveness(
+	runtime: CliRuntime,
+	result: IduMcpToolResult,
+	stateRoot?: string,
+): void {
+	if (!stateRoot) return;
+	if (result.tool === "idu_agentlab_request_create") {
+		const plan = result.data.plan;
+		if (isAgentLabReviewRequestPlan(plan)) {
+			recordAgentLabEffectivenessEventDeferred(
+				stateRoot,
+				agentLabEffectivenessEventFromRequestPlan(
+					runtime.projectId,
+					plan,
+					"mcp",
+				),
+			);
+		}
+		return;
+	}
+	if (result.tool === "idu_agentlab_review_run") {
+		const runResult = result.data.result;
+		if (isAgentLabReviewRunResult(runResult)) {
+			recordAgentLabEffectivenessEventDeferred(
+				stateRoot,
+				agentLabEffectivenessEventFromRunResult(
+					runtime.projectId,
+					runResult,
+					"mcp",
+				),
+			);
+		}
+		return;
+	}
+	if (result.tool === "idu_agentlab_review_status") {
+		const status = result.data.status;
+		if (isAgentLabReviewStatus(status)) {
+			recordAgentLabEffectivenessEventDeferred(
+				stateRoot,
+				agentLabEffectivenessEventFromStatus(
+					runtime.projectId,
+					status,
+					isAgentLabWorkloadEnvelope(result.data.workloadEnvelope)
+						? result.data.workloadEnvelope
+						: undefined,
+					"mcp",
+				),
+			);
+		}
+	}
+}
+
+export async function callIduMcpTool(
+	name: string,
+	input: unknown = {},
+	options: IduMcpServerOptions = {},
+): Promise<IduMcpToolResult> {
+	// Pair invariant (#425): the start event and the end event come
+	// together. The start event fires before any check below; the
+	// finally block below emits the end event in EVERY code path that
+	// reaches a return, including the unknown_tool, lifecycle, and
+	// failed-resolution early returns. If the start event itself fails
+	// to emit, no end event is emitted (no start to pair with). The
+	// audit walks the log and pairs them via payload.followsUp, so any
+	// future start-without-end is signal, not structural noise.
+	let startEventId: string | undefined;
+	let outcome: OrchestratorTurnOutcome = "throw";
+	let startCtx: { stateRoot: string; projectId: string } | undefined;
+	let result: IduMcpToolResult | undefined;
+
+	try {
+		// Emit orchestrator_turn event so supervisor-main and
+		// supervisor-semantic (which are subscribed to this kind) receive
+		// a stimulus at the start of every tool call. Best-effort: a
+		// failure to append the event must not block the tool.
+		try {
+			const ctx = resolveMcpProjectContext(
+				(options as { projectPath?: string }).projectPath,
+			);
+			if (ctx.projectId && ctx.stateRoot) {
+				startEventId = emitOrchestratorTurn({
+					stateRoot: ctx.stateRoot,
+					projectId: ctx.projectId,
+					toolName: name,
+					source: "mcp-server",
+					now: new Date(),
+				});
+				startCtx = { stateRoot: ctx.stateRoot, projectId: ctx.projectId };
+			}
+		} catch {
+			// start event failed; the finally block will not emit
+			// the end event because startEventId is undefined.
+		}
+
+		if (!isToolName(name)) {
+			outcome = "unknown_tool";
+			result = envelope({
+				stateRoot: null,
+
+				ok: false,
+				tool: "idu_status",
+				projectId: null,
+				projectPath: null,
+				summary: `Herramienta MCP desconocida: ${name}`,
+				data: { requestedTool: name },
+				errors: [`Herramienta MCP desconocida: ${name}`],
+			});
+			return result;
+		}
+		const args = asRecord(input);
+		if (isProjectLifecycleTool(name)) {
+			outcome = "lifecycle";
+			result = await handleProjectLifecycleTool(name, args, options);
+			return result;
+		}
+		const resolution = (options.projectResolver ?? resolveMcpProjectContext)(
+			stringArg(args, "projectPath"),
+		);
+		if (
+			resolution.status === "unregistered_project" ||
+			resolution.status === "invalid_project"
+		) {
+			outcome = resolution.status;
+			result = envelope({
+				stateRoot: resolution.stateRoot,
+
+				ok: false,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary:
+					resolution.status === "unregistered_project"
+						? "Proyecto no registrado para Idu-pi MCP."
+						: "Proyecto inválido para Idu-pi MCP.",
+				data: {
+					resolutionStatus: resolution.status,
+					recommendedNext: resolution.recommendedNext,
+				},
+				safeNotes: resolution.safeNotes,
+				errors: resolution.errors,
+			});
+			return result;
+		}
+		try {
+			const runtime = (options.runtimeFactory ?? defaultRuntimeFactory)(
+				resolution.projectPath,
+			);
+			const startedAt = Date.now();
+			const dispatchResult = await dispatchTool(
+				name,
+				args,
+				runtime,
+				resolution,
+			);
+			if (
+				!isReadOnlyAlertTelemetryExcludedTool(name) &&
+				runtime.projectId.trim()
+			) {
+				await recordMcpUsage(
+					runtime,
+					dispatchResult,
+					Date.now() - startedAt,
+					resolution.stateRoot,
+				);
+				recordMcpAgentLabEffectiveness(
+					runtime,
+					dispatchResult,
+					resolution.stateRoot,
+				);
+				recordMcpContextQuality(
+					runtime,
+					dispatchResult,
+					resolution.stateRoot,
+				);
+			}
+			outcome = "ok";
+			result = dispatchResult;
+			return result;
+		} catch (error) {
+			outcome = "throw";
+			result = envelope({
+				stateRoot: resolution.stateRoot ?? null,
+
+				ok: false,
+				tool: name,
+				projectId: resolution.projectId,
+				projectPath: resolution.projectPath,
+				summary: `Falló ${name}: ${redactSecrets(errorMessage(error))}`,
+				data: { resolutionStatus: resolution.status },
+				safeNotes: resolution.safeNotes,
+				errors: [redactSecrets(errorMessage(error))],
+			});
+			return result;
+		}
+	} finally {
+		// Emit end event IF start succeeded. This is the pair invariant:
+		// start firing without end must never happen, because the only
+		// way to start firing is for ctx.projectId && ctx.stateRoot to be
+		// truthy above, and the finally block runs on every return.
+		if (startEventId && startCtx) {
+			try {
+				emitOrchestratorTurnCompleted({
+					stateRoot: startCtx.stateRoot,
+					projectId: startCtx.projectId,
+					toolName: name,
+					startEventId,
+					outcome,
+					ok: result?.ok,
+					summary: result?.summary,
+					evidenceRefs: result
+						? arrayField(result.data, "evidenceRefs").map(String)
+						: [],
+					autonomyGateTraces: result
+						? arrayField(result.data, "autonomyGateTraces")
+						: [],
+					errors: result?.errors,
+					source: "mcp-server",
+					now: new Date(),
+				});
+			} catch {
+				// best-effort; do not affect the result
+			}
+		}
+	}
+}
+
+export async function handleMcpRequest(
+	request: McpJsonRpcRequest,
+	options: IduMcpServerOptions = {},
+): Promise<McpJsonRpcResponse | undefined> {
+	if (
+		!isRecord(request) ||
+		request.jsonrpc !== "2.0" ||
+		typeof request.method !== "string"
+	) {
+		return jsonRpcError(request?.id ?? null, -32600, "Invalid Request");
+	}
+	if (request.id === undefined) {
+		if (request.method === "notifications/initialized") return undefined;
+		return undefined;
+	}
+	switch (request.method) {
+		case "initialize":
+			return jsonRpcResult(request.id, {
+				protocolVersion: "2024-11-05",
+				capabilities: { tools: { listChanged: false } },
+				serverInfo: { name: "idu-pi-mcp", version: "0.1.1" },
+			});
+		case "ping":
+			return jsonRpcResult(request.id, {});
+		case "tools/list":
+			return jsonRpcResult(request.id, { tools: listIduMcpTools() });
+		case "tools/call": {
+			const params = asRecord(request.params);
+			const name = stringArg(params, "name");
+			if (!name) return jsonRpcError(request.id, -32602, "Missing tool name");
+			const result = await callIduMcpTool(
+				name,
+				params.arguments ?? {},
+				options,
+			);
+			return jsonRpcResult(request.id, {
+				content: [
+					{ type: "text", text: `${JSON.stringify(result, null, 2)}\n` },
+				],
+				isError: !result.ok,
+			});
+		}
+		default:
+			return jsonRpcError(
+				request.id,
+				-32601,
+				`Method not found: ${request.method}`,
+			);
+	}
+}
+
+export function parseMcpLine(
+	line: string,
+): McpJsonRpcRequest | undefined | McpJsonRpcResponse {
+	const trimmed = line.trim();
+	if (!trimmed) return undefined;
+	try {
+		return JSON.parse(trimmed) as McpJsonRpcRequest;
+	} catch {
+		return jsonRpcError(null, -32700, "Parse error");
+	}
+}
+
+// Restore the PISO gate's stateRoot to the value from the enclosing scope.
+// Called at the end of every handleMcpRequest.
+
+export function runMcpServer(options: IduMcpServerOptions = {}): void {
+	let buffer = "";
+	stdin.setEncoding("utf8");
+	stdin.on("data", (chunk) => {
+		buffer += chunk;
+		let newlineIndex = buffer.indexOf("\n");
+		while (newlineIndex !== -1) {
+			const line = buffer.slice(0, newlineIndex);
+			buffer = buffer.slice(newlineIndex + 1);
+			void handleLine(line, options);
+			newlineIndex = buffer.indexOf("\n");
+		}
+	});
+	stdin.on("end", () => {
+		if (buffer.trim()) void handleLine(buffer, options);
+	});
+}
+
+async function handleLine(
+	line: string,
+	options: IduMcpServerOptions,
+): Promise<void> {
+	const parsed = parseMcpLine(line);
+	if (!parsed) return;
+	if ("error" in parsed) {
+		writeResponse(parsed);
+		return;
+	}
+	const response = await handleMcpRequest(parsed, options);
+	if (response) writeResponse(response);
+}
+
+export type IduProjectLifecycleToolName =
+	| "idu_project_status"
+	| "idu_project_enroll"
+	| "idu_bootstrap_project"
+	| "idu_start";
+
+function isProjectLifecycleTool(
+	name: IduMcpToolName,
+): name is IduProjectLifecycleToolName {
+	return [
+		"idu_project_status",
+		"idu_project_enroll",
+		"idu_bootstrap_project",
+		"idu_start",
+	].includes(name);
+}
+
+function isReadOnlyAlertTelemetryExcludedTool(name: IduMcpToolName): boolean {
+	return (
+		name === "idu_supervisor_self_maintenance_advisory" ||
+		name === "idu_autonomous_alerts_status" ||
+		name === "idu_autonomous_alerts_tick"
+	);
+}
+
+async function handleProjectLifecycleTool(
+	name: IduProjectLifecycleToolName,
+	args: JsonObject,
+	options: IduMcpServerOptions,
+): Promise<IduMcpToolResult> {
+	try {
+		applyPackageEnvDefaults();
+		const config = loadConfig({ requireTelegram: false });
+		const registryPath = resolveIduRegistryPath();
+		switch (name) {
+			case "idu_project_status":
+				return await handleProjectStatus(
+					name,
+					args,
+					options,
+					config,
+					registryPath,
+				);
+			case "idu_project_enroll":
+				return await handleProjectEnroll(
+					name,
+					args,
+					options,
+					config,
+					registryPath,
+				);
+			case "idu_bootstrap_project":
+				return await handleBootstrapProject(
+					name,
+					args,
+					options,
+					config,
+					registryPath,
+				);
+			case "idu_start":
+				return await handleStart(name, args, options);
+		}
+	} catch (error) {
+		return envelope({
+			stateRoot: null,
+
+			ok: false,
+			tool: name,
+			projectId: null,
+			projectPath: stringArg(args, "projectPath") ?? null,
+			summary: `Falló ${name}: ${redactSecrets(errorMessage(error))}`,
+			data: {},
+			errors: [redactSecrets(errorMessage(error))],
+		});
+	}
+}
+
+export function workerBoundaryData(): JsonObject {
+	return {
+		orchestratorOwns: [
+			"decisión final",
+			"comunicación con el usuario",
+			"subagentes worker/scout/reviewer",
+			"worktrees/sandboxes",
+			"implementación y tests",
+		],
+		iduPiOwns: [
+			"auditoría del proyecto",
+			"contratos operativos",
+			"Plan Maestro/Doc/reports en stateRoot",
+			"detección de drift y recomendaciones",
+		],
+		agentLabsOwn: [
+			"auditoría audit-only",
+			"pruebas de cambios",
+			"detección de desviaciones contra Plan Maestro",
+			"sugerencias de actualización de flujos",
+		],
+		agentLabsMustNot: [
+			"implementar features",
+			"editar repo real",
+			"crear workspaces propios dentro de stateRoot",
+			"hacer commit/push",
+		],
+	};
+}
+
+export function buildOrchestratorProcedure(
+	purpose: string,
+	request: string,
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+): JsonObject {
+	const connection = runtime.inspectConnection();
+	// Phase 0 (#263): governance config comes from the runtime (populated by
+	// createCliRuntime), not from a fresh loadConfig() that needs DEFAULT_CWD.
+	const governanceConfig = runtime.governanceConfig;
+	const workerBoundary = workerBoundaryData();
+	const baseSteps = [
+		"Consultar Idu-pi MCP para estado, contratos y riesgos.",
+		"Revalidar la auditoría con subagentes propios del orquestador.",
+		"Leer Plan Maestro y Doc/<project> antes de decidir.",
+		"Usar AgentLabs sólo como auditores/pruebas/drift, nunca como workers.",
+		"Comunicar al usuario la conclusión del orquestador: grave, leve, pendiente y próximo paso.",
+	];
+	const purposeSteps: Record<string, string[]> = {
+		create_plan: [
+			"Si no hay plan o está stale, ejecutar auditoría general del proyecto.",
+			"Pedir a subagentes del orquestador validar frontend, auth, datos, arquitectura y flujos.",
+			"Correr/reusar AgentLabs audit-only si la evidencia es insuficiente o hay riesgo high/critical.",
+			"Construir Plan Maestro con cumple/no cumple, contratos, violaciones y hitos.",
+			"Si falta evidencia, pedir auditoría profunda antes de cerrar como DRAFT_CONFIABLE.",
+		],
+		update_plan: [
+			"Comparar Plan Maestro/Doc contra repo y diff actual.",
+			"Detectar drift de contratos, flujos y violaciones.",
+			"Actualizar stateRoot Doc/Plan sólo con evidencia y mantener historial en reports.",
+		],
+		implement_change: [
+			"Llamar idu_supervisor_context_pack para obtener objetivo compacto, Plan Maestro, contratos, riesgos, lecturas y gates antes de delegar.",
+			"Usar idu_task_context como fallback si el pack no está disponible o como consulta puntual adicional.",
+			"Delegar implementación a workers normales del orquestador con ese contexto.",
+			"Ejecutar postflight y auditorías audit-only antes de cerrar.",
+		],
+		postflight_review: [
+			"Inspeccionar diff y cambios locales.",
+			"Verificar contratos afectados y DoD.",
+			"Si hay drift, pedir AgentLab audit-only y proponer actualización de flujos/Doc.",
+		],
+	};
+	return {
+		summary: `Procedimiento asesor para ${purpose}`,
+		purpose,
+		request,
+		project: {
+			id: runtime.projectId,
+			path: runtime.projectPath,
+			resolutionStatus: resolution.status,
+			configStatus: connection.configStatus,
+			alignmentStatus: connection.alignmentStatus,
+		},
+		governanceConfig,
+		workerBoundary,
+		procedure: [...baseSteps, ...(purposeSteps[purpose] ?? [])],
+		mustConsult: [
+			"idu_status",
+			"idu_supervisor_context_pack antes de delegar implementación",
+			"idu_task_context como fallback o asesoría puntual",
+			"idu_postflight después del diff",
+			"idu_agentlab_* sólo si se requiere auditoría/prueba/drift",
+		],
+		mustNot: [
+			"No permitir que Idu-pi se imponga sin revalidación del orquestador.",
+			"No usar AgentLabs para codificar.",
+			"No crear workspaces permanentes en stateRoot.",
+			"No presentar Plan Maestro como confiable si falta evidencia crítica.",
+		],
+		recommendedNext:
+			connection.alignmentStatus === "aligned"
+				? "Continuar con idu_supervisor_context_pack, idu_task_context o idu_postflight según etapa."
+				: connection.recommendedNext,
+	};
+}
+
+function readRuntimeStructuredTasks(runtime: CliRuntime): {
+	status: "available" | "unavailable";
+	tasks: StructuredTask[];
+	safeNotes: string[];
+} {
+	if (!runtime.listTasks) {
+		return {
+			status: "unavailable",
+			tasks: [],
+			safeNotes: [
+				"Structured task queue direct access was unavailable; report used an empty task snapshot.",
+			],
+		};
+	}
+	try {
+		return {
+			status: "available",
+			tasks: runtime.listTasks(),
+			safeNotes: ["Leí snapshot de cola estructurada sin modificarla."],
+		};
+	} catch {
+		return {
+			status: "unavailable",
+			tasks: [],
+			safeNotes: [
+				"Structured task queue read failed safely; report used an empty task snapshot.",
+			],
+		};
+	}
+}
+
+export function loadRuntimeAutomaticov1Plan(runtime: CliRuntime) {
+	if (!runtime.masterPlanReview) return undefined;
+	try {
+		return runtime.masterPlanReview("latest").plan;
+	} catch {
+		return undefined;
+	}
+}
+
+export function loadRuntimeExecutionReadiness(runtime: CliRuntime, stateRoot: string) {
+	const taskTree = buildMasterPlanTaskTree(
+		loadRuntimeAutomaticov1Plan(runtime),
+	);
+	const usageReport = buildIduUsageReport(readIduUsageEvents(stateRoot, 500));
+	return buildIduExecutionReadiness({
+		coreStatus: safeRuntimeProjectCoreStatus(stateRoot),
+		constitutionStatus: safeRuntimeProjectConstitutionStatus(stateRoot),
+		taskTreeStatus: taskTree.status,
+		mcpContextPackStaleness: usageReport.mcpContextPackStaleness,
+	});
+}
+
+function safeRuntimeProjectCoreStatus(stateRoot: string) {
+	try {
+		return loadProjectCore(stateRoot).status;
+	} catch {
+		return "unknown" as const;
+	}
+}
+
+function safeRuntimeProjectConstitutionStatus(stateRoot: string) {
+	try {
+		return loadProjectConstitution(stateRoot).status;
+	} catch {
+		return "unknown" as const;
+	}
+}
+
+export function buildRuntimeSelfMaintenanceReport(
+	runtime: CliRuntime,
+	stateRoot: string,
+): {
+	taskRead: ReturnType<typeof readRuntimeStructuredTasks>;
+	report: ReturnType<typeof buildSupervisorSelfMaintenanceAdvisory>;
+} {
+	const taskRead = readRuntimeStructuredTasks(runtime);
+	const now = new Date();
+	const supervisorActivity = summarizeSupervisorActivityEvents(
+		filterRecentSupervisorActivityEvents(
+			readSupervisorActivityEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
+	);
+	const usageReport = buildIduUsageReport(
+		filterRecentIduUsageEvents(
+			readIduUsageEvents(stateRoot),
+			now,
+			SELF_MAINTENANCE_PRESSURE_WINDOW_MS,
+		),
+		{ now },
+	);
+	const agentLabEffectiveness = buildAgentLabEffectivenessReport(
+		readAgentLabEffectivenessEvents(stateRoot),
+	);
+	let semanticNewEvents = 0;
+	try {
+		const semanticDelta = runtime.semanticAuditStatus().newEvents;
+		semanticNewEvents =
+			semanticDelta.labRuns +
+			semanticDelta.findings +
+			semanticDelta.proposals +
+			semanticDelta.tasks +
+			semanticDelta.userSignals +
+			semanticDelta.memoryItems;
+	} catch {
+		semanticNewEvents = 0;
+	}
+	return {
+		taskRead,
+		report: buildSupervisorSelfMaintenanceAdvisory({
+			projectId: runtime.projectId,
+			now,
+			tasks: taskRead.tasks,
+			supervisorEvents: supervisorActivity.totalEvents,
+			supervisorActivitySkipped:
+				(supervisorActivity.byReason.idu_inactive ?? 0) +
+				(supervisorActivity.byReason.no_new_events ?? 0) +
+				(supervisorActivity.byReason.not_enough_data ?? 0),
+			supervisorActivityThrottled: supervisorActivity.byReason.throttled ?? 0,
+			usageFailures: usageReport.unresolvedFailures,
+			usageNotAllowed: usageReport.notAllowed,
+			usageRequiresHuman: usageReport.requiresHuman,
+			agentLabStaleRequests: agentLabEffectiveness.staleRequests,
+			semanticNewEvents,
+		}),
+	};
+}
+
+async function dispatchTool(
+	name: IduMcpToolName,
+	args: JsonObject,
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+): Promise<IduMcpToolResult> {
+	switch (name) {
+		case "idu_status":
+			return await handleStatus(name, args, runtime, resolution);
+		case "idu_activate":
+			return await handleActivate(name, args, runtime, resolution);
+		case "idu_deactivate":
+			return await handleDeactivate(name, args, runtime, resolution);
+		case "idu_project_reset_state":
+			return await handleProjectResetState(
+				name,
+				args,
+				runtime,
+				resolution,
+			);
+		case "idu_prepare":
+			return await handlePrepare(name, args, runtime, resolution);
+		case "idu_bibliotecario_init":
+			return await handleBibliotecarioInit(name, args, runtime, resolution);
+		case "idu_model_invocation_status":
+			return await handleModelInvocationStatus(name, args, runtime, resolution);
+		case "idu_skill_rating":
+			return await handleSkillRating(name, args, runtime, resolution);
+		case "idu_supervisor_trigger":
+			return await handleSupervisorTrigger(name, args, runtime, resolution);
+		case "idu_trigger_engine":
+			return await handleTriggerEngine(name, args, runtime, resolution);
+		case "idu_role_engine_control":
+			return await handleRoleEngineControl(name, args, runtime, resolution);
+		case "idu_role_engine_status":
+			return await handleRoleEngineStatus(name, args, runtime, resolution);
+		case "idu_master_plan_status":
+			return await handleMasterPlanStatus(name, args, runtime, resolution);
+		case "idu_master_plan_create":
+			return await handleMasterPlanCreate(name, args, runtime, resolution);
+		case "idu_master_plan_review":
+			return await handleMasterPlanReview(name, args, runtime, resolution);
+		case "idu_master_plan_approve":
+			return await handleMasterPlanApprove(name, args, runtime, resolution);
+		case "idu_master_plan_reject":
+			return await handleMasterPlanReject(name, args, runtime, resolution);
+		case "idu_plan_snapshot":
+			return await handlePlanSnapshot(name, args, runtime, resolution);
+		case "idu_next_advisory_action":
+			return await handleNextAdvisoryAction(name, args, runtime, resolution);
+		case "idu_continuation_proposal":
+			return await handleContinuationProposal(name, args, runtime, resolution);
+		case "idu_task_package_create":
+			return await handleTaskPackageCreate(name, args, runtime, resolution);
+		case "idu_supervisor_context_pack":
+			return await handleSupervisorContextPack(name, args, runtime, resolution);
+		case "idu_orchestrator_procedure":
+			return await handleOrchestratorProcedure(name, args, runtime, resolution);
+		case "idu_task_context":
+			return await handleTaskContext(name, args, runtime, resolution);
+		case "idu_preflight":
+			return await handlePreflight(name, args, runtime, resolution);
+		case "idu_advisory":
+			return await handleAdvisory(name, args, runtime, resolution);
+		case "idu_postflight":
+			return await handlePostflight(name, args, runtime, resolution);
+		case "idu_supervisor_tick":
+			return await handleSupervisorTick(name, args, runtime, resolution);
+		case "idu_execution_director_tick":
+			return await handleExecutionDirectorTick(name, args, runtime, resolution);
+		case "idu_proposal_outbox":
+			return await handleProposalOutbox(name, args, runtime, resolution);
+		case "idu_proposal_detail":
+			return await handleProposalDetail(name, args, runtime, resolution);
+		case "idu_objective_status":
+			return await handleObjectiveStatus(name, args, runtime, resolution);
+		case "idu_supervisor_consult":
+			return await handleSupervisorConsult(name, args, runtime, resolution);
+		case "idu_supervisor_cron_plan":
+			return await handleSupervisorCronPlan(name, args, runtime, resolution);
+		case "idu_supervisor_responses":
+			return await handleSupervisorResponses(name, args, runtime, resolution);
+		case "idu_architectural_pruning_plan":
+			return await handleArchitecturalPruningPlan(name, args, runtime, resolution);
+		case "idu_context_pruning_advisory":
+			return await handleContextPruningAdvisory(name, args, runtime, resolution);
+		case "idu_autonomous_alerts_status":
+			return await handleAutonomousAlertsStatus(name, args, runtime, resolution);
+		case "idu_autonomous_alerts_tick":
+			return await handleAutonomousAlertsTick(name, args, runtime, resolution);
+		case "idu_autonomous_alerts_control":
+			return await handleAutonomousAlertsControl(name, args, runtime, resolution);
+		case "idu_supervisor_self_maintenance_advisory":
+			return await handleSupervisorSelfMaintenanceAdvisory(
+				name,
+				args,
+				runtime,
+				resolution,
+			);
+		case "idu_birth_status":
+			return await handleBirthStatus(name, args, runtime, resolution);
+		case "idu_birth_existing_scan":
+			return await handleBirthExistingScan(name, args, runtime, resolution);
+		case "idu_birth_bibliotecario_discovery":
+			return await handleBirthBibliotecarioDiscovery(name, args, runtime, resolution);
+		case "idu_birth_prototype_master":
+			return await handleBirthPrototypeMaster(name, args, runtime, resolution);
+		case "idu_birth_general_spec":
+			return await handleBirthGeneralSpec(name, args, runtime, resolution);
+		case "idu_birth_general_spec_derive":
+			return await handleBirthGeneralSpecDerive(name, args, runtime, resolution);
+		case "idu_genesis_mission_draft":
+			return await handleGenesisMissionDraft(name, args, runtime, resolution);
+		case "idu_genesis_mission_confirm":
+			return await handleGenesisMissionConfirm(name, args, runtime, resolution);
+		case "idu_skill_for_task":
+			return await handleSkillForTask(name, args, runtime, resolution);
+		case "idu_birth_validate":
+			return await handleBirthValidate(name, args, runtime, resolution);
+		case "idu_birth_repo_plan":
+			return await handleBirthRepoPlan(name, args, runtime, resolution);
+		case "idu_pending_injections":
+			return await handlePendingInjections(name, args, runtime, resolution);
+		case "idu_hygiene_migrate":
+			return await handleHygieneMigrate(name, args, runtime, resolution);
+		case "idu_hygiene_sweep":
+			return await handleHygieneSweep(name, args, runtime, resolution);
+		case "idu_ack_advisory":
+			return await handleAckAdvisory(name, args, runtime, resolution);
+		case "idu_outbox_prune":
+			return await handleOutboxPrune(name, args, runtime, resolution);
+		case "idu_subscribe_triggers":
+			return await handleSubscribeTriggers(name, args, runtime, resolution);
+		case "idu_automaticov1_cycle":
+			return await handleAutomaticov1Cycle(name, args, runtime, resolution);
+		case "idu_bibliotecario_proactive_advisory":
+			return await handleBibliotecarioProactiveAdvisory(name, args, runtime, resolution);
+		case "idu_external_intelligence_report":
+			return await handleExternalIntelligenceReport(name, args, runtime, resolution);
+		case "idu_external_source_recommend":
+			return await handleExternalSourceRecommend(name, args, runtime, resolution);
+		case "idu_task":
+			return await handleTask(name, args, runtime, resolution);
+		case "idu_queue_detail":
+			return await handleQueueDetail(name, args, runtime, resolution);
+		case "idu_queue_complete":
+			return await handleQueueComplete(name, args, runtime, resolution);
+		case "idu_semantic_audit_status":
+			return await handleSemanticAuditStatus(name, args, runtime, resolution);
+		case "idu_source_status":
+			return await handleSourceStatus(name, args, runtime, resolution);
+		case "idu_source_add":
+			return await handleSourceAdd(name, args, runtime, resolution);
+		case "idu_source_remove":
+			return await handleSourceRemove(name, args, runtime, resolution);
+		case "idu_source_read":
+			return await handleSourceRead(name, args, runtime, resolution);
+		case "idu_source_extract":
+			return await handleSourceExtract(name, args, runtime, resolution);
+		case "idu_source_report":
+			return await handleSourceReport(name, args, runtime, resolution);
+		case "idu_source_research_report":
+			return await handleSourceResearchReport(name, args, runtime, resolution);
+		case "idu_source_digest":
+			return await handleSourceDigest(name, args, runtime, resolution);
+		case "idu_source_digest_status":
+			return await handleSourceDigestStatus(name, args, runtime, resolution);
+		case "idu_source_chunk_read":
+			return await handleSourceChunkRead(name, args, runtime, resolution);
+		case "idu_source_recommend_for_task":
+			return await handleSourceRecommendForTask(name, args, runtime, resolution);
+		case "idu_source_required_actions":
+			return await handleSourceRequiredActions(name, args, runtime, resolution);
+		case "idu_source_skill_candidates_create":
+			return await handleSourceSkillCandidatesCreate(name, args, runtime, resolution);
+		case "idu_source_skill_candidates_review":
+			return await handleSourceSkillCandidatesReview(name, args, runtime, resolution);
+		case "idu_skill_draft_from_lessons":
+			return await handleSkillDraftFromLessons(name, args, runtime, resolution);
+		case "idu_source_refresh":
+			return await handleSourceRefresh(name, args, runtime, resolution);
+		case "idu_agentlab_request_create":
+			return await handleAgentLabRequestCreate(name, args, runtime, resolution);
+		case "idu_agentlab_review_run":
+			return await handleAgentLabReviewRun(name, args, runtime, resolution);
+		case "idu_agentlab_review_status":
+			return await handleAgentLabReviewStatus(name, args, runtime, resolution);
+	}
+	throw new Error(`Tool ${name} is handled before runtime dispatch.`);
+}
+
+type MasterPlanReviewResult = ReturnType<
+	NonNullable<CliRuntime["masterPlanReview"]>
+>;
+
+type PlanSnapshot = JsonObject & {
+	authority: "advisory";
+	planStatus: string;
+	objective: string;
+	operationalContracts: unknown[];
+	flows: unknown[];
+	contextBudget: ContextBudgetUsage;
+};
+
+export type SupervisorConsultation = JsonObject & {
+	version: 1;
+	authority: "advisory";
+	source: string;
+	supervisorRecommendation: string;
+	severity: string;
+	confidence: number;
+	risks: string[];
+	gates: string[];
+	contracts: string[];
+	evidenceRefs: string[];
+	proceed: boolean;
+	proceedRationale: string;
+	stopRationale: string[];
+	requiresHuman: boolean;
+	agentLabs: { mode: "audit_only"; autoRun: false; suggested: string[] };
+};
+
+export function defaultRuntimeFactory(projectPath?: string): CliRuntime {
+	return createCliRuntime({ projectPath, requireTelegramConfig: false });
+}
+
+export function buildSupervisorConsultation(input: {
+	source: string;
+	planObjective?: string;
+	supervisorRecommendation: string;
+	severity: string;
+	confidence: number;
+	risks?: string[];
+	gates?: string[];
+	contracts?: string[];
+	evidenceRefs?: string[];
+	proceed: boolean;
+	proceedRationale: string;
+	stopRationale?: string[];
+	requiresHuman: boolean;
+	suggestedAgentLabs?: string[];
+}): SupervisorConsultation {
+	return {
+		version: 1,
+		authority: "advisory",
+		source: input.source,
+		...(input.planObjective ? { planObjective: input.planObjective } : {}),
+		supervisorRecommendation: input.supervisorRecommendation,
+		severity: input.severity,
+		confidence: input.confidence,
+		risks: (input.risks ?? []).slice(0, 8),
+		gates: (input.gates ?? []).slice(0, 8),
+		contracts: dedupe(input.contracts ?? []).slice(0, 8),
+		evidenceRefs: dedupe(input.evidenceRefs ?? []).slice(0, 12),
+		proceed: input.proceed,
+		proceedRationale: input.proceedRationale,
+		stopRationale: (input.stopRationale ?? []).slice(0, 8),
+		requiresHuman: input.requiresHuman,
+		agentLabs: {
+			mode: "audit_only",
+			autoRun: false,
+			suggested: dedupe(input.suggestedAgentLabs ?? []).slice(0, 8),
+		},
+	};
+}
+
+export function planObjectiveForRuntime(runtime: CliRuntime): string | undefined {
+	if (!runtime.masterPlanReview) return undefined;
+	try {
+		const review = runtime.masterPlanReview("latest");
+		const plan = review.plan as unknown as JsonObject;
+		return (
+			String(plan.inferredObjective ?? plan.executiveSummary ?? "").trim() ||
+			undefined
+		);
+	} catch {
+		return undefined;
+	}
+}
+
+export function buildConsultationFromAdvisory(input: {
+	source: string;
+	planObjective?: string;
+	advisory: JsonObject;
+	risks?: string[];
+	gates?: string[];
+	proceedRationale?: string;
+}): SupervisorConsultation {
+	const requiresHuman = Boolean(input.advisory.requiresHuman);
+	const recommendation = String(input.advisory.recommendation ?? "warn");
+	const severity = String(input.advisory.severity ?? "warning");
+	const stopRationale = requiresHuman
+		? ["Supervisor requiere revisión humana/orquestador antes de proceder."]
+		: [];
+	return buildSupervisorConsultation({
+		source: input.source,
+		planObjective: input.planObjective,
+		supervisorRecommendation: recommendation,
+		severity,
+		confidence: Number(input.advisory.confidence ?? 0.7),
+		risks: input.risks,
+		gates: input.gates,
+		contracts: arrayField(input.advisory, "contractsAffected").map(String),
+		evidenceRefs: arrayField(input.advisory, "evidenceRefs").map(String),
+		proceed: !requiresHuman && recommendation !== "block",
+		proceedRationale:
+			input.proceedRationale ??
+			(!requiresHuman
+				? "Supervisor no detectó bloqueo; el orquestador puede proceder con gates y evidencia."
+				: "Supervisor recomienda detenerse hasta resolver revisión humana/orquestador."),
+		stopRationale,
+		requiresHuman,
+		suggestedAgentLabs: arrayField(input.advisory, "suggestedAgentLabs").map(
+			String,
+		),
+	});
+}
+
+function buildActiveSkillsIndex(stateRoot: string): Array<{
+	skillId: string;
+	name: string;
+	summary: string;
+	path: string;
+	rating: number;
+}> {
+	try {
+		const entries = loadSkillsIndexFromLabDb(stateRoot);
+		return packSkillsIndex(entries);
+	} catch {
+		return [];
+	}
+}
+
+function detectProjectTypeForTaxonomy(runtime: CliRuntime): string {
+	const path = (runtime.projectPath ?? "").toLowerCase();
+	if (path.includes("component") || path.includes("ui")) return "web";
+	if (path.includes("lib") || path.includes("pkg")) return "library";
+	return "program";
+}
+
+export function buildSupervisorContextPack(
+	runtime: CliRuntime,
+	request: string,
+	includePlanSnapshot: boolean,
+): JsonObject {
+	if (!runtime.masterPlanReview) {
+		throw new Error("Master Plan no disponible en este runtime.");
+	}
+	const review = runtime.masterPlanReview("latest");
+	const snapshot = buildPlanSnapshot(review, runtime);
+	const humanVision = budgetTextField(
+		extractHumanVision(runtime.projectPath),
+		"supervisor_context_pack",
+		"goals.humanVision",
+	);
+	const taskGoalResult = sliceTextToBudget({
+		text: request,
+		profile: "supervisor_context_pack",
+		path: "goals.taskGoal",
+		maxChars: 320,
+	});
+	const taskGoal = { value: taskGoalResult.text, usage: taskGoalResult.usage };
+	const compactRequest = taskGoal.value;
+	const advisoryAction = buildNextAdvisoryAction(
+		snapshot,
+		compactRequest,
+		"from_request",
+		"small",
+	);
+	const taskPackage = buildTaskPackage(
+		snapshot,
+		advisoryAction,
+		compactRequest,
+		undefined,
+		false,
+	);
+	const report = runtime.preflight(request);
+	const alignmentAdvisory = buildPreflightOrchestratorAdvisory(report);
+	const contracts = dedupe([
+		...arrayField(taskPackage, "contracts").map(String),
+		...arrayField(
+			alignmentAdvisory as unknown as JsonObject,
+			"contractsAffected",
+		).map(String),
+	]);
+	const requiredReads = dedupe([
+		...arrayField(taskPackage, "filesToRead").map(String),
+		...arrayField(
+			alignmentAdvisory as unknown as JsonObject,
+			"requiredReads",
+		).map(String),
+	]);
+	const risks = dedupe([
+		...arrayField(snapshot, "risks").map(String),
+		...arrayField(report as unknown as JsonObject, "warnings").map(String),
+	]);
+	const safeRisks = budgetStringArray(
+		risks,
+		"supervisor_context_pack",
+		"risks",
+	);
+	const safeReads = budgetStringArray(
+		requiredReads,
+		"supervisor_context_pack",
+		"requiredReads",
+	);
+	const autonomyGates: string[] = [...AUTONOMY_GATE_TEXTS];
+	// D2: structured per-gate verdict trace (read/write calibration). The
+	// legacy `autonomyGates` string list is kept for backward-compatible
+	// consumers; `autonomyGateTraces` carries the verdict/honor/override
+	// record the context-quality event now persists.
+	const autonomyGateTraces = buildAutonomyGateTraces();
+	const skipNoiseGuidance = [
+		"No leas docs completas si el pack ya trae objetivo, contratos y gates suficientes.",
+		"No cargues Source Library completa; pedí chunks concretos cuando la tarea lo requiera.",
+		"Ignorá subagent-artifacts, dist, node_modules, logs y stateRoot salvo que la tarea los nombre.",
+		"No trates safeNotes o memoria como contrato aprobado; el Plan Maestro gobierna.",
+		"No infieras tokens/costo/contexto si no hay evidencia estructurada.",
+	];
+	const humanApprovalRequired =
+		Boolean(alignmentAdvisory.requiresHuman) ||
+		Boolean(
+			(taskPackage.agentLabPolicy as JsonObject | undefined)
+				?.requiresHumanApproval,
+		);
+	const preconditions = taskPackage.preconditions as JsonObject | undefined;
+	const preconditionBlocked = Boolean(preconditions?.blocked);
+	const stopRationale = [
+		...(alignmentAdvisory.requiresHuman
+			? [
+					"Supervisor requiere revisión humana/orquestador por riesgo o alcance.",
+				]
+			: []),
+		...(preconditionBlocked
+			? ["Task package está bloqueado por precondiciones."]
+			: []),
+	];
+	const sourceEvidence = buildSupervisorSourceEvidence(runtime, compactRequest);
+	const embeddedPlanSnapshot = includePlanSnapshot
+		? compactPlanSnapshotForContextPack(snapshot)
+		: undefined;
+	const embeddedPlanSnapshotUsage = embeddedPlanSnapshot
+		? budgetEmbeddedPlanSnapshotForContextPack(embeddedPlanSnapshot)
+		: undefined;
+	const orchestratorAdvisories = buildOrchestratorAdvisoriesSection(runtime);
+	const supervisorConsultation = buildSupervisorConsultation({
+		source: "idu_supervisor_context_pack",
+		planObjective: snapshot.objective,
+		supervisorRecommendation: String(alignmentAdvisory.recommendation),
+		severity: String(alignmentAdvisory.severity),
+		confidence: Number(alignmentAdvisory.confidence ?? 0.78),
+		risks: safeRisks.items,
+		gates: autonomyGates,
+		contracts,
+		evidenceRefs: dedupe([
+			"readme:vision",
+			"plan:snapshot",
+			"task:context",
+			...alignmentAdvisory.evidenceRefs,
+		]),
+		proceed: !alignmentAdvisory.requiresHuman && !preconditionBlocked,
+		proceedRationale:
+			!alignmentAdvisory.requiresHuman && !preconditionBlocked
+				? "Supervisor no detectó bloqueo; el orquestador puede proceder mostrando gates y evidencia."
+				: "Supervisor exige resolver stopRationale antes de proceder.",
+		stopRationale,
+		requiresHuman: humanApprovalRequired,
+		suggestedAgentLabs: alignmentAdvisory.suggestedAgentLabs,
+	});
+	return {
+		packVersion: 1,
+		authority: "advisory",
+		audience: "orchestrator_subagents",
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		request: compactRequest,
+		summary: "Supervisor context pack listo para el orquestador.",
+		goals: {
+			humanVision: humanVision.value,
+			planObjective: snapshot.objective,
+			taskGoal: taskGoal.value,
+		},
+		contracts,
+		risks: safeRisks.items,
+		requiredReads: safeReads.items,
+		skipNoiseGuidance,
+		autonomyGates,
+		autonomyGateTraces,
+		humanApprovalRequired,
+		supervisorConsultation,
+		sourceEvidence,
+		taskPackage,
+		taskContext: {
+			recommendation: alignmentAdvisory.recommendation,
+			severity: alignmentAdvisory.severity,
+			confidence: alignmentAdvisory.confidence,
+			summary: alignmentAdvisory.summary,
+			contractsAffected: alignmentAdvisory.contractsAffected,
+			requiredReads: alignmentAdvisory.requiredReads,
+			suggestedAgentLabs: alignmentAdvisory.suggestedAgentLabs,
+			requiresHuman: alignmentAdvisory.requiresHuman,
+			evidenceRefs: alignmentAdvisory.evidenceRefs,
+		},
+		...(embeddedPlanSnapshot ? { planSnapshot: embeddedPlanSnapshot } : {}),
+		activeSkillsIndex: buildActiveSkillsIndex(runtime.workspaceRoot),
+		taxonomyGuide: readTaxonomyGuide(
+			runtime.workspaceRoot,
+			detectProjectTypeForTaxonomy(runtime),
+		),
+		contextBudget: mergeContextBudgetUsage("supervisor_context_pack", [
+			humanVision.usage,
+			taskGoal.usage,
+			safeRisks.usage,
+			safeReads.usage,
+			...(embeddedPlanSnapshotUsage ? [embeddedPlanSnapshotUsage] : []),
+		]),
+		// Phase 0 (#263): runtime-owned governance config (no DEFAULT_CWD read).
+		governanceConfig: runtime.governanceConfig,
+		workerBoundary: workerBoundaryData(),
+		orchestratorAdvisories,
+	};
+}
+
+export function buildOrchestratorAdvisoriesSection(
+	runtime: CliRuntime,
+): JsonObject {
+	// Get advisories from the runtime (last 500 to have enough data for grouping)
+	const advisories = runtime.getOrchestratorAdvisory
+		? runtime.getOrchestratorAdvisory({ limit: 500 })
+		: [];
+
+	// Group by roleId and cap at 5 per role
+	const byRole: Record<string, JsonObject[]> = {};
+	const roleAdvisoryMap = new Map<string, JsonObject[]>();
+
+	for (const advisory of advisories) {
+		const roleId = advisory.roleId;
+		if (!roleAdvisoryMap.has(roleId)) {
+			roleAdvisoryMap.set(roleId, []);
+		}
+		roleAdvisoryMap.get(roleId)!.push({
+			ts: advisory.ts,
+			priority: advisory.priority,
+			advisory: advisory.advisory,
+			evidenceRefs: advisory.evidenceRefs,
+		});
+	}
+
+	// Cap each role at 5 advisories (most recent first)
+	let total = 0;
+	for (const [roleId, roleAdvisories] of roleAdvisoryMap.entries()) {
+		// Sort by timestamp descending (most recent first)
+		const sorted = roleAdvisories.sort((a, b) => {
+			const tsA = String(a.ts);
+			const tsB = String(b.ts);
+			return tsB.localeCompare(tsA);
+		});
+		byRole[roleId] = sorted.slice(0, 5);
+		total += byRole[roleId]!.length;
+	}
+
+	return {
+		advisoryOnly: true,
+		byRole,
+		total,
+	};
+}
+
+function compactPlanSnapshotForContextPack(snapshot: PlanSnapshot): JsonObject {
+	return {
+		authority: snapshot.authority,
+		planStatus: snapshot.planStatus,
+		planApproved: snapshot.planApproved,
+		projectId: snapshot.projectId,
+		projectPath: snapshot.projectPath,
+		objective: snapshot.objective,
+		summary: snapshot.summary,
+		flowArtifact: snapshot.flowArtifact,
+		blockers: snapshot.blockers,
+		recommendedNext: snapshot.recommendedNext,
+	};
+}
+
+function budgetEmbeddedPlanSnapshotForContextPack(
+	snapshot: JsonObject,
+): ContextBudgetUsage {
+	const serialized = JSON.stringify(snapshot);
+	return createContextBudgetUsage("supervisor_context_pack", {
+		usedChars: serialized.length,
+	});
+}
+
+function buildSupervisorSourceEvidence(
+	runtime: CliRuntime,
+	request: string,
+): JsonObject {
+	const recommendation = runtime.sourceRecommend(request);
+	const required = runtime.sourceRequiredActions();
+	return {
+		version: 1,
+		authority: "advisory",
+		source: "source_library",
+		rawContentIncluded: false,
+		contractPromotionAllowed: false,
+		agentLabAutoRunAllowed: false,
+		orchestratorGuidance: [
+			"Usar sólo IDs y chunk refs como punteros; no tratar fuentes como contratos.",
+			"Leer chunks nombrados con idu_source_chunk_read o despachar document-reader antes de implementar si la tarea depende de esa evidencia.",
+			"No ejecutar AgentLabs, web fetch, promoción de contratos ni cambios de dependencias desde este pack.",
+		],
+		recommendationReport: boundSupervisorSourceRecommendation(recommendation),
+		requiredActions: boundSupervisorSourceRequiredActions(required),
+	};
+}
+
+function boundSupervisorSourceRecommendation(
+	report: SourceRecommendationReport,
+): JsonObject {
+	return {
+		projectId: report.projectId,
+		request: boundSupervisorSourceText(report.request, 240),
+		generatedAt: report.generatedAt,
+		matches: report.matches.slice(0, 3).map((match) => ({
+			sourceId: boundSupervisorSourceText(match.sourceId, 120),
+			title: boundSupervisorSourceText(match.title, 160),
+			chunkIds: match.chunkIds
+				.slice(0, 5)
+				.map((chunkId) => boundSupervisorSourceText(chunkId, 160)),
+			whyRelevant: boundSupervisorSourceText(match.whyRelevant, 280),
+			confidence: match.confidence,
+			orchestratorInstruction: boundSupervisorSourceText(
+				match.orchestratorInstruction,
+				280,
+			),
+			contractPromotionAllowed: false,
+		})),
+		missingKnowledge: report.missingKnowledge
+			.slice(0, 5)
+			.map((item) => boundSupervisorSourceText(item, 220)),
+		limitations: report.limitations
+			.slice(0, 5)
+			.map((item) => boundSupervisorSourceText(item, 220)),
+		contractPromotionAllowed: false,
+	};
+}
+
+export function boundSourceRecommendationForInjection(
+	report: SourceRecommendationReport,
+): JsonObject {
+	const bounded = boundSupervisorSourceRecommendation(report);
+	const originalChunkRefs = report.matches.reduce(
+		(total, match) => total + match.chunkIds.length,
+		0,
+	);
+	const boundedMatches = arrayField(bounded, "matches") as JsonObject[];
+	const boundedChunkRefs = boundedMatches.reduce(
+		(total, match) => total + arrayField(match, "chunkIds").length,
+		0,
+	);
+	const truncated =
+		report.matches.length > boundedMatches.length ||
+		originalChunkRefs > boundedChunkRefs ||
+		report.request.length > String(bounded.request ?? "").length ||
+		report.missingKnowledge.length >
+			arrayField(bounded, "missingKnowledge").length ||
+		report.limitations.length > arrayField(bounded, "limitations").length;
+	return {
+		...bounded,
+		contextPressure: {
+			mode: "advisory_only",
+			tokenCostMeasured: false,
+			estimatedTokenUse: "not_measured",
+			pressure: truncated ? "medium" : "low",
+			recommendation: truncated
+				? "review_before_adding_more_context"
+				: "bounded_context_ok",
+			rawContentIncluded: false,
+			webFetchAllowed: false,
+			writesAllowed: false,
+			contractPromotionAllowed: false,
+			matchCount: boundedMatches.length,
+			originalMatchCount: report.matches.length,
+			chunkRefCount: boundedChunkRefs,
+			originalChunkRefCount: originalChunkRefs,
+			truncated,
+		},
+	};
+}
+
+function boundSupervisorSourceRequiredActions(
+	report: SourceRequiredActionsReport,
+): JsonObject {
+	return {
+		projectId: report.projectId,
+		generatedAt: report.generatedAt,
+		actions: report.actions.slice(0, 3).map((item) => ({
+			sourceId: boundSupervisorSourceText(item.sourceId, 120),
+			title: boundSupervisorSourceText(item.title, 160),
+			kind: item.kind,
+			digestStatus: item.digestStatus,
+			conversionStatus: item.conversionStatus,
+			requiredAction: {
+				owner: item.requiredAction.owner,
+				action: item.requiredAction.action,
+				reason: boundSupervisorSourceText(item.requiredAction.reason, 220),
+				recommendedAgent: item.requiredAction.recommendedAgent,
+				recommendedReaderType: item.requiredAction.recommendedReaderType,
+				instructions: boundSupervisorSourceText(
+					item.requiredAction.instructions,
+					280,
+				),
+				contractPromotionAllowed: false,
+			},
+			contractPromotionAllowed: false,
+		})),
+		limitations: report.limitations
+			.slice(0, 5)
+			.map((item) => boundSupervisorSourceText(item, 220)),
+		contractPromotionAllowed: false,
+	};
+}
+
+function boundSupervisorSourceText(value: string, maxChars: number): string {
+	const normalized = value.replace(/\s+/gu, " ").trim();
+	if (normalized.length <= maxChars) return normalized;
+	return `${normalized.slice(0, Math.max(0, maxChars - 28)).trimEnd()}… [source ref truncated]`;
+}
+
+function extractHumanVision(projectPath: string): string {
+	const readme = ["README.md", "readme.md"]
+		.map((name) => join(projectPath, name))
+		.find((path) => existsSync(path));
+	if (!readme) return "README no disponible; usar Plan Maestro vigente.";
+	const content = readFileSync(readme, "utf8");
+	const lines = content
+		.split(/\r?\n/u)
+		.map((line) => line.trim())
+		.filter((line) => line && !line.startsWith("```"));
+	const normalizedLines = lines.map((line) => line.replace(/^#+\s*/u, ""));
+	const selected: string[] = [];
+	for (const line of normalizedLines.slice(0, 2)) {
+		pushHumanVisionLine(selected, line, 10);
+	}
+	for (const [index, line] of normalizedLines.entries()) {
+		if (
+			/qué problema|que problema|qué no es|que no es|cómo funciona|como funciona|arquitectura simple/iu.test(
+				line,
+			)
+		) {
+			pushHumanVisionLine(selected, line, 10);
+			pushHumanVisionLine(selected, normalizedLines[index + 1] ?? "", 10);
+		}
+	}
+	for (const line of normalizedLines) {
+		if (/orquestador|supervisor|agentlab/iu.test(line)) {
+			pushHumanVisionLine(selected, line);
+		}
+		if (selected.length >= 8 || selected.join("\n").length > 850) break;
+	}
+	return selected.join("\n");
+}
+
+function pushHumanVisionLine(
+	selected: string[],
+	line: string,
+	maxLines = 8,
+): void {
+	const compact = compactHumanVisionLine(line);
+	if (!compact || selected.includes(compact)) return;
+	if (
+		selected.length >= maxLines ||
+		[...selected, compact].join("\n").length > 900
+	)
+		return;
+	selected.push(compact);
+}
+
+function compactHumanVisionLine(line: string): string {
+	const normalized = line.replace(/\s+/gu, " ").trim();
+	if (normalized.length <= 80) return normalized;
+	return `${normalized.slice(0, 77).trimEnd()}…`;
+}
+
+export function buildPlanSnapshot(
+	review: MasterPlanReviewResult,
+	runtime: CliRuntime,
+): PlanSnapshot {
+	const plan = review.plan as unknown as JsonObject;
+	const status = String(plan.status ?? "unknown");
+	const criticalRisks = arrayField(plan, "criticalRisks");
+	const driftFindings = arrayField(plan, "driftFindings");
+	const objective = budgetTextField(
+		String(
+			plan.inferredObjective ??
+				plan.executiveSummary ??
+				"Objetivo no definido.",
+		),
+		"plan_snapshot",
+		"objective",
+	);
+	const summary = budgetTextField(
+		String(plan.executiveSummary ?? ""),
+		"plan_snapshot",
+		"summary",
+	);
+	const approvedClaims = budgetJsonArray(
+		arrayField(plan, "canonicalClaims"),
+		"plan_snapshot",
+		"approvedClaims",
+	);
+	const operationalContracts = budgetJsonArray(
+		arrayField(plan, "operationalContracts"),
+		"plan_snapshot",
+		"operationalContracts",
+	);
+	const workMilestones = budgetJsonArray(
+		arrayField(plan, "workMilestones"),
+		"plan_snapshot",
+		"workMilestones",
+	);
+	const budgetedDriftFindings = budgetJsonArray(
+		driftFindings,
+		"plan_snapshot",
+		"driftFindings",
+	);
+	const risks = budgetStringArray(
+		dedupe([
+			...criticalRisks.map(String),
+			...arrayField(plan, "qualityRisks").map(String),
+			...arrayField(plan, "securityRisks").map(String),
+			...arrayField(plan, "architectureRisks").map(String),
+		]),
+		"plan_snapshot",
+		"risks",
+	);
+	const flows = budgetJsonArray(
+		arrayField(plan, "projectFlows"),
+		"plan_snapshot",
+		"flows",
+	);
+	const blockers = budgetJsonArray(
+		status === "approved" ? criticalRisks : ["Plan Maestro no aprobado"],
+		"plan_snapshot",
+		"blockers",
+	);
+	const recommendedNext = budgetJsonArray(
+		arrayField(plan, "recommendedNext"),
+		"plan_snapshot",
+		"recommendedNext",
+	);
+	const recommendedAgentLabs = budgetJsonArray(
+		arrayField(
+			(review.revisionAntesDeZarpar as JsonObject | undefined) ?? {},
+			"recommendedAgentLabs",
+		),
+		"plan_snapshot",
+		"recommendedAgentLabs",
+	);
+	return {
+		authority: "advisory",
+		planStatus: status,
+		planApproved: status === "approved",
+		projectId: runtime.projectId,
+		projectPath: runtime.projectPath,
+		objective: objective.value,
+		summary: summary.value,
+		approvedClaims: approvedClaims.items,
+		operationalContracts: operationalContracts.items,
+		workMilestones: workMilestones.items,
+		driftFindings: budgetedDriftFindings.items,
+		risks: risks.items,
+		flows: flows.items,
+		flowArtifact: String(plan.flowArtifact ?? "master-plan.flows.json"),
+		blockers: blockers.items,
+		recommendedNext: recommendedNext.items,
+		recommendedAgentLabs: recommendedAgentLabs.items,
+		// Phase 0 (#263): runtime-owned governance config (no DEFAULT_CWD read).
+		governanceConfig: runtime.governanceConfig,
+		workerBoundary: workerBoundaryData(),
+		contextBudget: mergeContextBudgetUsage("plan_snapshot", [
+			objective.usage,
+			summary.usage,
+			approvedClaims.usage,
+			operationalContracts.usage,
+			workMilestones.usage,
+			budgetedDriftFindings.usage,
+			risks.usage,
+			flows.usage,
+			blockers.usage,
+			recommendedNext.usage,
+			recommendedAgentLabs.usage,
+		]),
+	};
+}
+
+function budgetTextField(
+	value: string,
+	profile: ContextBudgetProfile,
+	path: string,
+): { value: string; usage: ContextBudgetUsage } {
+	const result = sliceTextToBudget({ text: value, profile, path });
+	return { value: result.text, usage: result.usage };
+}
+
+function budgetStringArray(
+	items: string[],
+	profile: ContextBudgetProfile,
+	path: string,
+): { items: string[]; usage: ContextBudgetUsage } {
+	return sliceListToBudget({ items, profile, path });
+}
+
+/**
+ * Resolve the source path of an excerpt item.
+ *
+ * Used by `budgetJsonArray` to attach a `fuente` key on truncated
+ * excerpts (REQ-EI-1, P1). Looks at `item.source` → `item.path` →
+ * `item.filePath`, in that order. Returns the first string it finds
+ * verbatim, or `undefined` when none of the three keys is present.
+ *
+ * Pure function. Idempotent: same input → same output. Accepts any
+ * record-like input — only the three known keys are inspected.
+ */
+export function resolveExcerptSource(item: unknown): string | undefined {
+	if (typeof item !== "object" || item === null) return undefined;
+	const record = item as Record<string, unknown>;
+	if (typeof record.source === "string") return record.source;
+	if (typeof record.path === "string") return record.path;
+	if (typeof record.filePath === "string") return record.filePath;
+	return undefined;
+}
+
+function budgetJsonArray(
+	items: unknown[],
+	profile: ContextBudgetProfile,
+	path: string,
+): { items: unknown[]; usage: ContextBudgetUsage } {
+	const budget = CONTEXT_BUDGETS[profile];
+	const selected = items.slice(0, budget.maxArrayItems);
+	const usages: ContextBudgetUsage[] = [];
+	const budgetedItems = selected.map((item, index) => {
+		const serialized = JSON.stringify(item) ?? String(item);
+		const result = sliceTextToBudget({
+			text: serialized,
+			profile,
+			path: `${path}[${index}]`,
+			maxChars: budget.maxArrayItemChars,
+		});
+		usages.push(result.usage);
+		if (!result.usage.truncated) return item;
+		const fuente = resolveExcerptSource(item);
+		return {
+			contextBudgetTruncated: true,
+			excerpt: result.text,
+			originalType: Array.isArray(item) ? "array" : typeof item,
+			...(fuente ? { fuente } : {}),
+		};
+	});
+	if (items.length > budget.maxArrayItems) {
+		usages.push(
+			createContextBudgetUsage(profile, {
+				truncated: true,
+				omitted: [
+					{
+						path,
+						reason: "max_items",
+						omittedItems: items.length - budget.maxArrayItems,
+					},
+				],
+			}),
+		);
+	}
+	return {
+		items: budgetedItems,
+		usage: mergeContextBudgetUsage(profile, usages),
+	};
+}
+
+export function withSourceContentBudget<
+	T extends { content: string; truncated?: boolean },
+>(
+	result: T,
+	profile: ContextBudgetProfile,
+	path: string,
+): T & { contextBudgetUsage: ContextBudgetUsage } {
+	const budget = CONTEXT_BUDGETS[profile];
+	const sliced = sliceTextToBudget({
+		text: result.content,
+		profile,
+		path,
+		maxChars: budget.maxSourceChars || budget.maxTextFieldChars,
+	});
+	const upstreamUsage = result.truncated
+		? createContextBudgetUsage(profile, {
+				truncated: true,
+				omitted: [{ path, reason: "max_chars" }],
+			})
+		: createContextBudgetUsage(profile);
+	const contextBudgetUsage = mergeContextBudgetUsage(profile, [
+		sliced.usage,
+		upstreamUsage,
+	]);
+	return {
+		...result,
+		content: sliced.text,
+		truncated: Boolean(result.truncated) || sliced.usage.truncated,
+		contextBudgetUsage,
+	};
+}
+
+export function withSourceResearchBudget<
+	T extends {
+		searchedSourceIds?: string[];
+		signals?: unknown[];
+		limitations?: string[];
+	},
+>(result: T): T & { contextBudgetUsage: ContextBudgetUsage } {
+	const searchedSourceIds = budgetStringArray(
+		(result.searchedSourceIds ?? []).map(String),
+		"source_research",
+		"result.searchedSourceIds",
+	);
+	const limitations = budgetStringArray(
+		(result.limitations ?? []).map(String),
+		"source_research",
+		"result.limitations",
+	);
+	const signals = budgetJsonArray(
+		result.signals ?? [],
+		"source_research",
+		"result.signals",
+	);
+	return {
+		...result,
+		searchedSourceIds: searchedSourceIds.items,
+		limitations: limitations.items,
+		signals: signals.items,
+		contextBudgetUsage: mergeContextBudgetUsage("source_research", [
+			searchedSourceIds.usage,
+			limitations.usage,
+			signals.usage,
+		]),
+	};
+}
+
+export function buildNextAdvisoryAction(
+	snapshot: PlanSnapshot,
+	request: string,
+	mode: string,
+	maxScope: string,
+): JsonObject {
+	const planApproved = snapshot.planStatus === "approved";
+	const title = request.trim()
+		? `Acción candidata: ${request.trim()}`
+		: (firstMilestoneAction(snapshot) ??
+			"Acción candidata desde Plan Maestro aprobado");
+	const contractsAffected = inferContractsFromSnapshot(snapshot, request);
+	const requiredReads = dedupe([
+		"Plan Maestro vigente",
+		"master-plan.flows.json",
+		"Doc/<project>/04-contratos-aprobados.md",
+		"Doc/<project>/01-contratos-operativos.generado.md",
+		...contractsAffected.map((area) => `Contrato ${area}`),
+	]);
+	return {
+		authority: "advisory",
+		recommendation: planApproved ? "warn" : "ask_human",
+		orchestratorDecisionRequired: true,
+		implementationOwner: "orchestrator",
+		iduRole: "advisor_auditor",
+		agentLabsRole: "audit_only",
+		mode,
+		maxScope,
+		candidateAction: {
+			id: stableActionId(title),
+			title,
+			whyNow: planApproved
+				? "El Plan Maestro está aprobado; corresponde avanzar en unidades pequeñas con governance-review preventivo."
+				: "El Plan Maestro aún no está aprobado; no conviene implementar sin aprobación.",
+			planRefs: ["master-plan.json", String(snapshot.flowArtifact)],
+			contractsAffected,
+			scope: [
+				"Preparar lineamientos de trabajo desde Plan Maestro aprobado.",
+				"Mantener implementación en subagentes normales del orquestador.",
+			],
+			nonGoals: [
+				"No implementar desde Idu-pi MCP.",
+				"No ejecutar AgentLabs automáticamente desde tools advisory.",
+				"No hacer commit/push ni tocar repo real fuera del worker normal.",
+			],
+			requiredReads,
+			acceptanceCriteria: [
+				"La acción declara contratos, flujos y criterios de verificación antes de codificar.",
+				"Un subagente governance-review del orquestador valida el paquete antes del worker.",
+				"AgentLabs quedan como audit-only y se ejecutan sólo por llamada explícita del orquestador.",
+			],
+			suggestedTests: [
+				"Test MCP lista herramientas advisory nuevas.",
+				"Test snapshot no escribe ni ejecuta AgentLabs.",
+				"Test task package incluye governance-review brief y stop conditions.",
+			],
+			stopConditions: [
+				"Aparece una herramienta de implementación como idu_apply o idu_implement.",
+				"La acción requiere cambiar datos/seguridad sin aprobación humana u orquestador.",
+				"Un AgentLab intenta codificar, modificar repo real o hacer commit/push.",
+			],
+		},
+		agentLabPolicy: {
+			mode: contractsAffected.some((contract) => contract === "security")
+				? "required_before_apply"
+				: "required_after_diff",
+			execution: "orchestrator_explicit_call_only",
+			specialties: dedupe([
+				...(contractsAffected.includes("security") ? ["security"] : []),
+				"architecture",
+				"code_quality",
+			]),
+			requiresHumanApproval: contractsAffected.includes("security"),
+			reason:
+				"MCP recomienda política; el orquestador decide si ejecuta AgentLabs audit-only antes o después del worker.",
+		},
+		orchestratorGuidance: [
+			"Enviar este paquete a un subagente governance-review antes de implementar.",
+			"Si governance-review pasa, delegar código a subagentes normales del orquestador.",
+			"Usar idu_postflight con actionId/taskPackageId después del diff.",
+		],
+	};
+}
+
+export function buildContinuationProposal(
+	runtime: CliRuntime,
+	snapshot: PlanSnapshot,
+	request: string,
+	autonomyWindowMinutes: number | undefined,
+	maxScope: string,
+): JsonObject {
+	const tasks = continuationTasks(runtime);
+	const blockingPendingTask = findBlockingPendingContinuationTask(tasks);
+	const selected = selectContinuationCandidate(snapshot, tasks, request);
+	const selectedText = selected?.text ?? "";
+	const preflight = selectedText ? runtime.preflight(selectedText) : undefined;
+	const advisoryAction = buildNextAdvisoryAction(
+		snapshot,
+		selectedText,
+		"continuation",
+		maxScope,
+	);
+	const candidate = advisoryAction.candidateAction as JsonObject;
+	candidate.origin = selected?.origin ?? "none";
+	if (selected?.task) {
+		candidate.queueTaskId = selected.task.id;
+		candidate.title = selected.task.text;
+	}
+	const blockers = arrayField(snapshot, "blockers").map(String);
+	const planApproved = snapshot.planStatus === "approved";
+	const guardStatus = selected?.task?.guardStatus ?? null;
+	const guardRisk = selected?.task?.guardRisk ?? null;
+	const preflightRisk = preflight?.risk ?? null;
+	const riskRequiresHuman = isHighContinuationRisk(preflightRisk);
+	const guardRequiresHuman =
+		guardStatus === "needs_confirmation" ||
+		guardStatus === "rejected" ||
+		isHighContinuationRisk(guardRisk);
+	const scopeAllowed = maxScope === "small" || maxScope === "medium";
+	const withinObjective = Boolean(
+		selected?.origin === "queue" && planApproved && blockers.length === 0,
+	);
+	const allowedToProceed = Boolean(
+		selected &&
+			withinObjective &&
+			scopeAllowed &&
+			!blockingPendingTask &&
+			!riskRequiresHuman &&
+			!guardRequiresHuman,
+	);
+	const decision = selected
+		? allowedToProceed
+			? "continue_autonomously"
+			: "ask_user"
+		: "stop_no_safe_action";
+	const requiresHuman = decision !== "continue_autonomously";
+	const queueProgress = continuationQueueProgress(
+		tasks,
+		selected?.task,
+		blockingPendingTask,
+	);
+	const taskPackage = selected
+		? buildTaskPackage(
+				snapshot,
+				advisoryAction,
+				selectedText,
+				selected.task?.id,
+				false,
+			)
+		: null;
+	if (taskPackage && requiresHuman) {
+		blockContinuationTaskPackage(taskPackage, decision);
+	}
+	const evidenceRefs = dedupe([
+		"plan:snapshot",
+		...(selected?.task ? [`queue:${selected.task.id}`] : []),
+		...(preflight ? [`preflight:${preflight.risk}`] : []),
+	]);
+	return {
+		proposalVersion: 1,
+		authority: "advisory",
+		source: "idu_continuation_proposal",
+		summary: selected
+			? `Continuidad propuesta: ${String(candidate.title)}`
+			: "No hay acción segura de continuidad.",
+		autonomy: {
+			requested: Boolean(autonomyWindowMinutes),
+			windowMinutes: autonomyWindowMinutes ?? null,
+			maxScope,
+		},
+		decision,
+		allowedToProceed,
+		requiresHuman,
+		orchestratorDecisionRequired: true,
+		planAlignment: {
+			planStatus: snapshot.planStatus,
+			objective: snapshot.objective,
+			withinObjective,
+			blockers: [
+				...blockers,
+				...(blockingPendingTask
+					? [`Tarea pendiente requiere decisión: ${blockingPendingTask.id}`]
+					: []),
+				...(selected && selected.origin !== "queue"
+					? ["Continuidad autónoma requiere tarea de cola aprobada/limpia."]
+					: []),
+			],
+			contractsAffected: arrayField(candidate, "contractsAffected"),
+			evidenceRefs,
+		},
+		queueProgress,
+		candidateAction: candidate,
+		taskPackage,
+		agentLabPolicy: {
+			...(advisoryAction.agentLabPolicy as JsonObject),
+			autoRun: false,
+			role: "audit_only",
+		},
+		decisionEnvelope: buildDecisionEnvelope({
+			tool: "idu_continuation_proposal",
+			recommendation: allowedToProceed ? "allow" : "ask_human",
+			severity: allowedToProceed ? "info" : "needs_approval",
+			confidence: allowedToProceed ? 0.78 : 0.72,
+			summary: selected
+				? `Continuidad: ${String(candidate.title)}`
+				: "No hay acción segura de continuidad.",
+			requiresHuman,
+			orchestratorDecisionRequired: true,
+			allowedToProceed,
+			evidenceRefs,
+			nextActions: allowedToProceed
+				? [
+						"Crear paquete de tarea y ejecutar governance-review antes del worker.",
+						"Delegar implementación a subagentes normales dentro del alcance aprobado.",
+					]
+				: ["Pedir decisión humana antes de continuar."],
+		}),
+		stopConditions: [
+			...arrayField(candidate, "stopConditions"),
+			"La próxima acción queda fuera del Plan Maestro aprobado.",
+			"El preflight sube a high/blocker o el guard queda needs_confirmation.",
+		],
+	};
+}
+
+function continuationTasks(runtime: CliRuntime): StructuredTask[] {
+	const runtimeWithList = runtime as CliRuntime & {
+		listTasks?: () => StructuredTask[];
+	};
+	return runtimeWithList.listTasks
+		? runtimeWithList.listTasks()
+		: parseTaskList(runtime.queueDetail());
+}
+
+function selectContinuationCandidate(
+	snapshot: PlanSnapshot,
+	tasks: StructuredTask[],
+	request: string,
+): { origin: string; text: string; task?: StructuredTask } | undefined {
+	const pending = tasks
+		.filter((task) => task.status === "pending")
+		.sort((a, b) => b.priority - a.priority);
+	const nextTask = pending[0];
+	if (nextTask) return { origin: "queue", text: nextTask.text, task: nextTask };
+	if (request.trim()) return { origin: "request", text: request.trim() };
+	const milestone = firstMilestoneAction(snapshot);
+	if (milestone) return { origin: "master_plan_milestone", text: milestone };
+	const recommendedNext = arrayField(snapshot, "recommendedNext").find(
+		(item): item is string =>
+			typeof item === "string" && item.trim().length > 0,
+	);
+	if (recommendedNext) {
+		return { origin: "recommended_next", text: recommendedNext.trim() };
+	}
+	return undefined;
+}
+
+function continuationQueueProgress(
+	tasks: StructuredTask[],
+	selectedTask: StructuredTask | undefined,
+	blockingPendingTask: StructuredTask | undefined,
+): JsonObject {
+	const count = (status: StructuredTask["status"]) =>
+		tasks.filter((task) => task.status === status).length;
+	return {
+		pending: count("pending"),
+		running: count("running"),
+		done: count("done"),
+		failed: count("failed"),
+		selectedTaskId: selectedTask?.id ?? null,
+		selectedTaskGuardStatus: selectedTask?.guardStatus ?? null,
+		selectedTaskGuardRisk: selectedTask?.guardRisk ?? null,
+		blockingPendingTaskId: blockingPendingTask?.id ?? null,
+		blockingPendingTaskGuardStatus: blockingPendingTask?.guardStatus ?? null,
+		blockingPendingTaskGuardRisk: blockingPendingTask?.guardRisk ?? null,
+	};
+}
+
+function findBlockingPendingContinuationTask(
+	tasks: StructuredTask[],
+): StructuredTask | undefined {
+	return tasks
+		.filter((task) => task.status === "pending")
+		.sort((a, b) => b.priority - a.priority)
+		.find(
+			(task) =>
+				task.guardStatus === "needs_confirmation" ||
+				task.guardStatus === "rejected" ||
+				isHighContinuationRisk(task.guardRisk),
+		);
+}
+
+function blockContinuationTaskPackage(
+	taskPackage: JsonObject,
+	decision: string,
+): void {
+	taskPackage.humanApprovalRequired = true;
+	taskPackage.recommendation = "ask_human";
+	const preconditions = asRecord(taskPackage.preconditions);
+	preconditions.blocked = true;
+	preconditions.recommendation = "ask_human";
+	preconditions.blockers = dedupe([
+		...arrayField(preconditions, "blockers").map(String),
+		`Continuation decision requires human review: ${decision}`,
+	]);
+	taskPackage.preconditions = preconditions;
+}
+
+function isHighContinuationRisk(risk: unknown): boolean {
+	return risk === "high" || risk === "blocker";
+}
+
+export function buildTaskPackage(
+	snapshot: PlanSnapshot,
+	advisoryAction: JsonObject,
+	request: string,
+	actionId: string | undefined,
+	includePlanSnapshot: boolean,
+): JsonObject {
+	const candidate = advisoryAction.candidateAction as JsonObject;
+	const id = actionId ?? String(candidate.id ?? stableActionId(request));
+	const planApproved = snapshot.planStatus === "approved";
+	const blockers = arrayField(snapshot, "blockers").map(String);
+	return {
+		taskPackageVersion: 1,
+		id,
+		actionId: id,
+		authority: "advisory",
+		planStatus: snapshot.planStatus,
+		preconditions: {
+			planApproved,
+			blocked: !planApproved || blockers.length > 0,
+			blockers,
+			recommendation: planApproved ? "governance_review" : "ask_human",
+		},
+		recommendation: planApproved ? "warn" : "ask_human",
+		owner: "orchestrator",
+		implementationOwner: "normal_subagents",
+		iduRole: "advisor_auditor",
+		agentLabsRole: "audit_only",
+		orchestratorDecisionRequired: true,
+		objective: snapshot.objective,
+		request,
+		scope: arrayField(candidate, "scope"),
+		nonGoals: arrayField(candidate, "nonGoals"),
+		filesToRead: arrayField(candidate, "requiredReads"),
+		likelyFilesToChange: [],
+		contracts: arrayField(candidate, "contractsAffected"),
+		acceptanceCriteria: arrayField(candidate, "acceptanceCriteria"),
+		verification: arrayField(candidate, "suggestedTests"),
+		postflightRequired: true,
+		humanApprovalRequired:
+			!planApproved ||
+			Boolean(
+				(advisoryAction.agentLabPolicy as JsonObject | undefined)
+					?.requiresHumanApproval,
+			),
+		governanceReview: {
+			required: true,
+			reviewerRole: "orchestrator_subagent",
+			mustRead: [
+				"master-plan.json",
+				"master-plan.flows.json",
+				"Doc/<project>/04-contratos-aprobados.md",
+				"Doc/<project>/01-contratos-operativos.generado.md",
+			],
+			questions: [
+				"¿La acción respeta el objetivo aprobado?",
+				"¿Toca flujos permanentes?",
+				"¿Hay contratos block/critical afectados?",
+				"¿Hace falta AgentLab antes de implementar?",
+				"¿La tarea está suficientemente chica?",
+			],
+			passCriteria: [
+				"scope claro",
+				"nonGoals claros",
+				"contratos afectados identificados",
+				"tests/verificación definidos",
+				"sin violaciones críticas sin aprobación",
+			],
+		},
+		agentLabPolicy: advisoryAction.agentLabPolicy,
+		stopConditions: [
+			...arrayField(candidate, "stopConditions"),
+			"AgentLab requerido antes de aplicar sin decisión explícita del orquestador.",
+		],
+		...(includePlanSnapshot ? { planSnapshot: snapshot } : {}),
+	};
+}
+
+export function arrayField(source: JsonObject, key: string): unknown[] {
+	const value = source[key];
+	return Array.isArray(value) ? value : [];
+}
+
+function firstMilestoneAction(snapshot: PlanSnapshot): string | undefined {
+	for (const milestone of arrayField(snapshot, "workMilestones")) {
+		if (!isRecord(milestone)) continue;
+		const actions = arrayField(milestone, "actions");
+		const first = actions.find((action) => typeof action === "string");
+		if (typeof first === "string" && first.trim()) return first.trim();
+	}
+	return undefined;
+}
+
+function inferContractsFromSnapshot(
+	snapshot: PlanSnapshot,
+	request: string,
+): string[] {
+	const text =
+		`${request} ${JSON.stringify(snapshot.operationalContracts)}`.toLowerCase();
+	return dedupe([
+		...(text.match(/auth|login|session|token|secret|seguridad|security/u)
+			? ["security"]
+			: []),
+		...(text.match(/db|database|datos|sqlite|json|schema|persist/u)
+			? ["data"]
+			: []),
+		...(text.match(/ui|frontend|html|css|pantalla/u) ? ["frontend"] : []),
+		...(text.match(/mcp|agent|orquestador|subagent|agentlab|governance/u)
+			? ["agent"]
+			: []),
+	]);
+}
+
+function stableActionId(title: string): string {
+	const slug = title
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/gu, "")
+		.replace(/[^a-z0-9]+/gu, "-")
+		.replace(/^-|-$/gu, "")
+		.slice(0, 48);
+	return `plan-action-${slug || "next"}`;
+}
+
+function isToolName(name: string): name is IduMcpToolName {
+	return TOOLS.some((toolDefinition) => toolDefinition.name === name);
+}
+
+function samePath(left: string, right: string): boolean {
+	return normalizePath(left) === normalizePath(right);
+}
+
+function normalizePath(path: string): string {
+	return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+function invalidProject(
+	path: string,
+	errors: string[],
+): IduMcpProjectResolution {
+	return {
+		status: "invalid_project",
+		projectId: slugifyProjectId(path.split(/[\\/]/u).at(-1) ?? "project"),
+		projectPath: path,
+		recommendedNext:
+			"Revisá DEFAULT_CWD/ALLOWED_ROOTS y el projectPath enviado.",
+		safeNotes: ["No escribí el registry automáticamente."],
+		errors,
+	};
+}
+
+function jsonRpcResult(id: unknown, result: unknown): McpJsonRpcResponse {
+	return { jsonrpc: "2.0", id, result };
+}
+
+function jsonRpcError(
+	id: unknown,
+	code: number,
+	message: string,
+	data?: unknown,
+): McpJsonRpcResponse {
+	return { jsonrpc: "2.0", id, error: { code, message, data } };
+}
+
+function writeResponse(response: McpJsonRpcResponse): void {
+	stdout.write(`${JSON.stringify(response)}\n`);
+}
+
+export function activeMcpProjectId(
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+): string | undefined {
+	const candidate = runtime.projectId || resolution.projectId;
+	return candidate.trim() ? candidate.trim() : undefined;
+}
+
+export function invalidMcpInput(
+	name: IduMcpToolName,
+	runtime: CliRuntime,
+	resolution: IduMcpProjectResolution,
+	message: string,
+	data: JsonObject = {},
+): IduMcpToolResult {
+	return envelope({
+		stateRoot: resolution.stateRoot ?? runtime.workspaceRoot,
+
+		ok: false,
+		tool: name,
+		projectId: activeMcpProjectId(runtime, resolution) ?? null,
+		projectPath: runtime.projectPath || resolution.projectPath || null,
+		summary: `Invalid input for ${name}: ${message}`,
+		data,
+		safeNotes: resolution.safeNotes,
+		errors: [message],
+	});
+}
+
+export function scoreArg(
+	args: JsonObject,
+	key: string,
+): { ok: true; text: string; value: number } | { ok: false; error: string } {
+	const raw = args[key];
+	const text =
+		typeof raw === "number" || typeof raw === "string"
+			? String(raw).trim()
+			: "";
+	const value = Number(text);
+	if (!text || !Number.isFinite(value) || !Number.isInteger(value)) {
+		return { ok: false, error: `${key} must be an integer in 0..10` };
+	}
+	if (value < 0 || value > 10) {
+		return { ok: false, error: `${key} must be in 0..10, got ${value}` };
+	}
+	return { ok: true, text, value };
+}
+
+export function supervisorTriggerActionArg(
+	args: JsonObject,
+): "enable" | "disable" | "status" | undefined {
+	const direct = stringArg(args, "action");
+	const positional = Array.isArray(args.args) ? args.args[0] : undefined;
+	const value = (
+		direct ?? (typeof positional === "string" ? positional.trim() : "")
+	).toLowerCase();
+	if (value === "enable" || value === "disable" || value === "status")
+		return value;
+	return undefined;
+}
+
+export function roleEngineControlActionArg(
+	args: JsonObject,
+): "enable" | "disable" | undefined {
+	const action = supervisorTriggerActionArg(args);
+	return action === "enable" || action === "disable" ? action : undefined;
+}
+
+export function roleEngineRoleArg(
+	args: JsonObject,
+): IduModelRoleId | "invalid" | undefined {
+	const value = stringArg(args, "role");
+	if (!value) return undefined;
+	if (value in DEFAULT_ROLE_ENGINE_CONFIG.roleEnabled) {
+		return value as IduModelRoleId;
+	}
+	return "invalid";
+}
+
+const AGENTLAB_SPECIALTIES = new Set<AgentLabSpecialty>([
+	"security",
+	"database",
+	"architecture",
+	"code_quality",
+	"ui_ux",
+	"performance",
+	"skill_review",
+	"project_understanding",
+	"docs",
+	"token_cost",
+	"librarian",
+	"general",
+]);
+
+export function compactSourceLibraryEvidence(
+	report: SourceRecommendationReport,
+): AgentLabSourceLibraryEvidence {
+	const bounded = boundSourceRecommendationForInjection(report);
+	const matches = (arrayField(bounded, "matches") as JsonObject[]).map(
+		(match) => {
+			const confidence: "high" | "medium" | "low" =
+				match.confidence === "high" ||
+				match.confidence === "medium" ||
+				match.confidence === "low"
+					? match.confidence
+					: "low";
+			return {
+				sourceId: String(match.sourceId ?? ""),
+				title: String(match.title ?? ""),
+				chunkIds: arrayField(match, "chunkIds").map(String),
+				whyRelevant: String(match.whyRelevant ?? ""),
+				confidence,
+			};
+		},
+	);
+	return {
+		request: String(bounded.request ?? ""),
+		generatedAt: report.generatedAt,
+		matches,
+		missingKnowledge: arrayField(bounded, "missingKnowledge").map(String),
+		limitations: arrayField(bounded, "limitations").map(String),
+		contractPromotionAllowed: false,
+	};
+}
+
+export function compactSourceSkillCandidateReview(review: unknown): JsonObject {
+	if (!isRecord(review)) {
+		return {
+			ok: false,
+			reportRef: "latest",
+			errors: ["Invalid source skill candidate review"],
+		};
+	}
+	const report = isRecord(review.report) ? review.report : undefined;
+	const candidates = Array.isArray(report?.candidates)
+		? report.candidates.filter(isRecord)
+		: [];
+	return {
+		ok: review.ok === true,
+		reportRef: "latest",
+		candidateCount: candidates.length,
+		candidateRefs: candidates.slice(0, 5).map((candidate) => ({
+			candidateId: stringValue(candidate.candidateId),
+			title: stringValue(candidate.title),
+			suggestedSkillName: stringValue(candidate.suggestedSkillName),
+			sourceIds: stringArrayValue(candidate.sourceIds).slice(0, 5),
+			chunkIds: stringArrayValue(candidate.chunkIds).slice(0, 5),
+			evidenceRefs: stringArrayValue(candidate.evidenceRefs).slice(0, 5),
+		})),
+		limitations: stringArrayValue(report?.limitations).slice(0, 5),
+		requiredActions: stringArrayValue(report?.requiredActions).slice(0, 5),
+		errors: stringArrayValue(review.errors).slice(0, 5),
+		rawContentIncluded: false,
+		contractPromotionAllowed: false,
+		skillPromotionAllowed: false,
+	};
+}
+
+function stringArrayValue(value: unknown): string[] {
+	return Array.isArray(value)
+		? value.filter((item): item is string => typeof item === "string")
+		: [];
+}
+
+export function agentLabSpecialtiesArg(
+	args: JsonObject,
+	key: string,
+): { values?: AgentLabSpecialty[]; errors: string[] } {
+	const rawValues = stringListArg(args, key);
+	if (rawValues.length === 0) return { errors: [] };
+	const errors = rawValues
+		.filter((value) => !AGENTLAB_SPECIALTIES.has(value as AgentLabSpecialty))
+		.map((value) => `specialty inválida: ${value}`);
+	if (errors.length > 0) return { errors };
+	return { values: [...new Set(rawValues)] as AgentLabSpecialty[], errors: [] };
+}
+
+export function parseTaskList(text: string): StructuredTask[] {
+	try {
+		const parsed = JSON.parse(text) as unknown;
+		if (Array.isArray(parsed)) return parsed.filter(isStructuredTask);
+	} catch {
+		// formatted queue output has no stable machine shape; return empty fallback.
+	}
+	return [];
+}
+
+function isStructuredTask(value: unknown): value is StructuredTask {
+	return (
+		isRecord(value) &&
+		typeof value.id === "string" &&
+		typeof value.text === "string"
+	);
+}
+
+export function aggregateRunStatus(statuses: string[]): string {
+	if (statuses.includes("security_violation")) return "security_violation";
+	if (statuses.includes("timed_out")) return "timed_out";
+	if (statuses.includes("failed")) return "failed";
+	if (statuses.includes("partial")) return "partial";
+	if (statuses.includes("completed")) return "completed";
+	if (statuses.includes("skipped")) return "skipped";
+	return "unknown";
+}
+
+export function agentLabStatusWorkloadEnvelope(status: {
+	valid: boolean;
+	errors: string[];
+	result?: {
+		generatedAt: string;
+		runs: Array<{
+			requestId: string;
+			status: string;
+			requiresHumanApproval?: boolean;
+		}>;
+		workloadEnvelope?: AgentLabWorkloadEnvelope;
+	};
+	workloadEnvelope?: AgentLabWorkloadEnvelope;
+}): AgentLabWorkloadEnvelope {
+	if (status.workloadEnvelope) return status.workloadEnvelope;
+	if (status.result?.workloadEnvelope) return status.result.workloadEnvelope;
+	const stale =
+		!status.valid &&
+		status.errors.some((error) =>
+			/stale|pendiente|request actual/iu.test(error),
+		);
+	return buildAgentLabWorkloadEnvelope({
+		status: stale ? "stale" : "failed",
+		statusReason:
+			status.errors[0] ??
+			(stale ? "AgentLab run stale." : "AgentLab status unavailable."),
+		generatedAt: status.result?.generatedAt ?? "deterministic",
+		source: "status",
+		runs: status.result?.runs ?? [],
+		requestIds: [],
+	});
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+if (
+	process.argv[1] &&
+	import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+	runMcpServer();
+}
