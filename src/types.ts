@@ -74,6 +74,7 @@ export interface DelegateResult {
 	resumeHint?: string;
 	lastActivityAt?: string;
 	bytesEmitted?: number;
+	instruction?: string;
 }
 
 export interface RunRecord {
@@ -86,18 +87,44 @@ export interface RunRecord {
 	command: string;
 	args: string[];
 	pid?: number;
+	runnerPid?: number;
 	status: RunStatus;
 	exitCode: number | null;
 	startedAt: string;
 	completedAt?: string;
+	elapsedMs?: number;
 	logPath: string;
 	resultSummary?: string;
 	error?: string;
 	lastActivityAt?: string;
 	bytesEmitted?: number;
-	elapsedMs?: number;
 	secondsSinceLastActivity?: number;
 	health?: "healthy" | "idle_warning" | "completed" | "interrupted";
+}
+
+export interface RunnerSpec {
+	runId: string;
+	sessionId: string;
+	parentSessionId?: string;
+	harness: string;
+	command: string;
+	args: string[];
+	workingDir: string;
+	env: Record<string, string>;
+	logPath: string;
+	sessionPath: string;
+	pidPath: string;
+	runnerPidPath?: string;
+	specPath?: string;
+	lockPath?: string;
+	startedAt?: string;
+	timeoutMs?: number;
+	idleTimeoutMs?: number;
+	hardCapMs?: number;
+	startupGraceMs?: number;
+	streams?: boolean;
+	verbose?: boolean;
+	shell?: boolean;
 }
 
 export interface SessionTreeEntry {

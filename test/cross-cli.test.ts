@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildWorkerArgs, unwrapCmdExecutable } from "../src/cmdline.js";
-import { CrossCliProcessManager, extractCleanSummary, acquireSessionLock, aliasToUuid, killProcessTree } from "../src/process-manager.js";
+import {
+	CrossCliProcessManager,
+	extractCleanSummary,
+	acquireSessionLock,
+	aliasToUuid,
+	killProcessTree,
+	writeJsonAtomic,
+	isProcessAlive,
+} from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
 
@@ -419,5 +427,121 @@ test("hardCapMs=0 sentinel is recognized and does not cause premature timeout", 
 	assert.equal(profileWithZeroHardCap.hardCapMs, 0);
 });
 
+test("writeJsonAtomic writes valid JSON and creates missing directory safely", async () => {
+	const { readFileSync, unlinkSync, rmdirSync, existsSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const { tmpdir } = await import("node:os");
 
+	const testDir = join(tmpdir(), `idu-atomic-test-${Date.now()}`);
+	const testFile = join(testDir, "test.json");
+	const payload = { hello: "world", count: 42, active: true };
 
+	try {
+		writeJsonAtomic(testFile, payload);
+		assert.ok(existsSync(testFile));
+		const readBack = JSON.parse(readFileSync(testFile, "utf8"));
+		assert.deepEqual(readBack, payload);
+	} finally {
+		try { unlinkSync(testFile); } catch {}
+		try { rmdirSync(testDir); } catch {}
+	}
+});
+
+test("isProcessAlive identifies live vs non-existent processes", () => {
+	assert.equal(isProcessAlive(process.pid), true);
+	assert.equal(isProcessAlive(0), false);
+	assert.equal(isProcessAlive(-1), false);
+	// 999999 is extraordinarily unlikely to exist
+	assert.equal(isProcessAlive(999999), false);
+});
+
+test("getStatus recovers completed status from log when runner and worker PIDs have exited", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-recovery-completed-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+	const mockLogPath = join(IDU_LOGS_DIR, `${mockRunId}.log`);
+
+	const logContent = [
+		`=== IDU RUN START: ${mockRunId} ===`,
+		`Command: mock-cmd`,
+		`=== RAW OUTPUT ===`,
+		`All unit tests passed successfully.`,
+		`=== PROCESS CLOSED WITH CODE 0 ===`,
+	].join("\n");
+
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "sess-rec-001",
+		request: { task: "Test recovery", profile: "fast" },
+		profile: { harness: "claude", model: "sonnet" },
+		command: "claude.cmd",
+		args: ["-p", "test"],
+		pid: 999998,
+		runnerPid: 999997,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 30000).toISOString(),
+		logPath: mockLogPath,
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+	writeFileSync(mockLogPath, logContent, "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "completed");
+		assert.equal(status.exitCode, 0);
+		assert.ok(status.resultSummary?.includes("All unit tests passed successfully"));
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+		try { unlinkSync(mockLogPath); } catch {}
+	}
+});
+
+test("getStatus records failed when runner and worker PIDs are dead without exit marker", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-recovery-abrupt-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+	const mockLogPath = join(IDU_LOGS_DIR, `${mockRunId}.log`);
+
+	const logContent = [
+		`=== IDU RUN START: ${mockRunId} ===`,
+		`Command: mock-cmd`,
+		`Incomplete output before abrupt kill`,
+	].join("\n");
+
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "sess-rec-abrupt",
+		request: { task: "Test abrupt", profile: "fast" },
+		profile: { harness: "opencode" },
+		command: "opencode.cmd",
+		args: ["run"],
+		pid: 999996,
+		runnerPid: 999995,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 30000).toISOString(),
+		logPath: mockLogPath,
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+	writeFileSync(mockLogPath, logContent, "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "failed");
+		assert.equal(status.error, "Worker process terminated unexpectedly");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+		try { unlinkSync(mockLogPath); } catch {}
+	}
+});
