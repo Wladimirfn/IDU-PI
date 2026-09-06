@@ -305,6 +305,80 @@ export const TOOLS = [
 	},
 ];
 
+export function validateToolInput(
+	schema: Record<string, any> | undefined,
+	args: Record<string, unknown>,
+): { valid: boolean; errors: string[] } {
+	if (!schema || typeof schema !== "object") {
+		return { valid: true, errors: [] };
+	}
+
+	const errors: string[] = [];
+	const required = Array.isArray(schema.required) ? schema.required : [];
+	const properties = (schema.properties || {}) as Record<string, any>;
+
+	// 1. Required fields
+	for (const reqField of required) {
+		const val = args[reqField];
+		if (val === undefined || val === null || val === "") {
+			errors.push(`Missing required parameter: '${reqField}'`);
+		}
+	}
+
+	// 2. Types and enums
+	for (const [key, val] of Object.entries(args)) {
+		if (val === undefined || val === null) continue;
+		const propDef = properties[key];
+		if (!propDef) continue;
+
+		if (propDef.type) {
+			switch (propDef.type) {
+				case "string":
+					if (typeof val !== "string") {
+						errors.push(`Parameter '${key}' must be a string, got ${typeof val}`);
+					}
+					break;
+				case "number":
+					if (typeof val !== "number" || isNaN(val)) {
+						errors.push(`Parameter '${key}' must be a number, got ${typeof val}`);
+					}
+					break;
+				case "boolean":
+					if (typeof val !== "boolean") {
+						errors.push(`Parameter '${key}' must be a boolean, got ${typeof val}`);
+					}
+					break;
+				case "array":
+					if (!Array.isArray(val)) {
+						errors.push(`Parameter '${key}' must be an array, got ${typeof val}`);
+					} else if (propDef.items?.type) {
+						const itemType = propDef.items.type;
+						for (let i = 0; i < val.length; i++) {
+							if (typeof val[i] !== itemType) {
+								errors.push(`Parameter '${key}[${i}]' must be a ${itemType}, got ${typeof val[i]}`);
+							}
+						}
+					}
+					break;
+				case "object":
+					if (typeof val !== "object" || val === null || Array.isArray(val)) {
+						errors.push(`Parameter '${key}' must be an object`);
+					}
+					break;
+			}
+		}
+
+		if (Array.isArray(propDef.enum) && !propDef.enum.includes(val)) {
+			errors.push(`Parameter '${key}' must be one of: [${propDef.enum.join(", ")}], got '${val}'`);
+		}
+	}
+
+	return {
+		valid: errors.length === 0,
+		errors,
+	};
+}
+
 function sendResponse(response: JsonRpcResponse): void {
 	stdout.write(JSON.stringify(response) + "\n");
 }
@@ -332,6 +406,27 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 		case "tools/call": {
 			const name = String(params?.name || "");
 			const args = (params?.arguments || {}) as Record<string, unknown>;
+
+			const tool = TOOLS.find((t) => t.name === name);
+			if (!tool) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: `Unknown tool: '${name}'` }],
+				};
+			}
+
+			const validation = validateToolInput(tool.inputSchema, args);
+			if (!validation.valid) {
+				return {
+					isError: true,
+					content: [
+						{
+							type: "text",
+							text: `Schema validation failed for tool '${name}':\n- ${validation.errors.join("\n- ")}`,
+						},
+					],
+				};
+			}
 
 			if (name === "idu_status" || name === "idu_project_status") {
 				const cwd = String(args.project_path || args.projectPath || process.cwd());

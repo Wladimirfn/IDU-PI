@@ -37,6 +37,7 @@ test("buildWorkerArgs builds correct argv for Claude with model and bypassPermis
 	const profile: IduProfile = {
 		harness: "claude",
 		model: "sonnet",
+		permissions: "workspace",
 	};
 	const { command, args } = buildWorkerArgs(profile, "Refactor auth", [], mockConfig);
 	assert.equal(command, "claude.cmd");
@@ -52,6 +53,7 @@ test("buildWorkerArgs builds correct argv for OpenCode run with auto mode", () =
 	const profile: IduProfile = {
 		harness: "opencode",
 		model: "MiniMax-M3",
+		permissions: "workspace",
 	};
 	const { command, args } = buildWorkerArgs(profile, "Check syntax", [], mockConfig);
 	assert.equal(command, "opencode.cmd");
