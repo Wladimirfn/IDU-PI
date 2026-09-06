@@ -1,55 +1,27 @@
 {
-  "name": "idu-pi",
-  "version": "0.1.1",
+  "name": "idu-cross-cli",
+  "version": "2.1.0",
+  "description": "Cross-CLI Agent Router & Quality Harness for Claude Code, OpenCode, Pi, Codex and Antigravity",
   "private": true,
   "type": "module",
   "bin": {
-    "idu-pi": "dist/src/cli.js",
-    "idu-pi-mcp": "dist/src/mcp-server.js"
+    "idu-cross-cli": "dist/src/cli.js",
+    "idu-pi-mcp": "dist/src/mcp-server.js",
+    "idu-pi": "dist/src/cli.js"
   },
   "packageManager": "pnpm@11.1.3",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true}); require('fs').rmSync('.pi-lens',{recursive:true,force:true})\"",
-    "setup": "node scripts/setup-env.mjs",
-    "install:bootstrap": "node scripts/install.mjs",
-    "setup:idu": "tsc -p tsconfig.json && node dist/src/cli.js setup",
-    "serve": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-bridge.ps1",
-    "dev": "tsc -p tsconfig.json && node dist/src/index.js",
-    "cli": "tsc -p tsconfig.json && node dist/src/cli.js",
-    "mcp": "tsc -p tsconfig.json && node dist/src/mcp-server.js",
-    "start": "node dist/src/index.js",
-    "build": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs",
-    "test": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node --test dist/test/*.test.js dist/test/**/*.test.js",
-    "test:guarded": "tsc -p tsconfig.json && node scripts/copy-migrations.mjs && node scripts/run-tests-with-leak-guard.mjs",
-    "check:protocol-drift": "node scripts/check-protocol-tool-drift.mjs --strict-coverage",
-    "check:cluster-drift": "node scripts/check-cluster-map-drift.mjs",
-    "check:cluster-drift:emit": "node scripts/check-cluster-map-drift.mjs --emit-md",
-    "check:cluster-drift:verify": "node scripts/check-cluster-map-drift.mjs --verify",
-    "sync:profiles": "node scripts/sync-profiles.mjs",
-    "sync:profiles:dry": "node scripts/sync-profiles.mjs --dry-run"
-  },
-  "dependencies": {
-    "dotenv": "17.4.2",
-    "grammy": "1.43.0"
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "cli": "node dist/src/cli.js",
+    "mcp": "node dist/src/mcp-server.js",
+    "start": "node dist/src/cli.js"
   },
   "devDependencies": {
     "@types/node": "24.12.4",
     "typescript": "5.9.3"
-  },
-  "files": [
-    "dist/src",
-    "scripts",
-    "config/default-core.json",
-    "config/default-constitution.json",
-    "config/default-blueprint.json",
-    "config/default-flows.json",
-    "skills-bundle",
-    "docs",
-    ".pi/extensions/idu-pi-commands.ts",
-    "README.md",
-    "pnpm-lock.yaml"
-  ]
+  }
 }

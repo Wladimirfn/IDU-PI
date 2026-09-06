@@ -1,531 +1,144 @@
-# Idu-pi
+# IDU Cross-CLI Agent Router & Quality Harness (v2.1.0)
 
-Idu-pi es un cerebelo supervisor de proyecto: ayuda a definir el plano, vigila la obra y coordina laboratorios de revisión sin reemplazar la decisión humana.
+**IDU Cross-CLI** es un router universal de terminales y arnés de calidad que permite a cualquier agente orquestador padre (**Claude Code**, **Pi**, **OpenCode** o **Antigravity**) delegar tareas a procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **Pi CLI**) mediante perfiles de costos/modelos bajo la estricta **ONE ORCHESTRATOR RULE**.
 
-Su destinatario principal es el orquestador. Idu-pi habla directo con el usuario sólo para crear/aprobar el plan y para fallas graves; el resto del tiempo reporta señales de alineación, riesgo, calidad, costo, tiempo, seguridad, emoción y aprendizaje al orquestador para que ejecute con foco.
+Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas y cron loops) ha sido retirado y archivado de forma segura en `legacy_archive/`.
 
-Idu-pi se usa principalmente desde CLI. Telegram es una interfaz remota opcional para operar ese mismo flujo cuando no estás en la terminal: comandos, estado y confirmaciones. El núcleo real es el supervisor que lee contexto del proyecto, aplica guardrails, registra reportes y prepara decisiones revisables.
+---
 
-## Qué problema resuelve
+## Novedades en v2.1.0: Watchdog Adaptativo, Tareas Largas y Resiliencia
 
-Idu-pi evita que un proyecto avance sin objetivo claro, sin reglas, sin memoria operativa o con riesgos invisibles de calidad, tiempo, costo/tokens y seguridad.
+1. **Watchdog Adaptativo por Inactividad (Sliding Window)**:
+   - Supera el límite ciego de `setTimeout`. Monitorea en tiempo real el streaming de `stdout`/`stderr` (`idleTimeoutMs`, `lastActivityAt`, `bytesEmitted`).
+   - El worker **nunca se interrumpe** mientras siga razonando o emitiendo actividad.
+   - En caso de corte o interrupción, preserva la salida parcial (`partial: true`), el error exacto y el `resumeHint` con el identificador de sesión.
 
-Sirve para responder preguntas como:
+2. **Techos Extendidos (Hasta 4 Horas o Ilimitado con Sentinel `0`)**:
+   - Soporta tareas de refactorización y análisis profundo de 30 a 60 minutos o más.
+   - Techos configurables por perfil (`hardCapMs`), con soporte para `hardCapMs = 0` (techo desactivado).
 
-- ¿Este cambio coincide con el objetivo del proyecto?
-- ¿Toca login, datos, seguridad o arquitectura?
-- ¿Necesita confirmación humana antes de seguir?
-- ¿Hay reportes o aprendizajes previos que deberían compactarse?
-- ¿Conviene pedir una revisión AgentLab en sandbox?
+3. **Terminación Confiable de Procesos en Windows (`killProcessTree`)**:
+   - Ejecución de `taskkill /PID <pid> /T /F` en Windows (`win32`).
+   - Elimina en árbol los wrappers por lotes (`cmd.exe`), `node.exe` y los binarios hijos del CLI sin dejar procesos zombies o huérfanos.
 
-## Seguridad de dependencias
+4. **Nueva Herramienta MCP `idu_worker_wait`**:
+   - Permite a los clientes MCP esperar la finalización de workers asíncronos con tiempo de espera configurable.
+   - **Garantía no destructiva**: si el timeout del cliente expira, el worker continúa ejecutándose en el sistema operativo en segundo plano.
 
-Este repo asume que los scripts `postinstall` pueden ser un vector de ataque. Por eso la instalación segura combina varias barreras:
+5. **Tríada de Sesiones Cross-CLI (`Session Triad`) y Bloqueos Concurrenciales**:
+   - Soporte nativo para `--session-id`, `--resume` y `--fork` en Claude, OpenCode y Pi.
+   - Bloqueo atómico contra ejecuciones concurrentes en la misma sesión (`acquireSessionLock`) con validación de PID y protección contra eliminación foránea.
 
-| Capa | Medida |
-| --- | --- |
-| npm/compatibilidad | `.npmrc` con `ignore-scripts=true` y `save-exact=true`. |
-| pnpm 11 | `pnpm-workspace.yaml` con `ignoreScripts`, `minimumReleaseAge`, `strictDepBuilds` y `onlyBuiltDependencies: []`. |
-| Dependencias | Versiones exactas en `package.json`; sin `latest` ni rangos `^`. |
-| Publicación futura | `files` allowlist para no publicar archivos sensibles por accidente. |
+6. **Integración Corregida con Codex CLI**:
+   - Soporte directo de `codex exec` con los flags oficiales `--dangerously-bypass-approvals-and-sandbox` y `--json`.
 
-Comando recomendado para instalar:
+7. **Evaluación Multirepositorio (`idu_preflight` & `idu_postflight`)**:
+   - Soporte total para `working_dir` y `cwd`. Permite auditar repositorios y proyectos externos sin falsear la ruta hacia el directorio de IDU.
 
-```text
-corepack pnpm install --frozen-lockfile --ignore-scripts
+---
+
+## Catálogo de Herramientas MCP (`dist/src/mcp-server.js`)
+
+El servidor expone **13 herramientas de alto impacto** optimizadas para mínimo consumo de contexto:
+
+| Herramienta | Descripción |
+| :--- | :--- |
+| `idu_status` | Estado del workspace actual, rama Git, cambios en el árbol y salud del sistema. |
+| `idu_project_status` | Alias de compatibilidad para consultar el estado del proyecto. |
+| `idu_preflight` | Evaluación de riesgo, tree sucio e impacto antes de tocar código en `working_dir`. |
+| `idu_postflight` | Verificación post-edición: diffs reales vs esperados y blast radius en `working_dir`. |
+| `idu_decision_record` | Registra una decisión técnica, de arquitectura o de gobernanza en el ledger duradero. |
+| `idu_decision_list` | Consulta y filtra el historial de decisiones auditables. |
+| `idu_delegate` | Lanza un worker terminal real bajo un perfil configurado con `IDU_WORKER=true`. |
+| `idu_delegate_parallel` | Lanza múltiples workers concurrentemente en paralelo. |
+| `idu_worker_status` | Monitorea en tiempo real estado, telemetría (`elapsedMs`, `health`, actividad) y logs. |
+| `idu_worker_wait` | Espera de forma síncrona/reactiva la finalización de un worker sin matarlo si expira. |
+| `idu_worker_result` | Recupera la salida completa estructurada, diffs y reporte del worker. |
+| `idu_session_list` | Lista las sesiones activas o históricas con su CLI, timestamp y bloqueo. |
+| `idu_capabilities` | Informa los perfiles disponibles en `~/.idu/profiles.json` y CLIs detectados. |
+
+---
+
+## Perfiles de Ejecución (`~/.idu/profiles.json`)
+
+| Perfil | CLI | Modelo | Timeout Trabajo | Inactividad (Idle) | Techo Máximo |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `architecture` | Claude Code | Claude 3.7 / Opus | 1 hora | 5 minutos | 4 horas |
+| `deep-refactor` | Claude Code | Claude 3.7 / Sonnet | 1 hora | 5 minutos | 4 horas |
+| `coding` | Codex CLI | GPT-5.6 Luna | 1 hora | N/A | 4 horas |
+| `cheap-explore` | OpenCode | MiniMax M3 | 30 minutos | 5 minutos | 2 horas |
+| `cheap-debug` | OpenCode | DeepSeek V4 Flash | 30 minutos | 5 minutos | 2 horas |
+| `fast` | Pi CLI | MiniMax M3 | 3 minutos | N/A | 3 minutos |
+
+---
+
+## Configuración en Clientes MCP
+
+### OpenCode (`~/.config/opencode/opencode.json` y `opencode.jsonc`)
+
+Para evitar que OpenCode cancele llamadas de herramientas MCP en tareas largas que tarden más de 2 minutos, configura:
+
+En `~/.config/opencode/opencode.json`:
+```json
+{
+  "experimental": {
+    "mcp_timeout": 1800000
+  }
+}
 ```
 
-Si alguna dependencia futura necesita build nativo, no habilites scripts globalmente: agregá una excepción explícita y revisable en `pnpm-workspace.yaml`.
-
-## Qué NO es
-
-- No es un bot de Telegram como núcleo del sistema; Telegram es una interfaz remota opcional del flujo CLI/supervisor.
-- No es una autonomía que aplica cambios críticos sola.
-- No reemplaza al humano ni al orquestador.
-- No convierte propuestas de IA en verdad automáticamente.
-- No ejecuta AgentLabs ni aplica reglas sólo por existir un reporte.
-
-Nada crítico se aplica sin confirmación humana.
-
-## Cómo funciona en 30 segundos
-
-1. Entrás por `idu-pi` para ver el home o por `idu-pi idu` / Pi slash `/idu` para activar el supervisor del proyecto.
-2. Si el proyecto no está registrado, lo enrolás explícitamente y Idu-pi crea estado aislado fuera del repo real.
-3. Idu-pi genera o lee el Plan Maestro: objetivo, contratos, flujos, riesgos y diferencia entre docs declaradas y realidad construida.
-4. Con Plan aprobado, el orquestador pide una acción candidata, crea un paquete de tarea y manda un governance-review antes de codificar.
-5. Los workers normales del orquestador implementan; Idu-pi sólo audita, recomienda y hace postflight con evidencia.
-6. AgentLabs se ejecutan sólo por llamada explícita y siempre son audit-only: no editan repo, no hacen commit/push y no implementan.
-7. El humano/orquestador decide qué aplicar, confirmar, encolar, regenerar o descartar.
-
-## Ruta rápida para usuarios nuevos
-
-```powershell
-# 1) Instalar / verificar sin cambios destructivos
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -DryRun
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1
-
-# 2) Abrir el home
-idu-pi
-
-# 3) Configurar MCP para que Pi vea las tools de Idu-pi
-idu-pi setup mcp-init
-
-# Opcional: configurar MCP para OpenCode
-idu-pi setup mcp-init --target opencode
-# Reiniciá OpenCode después de modificar opencode.json
-
-# 4) Registrar un proyecto real
-idu-pi project enroll "C:\ruta\a\tu-proyecto" mi-proyecto
-
-# 5) Activar supervisor local
-idu-pi idu
-
-# 6) Crear/revisar/aprobar Plan Maestro cuando estés conforme
-idu-pi master-plan-status
-idu-pi master-plan-review latest
-idu-pi master-plan-approve latest
+En `~/.config/opencode/opencode.jsonc`:
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "idu-pi": {
+      "type": "local",
+      "command": [
+        "node",
+        "C:\\Users\\elmas\\pi-telegram-bridge\\dist\\src\\mcp-server.js"
+      ],
+      "cwd": "C:\\Users\\elmas\\pi-telegram-bridge",
+      "enabled": true,
+      "timeout": 1800
+    }
+  }
+}
 ```
 
-Después de eso, el orquestador puede usar MCP para el loop preventivo:
+---
 
-```text
-idu_plan_snapshot
-→ idu_supervisor_context_pack
-→ idu_next_advisory_action
-→ idu_continuation_proposal
-→ idu_task_package_create
-→ governance-review del orquestador
-→ worker normal
-→ idu_postflight
-→ idu_agentlab_review_run sólo si el orquestador lo decide
-```
+## Comandos CLI Directos
 
-## Arquitectura simple
-
-```text
-Humano → Orquestador → Subagentes / código
-              ↑
-           Idu-pi Supervisor → AgentLabs / reports / DB / memoria
-```
-
-Idu-pi no compite con el orquestador: lo supervisa. Si detecta desvío del plan, falta de evidencia, costo excesivo, riesgo crítico o confusión del usuario, le avisa al orquestador con una recomendación accionable. Para que el supervisor no sea invisible, las salidas MCP principales exponen `data.supervisorConsultation`: objetivo del Plan Maestro, recomendación, riesgos, gates, contratos, evidencia y razón de avanzar/frenar.
-
-Roles:
-
-| Rol | Responsabilidad |
-| --- | --- |
-| Humano | Define intención, aprueba decisiones críticas, commits, pushes y cambios de verdad. |
-| Orquestador | Ejecuta trabajo, coordina subagentes, aplica decisiones aprobadas. |
-| Idu-pi | Supervisa plan, riesgo, contexto, memoria, reportes, propuestas, gates, costo, calidad, seguridad, emoción y aprendizaje; mide calidad de contexto local, reporta deuda semántica/context pruning y genera inteligencia externa allowlist para factibilidad sin guardar prompts/docs crudos ni borrar/actualizar automáticamente. |
-| AgentLabs | Inspeccionan en sandbox como especialistas y reportan evidencia. |
-| Subagentes | Ejecutan tareas acotadas bajo coordinación del orquestador. |
-
-## Interfaces
-
-Idu-pi puede usarse por varias superficies:
-
-| Interfaz | Para qué sirve |
-| --- | --- |
-| CLI | Superficie principal para uso local, scripts, validación rápida e integración con Pi. |
-| Telegram | Interfaz remota opcional para usar comandos, estado y confirmaciones del mismo supervisor sin estar en la terminal. |
-| MCP Server | Herramientas stdio para que el orquestador consulte Idu-pi desde cualquier proyecto; incluye `idu_supervisor_context_pack` para inyectar metas, contratos, riesgos, gates y refs locales de Bibliotecario/Source Library sin volcar docs largas. |
-| Futuras UI/dashboard | Visualizar cola, reportes, propuestas y estado del supervisor. |
-
-Más detalle: [MCP Server](docs/mcp-server.md).
-
-Todas las interfaces llaman al mismo core. El core no depende de Telegram.
-
-## Instalación / configuración
-
-Primera instalación segura, cuando `idu-pi` todavía no existe en `PATH`:
-
-```powershell
-git clone https://github.com/Wladimirfn/IDU-PI.git idu-pi
-cd idu-pi
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1
-```
-
-Dry-run verificable:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1 -DryRun
-# o
-node scripts/install.mjs --dry-run
-```
-
-El instalador no ejecuta bootstrap remoto opaco ni scripts de dependencias: usa `pnpm-lock.yaml` con `--frozen-lockfile --ignore-scripts`; pnpm puede descargar paquetes fijados desde el registry/cache configurado. El repo además incluye defensa en profundidad para instalaciones manuales: `.npmrc` bloquea scripts en clientes npm/compatibles, `pnpm-workspace.yaml` declara `ignoreScripts`, `minimumReleaseAge`, `strictDepBuilds` y `onlyBuiltDependencies: []`, y `package.json` usa versiones exactas. No ejecuta Telegram/AgentLabs ni enrola proyectos. Si crea el shim local y falta en `PATH`, pregunta antes de agregarlo al `PATH` de usuario; para aceptarlo sin segunda pregunta usá `-Yes -AddPath`. Guía: [Instalación rápida segura](docs/quickstart-install.md).
-
-Para entrar sin memorizar comandos después de instalar:
-
-```text
-idu-pi
-```
-
-Primera vez desde el repo, antes del link global o shim:
-
-```text
-corepack pnpm cli
-# o después de compilar
-node dist/src/cli.js
-```
-
-El home muestra logo, estado del sistema, MCP, proyecto actual, supervisor, rutas de estado y acciones recomendadas. Si la terminal es interactiva, muestra un menú minimalista:
-
-```text
-1. Configurar IDU-Pi
-2. Proyecto actual
-3. Telegram remoto
-4. Modelos y perfiles
-5. Supervisor
-6. Tareas y cola
-7. Diagnóstico
-8. Exit
-```
-
-Si no es interactivo, imprime el resumen y sale sin escribir archivos.
-
-### El bridge de Telegram como servicio
-
-El bridge es el proceso persistente del sistema: mantiene el bot vivo y es donde vive el monitoreo de infraestructura. Se registra como tarea programada `Idu-pi Telegram Bridge`, que arranca en cada inicio de sesión y se reinicia sola si el proceso muere.
-
-Instalar el arranque automático — **requiere PowerShell como Administrador**, porque `Register-ScheduledTask` no corre sin elevación:
-
-```powershell
-scripts\install-scheduled-task.ps1
-```
-
-Termina con el estado real de la tarea, por ejemplo `Tarea registrada: Idu-pi Telegram Bridge (estado: Running)`. Si no dice eso, no quedó instalada.
-
-Consultar, detener y desinstalar:
-
-```powershell
-scripts\scheduled-task-status.ps1     # estado, última corrida, próximo disparo
-scripts\stop-bridge.ps1               # detiene el proceso; la tarea sigue registrada
-scripts\uninstall-scheduled-task.ps1  # quita el arranque automático
-```
-
-Para operar el proceso en caliente sin tocar la tarea programada:
-
-```powershell
-scripts\bridge-control.ps1 -Action status    # PID vivo según el pidfile
-scripts\bridge-control.ps1 -Action restart   # relanza en segundo plano y confirma que quedó vivo
-scripts\bridge-control.ps1 -Action stop
-```
-
-`restart` lanza el bridge desacoplado de la consola y después verifica el pidfile: si el proceso no quedó arriba, falla en vez de reportar éxito.
-
-Para levantarlo a mano sin tarea programada, en una ventana que hay que dejar abierta:
-
-```powershell
-scripts\start-bridge.ps1
-# o
-corepack pnpm serve
-```
-
-**El bridge compila el árbol de trabajo al arrancar.** `start-bridge.ps1` ejecuta `pnpm build` sobre la rama que esté checkouteada, así que si esa rama no compila, el bridge no levanta — tampoco en el siguiente inicio de sesión. Si vas a dejar la máquina sola, dejala en una rama que compile.
-
-### El supervisor tick como tarea programada
-
-El tick es la segunda tarea programada del sistema, separada del bridge: `Idu-pi Supervisor Tick`. Corre el preflight, los sensores y la escalación en un intervalo fijo.
-
-**El tick no corre desde tu checkout de trabajo.** Corre desde un directorio de deploy aparte (`C:\idu-pi-deploy`), clonado y siempre en `main`. Esa separación es deliberada: antes, cualquier rama que tuvieras checkouteada al momento del tick era código de producción — sin CI, sin review, sin merge.
-
-```powershell
-scripts\install-deploy-tick.ps1       # crea el deploy, clona, checkout main, build inicial
-scripts\install-supervisor-tick.ps1   # registra la tarea Idu-pi Supervisor Tick
-scripts\update-deploy-tick.ps1        # pull de main + rebuild — corré esto en cada merge
-scripts\uninstall-supervisor-tick.ps1
-```
-
-Después de instalar el deploy hay que re-registrar la tarea a mano con `WorkingDir: C:\idu-pi-deploy` y acción `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\idu-supervisor-tick-bootstrap.ps1`. La tarea vive en tu máquina, no en el repo: mergear no alcanza.
-
-Si te olvidás de actualizar el deploy después de un merge, el tick sigue corriendo el commit anterior. No se pierden commits — el watermark avanza sólo cuando el preflight tiene éxito — pero los procesa dos veces.
-
-Para leer el resultado del último tick sin abrir el log a mano:
-
-```powershell
-idu-pi idu-supervisor-tick-last --log C:\idu-pi-deploy\logs\supervisor-tick.log
-```
-
-Devuelve timestamp y antigüedad, códigos de salida, archivos vistos y qué requiere acción. Es read-only: no toca el tick en vivo. La ruta del log es configurable a propósito (`--log` o `IDU_PI_TICK_LOG`) y no tiene default, porque el `supervisor-tick.log` del checkout quedó congelado cuando el tick se mudó al deploy: leerlo por defecto reportaría un tick viejo como si fuera el actual.
-
-Detalle completo: [`docs/tick-deployment.md`](docs/tick-deployment.md).
-
-Para configurar MCP y enrolar proyectos externos:
-
-```text
-idu-pi setup status
-idu-pi setup wizard
-idu-pi setup path-help
-idu-pi setup mcp-init
-idu-pi project enroll <projectPath> [projectId]
-```
-
-Desde MCP, el orquestador usa Idu-pi como guía de buenas prácticas, asesor y auditor; no como autoridad ciega. Las tools principales son:
-
-```text
-# Proyecto y sesión
-idu_project_status
-idu_project_enroll
-idu_project_reset_state
-idu_bootstrap_project
-idu_start
-idu_status
-idu_activate
-idu_deactivate
-idu_prepare
-
-# Plan Maestro
-idu_master_plan_status
-idu_master_plan_create
-idu_master_plan_review
-idu_master_plan_approve
-idu_master_plan_reject
-idu_plan_snapshot
-idu_next_advisory_action
-idu_continuation_proposal
-idu_task_package_create
-
-# Riesgo, tareas y postflight
-idu_orchestrator_procedure
-idu_task_context
-idu_preflight
-idu_advisory
-idu_postflight
-idu_task
-idu_queue_detail
-idu_queue_complete
-idu_semantic_audit_status
-idu_supervisor_tick
-idu_bibliotecario_proactive_advisory
-
-# Source Library / documentación manual
-idu_source_status
-idu_source_add
-idu_source_remove
-idu_source_read
-idu_source_extract
-idu_source_report
-idu_source_research_report
-idu_source_digest
-idu_source_digest_status
-idu_source_chunk_read
-idu_source_recommend_for_task
-idu_source_required_actions
-idu_source_refresh
-idu_external_source_recommend
-idu_external_intelligence_report
-
-# AgentLabs audit-only
-idu_agentlab_request_create
-idu_agentlab_review_run
-idu_agentlab_review_status
-```
-
-`idu_start` activa guardrails para proyectos registrados y corre el hook seguro de arranque supervisor (`on_idu_activation`) exponiendo `data.supervisorStartup`; no enrola ni crea drafts. `idu_activate` sólo activa guardrails; no enrola, no crea drafts y no corre hook de arranque. `idu_source_add/status/remove/read/extract/report/research/digest/chunk/recommend/required-actions/refresh` mantienen una Source Library en `stateRoot/Doc/<project>` para documentación manual `.md`, `.txt` y `.pdf`; los PDFs se copian/registran con conversión best-effort desde texto embebido a Markdown, sin OCR ni dependencias nuevas; si no hay texto legible quedan `metadata_only`. Los digests dividen documentos grandes con texto real en chunks/tomos bajo `sources/chunks`, guardan `sources/digests/<sourceId>.json` y actualizan `source-library-index.json` para recomendar lecturas al orquestador; si una fuente no es legible, no inventan temas y devuelven acción requerida para lector bibliotecario especializado. Ninguna fuente promueve contratos automáticamente. `idu_external_source_recommend` usa un registry no-fetch para recomendar fuentes por tarea/dominio/lenguaje/framework: official docs, academic discovery, community signals y blocked/manual, incluyendo estructura de programación como HTML sin JS embebido, separación de responsabilidades y carpetas controladas. No consulta web, no guarda raw docs, no importa Source Library, no ejecuta AgentLabs y no promueve contratos. `idu_external_intelligence_report` consulta sólo source IDs externos exactos/allowlist, guarda un reporte normalizado bajo `stateRoot/reports/external-intelligence` y no acepta URLs libres, no guarda cuerpos crudos, no actualiza dependencias, no ejecuta AgentLabs ni promueve contratos. `idu_master_plan_create` crea/regenera en `stateRoot` un Plan Maestro normativo que separa documentación declarada, realidad construida, drift, contratos y flujos permanentes (`master-plan.flows.json`). `idu_master_plan_review` devuelve además `revisionAntesDeZarpar`: una revisión honesta para el orquestador con entendimiento del proyecto, contratos necesarios, definiciones faltantes, fuentes, herramientas/MCP, AgentLabs recomendados, problemas, estrategia de arreglo, preguntas al usuario y checklist antes de ejecutar trabajo grande. `idu_master_plan_approve` y `idu_master_plan_reject` cierran explícitamente el ciclo normativo desde MCP: cambian sólo artefactos de gobernanza en `stateRoot`, no aplican flows, no ejecutan AgentLabs, no tocan el repo real y no hacen commit/push. Con un Plan aprobado, `idu_plan_snapshot`, `idu_next_advisory_action`, `idu_continuation_proposal` e `idu_task_package_create` arman lineamientos preventivos para que el orquestador revise Plan/flows/contratos con un subagente governance-review antes de codificar. `idu_continuation_proposal` cierra el ciclo post-tarea: consulta Plan Maestro + cola/Todos + preflight/guards + ventana de autonomía y devuelve si conviene `continue_autonomously`, `ask_user` o `stop_no_safe_action` sin implementar ni ejecutar AgentLabs. `idu_orchestrator_procedure` e `idu_task_context` devuelven severidad, confianza, evidencia, lecturas requeridas, contratos afectados, labs sugeridos y guía para subagentes. El orquestador revalida y decide. `idu_agentlab_request_create` sólo crea solicitud; los labs se ejecutan únicamente con `idu_agentlab_review_run` o llamada explícita del orquestador.
-
-Guía: [Instalador, home CLI y estado por proyecto](docs/installer.md).
-
-## Cómo se activa
-
-Desde Telegram, usá el menú remoto para no memorizar comandos:
-
-```text
-/idu_menu
-/idu_projects
-/idu
-/idu_status
-/idu_off
-```
-
-Telegram replica el mismo flujo CLI/supervisor: los botones son atajos a comandos existentes y el texto libre se reenvía como entrada humana al core.
-
-Desde CLI:
-
-```text
-idu-pi idu
-idu-pi idu-status
-idu-pi idu-off
-```
-
-En CLI y Pi slash, `idu-pi idu` / `idu-pi idu start` / `/idu` es el flujo cómodo de bootstrap/start: puede enrolar un proyecto permitido, crear estado aislado y drafts de Project Core/Constitution si faltan, activar guardrails, mostrar el arranque supervisor y mostrar el dashboard/reporte. En Telegram, `/idu` es activación remota sobre el proyecto activo ya configurado; no crea un segundo core ni auto-enrola proyectos.
-
-`/idu_off` apaga esos guardrails automáticos. Los comandos manuales siguen disponibles.
-
-### Living Loop Triggers (opt-in)
-
-El trigger engine inyecta envelopes al orchestrator cuando se cumplen condiciones (tareas colgadas, recordatorio del objetivo, intenciones pendientes de decisión humana). Es opt-in:
+El arnés puede ejecutarse directamente desde terminal:
 
 ```bash
-# Activar
-IDU_PI_TRIGGER_ENGINE=1
+# Ver estado del sistema y CLIs instalados
+pnpm run cli status
 
-# O en Windows (en el .env o en la Task Scheduler del bridge):
-setx IDU_PI_TRIGGER_ENGINE 1
+# Ver capacidades y perfiles en JSON
+pnpm run cli capabilities
+
+# Ejecutar preflight sobre una tarea en un repositorio específico
+pnpm run cli preflight "Refactorizar autenticación" --cwd "C:/ruta/al/proyecto"
+
+# Delegar directamente a un worker desde la terminal
+pnpm run cli delegate "Auditar arquitectura del módulo IoT" --profile architecture
+
+# Iniciar el servidor MCP por stdio
+pnpm run mcp
 ```
 
-Sin el flag, el trigger engine no se invoca desde el bridge runtime. Ver [`docs/living-loop-triggers.md`](docs/living-loop-triggers.md) para el bus de eventos, los disparadores, las tools MCP (`idu_pending_injections`, `idu_subscribe_triggers`) y los flows end-to-end.
+---
 
-## Conceptos principales
-
-### Project Core
-
-Project Core es el plano maestro: objetivo, alcance, usuarios, stack, sensibilidad de datos, restricciones y criterios de éxito. Puede nacer como draft, pero sólo es fuente de verdad cuando el humano lo confirma.
-
-### Constitution
-
-Constitution son las normas técnicas derivadas del Project Core confirmado. Traducen alcance, stack, seguridad, datos y aprobaciones humanas a reglas operativas.
-
-### Gates
-
-Los gates son validadores deterministas. Revisan intención, archivos cambiados y riesgos. Si aparece riesgo `high` o `blocker`, Idu-pi pide confirmación humana.
-
-### AgentLabs
-
-AgentLabs son especialistas de revisión audit-only. Inspeccionan en workspaces aislados, producen reportes con evidencia y no aplican cambios al repo real, no crean workspaces permanentes en `stateRoot`, no hacen commit/push y no implementan features. Las solicitudes, ejecuciones y estados exponen `workloadEnvelope` advisory-only para declarar carga, presupuesto y estados honestos (`completed`, `partial`, `timed_out`, `stale`, `failed`, etc.) sin autorizar ejecución ni promoción de contratos. Para bibliotecario, `external-source-intelligence` usa refs locales de Source Library/digests antes que prompts genéricos y no hace web/live fetch automático. Para auditorías grandes, `specialist-audit-plan` divide la solicitud en especialistas con envelopes por especialidad y exige ejecución explícita posterior. Idu-pi registra efectividad AgentLab localmente en `stateRoot/reports/agentlab-effectiveness-events.jsonl` con counts/outcomes/severidades/completitud de evidencia, sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota. La calidad del contexto supervisor se mide aparte en `stateRoot/reports/context-quality-events.jsonl` con ratings/cuentas derivadas, sin guardar prompts/docs crudos ni medir tokens/costo/% contexto. Idu-pi consolida esos reportes en hallazgos, recomendaciones y candidates; el humano/orquestador decide.
-
-### Plan Maestro
-
-Plan Maestro es el documento normativo vivo del proyecto. Responde qué es el repo, qué hace, cómo está construido, qué alcance tiene, qué requisitos debe cumplir, qué contratos gobiernan cambios y qué diferencia existe entre la documentación declarada y la realidad construida. Los flujos permanentes viven aparte en `master-plan.flows.json` para que puedan actualizarse junto al proyecto sin convertir el Plan Maestro en lista de tareas.
-
-El contrato de datos no se limita a “hay DB”: debe declarar stores, owner lógico, retención, backup/restore, sanitización/redacción, migración/rollback y ciclo de vida de artefactos SQLite/JSON/JSONL. Los flujos de ingesta, reportes y API deben quedar asociados a stores detectados/canónicos; si no hay evidencia, Idu-pi lo marca como riesgo en vez de inventar persistencia.
-
-La revisión del Plan Maestro incluye `revisionAntesDeZarpar`: contratos entendidos como acuerdos/recursos de preparación, no sólo prohibiciones. Cubre objetivo, stack, arquitectura, datos, seguridad, navegación, fuentes de información, AgentLabs, testing y entrega. Si falta una biblioteca local de fuentes (`Doc/<project>/source-index.json` y `sources/local/` para PDFs, normas, leyes o libros), la revisión la marca como fuente recomendada antes de derivar normas fuertes. Las fuentes externas vivas —docs oficiales, changelogs, releases/issues, GitHub/npm advisories, OWASP/CVE/NVD, posts oficiales en X/Twitter, Reddit/comunidades técnicas y blogs/noticias de seguridad— sólo informan riesgos y recomendaciones; no se convierten automáticamente en contratos aprobados. Para esa inteligencia, Idu-pi ofrece `idu_external_intelligence_report` como primer conector controlado del Bibliotecario: source IDs allowlist, reportes normalizados stateRoot-only y sin web libre, updates automáticos ni ejecución AgentLab. AgentLab bibliotecario sigue siendo audit-only y mantiene al orquestador informado sin implementar ni modificar el repo.
-
-### Supervisor loop
-
-El supervisor loop observa señales, audita eventos, compacta memoria, propone mejoras y prepara tareas. No reemplaza el criterio humano.
-
-## Qué protege
-
-| Pilar | Cómo ayuda Idu-pi |
-| --- | --- |
-| Calidad | Pide contexto, tests, evidencia y revisión antes de avanzar. |
-| Tiempo | Prioriza señales humanas, evita loops y reduce retrabajo. |
-| Costo/tokens | Compacta contexto y propone mejoras de flujo cuando hay ruido. |
-| Seguridad | Bloquea cambios sensibles y exige aprobación en zonas críticas. |
-| Reportes | Guarda salidas revisables en `reports/` y DB local. |
-| Recursos | Usa labs/sandbox para revisar sin contaminar el repo real. |
-| Aprendizaje | Convierte reportes en propuestas, reglas, skills y memoria candidata. |
-
-Nada crítico se aplica sin confirmación humana.
-
-## Instalación rápida
-
-Recomendado en Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/install.ps1
-```
-
-Instalación manual para desarrollo:
+## Pruebas y Construcción
 
 ```bash
-corepack pnpm install
-cp .env.example .env
-corepack pnpm dev
+# Compilar TypeScript
+pnpm run build
+
+# Ejecutar suite de pruebas unitarias
+pnpm test
 ```
 
-Variables mínimas en `.env` para el adapter Telegram:
-
-```env
-TELEGRAM_BOT_TOKEN=token_de_botfather
-ALLOWED_USER_ID=123456789
-DEFAULT_CWD=/ruta/absoluta/a/tu/proyecto
-ALLOWED_ROOTS=/ruta/absoluta/a/tu/proyecto
-PI_BIN=pi
-AGENT_WORKSPACE_ROOT=/ruta/absoluta/a/bridge-agents
-AGENT_WORKSPACE_MODE=clone
-```
-
-Variables opcionales de operación:
-
-| Variable | Para qué |
-| --- | --- |
-| `IDU_PI_DOTENV_PATH` | Ruta absoluta al `.env` único del operador. El directorio de deploy no lleva `.env` propio: resuelve el archivo relativo al módulo compilado, así que sin esta variable arranca y falla con `Missing required env var: DEFAULT_CWD`. Si apunta a un archivo inexistente, falla de entrada con esa ruta en el mensaje en vez de fallar más tarde con un error de config confuso. |
-| `IDU_PI_TICK_LOG` | Ruta al `supervisor-tick.log` que lee `idu-supervisor-tick-last`. Sin esto (o sin `--log`), el comando falla y te dice por qué; no adivina. |
-| `IDU_PI_TRIGGER_ENGINE` | Activa el trigger engine (`1`). Ver [Living Loop Triggers](#living-loop-triggers-opt-in). |
-
-## Camino inicial recomendado
-
-Desde Telegram:
-
-```text
-/config
-/config init_workspace
-/config init_assets
-/config init_project_config
-/config skills_sync
-/config db_init
-/config sync_commands
-/idu
-/idu_status
-```
-
-Desde CLI:
-
-```text
-idu-pi status
-idu-pi idu
-idu-pi idu-status
-idu-pi idu-prepare
-```
-
-## Seguridad operativa
-
-- Nunca subas `.env`.
-- Mantené `ALLOWED_ROOTS` limitado.
-- No subas tokens, API keys, registros locales ni estado runtime.
-- Usá workspaces clone para AgentLabs.
-- No copies cambios desde labs sin revisión humana.
-- No hagas commit/push sin aprobación humana explícita.
-- Nada crítico se aplica sin confirmación humana.
-
-## Desarrollo
-
-```bash
-corepack pnpm build
-corepack pnpm test
-```
-
-**`pnpm test` no es lo que corre CI.** La puerta que decide el merge corre:
-
-```bash
-corepack pnpm test:guarded          # tests + leak guard (LEAK_GUARD_THRESHOLD=62)
-corepack pnpm check:protocol-drift
-corepack pnpm check:cluster-drift:verify
-```
-
-El leak guard cuenta las entradas nuevas en el directorio temporal del sistema al terminar la suite y falla con exit 1 aunque no falle ningún test. Un test que crea directorios temporales y no los limpia pasa con `pnpm test` y rompe en CI. Antes de abrir un PR, corré `test:guarded`.
-
-## Documentación
-
-- [`docs/quickstart-install.md`](docs/quickstart-install.md) — primera instalación segura con bootstrap installer.
-- [`docs/cli-commands.md`](docs/cli-commands.md) — comandos CLI por grupo.
-- [`docs/telegram-commands.md`](docs/telegram-commands.md) — comandos Telegram por grupo.
-- [`docs/supervisor-model.md`](docs/supervisor-model.md) — modelo conceptual del supervisor.
-- [`docs/superpowers/specs/2026-06-07-birth-pipeline-universal-design.md`](docs/superpowers/specs/2026-06-07-birth-pipeline-universal-design.md) — Birth Pipeline Universal: Project Core → Plan Maestro → Prototipo → Spec General → Repo/Git gate.
-- [`docs/superpowers/specs/2026-06-08-supervisor-autoresurrect-exploration.md`](docs/superpowers/specs/2026-06-08-supervisor-autoresurrect-exploration.md) — exploración de causa raíz y opciones para resucitar el supervisor automático.
-- [`docs/architecture.md`](docs/architecture.md) — arquitectura técnica y módulos core.
-- [`docs/project-map-workflow.md`](docs/project-map-workflow.md) — workflow de Project Core, blueprint y flows.
-- [`docs/lab-agent-best-practices.md`](docs/lab-agent-best-practices.md) — checklist operativo para AgentLabs.
-- [`docs/living-loop-triggers.md`](docs/living-loop-triggers.md) — bus de eventos, inyecciones, disparadores y activación (`IDU_PI_TRIGGER_ENGINE=1`).
-- [`docs/tick-deployment.md`](docs/tick-deployment.md) — por qué el tick corre desde `C:\idu-pi-deploy` y no desde tu checkout, y cómo mantenerlo en sync.
-
-## Spec-Driven Development (OpenSpec)
-
-This repo follows a Spec-Driven Development (SDD) workflow for any
-slice that touches architecture, data, or the agent contract. The
-canonical home for SDD artifacts is
-[`openspec/changes/`](openspec/changes/). Each change goes through:
-
-- **init** — open the change with project context and plan status
-- **proposal / spec / design / tasks** — the spec-driven work
-- **apply** — strict TDD implementation
-- **verify** — acceptance evidence against the spec
-- **sync** — fold the deltas into the canonical specs
-- **archive** — close the change
-
-Historical breadcrumbs (predate OpenSpec) live in
-`docs/superpowers/{plans,specs}/`. They are kept for context but are
-not the canonical home.
+Todas las 24 pruebas pasan al 100% cubriendo el arnés cross-cli, ciclo de vida de procesos, aislamiento de locks, watchdog de timeouts y herramientas MCP.
