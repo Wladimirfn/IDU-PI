@@ -545,3 +545,98 @@ test("getStatus records failed when runner and worker PIDs are dead without exit
 		try { unlinkSync(mockLogPath); } catch {}
 	}
 });
+
+test("getStatus reads disk session.json directly without in-memory stale shadowing", async () => {
+	const { unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-disk-truth-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// Initial record as if created at spawn
+	const initialRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "sess-disk-truth",
+		request: { task: "Test truth", profile: "fast" },
+		profile: { harness: "pi" },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 10000).toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeJsonAtomic(mockSessionPath, initialRecord);
+
+	// Ensure manager reads it
+	let status = manager.getStatus(mockRunId);
+	assert.ok(status);
+	assert.equal(status.bytesEmitted, undefined);
+
+	// External daemon updates session.json on disk with worker pid and telemetry
+	const daemonUpdatedRecord: RunRecord = {
+		...initialRecord,
+		pid: process.pid, // alive pid
+		runnerPid: process.pid,
+		bytesEmitted: 42000,
+		lastActivityAt: new Date().toISOString(),
+	};
+	writeJsonAtomic(mockSessionPath, daemonUpdatedRecord);
+
+	try {
+		// getStatus in the same process must read the updated disk truth, not a stale mirror
+		status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.bytesEmitted, 42000);
+		assert.equal(status.pid, process.pid);
+		assert.equal(status.runnerPid, process.pid);
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("getStatus recovers from log when process closed with CODE null (POSIX signal termination)", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-signal-death-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+	const mockLogPath = join(IDU_LOGS_DIR, `${mockRunId}.log`);
+
+	const logContent = [
+		`=== IDU RUN START: ${mockRunId} ===`,
+		`Worker killed by signal`,
+		`=== PROCESS CLOSED WITH CODE null ===`,
+	].join("\n");
+
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "sess-signal-null",
+		request: { task: "Test signal", profile: "fast" },
+		profile: { harness: "claude" },
+		command: "claude.cmd",
+		args: ["-p", "test"],
+		pid: 999994,
+		runnerPid: 999993,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 30000).toISOString(),
+		logPath: mockLogPath,
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+	writeFileSync(mockLogPath, logContent, "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "failed");
+		assert.equal(status.exitCode, 1);
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+		try { unlinkSync(mockLogPath); } catch {}
+	}
+});

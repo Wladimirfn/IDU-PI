@@ -34,7 +34,6 @@ import type {
 	SessionTreeEntry,
 } from "./types.js";
 
-const activeProcesses = new Map<string, { process?: ChildProcess; record: RunRecord }>();
 const SESSION_TREE_PATH = join(IDU_SESSIONS_DIR, "tree.json");
 
 export function writeJsonAtomic(filePath: string, data: any): void {
@@ -600,8 +599,6 @@ export class CrossCliProcessManager {
 			sessionLock.updatePid?.(runnerProcess.pid);
 		}
 
-		activeProcesses.set(runId, { process: runnerProcess, record });
-
 		if (asyncExecution) {
 			const instructionMsg = `Worker process is RUNNING in background daemon (runId: ${runId}). DO NOT end your turn saying you will check back later. Execute this command now in your terminal tool to stay blocked and stream live logs until completion:\nnode dist/src/cli.js wait ${runId} --follow`;
 			return {
@@ -627,19 +624,14 @@ export class CrossCliProcessManager {
 	}
 
 	public getStatus(runId: string): RunRecord | null {
-		let record: RunRecord | null = null;
-		const inMem = activeProcesses.get(runId);
-		if (inMem) {
-			record = inMem.record;
-		} else {
-			const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
-			if (!existsSync(sessionPath)) return null;
+		const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
+		if (!existsSync(sessionPath)) return null;
 
-			try {
-				record = JSON.parse(readFileSync(sessionPath, "utf8")) as RunRecord;
-			} catch {
-				return null;
-			}
+		let record: RunRecord | null = null;
+		try {
+			record = JSON.parse(readFileSync(sessionPath, "utf8")) as RunRecord;
+		} catch {
+			return null;
 		}
 
 		if (record && (record.status === "running" || record.status === "pending")) {
@@ -652,9 +644,9 @@ export class CrossCliProcessManager {
 				if (existsSync(record.logPath)) {
 					try {
 						logText = readFileSync(record.logPath, "utf8");
-						const match = logText.match(/=== PROCESS CLOSED WITH CODE (\d+) ===/);
+						const match = logText.match(/=== PROCESS CLOSED WITH CODE (\d+|null) ===/);
 						if (match) {
-							recoveredCode = parseInt(match[1], 10);
+							recoveredCode = match[1] === "null" ? 1 : parseInt(match[1], 10);
 						}
 					} catch {
 						// best effort
@@ -671,7 +663,6 @@ export class CrossCliProcessManager {
 					record.error = record.error || "Worker process terminated unexpectedly";
 				}
 				record.completedAt = record.completedAt || new Date().toISOString();
-				const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
 				writeJsonAtomic(sessionPath, record);
 			}
 		}
@@ -724,74 +715,6 @@ export class CrossCliProcessManager {
 			await new Promise((r) => setTimeout(r, 1_500));
 		}
 		return this.getResult(runId, verbose);
-	}
-
-	private cleanupRun(
-		runId: string,
-		pidPath: string,
-		sessionPath: string,
-		record: RunRecord,
-		sessionLock?: SessionLockHandle | null,
-		stdoutBuffer?: string,
-	): void {
-		activeProcesses.delete(runId);
-		if (sessionLock) {
-			sessionLock.release();
-		}
-		if (existsSync(pidPath)) {
-			try {
-				unlinkSync(pidPath);
-			} catch {
-				// best effort
-			}
-		}
-		try {
-			writeJsonAtomic(sessionPath, record);
-		} catch {
-			// best effort
-		}
-
-		// Only update session tree if the process actually spawned and ran
-		if (record.pid) {
-			try {
-				const workingDir = record.request.workingDir || process.cwd();
-				const key = getSessionKey(workingDir, record.sessionId);
-				const tree = loadSessionTree();
-				const entry: SessionTreeEntry = tree[key] || {
-					sessionId: record.sessionId,
-					parentSessionId: record.parentSessionId,
-					profile: record.request.profile,
-					harness: record.profile.harness,
-					workingDir,
-					createdAt: record.startedAt,
-					lastActiveAt: record.completedAt || record.startedAt,
-					turnCount: 0,
-					runs: [],
-				};
-				if (!entry.nativeSessionId && stdoutBuffer) {
-					if (record.profile.harness === "opencode") {
-						const match = stdoutBuffer.match(/"sessionID"\s*:\s*"([^"]+)"/);
-						if (match) {
-							entry.nativeSessionId = match[1];
-						}
-					} else if (record.profile.harness === "antigravity") {
-						const match = stdoutBuffer.match(/"conversationId"\s*:\s*"([^"]+)"/);
-						if (match) {
-							entry.nativeSessionId = match[1];
-						}
-					}
-				}
-				entry.lastActiveAt = record.completedAt || new Date().toISOString();
-				entry.turnCount += 1;
-				if (!entry.runs.includes(record.runId)) {
-					entry.runs.push(record.runId);
-				}
-				tree[key] = entry;
-				saveSessionTree(tree);
-			} catch {
-				// best effort
-			}
-		}
 	}
 
 	private buildResult(
