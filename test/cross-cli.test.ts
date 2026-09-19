@@ -36,6 +36,10 @@ const mockConfig: IduConfig = {
 			command: "codex.cmd",
 			argsTemplate: [],
 		},
+		antigravity: {
+			command: "agy.cmd",
+			argsTemplate: [],
+		},
 	},
 	defaultTimeoutMs: 10000,
 	maxConcurrentWorkers: 4,
@@ -85,6 +89,23 @@ test("buildWorkerArgs builds correct argv for Pi CLI with provider and task flag
 	assert.ok(args.includes("MiniMax-M3"));
 	assert.ok(args.includes("-p"));
 	assert.equal(args[args.length - 1], "Run scout");
+});
+
+test("buildWorkerArgs builds correct argv for Antigravity (agy) with model and permissions", () => {
+	const profile: IduProfile = {
+		harness: "antigravity",
+		model: "flash",
+		permissions: "workspace",
+	};
+	const { command, args } = buildWorkerArgs(profile, "Review architecture", [], mockConfig);
+	assert.equal(command, "agy.cmd");
+	assert.ok(args.includes("--model"));
+	assert.ok(args.includes("gemini-3.8-flash-high"));
+	assert.ok(args.includes("--output-format"));
+	assert.ok(args.includes("stream-json"));
+	assert.ok(args.includes("--dangerously-skip-permissions"));
+	assert.ok(args.includes("-p"));
+	assert.equal(args[args.length - 1], "Review architecture");
 });
 
 test("CrossCliProcessManager gets capabilities reporting profiles and CLIs", () => {
@@ -179,6 +200,25 @@ test("extractCleanSummary extracts full assistant report from NDJSON without tru
 	assert.ok(!summary.includes("step_finish"), "Summary should not include raw JSON events");
 });
 
+test("extractCleanSummary extracts full response from Antigravity (agy) stream-json and json events", () => {
+	const streamJson = [
+		JSON.stringify({ event: "init", conversation_id: "conv-1" }),
+		JSON.stringify({ event: "step_update", step_update: { text_delta: "Thinking..." } }),
+		JSON.stringify({ event: "result", result: { conversation_id: "conv-1", status: "SUCCESS", response: "Antigravity report complete." } }),
+	].join("\n");
+
+	const summaryStream = extractCleanSummary(streamJson, "antigravity");
+	assert.equal(summaryStream, "Antigravity report complete.");
+
+	const jsonOutput = JSON.stringify({
+		conversation_id: "conv-2",
+		status: "SUCCESS",
+		response: "Direct json response.",
+	});
+	const summaryJson = extractCleanSummary(jsonOutput, "antigravity");
+	assert.equal(summaryJson, "Direct json response.");
+});
+
 test("Session Triad: buildWorkerArgs handles --session-id, --resume, and --fork for Claude", () => {
 	const profile: IduProfile = { harness: "claude", model: "opus" };
 	const uuid = "12345678-1234-4234-8234-123456789abc";
@@ -243,6 +283,24 @@ test("Session Triad: buildWorkerArgs handles Pi CLI --session-id, --session, and
 	const piFork = buildWorkerArgs(piProfile, "Task", [], mockConfig, { parentSessionId: sessId, fork: true });
 	assert.ok(piFork.args.includes("--fork"));
 	assert.equal(piFork.args[piFork.args.indexOf("--fork") + 1], sessId);
+});
+
+test("Session Triad: buildWorkerArgs handles Antigravity Turn 1 and Turn 2 with --conversation", () => {
+	const agyProfile: IduProfile = { harness: "antigravity", model: "gemini-3.8-flash-high" };
+	const nativeSessId = "agy-conv-uuid-1234";
+
+	// Turn 1: New session (MUST NOT include --conversation)
+	const turn1 = buildWorkerArgs(agyProfile, "Turn 1 task", [], mockConfig, { sessionId: "ses-1", isResumed: false });
+	assert.ok(!turn1.args.includes("--conversation"), "Turn 1 must not include --conversation flag");
+
+	// Turn 2: Resumed session (includes --conversation)
+	const turn2 = buildWorkerArgs(agyProfile, "Turn 2 task", [], mockConfig, {
+		sessionId: "ses-1",
+		nativeSessionId: nativeSessId,
+		isResumed: true,
+	});
+	assert.ok(turn2.args.includes("--conversation"));
+	assert.equal(turn2.args[turn2.args.indexOf("--conversation") + 1], nativeSessId);
 });
 
 test("aliasToUuid maps non-UUID aliases deterministically to valid UUIDv4 strings", () => {
@@ -725,4 +783,44 @@ test("CLI wait command exits with 124 on timeout and 0 on completion with silent
 		try { unlinkSync(completedLogPath); } catch {}
 	}
 });
+
+test("SDD Implementation Guard blocks delegating SDD Work Unit implementation to workspace profiles", async () => {
+	const manager = CrossCliProcessManager.getInstance();
+
+	// 1. Task targeting WU implementation with workspace profile must throw
+	await assert.rejects(
+		async () => {
+			await manager.delegate({
+				task: "Delegating WU2 implementation to a subagent with a coding profile while separating code and docs",
+				profile: "coding",
+			});
+		},
+		/SDD WORK UNIT IMPLEMENTATION VIOLATION/,
+	);
+
+	// 2. Task targeting sdd-apply with workspace profile must throw
+	await assert.rejects(
+		async () => {
+			await manager.delegate({
+				task: "Run sdd-apply for change predictive-ai-api-key-encryption",
+				profile: "coding",
+			});
+		},
+		/SDD WORK UNIT IMPLEMENTATION VIOLATION/,
+	);
+});
+
+test("checkActiveSddAttempt detects heuristic markers and permits non-SDD tasks", async () => {
+	const { checkActiveSddAttempt } = await import("../src/process-manager.js");
+
+	// 1. SDD Work Unit task triggers blocked: true
+	const res1 = checkActiveSddAttempt(process.cwd(), "Implement WU3: fix telemetry parser");
+	assert.equal(res1.blocked, true);
+	assert.ok(res1.reason?.includes("SDD implementation / Work Unit"));
+
+	// 2. Regular non-SDD task triggers blocked: false
+	const res2 = checkActiveSddAttempt(process.cwd(), "Check memory health and git status");
+	assert.equal(res2.blocked, false);
+});
+
 

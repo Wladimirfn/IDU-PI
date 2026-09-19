@@ -10,6 +10,7 @@ import {
 	renameSync,
 	mkdirSync,
 	createWriteStream,
+	readdirSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -307,6 +308,13 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 				definitiveResult = parsed.result.trim();
 			}
 
+			// Antigravity (agy) result events (stream-json or json)
+			if (parsed.event === "result" && typeof parsed.result?.response === "string" && parsed.result.response.trim()) {
+				definitiveResult = parsed.result.response.trim();
+			} else if (typeof parsed.response === "string" && parsed.response.trim()) {
+				definitiveResult = parsed.response.trim();
+			}
+
 			// OpenCode NDJSON events
 			if (parsed.type === "text") {
 				if (typeof parsed.text === "string" && parsed.text) {
@@ -359,6 +367,73 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 		.trim();
 
 	return cleaned;
+}
+
+export interface SddGuardCheckResult {
+	blocked: boolean;
+	reason?: string;
+	change?: string;
+	workUnit?: string;
+}
+
+export function checkActiveSddAttempt(workingDir: string, taskPrompt?: string): SddGuardCheckResult {
+	// 1. Explicit task prompt heuristics for SDD implementation / Work Units
+	if (taskPrompt) {
+		const sddPattern = /\b(?:sdd-attempt acquire|sdd-apply|Work Unit:\s*["']?([^"'\n]+)["']?|WU\d+|implement(?:ing)?\s+(?:WU\d+|work unit))\b/i;
+		const match = taskPrompt.match(sddPattern);
+		if (match) {
+			return {
+				blocked: true,
+				reason: `Task explicitly targets SDD implementation / Work Unit ("${match[0]}").`,
+				workUnit: match[1] || match[0],
+			};
+		}
+	}
+
+	// 2. Active SDD attempt on disk via openspec/changes
+	const openspecChangesDir = join(workingDir, "openspec", "changes");
+	if (!existsSync(openspecChangesDir)) {
+		return { blocked: false };
+	}
+
+	try {
+		const entries = readdirSync(openspecChangesDir, { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => e.name);
+
+		let candidateChanges = entries;
+		if (taskPrompt) {
+			const mentioned = entries.filter((c) => taskPrompt.includes(c));
+			if (mentioned.length > 0) {
+				candidateChanges = mentioned;
+			}
+		}
+
+		for (const change of candidateChanges) {
+			try {
+				const stdout = execFileSync("gentle-ai", ["sdd-attempt", "status", "--cwd", workingDir, "--change", change], {
+					encoding: "utf8",
+					timeout: 2000,
+					stdio: ["ignore", "pipe", "ignore"],
+				});
+				const status = JSON.parse(stdout);
+				if (status.active_attempt && status.active_attempt.outcome === "running") {
+					return {
+						blocked: true,
+						change,
+						workUnit: status.active_attempt.work_unit || `ordinal ${status.active_attempt.ordinal}`,
+						reason: `Active SDD attempt is currently running for change "${change}" (Work Unit: "${status.active_attempt.work_unit || status.active_attempt.ordinal}").`,
+					};
+				}
+			} catch {
+				// gentle-ai not installed or call failed, continue
+			}
+		}
+	} catch {
+		// best effort
+	}
+
+	return { blocked: false };
 }
 
 export class CrossCliProcessManager {
@@ -422,8 +497,18 @@ export class CrossCliProcessManager {
 			);
 		}
 
-		// 3. Resolve session continuity and hierarchy (The Universal Triad: id / resume / fork)
+		// 3. SDD WORK UNIT IMPLEMENTATION GUARD: Enforce local implementation ownership
 		const workingDir = request.workingDir || process.cwd();
+		if (profile.permissions === "workspace") {
+			const sddCheck = checkActiveSddAttempt(workingDir, request.task);
+			if (sddCheck.blocked) {
+				throw new Error(
+					`SDD WORK UNIT IMPLEMENTATION VIOLATION: ${sddCheck.reason} Delegating workspace mutation (profile: "${request.profile}") to an external CLI worker is blocked. Primary implementation must be performed locally by the active orchestrator or local SDD phase subagents (sdd-apply). Use read-only/advisory profiles (e.g. "architecture") for external review.`,
+				);
+			}
+		}
+
+		// 4. Resolve session continuity and hierarchy (The Universal Triad: id / resume / fork)
 		const tree = loadSessionTree();
 
 		let requestedSessionId = request.sessionId?.trim();

@@ -156,7 +156,7 @@ export const TOOLS = [
 	{
 		name: "idu_delegate",
 		description:
-			"Cross-CLI Task Delegation: Spawns an external terminal worker (Claude, OpenCode, Codex, Pi) using a configured profile (e.g. cheap-explore, cheap-debug, coding, architecture, deep-refactor, fast). Enforces the ONE ORCHESTRATOR RULE (IDU_WORKER=true) to prevent recursive sub-agent loops.",
+			"Cross-CLI Task Delegation: Spawns an external terminal worker (Claude, OpenCode, Codex, Pi) for advisory, audit, or secondary consultation. Enforces the ONE ORCHESTRATOR RULE (IDU_WORKER=true) and blocks external delegation of active SDD work units or primary implementation.",
 		inputSchema: {
 			type: "object",
 			properties: {

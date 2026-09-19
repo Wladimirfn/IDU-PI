@@ -223,8 +223,8 @@ async function runDaemon(): Promise<void> {
 				if (spec.harness === "opencode") {
 					const m = fullOutput.match(/"sessionID"\s*:\s*"([^"]+)"/);
 					if (m) entry.nativeSessionId = m[1];
-				} else if (spec.harness === "antigravity") {
-					const m = fullOutput.match(/"conversationId"\s*:\s*"([^"]+)"/);
+				} else if (spec.harness === "antigravity" || spec.harness === "agy") {
+					const m = fullOutput.match(/"conversation_?id"\s*:\s*"([^"]+)"/i);
 					if (m) entry.nativeSessionId = m[1];
 				}
 			}
