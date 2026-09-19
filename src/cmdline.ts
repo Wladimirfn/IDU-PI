@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import type { IduConfig, IduProfile } from "./types.js";
 
 export interface ResolvedCommand {
@@ -90,8 +90,15 @@ export function buildWorkerArgs(
 	sessionOptions: BuildWorkerArgsOptions = {},
 ): BuiltCommandLine {
 	const harness = profile.harness.toLowerCase();
-	const cliDef = config.clis[harness];
-	const command = cliDef?.command || harness;
+	const cliDef = config.clis[harness] || (harness === "antigravity" ? config.clis["agy"] : undefined);
+	let command = cliDef?.command || (harness === "antigravity" ? "agy" : harness);
+
+	if ((command === "agy" || command === "antigravity") && !checkCliAvailable(command)) {
+		const localAgy = join(process.env.LOCALAPPDATA || "", "agy", "bin", process.platform === "win32" ? "agy.exe" : "agy");
+		if (existsSync(localAgy)) {
+			command = localAgy;
+		}
+	}
 
 	let fullMessage = task;
 	if (contextFiles.length > 0) {
@@ -238,14 +245,23 @@ export function buildWorkerArgs(
 			break;
 		}
 
-		case "antigravity": {
+		case "antigravity":
+		case "agy": {
+			if (profile.model) {
+				let model = profile.model;
+				if (model === "flash") model = "gemini-3.8-flash-high";
+				else if (model === "pro") model = "gemini-3.1-pro-high";
+				args.push("--model", model);
+			}
+			args.push("--output-format", "stream-json");
+			if (hasWorkspacePermissions(profile)) {
+				args.push("--dangerously-skip-permissions");
+			}
 			const targetSession = sessionOptions.nativeSessionId || sessionId;
 			if (sessionOptions.isResumed && targetSession) {
-				args.push("send-message", targetSession, fullMessage);
-			} else {
-				const modelFlag = profile.model ? `--model=${profile.model}` : "--model=flash";
-				args.push("new-conversation", modelFlag, fullMessage);
+				args.push("--conversation", targetSession);
 			}
+			args.push("-p", fullMessage);
 			break;
 		}
 

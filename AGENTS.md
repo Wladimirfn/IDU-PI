@@ -33,7 +33,8 @@ Skill locations (kept strictly byte-identical):
 
 1. **Session Start**: Call `idu_status` to inspect workspace health, active branch, and dirty tree.
 2. **Before Changes**: Call `idu_preflight` with your task and expected files to assess blast radius.
-3. **Delegation**: Delegate long or complex sub-tasks via `idu_delegate` using the appropriate profile.
-4. **Monitoring**: Wait with `idu_worker_wait` or inspect with `idu_worker_status`.
+3. **Local Implementation**: Implement code and execute changes directly in the active orchestrator (Pi, OpenCode, Claude Code, Antigravity) using local edit tools and native SDD workflows (`sdd-apply`, `sdd-verify`). NEVER delegate primary coding away.
+4. **Consultative Delegation (Advisory Only)**: Call `idu_delegate` ONLY for external audits, second opinions, or debating complex architectural forks (e.g. `--profile architecture` for Opus). The delegated worker advises; the active orchestrator remains the sole implementer.
+   - If running asynchronously, wait with `idu_worker_wait` or `node dist/src/cli.js wait <run_id> --timeout 540000`.
 5. **After Changes**: Always run `idu_postflight` to verify actual git diffs match expected files.
 6. **Decisions**: Record key architectural or governance choices via `idu_decision_record`.
