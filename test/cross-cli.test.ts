@@ -40,6 +40,10 @@ const mockConfig: IduConfig = {
 			command: "agy.cmd",
 			argsTemplate: [],
 		},
+		commandcode: {
+			command: "cmdc.cmd",
+			argsTemplate: [],
+		},
 	},
 	defaultTimeoutMs: 10000,
 	maxConcurrentWorkers: 4,
@@ -106,6 +110,24 @@ test("buildWorkerArgs builds correct argv for Antigravity (agy) with model and p
 	assert.ok(args.includes("--dangerously-skip-permissions"));
 	assert.ok(args.includes("-p"));
 	assert.equal(args[args.length - 1], "Review architecture");
+});
+
+test("buildWorkerArgs builds correct argv for Command Code with model and yolo permissions", () => {
+	const profile: IduProfile = {
+		harness: "commandcode",
+		model: "deepseek/deepseek-v4.1-flash",
+		permissions: "workspace",
+	};
+	const { command, args } = buildWorkerArgs(profile, "Implement feature", [], mockConfig);
+	assert.equal(command, "cmdc.cmd");
+	assert.ok(args.includes("-m"));
+	assert.ok(args.includes("deepseek/deepseek-v4.1-flash"));
+	assert.ok(args.includes("--output-format"));
+	assert.ok(args.includes("json"));
+	assert.ok(args.includes("--yolo"));
+	assert.ok(args.includes("--skip-onboarding"));
+	assert.ok(args.includes("-p"));
+	assert.equal(args[args.length - 1], "Implement feature");
 });
 
 test("CrossCliProcessManager gets capabilities reporting profiles and CLIs", () => {
@@ -219,6 +241,71 @@ test("extractCleanSummary extracts full response from Antigravity (agy) stream-j
 	assert.equal(summaryJson, "Direct json response.");
 });
 
+test("extractCleanSummary extracts finalText from Command Code result JSON", () => {
+	const cmdcJson = [
+		JSON.stringify({ type: "event", event: { type: "run_start", sessionId: "cmdc-sess-1" } }),
+		JSON.stringify({ type: "event", event: { type: "message_start" } }),
+		JSON.stringify({ type: "event", event: { type: "text_delta", delta: "Processing" } }),
+		JSON.stringify({
+			type: "result",
+			subtype: "success",
+			sessionId: "cmdc-sess-1",
+			stopReason: "end_turn",
+			finalText: "All implementation steps completed successfully.",
+		}),
+	].join("\n");
+
+	const summary = extractCleanSummary(cmdcJson, "commandcode");
+	assert.equal(summary, "All implementation steps completed successfully.");
+});
+
+test("extractCleanSummary handles Command Code empty finalText and does not leak raw NDJSON", () => {
+	// Case 1: finalText is empty and text_delta has content
+	const cmdcDeltaOnly = [
+		JSON.stringify({ type: "event", event: { type: "run_start", sessionId: "cmdc-sess-2" } }),
+		JSON.stringify({ type: "event", event: { type: "text_delta", delta: "Partial streamed output." } }),
+		JSON.stringify({
+			type: "result",
+			subtype: "error",
+			sessionId: "cmdc-sess-2",
+			stopReason: "error",
+			finalText: "",
+		}),
+	].join("\n");
+	const summaryDelta = extractCleanSummary(cmdcDeltaOnly, "commandcode");
+	assert.equal(summaryDelta, "Partial streamed output.");
+
+	// Case 2: finalText is empty, no text_delta, but error message exists
+	const cmdcError = [
+		JSON.stringify({ type: "event", event: { type: "run_start", sessionId: "cmdc-sess-3" } }),
+		JSON.stringify({
+			type: "result",
+			subtype: "error",
+			sessionId: "cmdc-sess-3",
+			stopReason: "error",
+			finalText: "",
+			error: { message: "Cap of --max-turns reached" },
+		}),
+	].join("\n");
+	const summaryError = extractCleanSummary(cmdcError, "commandcode");
+	assert.equal(summaryError, "Command Code error: Cap of --max-turns reached");
+
+	// Case 3: Completely empty response — must return empty string, NEVER raw NDJSON lines
+	const cmdcBlank = [
+		JSON.stringify({ type: "event", event: { type: "run_start", sessionId: "cmdc-sess-4" } }),
+		JSON.stringify({
+			type: "result",
+			subtype: "error",
+			sessionId: "cmdc-sess-4",
+			stopReason: "stop",
+			finalText: "",
+		}),
+	].join("\n");
+	const summaryBlank = extractCleanSummary(cmdcBlank, "commandcode");
+	assert.equal(summaryBlank, "");
+	assert.ok(!summaryBlank.includes("{"), "Should never leak raw NDJSON");
+});
+
 test("Session Triad: buildWorkerArgs handles --session-id, --resume, and --fork for Claude", () => {
 	const profile: IduProfile = { harness: "claude", model: "opus" };
 	const uuid = "12345678-1234-4234-8234-123456789abc";
@@ -301,6 +388,38 @@ test("Session Triad: buildWorkerArgs handles Antigravity Turn 1 and Turn 2 with 
 	});
 	assert.ok(turn2.args.includes("--conversation"));
 	assert.equal(turn2.args[turn2.args.indexOf("--conversation") + 1], nativeSessId);
+});
+
+test("Session Triad: buildWorkerArgs handles Command Code Turn 1, Turn 2 resume with --session, and fork with --fork-session", () => {
+	const cmdcProfile: IduProfile = { harness: "commandcode", permissions: "workspace" };
+	const sessId = "cmdc-session-uuid-1234";
+
+	// Turn 1: New session (MUST NOT include --session)
+	const turn1 = buildWorkerArgs(cmdcProfile, "Turn 1 task", [], mockConfig, { sessionId: sessId, isResumed: false });
+	assert.ok(!turn1.args.includes("--session"), "Turn 1 must not include --session flag");
+	assert.ok(turn1.args.includes("--yolo"));
+	assert.ok(turn1.args.includes("--output-format"));
+	assert.ok(turn1.args.includes("json"));
+
+	// Turn 2: Resumed session WITH nativeSessionId (includes --session)
+	const turn2 = buildWorkerArgs(cmdcProfile, "Turn 2 task", [], mockConfig, { sessionId: sessId, nativeSessionId: sessId, isResumed: true });
+	assert.ok(turn2.args.includes("--session"));
+	assert.equal(turn2.args[turn2.args.indexOf("--session") + 1], sessId);
+
+	// Turn 2: Resumed session WITHOUT nativeSessionId (MUST NOT include --session, degraded safe fresh)
+	const turn2Degraded = buildWorkerArgs(cmdcProfile, "Turn 2 degraded", [], mockConfig, { sessionId: sessId, isResumed: true });
+	assert.ok(!turn2Degraded.args.includes("--session"), "Must not pass unverified session ID to cmdc");
+
+	// Fork: Branch from parent session WITH parentNativeSessionId (includes --session <parentId> --fork-session)
+	const forked = buildWorkerArgs(cmdcProfile, "Fork task", [], mockConfig, { parentNativeSessionId: sessId, fork: true });
+	assert.ok(forked.args.includes("--session"));
+	assert.equal(forked.args[forked.args.indexOf("--session") + 1], sessId);
+	assert.ok(forked.args.includes("--fork-session"));
+
+	// Fork: Branch without parentNativeSessionId (MUST NOT include --session or --fork-session)
+	const forkedDegraded = buildWorkerArgs(cmdcProfile, "Fork task degraded", [], mockConfig, { parentSessionId: sessId, fork: true });
+	assert.ok(!forkedDegraded.args.includes("--session"));
+	assert.ok(!forkedDegraded.args.includes("--fork-session"));
 });
 
 test("aliasToUuid maps non-UUID aliases deterministically to valid UUIDv4 strings", () => {

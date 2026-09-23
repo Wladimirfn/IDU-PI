@@ -226,6 +226,9 @@ async function runDaemon(): Promise<void> {
 				} else if (spec.harness === "antigravity" || spec.harness === "agy") {
 					const m = fullOutput.match(/"conversation_?id"\s*:\s*"([^"]+)"/i);
 					if (m) entry.nativeSessionId = m[1];
+				} else if (spec.harness === "commandcode" || spec.harness === "cmdc") {
+					const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
+					if (m) entry.nativeSessionId = m[1];
 				}
 			}
 			entry.lastActiveAt = record.completedAt;
