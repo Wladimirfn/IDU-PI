@@ -1,4 +1,4 @@
-export type HarnessEngine = "claude" | "opencode" | "pi" | "codex" | "kimi" | "qwen" | "antigravity" | string;
+export type HarnessEngine = "claude" | "opencode" | "pi" | "codex" | "kimi" | "qwen" | "antigravity" | "commandcode" | "cmdc" | string;
 
 export type PermissionLevel = "read-only" | "workspace" | string[];
 

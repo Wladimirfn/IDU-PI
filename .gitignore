@@ -26,6 +26,7 @@ escalation-delivery.json
 
 # Local runtime state / generated data
 /.codegraph/
+/.commandcode/
 /birth/
 data/
 reports/

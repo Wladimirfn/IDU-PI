@@ -90,8 +90,14 @@ export function buildWorkerArgs(
 	sessionOptions: BuildWorkerArgsOptions = {},
 ): BuiltCommandLine {
 	const harness = profile.harness.toLowerCase();
-	const cliDef = config.clis[harness] || (harness === "antigravity" ? config.clis["agy"] : undefined);
-	let command = cliDef?.command || (harness === "antigravity" ? "agy" : harness);
+	const cliDef =
+		config.clis[harness] ||
+		(harness === "antigravity" ? config.clis["agy"] : undefined) ||
+		(harness === "cmdc" ? config.clis["commandcode"] : undefined) ||
+		(harness === "commandcode" ? config.clis["cmdc"] : undefined);
+	let command =
+		cliDef?.command ||
+		(harness === "antigravity" ? "agy" : harness === "commandcode" ? "cmdc" : harness);
 
 	if ((command === "agy" || command === "antigravity") && !checkCliAvailable(command)) {
 		const localAgy = join(process.env.LOCALAPPDATA || "", "agy", "bin", process.platform === "win32" ? "agy.exe" : "agy");
@@ -261,6 +267,35 @@ export function buildWorkerArgs(
 			if (sessionOptions.isResumed && targetSession) {
 				args.push("--conversation", targetSession);
 			}
+			args.push("-p", fullMessage);
+			break;
+		}
+
+		case "commandcode":
+		case "cmdc": {
+			if (profile.model) {
+				args.push("-m", profile.model);
+			}
+			args.push("--output-format", "json");
+			if (hasWorkspacePermissions(profile)) {
+				args.push("--yolo");
+			}
+			args.push("--skip-onboarding");
+
+			// Command Code Session Handling:
+			// Turn 1: do not pass --session (starts fresh session)
+			// Fork: --session <targetParent> --fork-session
+			// Turn 2+ (resume): --session <targetSession>
+			// Note: cmdc throws if passed an unknown session ID (requires real transcript/id prefix).
+			// If nativeSessionId is not available, we do NOT pass --session (safe degraded fresh session).
+			const targetParent = sessionOptions.parentNativeSessionId;
+			const targetSession = sessionOptions.nativeSessionId;
+			if (sessionOptions.fork && targetParent) {
+				args.push("--session", targetParent, "--fork-session");
+			} else if (sessionOptions.isResumed && targetSession) {
+				args.push("--session", targetSession);
+			}
+
 			args.push("-p", fullMessage);
 			break;
 		}

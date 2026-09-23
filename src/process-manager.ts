@@ -292,10 +292,13 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 
 	const trimmed = stdout.trim();
 
-	// Try parsing NDJSON lines (OpenCode / Claude stream-json)
+	// Try parsing NDJSON lines (OpenCode / Claude stream-json / Command Code json)
 	const lines = trimmed.split("\n");
 	const assistantTexts: string[] = [];
 	let definitiveResult = "";
+	let cmdcStreamedText = "";
+	const normalizedHarness = harness.toLowerCase();
+	const isCmdc = normalizedHarness === "commandcode" || normalizedHarness === "cmdc";
 
 	for (const line of lines) {
 		const l = line.trim();
@@ -306,6 +309,24 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 			// Claude final result event has the highest priority
 			if (parsed.type === "result" && typeof parsed.result === "string" && parsed.result.trim()) {
 				definitiveResult = parsed.result.trim();
+			}
+
+			// Command Code (cmdc) final result event
+			if (parsed.type === "result") {
+				if (typeof parsed.finalText === "string" && parsed.finalText.trim()) {
+					definitiveResult = parsed.finalText.trim();
+				} else if (parsed.error && typeof parsed.error.message === "string" && parsed.error.message.trim()) {
+					definitiveResult = `Command Code error: ${parsed.error.message.trim()}`;
+				}
+			}
+
+			// Command Code (cmdc) event stream (run_end or text_delta)
+			if (parsed.type === "event" && parsed.event) {
+				if (parsed.event.type === "run_end" && typeof parsed.event.result?.finalText === "string" && parsed.event.result.finalText.trim()) {
+					definitiveResult = parsed.event.result.finalText.trim();
+				} else if (parsed.event.type === "text_delta" && typeof parsed.event.delta === "string") {
+					cmdcStreamedText += parsed.event.delta;
+				}
 			}
 
 			// Antigravity (agy) result events (stream-json or json)
@@ -347,6 +368,10 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 		}
 	}
 
+	if (cmdcStreamedText.trim()) {
+		assistantTexts.push(cmdcStreamedText.trim());
+	}
+
 	if (definitiveResult) {
 		return definitiveResult;
 	}
@@ -365,6 +390,11 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 		.replace(/^=== IDU RUN START:[^=]+===\s*[\r\n]+(?:[^\r\n]+[\r\n]+){1,6}={20,}[\r\n]+/i, "")
 		.replace(/[\r\n]+=== PROCESS (?:CLOSED|EXITED|ERROR)[^\r\n]*===[\r\n]*$/i, "")
 		.trim();
+
+	// If the harness is cmdc/commandcode, or output is an unparsed NDJSON stream, never leak raw NDJSON
+	if (isCmdc || (cleaned.startsWith("{") && cleaned.endsWith("}") && cleaned.includes("\n{"))) {
+		return "";
+	}
 
 	return cleaned;
 }

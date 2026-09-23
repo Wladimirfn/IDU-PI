@@ -123,6 +123,16 @@ export const DEFAULT_PROFILES: ProfilesConfig = {
 			idleTimeoutMs: 300000,
 			hardCapMs: 14400000,
 		},
+		commandcode: {
+			harness: "commandcode",
+			model: "deepseek/deepseek-v4.1-flash",
+			permissions: "workspace",
+			description: "Command Code CLI (cmdc --yolo) para implementacion delegada con sesiones continuas",
+			streams: false,
+			timeoutMs: 1800000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 7200000,
+		},
 	},
 };
 
@@ -140,6 +150,7 @@ const DEFAULT_CONFIG: IduConfig = {
 		kimi: { command: "kimi", argsTemplate: ["-p", "{task}"] },
 		qwen: { command: "qwen", argsTemplate: ["-p", "{task}"] },
 		antigravity: { command: "agy", argsTemplate: ["-p", "{task}"] },
+		commandcode: { command: "cmdc", argsTemplate: ["--output-format", "json", "--yolo", "--skip-onboarding", "-p", "{task}"] },
 	},
 	defaultTimeoutMs: 300_000,
 	maxConcurrentWorkers: 4,
