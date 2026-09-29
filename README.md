@@ -6,7 +6,10 @@
 
 **IDU Cross-CLI** es un router universal de terminales y arnés de calidad que permite a cualquier agente orquestador padre (**Claude Code**, **Pi**, **OpenCode** o **Antigravity**) delegar tareas a procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **Pi CLI**) mediante perfiles de costos/modelos bajo la estricta **ONE ORCHESTRATOR RULE**.
 
-Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas y cron loops) ha sido retirado y archivado de forma segura en `legacy_archive/`.
+Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas, AgentLab, Plan
+Maestro y cron loops) fue retirado. Su código está en el tag `legacy-archive-pre-purge` y ya
+no ocupa el árbol de trabajo; sus documentos de planificación se eliminaron por completo.
+Ver `docs/architecture.md` para la arquitectura vigente.
 
 ---
 
@@ -65,14 +68,35 @@ El servidor expone **13 herramientas de alto impacto** optimizadas para mínimo 
 
 ## Perfiles de Ejecución (`~/.idu/profiles.json`)
 
+Los perfiles no están-fixed en el repo: se cargan desde `~/.idu/profiles.json`, que **mergea
+sobre** los presets del proyecto. Para ver los perfiles efectivos de tu máquina:
+
+```bash
+pnpm run cli capabilities
+```
+
 | Perfil | CLI | Modelo | Timeout Trabajo | Inactividad (Idle) | Techo Máximo |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `architecture` | Claude Code | Claude 3.7 / Opus | 1 hora | 5 minutos | 4 horas |
-| `deep-refactor` | Claude Code | Claude 3.7 / Sonnet | 1 hora | 5 minutos | 4 horas |
-| `coding` | Codex CLI | GPT-5.6 Luna | 1 hora | N/A | 4 horas |
-| `cheap-explore` | OpenCode | MiniMax M3 | 30 minutos | 5 minutos | 2 horas |
-| `cheap-debug` | OpenCode | DeepSeek V4 Flash | 30 minutos | 5 minutos | 2 horas |
-| `fast` | Pi CLI | MiniMax M3 | 3 minutos | N/A | 3 minutos |
+| `architecture` | Claude Code | opus | 1 hora | 5 minutos | 4 horas |
+| `antigravity-advisory` | Antigravity (`agy`) | gemini-3.8-flash-high | 1 hora | 5 minutos | 4 horas |
+| `deep-refactor` | Claude Code | sonnet | 1 hora | 5 minutos | 4 horas |
+| `coding` | Codex CLI | gpt-5.6-luna | 1 hora | N/A | 4 horas |
+| `cheap-explore` | OpenCode | MiniMax-M3 | 30 minutos | 5 minutos | 2 horas |
+| `cheap-debug` | OpenCode | deepseek-v4-flash | 30 minutos | 5 minutos | 2 horas |
+| `commandcode` | Command Code (`cmdc`) | deepseek/deepseek-v4.1-flash | 30 minutos | 5 minutos | 2 horas |
+| `fast` | Pi CLI | MiniMax-M3 | 3 minutos | N/A | 3 minutos |
+| `kimi` | Kimi | (default del CLI) | 30 minutos | N/A | 2 horas |
+| `qwen` | Qwen | (default del CLI) | 30 minutos | N/A | 2 horas |
+| `antigravity` | Antigravity (`agy`) | gemini-3.8-flash-high | 30 minutos | 5 minutos | 2 horas |
+
+**El nombre del modelo es un pass-through opaco.** El arnés no lo valida ni lo normaliza: lo
+reenvía al CLI subyacente, que acepta cualquier identificador que entienda. Para usar un
+modelo distinto, agregá un perfil a `~/.idu/profiles.json` — no hace falta tocar código.
+
+> **Inactividad vs. streaming.** La columna "Inactividad" solo aplica a perfiles con
+> `streams: true`. En un perfil sin streaming, el único freno es el timeout total: el daemon no
+> corta por silencio aunque se declare `idleTimeoutMs`. Si delegás tareas largas a un perfil
+> así, sumale `streams: true` al perfil.
 
 ---
 
@@ -100,15 +124,20 @@ En `~/.config/opencode/opencode.jsonc`:
       "type": "local",
       "command": [
         "node",
-        "C:\\Users\\elmas\\pi-telegram-bridge\\dist\\src\\mcp-server.js"
+        "/ruta/absoluta/al/repo/dist/src/mcp-server.js"
       ],
-      "cwd": "C:\\Users\\elmas\\pi-telegram-bridge",
+      "cwd": "/ruta/absoluta/al/repo",
       "enabled": true,
       "timeout": 1800
     }
   }
 }
 ```
+
+Usá la **ruta absoluta**: un path relativo resuelve contra el cwd del cliente MCP, que no es el
+del proyecto. Antes de conectar, compilá con `pnpm build` — `dist/` no está versionado.
+
+Otras clientes: `docs/mcp-server.md`.
 
 ---
 
@@ -129,9 +158,15 @@ pnpm run cli preflight "Refactorizar autenticación" --cwd "C:/ruta/al/proyecto"
 # Delegar directamente a un worker desde la terminal
 pnpm run cli delegate "Auditar arquitectura del módulo IoT" --profile architecture
 
+# Esperar en silencio a un worker lanzado con async
+node dist/src/cli.js wait <run_id> --timeout 540000
+
 # Iniciar el servidor MCP por stdio
 pnpm run mcp
 ```
+
+`preflight` acepta `--cwd` (o `--working-dir`) y `--expected-files a,b`. Sin `--cwd` audita el
+directorio actual.
 
 ---
 
@@ -145,4 +180,6 @@ pnpm run build
 pnpm test
 ```
 
-Todas las 24 pruebas pasan al 100% cubriendo el arnés cross-cli, ciclo de vida de procesos, aislamiento de locks, watchdog de timeouts y herramientas MCP.
+La suite completa pasa al 100% y cubre el arnés cross-cli, el ciclo de vida de procesos, el
+aislamiento de locks, el watchdog de timeouts, el contrato de las 13 herramientas MCP y la
+ausencia de drift entre este README y los perfiles reales del código.

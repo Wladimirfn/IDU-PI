@@ -128,12 +128,22 @@ export function runPreflight(input: PreflightInput): PreflightResult {
 				? "medium"
 				: "low";
 
-	const advisory =
-		risk === "low"
-			? "Working tree is clean. Low risk change; safe to proceed."
-			: risk === "medium"
-				? `Working tree has ${dirtyFiles.length} uncommitted file(s). Review git status before applying refactors.`
-				: `High risk: large uncommitted set (${dirtyFiles.length} files) or destructive mode. Stash or commit before proceeding.`;
+	const causes: string[] = [];
+	if (dirtyFiles.length > 15) causes.push(`large uncommitted set (${dirtyFiles.length} files)`);
+	if (changeMode === "destructive") causes.push("destructive change mode");
+
+	let advisory: string;
+	if (risk === "low") {
+		advisory = "Working tree is clean. Low risk change; safe to proceed.";
+	} else if (risk === "medium") {
+		advisory = `Working tree has ${dirtyFiles.length} uncommitted file(s). Review git status before applying refactors.`;
+	} else if (dirtyFiles.length > 15) {
+		advisory = `High risk: ${causes.join(" and ")}. Stash or commit before proceeding.`;
+	} else {
+		// Tree is clean but the mode is destructive. Saying "large uncommitted
+		// set (0 files)" here is self-contradictory and hides the real reason.
+		advisory = "High risk: destructive change mode. This deletes or replaces existing behavior; confirm scope before proceeding.";
+	}
 
 	return {
 		okToProceed: risk !== "high",

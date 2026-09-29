@@ -165,8 +165,37 @@ async function main(): Promise<void> {
 		}
 
 		case "preflight": {
-			const request = args.slice(1).join(" ") || "General check";
-			const result = runPreflight({ request });
+			let workingDirIndex = args.indexOf("--working-dir");
+			if (workingDirIndex === -1) workingDirIndex = args.indexOf("--cwd");
+			const workingDir =
+				workingDirIndex !== -1 && args[workingDirIndex + 1] ? args[workingDirIndex + 1] : undefined;
+
+			const expectedIndex = args.indexOf("--expected-files");
+			const expectedFiles =
+				expectedIndex !== -1 && args[expectedIndex + 1]
+					? args[expectedIndex + 1]
+							.split(",")
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: [];
+
+			// Flags must be stripped from the request text. Previously --cwd was
+			// swallowed into the request string and the audit silently ran against
+			// process.cwd() while reporting the foreign path as if it were honored.
+			const flagsToFilter = new Set([
+				workingDirIndex,
+				workingDirIndex !== -1 ? workingDirIndex + 1 : -1,
+				expectedIndex,
+				expectedIndex !== -1 ? expectedIndex + 1 : -1,
+			]);
+
+			const request =
+				args
+					.slice(1)
+					.filter((_, i) => !flagsToFilter.has(i + 1))
+					.join(" ") || "General check";
+
+			const result = runPreflight({ request, expectedFiles, cwd: workingDir });
 			console.log(JSON.stringify(result, null, 2));
 			break;
 		}
@@ -244,7 +273,8 @@ async function main(): Promise<void> {
 			console.log("  idu wait <runId> [--follow]             Wait for background run (with optional live streaming)");
 			console.log("  idu sessions                            Display session hierarchy tree");
 			console.log("  idu capabilities                        Print JSON capabilities");
-			console.log("  idu preflight <request>                 Run preflight safety check");
+			console.log("  idu preflight <request> [--cwd <dir>]   Run preflight safety check");
+			console.log("  idu preflight <r> --expected-files <a,b>  Declare expected blast radius");
 			console.log("  idu delegate <task> --profile <p>       Directly delegate to a worker");
 			console.log("  idu delegate <task> --session <id>      Resume an existing session");
 			console.log("  idu delegate <task> --session <id> --fork Branch a child session");

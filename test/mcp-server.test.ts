@@ -255,3 +255,97 @@ test("MCP idu_delegate and idu_worker_wait descriptions mandate silent 540s wait
 	assert.ok(!waitTool.description.includes("--follow"), "idu_worker_wait description must not suggest --follow");
 });
 
+test("Docs Guard: README profile table matches DEFAULT_PROFILES exactly (zero drift)", async () => {
+	const { DEFAULT_PROFILES } = await import("../src/config.js");
+	const { readFileSync } = await import("node:fs");
+	const { resolve } = await import("node:path");
+
+	const readme = readFileSync(resolve("README.md"), "utf8");
+	const section = readme.match(/## Perfiles de Ejecución[\s\S]*?(?=\n## )/);
+	assert.ok(section, "README must contain a '## Perfiles de Ejecución' section");
+
+	const documented = Array.from(section![0].matchAll(/^\|\s*`([a-z0-9-]+)`\s*\|/gim)).map((m) => m[1]);
+	const actual = Object.keys(DEFAULT_PROFILES.profiles);
+
+	assert.ok(documented.length > 0, "README profile table must list at least one profile");
+	assert.deepEqual(
+		[...documented].sort(),
+		[...actual].sort(),
+		`README profile table is out of sync with DEFAULT_PROFILES.\n  documented: ${documented.join(", ")}\n  in code:     ${actual.join(", ")}\nAdd or remove the profile in both places.`,
+	);
+});
+
+test("Regression: idu preflight --cwd is honored and never swallowed into the request text", async () => {
+	const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+	const { join, resolve } = await import("node:path");
+	const { tmpdir } = await import("node:os");
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const execFileAsync = promisify(execFile);
+
+	const cliPath = resolve("dist/src/cli.js");
+	const repoRoot = resolve(".");
+
+	// A throwaway git repo with exactly one untracked file.
+	const target = mkdtempSync(join(tmpdir(), "idu-preflight-cwd-"));
+	try {
+		await execFileAsync("git", ["init", "-q"], { cwd: target });
+		writeFileSync(join(target, "only-dirty-file.txt"), "dirty\n", "utf8");
+
+		// Run from the repo root (a clean tree) but target the dirty temp repo.
+		// Before the fix, --cwd was absorbed into the request string and the
+		// audit silently ran against the repo root, reporting success anyway.
+		const { stdout } = await execFileAsync(
+			process.execPath,
+			[cliPath, "preflight", "Tarea de prueba", "--cwd", target],
+			{ cwd: repoRoot },
+		);
+		const parsed = JSON.parse(stdout);
+
+		assert.ok(
+			!parsed.request.includes("--cwd"),
+			`--cwd must not leak into the request text (got: ${parsed.request})`,
+		);
+		assert.equal(parsed.request, "Tarea de prueba");
+		assert.equal(
+			parsed.uncommittedCount,
+			1,
+			"preflight must inspect the --cwd target, not the invoking directory",
+		);
+		assert.deepEqual(parsed.uncommittedFiles, ["?? only-dirty-file.txt"]);
+	} finally {
+		try { rmSync(target, { recursive: true, force: true }); } catch {}
+	}
+});
+
+test("Regression: destructive preflight on a clean tree does not claim a phantom uncommitted set", async () => {
+	const { runPreflight } = await import("../src/quality.js");
+	const { mkdtempSync, rmSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const { tmpdir } = await import("node:os");
+	const { execFile } = await import("node:child_process");
+	const { promisify } = await import("node:util");
+	const execFileAsync = promisify(execFile);
+
+	// git init is required: a bare temp dir would be absorbed by whatever
+	// repository encloses it (git searches parent directories), and the
+	// assertion below would then measure that repo instead of a clean tree.
+	const scratch = mkdtempSync(join(tmpdir(), "idu-preflight-destructive-"));
+	try {
+		await execFileAsync("git", ["init", "-q"], { cwd: scratch });
+		const res = runPreflight({ request: "Borrar cosas", changeMode: "destructive", cwd: scratch });
+		assert.equal(res.risk, "high");
+		assert.equal(res.uncommittedCount, 0);
+		assert.ok(
+			res.advisory.includes("destructive change mode"),
+			`advisory must name the real cause; got: ${res.advisory}`,
+		);
+		assert.ok(
+			!res.advisory.includes("(0 files)"),
+			"advisory must not report a 0-file uncommitted set as a cause of high risk",
+		);
+	} finally {
+		try { rmSync(scratch, { recursive: true, force: true }); } catch {}
+	}
+});
+
