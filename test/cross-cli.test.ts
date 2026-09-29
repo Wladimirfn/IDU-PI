@@ -202,6 +202,24 @@ test("unwrapCmdExecutable unwraps Windows npm cmd wrappers to direct executables
 		assert.equal(resAgent.command, serverExe);
 		assert.equal(resAgent.isShell, false);
 		assert.deepEqual(resAgent.args, ["agentapi", "new-conversation", "prompt"]);
+
+		// 4. npm shim whose entry point is an ES module (e.g. Command Code's `index.mjs`). Falling back
+		// to the shell here splits a multi-word prompt into separate arguments.
+		const scriptMjs = join(tempDir, "node_modules", "tool", "dist", "index.mjs");
+		const { mkdirSync } = await import("node:fs");
+		mkdirSync(join(tempDir, "node_modules", "tool", "dist"), { recursive: true });
+		writeFileSync(scriptMjs, "");
+		const mjsCmd = join(tempDir, "mjs-tool.cmd");
+		writeFileSync(
+			mjsCmd,
+			`@ECHO off\r\nIF EXIST "%dp0%\\node.exe" (\r\n  SET "_prog=%dp0%\\node.exe"\r\n)\r\n` +
+				`endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\tool\\dist\\index.mjs" %*\r\n`,
+		);
+
+		const resMjs = unwrapCmdExecutable(mjsCmd, ["-p", "two words"]);
+		assert.equal(resMjs.command, process.execPath);
+		assert.equal(resMjs.isShell, false);
+		assert.deepEqual(resMjs.args, [scriptMjs, "-p", "two words"]);
 	} finally {
 		rmSync(tempDir, { recursive: true, force: true });
 	}
