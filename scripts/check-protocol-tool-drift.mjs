@@ -35,20 +35,23 @@ const DEPLOYED_PROTOCOLS = [
 // name here is a decision ("the orchestrator should not reach for this"),
 // not a way to silence the check. Keep it sorted.
 //
-// This set is the ratchet for #434. The list was frozen on 2026-08-03 with
-// 66 entries — the entire documented-vs-registered gap at that moment. Any
-// new tool that registers without being documented AND without being added
-// here will fail CI under --strict-coverage. The list can only shrink (a
-// tool becomes documented and is removed); it cannot grow during normal
-// maintenance. Retiring a registry entry is fine: the staleAllowlist check
-// at the bottom will print a warning to remove it.
+// Registered tools the protocol intentionally does not document. The list was
+// frozen on 2026-08-03 and emptied by the post-v2.1.0 purge: every tool that
+// used to be registered but undocumented is gone, and the surviving 13 are all
+// documented. Keep it empty unless a tool is deliberately withheld, and say
+// why. It can only shrink; it cannot grow during normal maintenance. A retired
+// entry is fine: the staleAllowlist check at the bottom warns to remove it.
 const INTENTIONALLY_UNDOCUMENTED = new Set([]);
 
-// Matches the registration call in both its single-line and wrapped forms:
-//   tool("idu_status", "...", {
-//   tool(
-//     "idu_status",
-const REGISTRATION = /\btool\(\s*["'`](idu_[a-z0-9_]+)["'`]/g;
+// Matches the tool registry as it is declared today: the TOOLS array of tool
+// definition objects in src/mcp-server.ts.
+//   export const TOOLS = [
+//     {
+//       name: "idu_status",
+// The anchor is the `name:` key inside a definition object, not a call
+// expression, so it cannot collide with the dispatcher's
+// `if (name === "idu_status")` comparisons further down the same file.
+const REGISTRATION = /^[ \t]*name:[ \t]*["'`](idu_[a-z0-9_]+)["'`]/gm;
 // Any base name mentioned in the protocol, including the harness-prefixed
 // spellings (mcp__idu-pi__idu_status, idu-pi_idu_status) which both end in
 // the base name.

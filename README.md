@@ -7,9 +7,15 @@
 **IDU Cross-CLI** es un router universal de terminales y arnés de calidad que permite a cualquier agente orquestador padre (**Claude Code**, **Pi**, **OpenCode** o **Antigravity**) delegar tareas a procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **Pi CLI**) mediante perfiles de costos/modelos bajo la estricta **ONE ORCHESTRATOR RULE**.
 
 Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas, AgentLab, Plan
-Maestro y cron loops) fue retirado. Su código está en el tag `legacy-archive-pre-purge` y ya
-no ocupa el árbol de trabajo; sus documentos de planificación se eliminaron por completo.
-Ver `docs/architecture.md` para la arquitectura vigente.
+Maestro y cron loops) fue retirado en dos pasos: primero en el commit `92f8380` y después con
+la purga de vestigios que borró los 15 perfiles de `config/profiles/` y los 14 scripts del
+cron `supervisor-tick` y de un solo uso que quedaban colgados. Su código está en el tag
+`legacy-archive-pre-purge` y ya no ocupa el árbol de trabajo; sus documentos de planificación
+se eliminaron por completo. Ver `docs/architecture.md` para la arquitectura vigente.
+
+> **Nombre de la carpeta.** El repositorio se llama `idu-cross-cli` (mismo `name` de
+> `package.json`). Si tu clon todavía vive en un directorio llamado `pi-telegram-bridge`, es
+> un nombre histórico: renómbralo y actualiza la ruta absoluta que declara tu cliente MCP.
 
 ---
 
@@ -178,7 +184,17 @@ pnpm run build
 
 # Ejecutar suite de pruebas unitarias
 pnpm test
+
+# Suite completa + guardas de deriva e higiene del repo
+pnpm run verify
 ```
+
+| Script | Qué comprueba |
+| :--- | :--- |
+| `pnpm test` | 49 pruebas unitarias: arnés cross-cli, ciclo de vida de procesos, locks, watchdog y contrato de las 13 herramientas MCP. |
+| `pnpm run test:guarded` | La misma suite envuelta en `scripts/run-tests-with-leak-guard.mjs`, que falla si los tests dejan archivos nuevos en el temp. |
+| `pnpm run test:protocol-drift` | Que el SKILL.md del protocolo documente exactamente las 13 herramientas canónicas, sin fantasmas. |
+| `pnpm run test:repo-hygiene` | Que las pruebas no filtren estado a la raíz del repo. |
 
 La suite completa pasa al 100% y cubre el arnés cross-cli, el ciclo de vida de procesos, el
 aislamiento de locks, el watchdog de timeouts, el contrato de las 13 herramientas MCP y la
