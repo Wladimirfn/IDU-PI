@@ -1,432 +1,141 @@
-# Arquitectura de Idu-pi
+# Arquitectura de IDU Cross-CLI
 
-Idu-pi está organizado como core de supervisión más adaptadores.
+`idu-cross-cli` es un router universal de terminales y arnés de calidad. Permite que un
+orquestador padre (**Claude Code**, **Pi**, **OpenCode**, **Antigravity**) delegue tareas a
+procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **Pi CLI**,
+**Kimi**, **Qwen**, **agy**, **cmdc**) mediante perfiles de costo/modelo, bajo la
+**ONE ORCHESTRATOR RULE**.
 
-Principio central:
-
-```text
-Adapters llaman core.
-Core no depende de Telegram.
-Telegram no debe contener lógica de negocio duplicada.
-```
+> **Nota de alcance.** Este documento describe el sistema que existe hoy. El bot de Telegram,
+> el módulo AgentLab, el Plan Maestro, el supervisor loop y el sistema de semantic memory que
+> aparecen en el historial del repositorio fueron retirados; su código quedó en
+> `legacy_archive/` hasta la purga de v2.1.1 y sus documentos en `docs/superpowers/`. No
+> reintroducirlos desde ahí.
 
 ## Vista general
 
 ```text
-CLI adapter ───────┐
-Telegram adapter ──┼── Core Idu-pi ── reports/ ── lab.db
-MCP adapter ───────┤        │
-Pi slash commands ─┘        │
-                            ├── Project Core / Constitution / Flows
-                            ├── Supervisor Loop / Hooks
-                            ├── Semantic Audit / Compaction
-                            ├── Learning Rules / Proposals
-                            └── AgentLab Contract / Requests / Runs / Consolidation
+Orquestador padre (Claude Code / Pi / OpenCode / Antigravity)
+        │
+        │  MCP (stdio, 13 herramientas)   ó   CLI directa
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│  process-manager.ts — CrossCliProcessManager (singleton)       │
+│  · validación de perfil y guardas de gobernanza                 │
+│  · tríada de sesiones  · locks · árbol de sesiones             │
+└───────────────────────────────────────────────────────────────┘
+        │  escribe spec.json, spawpea daemon desligado
+        ▼
+┌───────────────────────────────────────────────────────────────┐
+│  runner.ts — daemon watchdog (proceso Node independiente)      │
+│  · spawpea el worker real (claude / pi / codex / …)            │
+│  · watchdog adaptativo: hard cap + inactividad + gracia        │
+│  · escribe logs/ y sessions/, actualiza el árbol de sesiones   │
+└───────────────────────────────────────────────────────────────┘
+        │
+        ▼
+   Worker CLI real  ──stdout/stderr──▶  logs/<runId>.log
 ```
+
+El orquestador **no** espera al worker: escribe un spec, lanza un daemon desligado y sondea el
+estado en disco. Si el orquestador muere, el worker sigue vivo.
 
 ## Capas
 
-| Capa | Responsabilidad |
-| --- | --- |
-| Adaptadores | Traducen comandos de CLI, Telegram, MCP o Pi slash hacia funciones core. |
-| Core | Implementa reglas, validaciones, reportes, propuestas y consolidación. |
-| Persistencia | Guarda reports JSON/JSONL y DB SQLite local, aislados por proyecto enrolado. |
-| Workspaces | Aíslan AgentLabs y perfiles no-default en clones. |
-| Pi RPC | Mantiene sesión de agente local y reenvía UI requests. |
+| Capa | Módulo | Responsabilidad |
+| --- | --- | --- |
+| Transporte MCP | `mcp-server.ts` | Servidor stdio, 13 herramientas, JSON-RPC por líneas, validación estricta de esquema. |
+| Transporte CLI | `cli.ts` | `status`, `result`, `wait`, `capabilities`, `preflight`, `sessions`, `delegate`. |
+| Orquestación | `process-manager.ts` | `CrossCliProcessManager`: guardas, sesiones, locks, árbol, construcción del spec. |
+| Ejecución | `runner.ts` | Daemon que posee el proceso hijo, el watchdog y el cierre del registro. |
+| Construcción de argv | `cmdline.ts` | Un `case` por harness + unwrapper de wrappers `.cmd`/`.bat` de Windows. |
+| Calidad | `quality.ts` | `runPreflight` (riesgo) y `runPostflight` (blast radius). |
+| Configuración | `config.ts` | Perfiles por defecto, config, rutas de `~/.idu`. |
+| Ledger | `decision-ledger.ts` | Registro durable de decisiones y auditorías de postflight. |
 
-## Adaptador CLI
+## Ciclo de una delegación
 
-Archivo principal:
+1. **Guardas.** Se validan, en orden: ONE ORCHESTRATOR RULE (no recursión), existencia del
+   perfil, y el guard de Work Unit SDD (ver abajo).
+2. **Sesión.** Se resuelve la tríada: identificador nuevo, `resume` de una sesión existente, o
+   `fork` que ramifica desde un padre.
+3. **Lock.** Se toma un lock atómico de sesión; una sesión viva no puede correr en paralelo.
+4. **Spec.** Se escribe `~/.idu/runtime/<runId>.spec.json` y el registro inicial en
+   `~/.idu/sessions/<runId>.json`.
+5. **Daemon.** Se spawpea `runner.js` con `detached: true` + `unref()`.
+6. **Watchdog.** El daemon sondea el tamaño del log cada 3 s y aplica los límites (§ Watchdog).
+7. **Cierre.** El daemon escribe el resumen limpio, actualiza `sessions/tree.json`, borra lock,
+   pid y spec, y termina.
 
-```text
-src/cli.ts
-```
+Un `runId` tiene la forma `IDU-<YYYYMMDDHHMMSS>-<perfil>-<rand>`.
 
-Responsabilidades:
+## Watchdog adaptativo
 
-- parsear comandos `idu-pi ...`;
-- construir runtime local;
-- resolver proyecto activo;
-- llamar funciones core;
-- formatear salida para terminal;
-- compartir `AGENT_WORKSPACE_ROOT` y registry con Telegram.
+El daemon no confía en un `setTimeout` ciego: usa el crecimiento del archivo de log como proxy de
+actividad. Tres límites, evaluados en cada tick de 3 s:
 
-El CLI no debe duplicar lógica de negocio. Debe llamar módulos como `project-preflight`, `semantic-audit-command`, `agentlab-review-runner` o `agentlab-report-consolidation`.
+| Límite | Condición | Semántica |
+| --- | --- | --- |
+| `hardCapMs` | tiempo total desde el arranque | Techo absoluto. `0` lo desactiva. |
+| `idleTimeoutMs` | inactividad **después** del primer byte | Solo aplica si el perfil tiene `streams: true`. |
+| `startupGraceMs` | inactividad **antes** del primer byte | Da margen de arranque (por defecto `max(idle, 120s)`). |
+| `timeoutMs` | tiempo total | Solo para perfiles **sin** `streams`. |
 
-## Adaptador MCP
+> **Trampa conocida.** Un perfil con `streams: false` nunca recibe corte por inactividad,
+> aunque declare `idleTimeoutMs`. Solo lo detiene `timeoutMs` o `hardCapMs`. Si querés que una
+> tarea larga de Pi se proteja contra silencios, el perfil necesita `streams: true`.
 
-Archivo principal:
+Al vencer un límite se mata el árbol de procesos y se esperan 10 s antes de cerrar el registro
+como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint`.
 
-```text
-src/mcp-server.ts
-```
+## Guardas de gobernanza
 
-Responsabilidades:
+- **ONE ORCHESTRATOR RULE.** El worker se lanza con `IDU_WORKER=true` y
+  `IDU_ALLOW_DELEGATION=false`. Un worker que intente delegar hacia adentro recibe un error.
+- **Guard de Work Unit SDD.** Si el perfil tiene `permissions: "workspace"` y hay un intento SDD
+  activo en `openspec/changes` (o el prompt menciona `sdd-apply` / `WU…`), la delegación se
+  bloquea. La implementación primaria la hace el orquestador activo; los workers externos son
+  consultivos.
+- **Permisos fail-closed.** `buildWorkerArgs` solo bypasea sandbox con el valor exacto
+  `permissions === "workspace"`. Un valor mal escrito no bypasea.
 
-- exponer herramientas MCP stdio para el orquestador;
-- resolver `projectPath` explícito o proyecto activo;
-- reutilizar el runtime/core del CLI sin importar Telegram;
-- devolver JSON estructurado con `ok`, `tool`, `projectId`, `summary`, `data`, `safeNotes` y `errors`;
-- mantener seguridad: sin commit/push, sin cambios críticos automáticos y sin AgentLabs salvo `idu_agentlab_review_run` explícito.
+## Sesiones y concurrencia
 
-Después de un Plan Maestro aprobado, el MCP ofrece un loop preventivo para el orquestador: snapshot del plan, acción candidata advisory, paquete para subagentes normales, governance-review antes de codificar, postflight trazado y AgentLabs audit-only sólo si el orquestador los ejecuta explícitamente. Idu-pi no implementa ni reemplaza la decisión del orquestador.
+- **Tríada universal:** identificador nuevo, `resume` de sesión existente, `fork` desde un padre.
+  Cada CLI lo expresa con flags distintos (`--session-id`/`--resume`/`--fork-session`,
+  `--session`/`--fork`, `--conversation`, …); `cmdline.ts` traduce.
+- **Alias a UUID:** para Claude, un alias no-UUID se mapea a un UUIDv4 determinista
+  (`aliasToUuid`), de modo que la misma conversación siempre resuelve al mismo identificador.
+- **Lock atómico:** `openSync(path, "wx")` sobre
+  `~/.idu/locks/sess_<hash-cwd8>_<sessionId>.lock`. El PID se valida antes de robar un lock; en
+  Windows, `EPERM` significa proceso **vivo** con otra elevación y el lock nunca se roba. Un lock
+  con PID muerto se reclama automáticamente, y uno corrupto se elimina y se reintenta.
+- **Árbol de sesiones:** `~/.idu/sessions/tree.json`, escrito de forma atómica
+  (tmp + `rename`), con `turnCount` y lista de runs por sesión.
 
-Guía: [MCP Server](mcp-server.md).
-
-## Adaptador Telegram
-
-Archivos principales:
-
-```text
-src/index.ts
-src/command-catalog.ts
-src/telegram-command-registry.ts
-```
-
-Responsabilidades:
-
-- registrar comandos slash;
-- responder mensajes;
-- mostrar catálogos;
-- reenviar confirmaciones/selecciones de Pi;
-- llamar funciones core;
-- mantener experiencia cómoda desde chat.
-
-Telegram es una interfaz. No es el núcleo de Idu-pi.
-
-## Catálogo de comandos
-
-`src/command-catalog.ts` es la fuente para:
-
-- `/help`;
-- `/comandos`;
-- BotFather `setMyCommands`;
-- comandos locales de referencia.
-
-Cuando se agrega un comando visible, el catálogo y `src/telegram-command-registry.ts` deben mantenerse alineados.
-
-## Installer y estado por proyecto
-
-`idu-pi setup` configura adapters globales como MCP. `idu-pi project enroll <path>` registra un proyecto y crea estado aislado bajo:
+## Estado en disco (`~/.idu`)
 
 ```text
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/
+config.json          configuración de CLIs y de la ONE ORCHESTRATOR RULE
+profiles.json        perfiles del usuario (mergean sobre los del proyecto)
+runtime/             <runId>.spec.json, .pid, .runner.pid  (efímeros)
+sessions/            <runId>.json (registro) + tree.json
+locks/               sess_*.lock
+logs/                <runId>.log  (stdout+stderr crudo del worker)
+decision_ledger.json decisiones y auditorías de postflight
 ```
 
-Guía: [Instalador y estado por proyecto](installer.md).
-
-## Reports
-
-Para proyectos enrolados, los artifacts revisables se guardan bajo:
-
-```text
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/reports/
-```
-
-Por compatibilidad, proyectos existentes sin `stateRoot` siguen usando:
-
-```text
-AGENT_WORKSPACE_ROOT/reports/
-```
-
-Ejemplos:
-
-| Archivo | Rol |
-| --- | --- |
-| `lab-runs.jsonl` | Reportes de labs. |
-| `lab.db` | SQLite local para tracking estructurado. |
-| `semantic-compaction-draft-*.json` | Drafts de compactación. |
-| `supervisor-improvement-proposals-*.json` | Propuestas de mejora. |
-| `skill-improvement-proposals-*.json` | Propuestas de skills. |
-| `skill-draft-*.json` | Drafts de skills, no skills reales. |
-| `agentlabs/requests/current.json` | Solicitud formal AgentLab actual. |
-| `agentlabs/runs/current.json` | Resultado AgentLab review-only actual. |
-| `agentlabs/reports/consolidated-current.json` | Consolidación actual de reportes AgentLab. |
-| `context-quality-events.jsonl` | Señales locales de calidad de contexto derivadas de context packs; no guarda prompts/docs crudos ni mide tokens/costo/% contexto. |
-| `master-plan.json` / `master-plan.md` | Plan Maestro canónico vivo generado por AutoDepth/Supervisor. |
-| `project-index.json` | Índice Supervisor del proyecto: tipos, áreas funcionales y ruido ignorado. |
-
-`reports/` queda como staging/revisión y fallback legacy. AgentLabs dejan artefactos en `agentlabs/`; sólo el Supervisor actualiza el Plan Maestro canónico.
-
-## SQLite / lab DB
-
-La DB local vive normalmente en estado aislado:
-
-```text
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/lab.db
-```
-
-Por compatibilidad, proyectos existentes sin estado enrolado pueden seguir usando:
-
-```text
-AGENT_WORKSPACE_ROOT/reports/lab.db
-```
-
-Se usa para:
-
-- lab runs;
-- findings;
-- proposals;
-- tasks;
-- user signal events;
-- semantic audit counters;
-- semantic memory item metadata.
-
-La DB complementa a los JSON/JSONL. No reemplaza la aprobación humana.
-
-## Project Core
-
-Project Core representa el plano maestro confirmado del proyecto.
-
-Módulos relacionados:
-
-```text
-src/project-core.ts
-src/project-core-wizard.ts
-src/project-core-research.ts
-src/project-core-confirmation.ts
-```
-
-Un draft puede venir de wizard o research. Sólo se vuelve fuente de verdad cuando el humano confirma.
-
-## Plan Maestro AutoDepth
-
-MASTER-PLAN-CONSOLIDADO-1 usa un Plan Maestro vivo y canónico en `stateRoot`:
-
-```text
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.json
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.md
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.current.json
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/master-plan.memory.json
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/project-index.json
-AGENT_WORKSPACE_ROOT/projects/<safeProjectId>/agentlabs/
-```
-
-`src/master-plan.ts` genera este draft de forma determinista con señales baratas del proyecto. AutoDepth decide `quick`, `standard` o `deep_required`; en `deep_required` ejecuta una etapa segura automática y marca que el deep review costoso requiere aprobación humana. AgentLabs quedan seleccionados como metadata/request recomendada, no se ejecutan automáticamente. Aprobar el Plan Maestro no aplica flows ni confirma Project Core/Constitution.
-
-El Plan Maestro también guarda `master-plan.pending-action.json` cuando hay draft pendiente, para permitir decisiones naturales acotadas como `ok`, `dale`, `sí` o `rehacer`. La memoria externa se consulta mediante una abstracción opcional; si no hay proveedor disponible, se usa `master-plan.memory.json` como fallback local o se marca `none/unavailable` sin bloquear la generación.
-
-## Constitution
-
-Constitution deriva reglas operativas desde Project Core confirmado.
-
-Módulo principal:
-
-```text
-src/project-constitution.ts
-```
-
-Se usa en gates para detectar riesgo, scope inválido, stack rechazado o necesidad de aprobación.
-
-## Project blueprint y flows
-
-Archivos project-local:
-
-```text
-config/project-blueprint.json
-config/project-flows.json
-```
-
-`project-blueprint` describe objetivo/reglas maestras.
-
-`project-flows` describe mapa funcional del proyecto real:
-
-- módulos;
-- pantallas;
-- UI elements;
-- dataStores;
-- flows;
-- conexiones entre módulos.
-
-Más detalle: [`project-map-workflow.md`](project-map-workflow.md).
-
-## Gates y riesgo
-
-Módulos típicos:
-
-```text
-src/project-preflight.ts
-src/project-advisory.ts
-src/project-postflight.ts
-src/human-intent.ts
-src/user-signal.ts
-```
-
-Evalúan:
-
-- intención humana;
-- keywords de riesgo;
-- cambios en archivos;
-- Project Core;
-- Constitution;
-- datos/auth/seguridad;
-- estado de configuración.
-
-## Supervisor Loop y Hooks
-
-Módulos:
-
-```text
-src/idu-supervisor-loop.ts
-src/idu-supervisor-hooks.ts
-src/idu-session.ts
-```
-
-El loop observa estado y puede preparar auditorías, drafts, propuestas o tareas.
-
-Los hooks reaccionan a eventos como activación de `/idu`, postflight de alto riesgo o umbrales semánticos.
-
-No deben aplicar cambios críticos automáticamente.
-
-## Living Loop Triggers
-
-Módulos:
-
-```text
-src/event-bus.ts                    — append/read JSONL en <stateRoot>/events.jsonl
-src/injection-store.ts              — append/read/ack en <stateRoot>/injections.jsonl
-src/trigger-engine.ts               — 3 disparadores: stuck_tasks_1h,
-                                      objective_reminder_hourly, intention_decision_pending
-src/trigger-engine-invocation.ts    — wrapper opt-in con env IDU_PI_TRIGGER_ENGINE=1
-src/autonomous-alert-engine-event-bridge.ts
-src/project-preflight-event-bridge.ts
-```
-
-El bus de eventos es append-only y aislado por `stateRoot` (no DB nueva). El trigger engine matchea eventos y construye envelopes de inyección. La invocación es opt-in y se hace desde el scheduler existente del bridge runtime (CLI: `runCliAutonomousAlertTick`); sin `setInterval` en el código del trigger engine. El orchestrator consume las inyecciones con `idu_pending_injections` y la metadata de los disparadores con `idu_subscribe_triggers`. Ver [`docs/living-loop-triggers.md`](living-loop-triggers.md).
-
-## Semantic Audit y Compaction
-
-Módulos:
-
-```text
-src/semantic-audit.ts
-src/semantic-audit-command.ts
-src/semantic-compaction.ts
-src/semantic-agent-tasks.ts
-src/context-pruning-advisory.ts
-src/external-source-registry.ts
-```
-
-Flujo:
-
-```text
-eventos → semantic audit → compaction draft → review → candidates/tasks/proposals
-```
-
-La compactación reduce ruido y prepara decisiones. No borra memoria ni aplica reglas sola.
-
-`context-pruning-advisory` agrega una vista read-only de deuda semántica: context bloat desde `context-quality-events.jsonl`, evidencia stale/missing de Source Library, digests faltantes/lectores bibliotecarios requeridos, planes/specs históricos y ruido de artefactos. Devuelve sólo señales, conteos, ids, rutas y metadata; no borra, no archiva fuentes, no refactoriza, no ejecuta AgentLabs y no promueve/degrada contratos.
-
-`external-source-registry` agrega un catálogo estático no-fetch para que Bibliotecario recomiende fuentes por tarea/dominio/lenguaje/framework antes de planificar. Separa `official_docs`, `academic_discovery`, `community_signal` y `blocked_or_manual`, con dominios transversales como `programming_structure`, `separation_of_concerns`, `security`, `civil_works`, `web`, `database`, `standards`, `academic` y `project_similarity`. Sirve para responder cómo se estructura un lenguaje/framework —por ejemplo HTML sin JS embebido, carpetas controladas y separación de responsabilidades— sin consultar web, guardar raw docs, importar Source Library, ejecutar AgentLabs ni promover contratos.
-
-`external-intelligence` agrega el primer loop controlado del Bibliotecario externo. Consulta sólo source IDs exactos/allowlist (`nodejs-releases`, `nextjs-releases`, `npm-advisories`), normaliza señales de ecosistema/seguridad/releases y escribe reportes bajo `stateRoot/reports/external-intelligence`. No acepta URLs arbitrarias, no guarda cuerpos crudos/headers/env/prompts/docs, no actualiza dependencias, no ejecuta AgentLabs, no promueve contratos y marca fuentes sin endpoint estable como `skipped` con limitación explícita.
-
-## Improvement proposals
-
-Módulos:
-
-```text
-src/supervisor-improvement-proposals.ts
-src/supervisor-improvement-decisions.ts
-src/skill-improvement-proposals.ts
-src/skill-improvement-decisions.ts
-src/skill-drafts.ts
-```
-
-Patrón:
-
-1. construir/revisar plan;
-2. guardar propuesta en `reports/`;
-3. registrar decisión humana;
-4. aplicar sólo si el tipo lo permite y está aprobado.
-
-## Learning Rules
-
-Módulo:
-
-```text
-src/supervisor-learning-rules.ts
-```
-
-Las reglas aprendidas se prueban, se habilitan/deshabilitan con backup y no pueden bajar riesgo alto de forma insegura.
-
-## AgentLab Contract
-
-Módulos:
-
-```text
-src/agentlab-supervisor-contract.ts
-src/agentlab-review-requests.ts
-src/agentlab-review-runner.ts
-src/agentlab-report-consolidation.ts
-```
-
-Flujo:
-
-```text
-request formal → review request → review run en clone → report → consolidation → candidates
-```
-
-Garantías:
-
-- solicitudes formales;
-- acciones permitidas/prohibidas explícitas;
-- review-only;
-- sandbox/clone;
-- guard contra mutaciones del repo real;
-- parsing limpio;
-- `workloadEnvelope` advisory-only en requests/runs/status para reportar carga, presupuesto y estados honestos (`requested`, `completed`, `partial`, `timed_out`, `stale`, `failed`) sin autorizar auto-run, escritura de repo real ni promoción de contratos;
-- planes `specialist-audit-plan` que dividen auditorías grandes en requests por especialidad con `specialtyWorkloadEnvelopes` y `explicitRunRequirement`, siempre sin ejecutar labs automáticamente;
-- requests bibliotecario `external-source-intelligence` alimentados por refs locales de Source Library/digests (`sourceId`, `chunkIds`, limitaciones) sin web/live fetch automático ni documentos/chunks crudos;
-- eventos locales de efectividad en `reports/agentlab-effectiveness-events.jsonl` para contar requests, runs, status, estados (`completed`, `partial`, `timed_out`, `stale`, `failed`, `security_violation`), hallazgos por severidad y completitud de evidencia sin prompts, texto crudo, env, headers, tokens, costo, porcentajes de contexto ni analytics remota;
-- eventos locales de calidad de contexto en `reports/context-quality-events.jsonl` derivados de `idu_supervisor_context_pack`, con ratings de compacto/relevante/ruido/completo y omisiones agregadas por razón, sin guardar prompts/docs crudos ni medir tokens/costo/% contexto;
-- reporte MCP read-only `idu_context_pruning_advisory` para deuda semántica/context pruning, sin guardar prompts/docs crudos, sin analytics remota, sin auto-delete y sin promoción/democión de contratos;
-- registry MCP `idu_external_source_recommend` para recomendar fuentes externas no-fetch por tarea/dominio/lenguaje/framework, incluyendo programming structure y project similarity, sin web libre, raw docs, Source Library import, AgentLab auto-run ni promoción de contratos;
-- reporte MCP `idu_external_intelligence_report` para inteligencia externa allowlist/stateRoot-only, sin web libre, sin raw bodies/docs, sin updates automáticos, sin AgentLab auto-run y sin promoción de contratos;
-- consolidación read-only.
-
-## AgentRouter y Pi RPC
-
-Módulos relacionados:
-
-```text
-src/agent-router.ts
-src/pi-rpc.ts
-```
-
-El router administra perfiles, sesiones persistentes y workspaces.
-
-El perfil default puede trabajar sobre repo real. Perfiles no-default se usan como labs en clone cuando `AGENT_WORKSPACE_MODE=clone`.
-
-## Workspaces
-
-```text
-AGENT_WORKSPACE_ROOT/workspaces/
-```
-
-Los labs deben inspeccionar y reportar desde clones. No deben commitear, pushear ni copiar cambios al repo real.
-
-## Prueba E2E del supervisor
-
-La aceptación integral vive en:
-
-```text
-test/idu-supervisor-e2e.test.ts
-```
-
-Esa prueba corre sin Telegram real, red ni IA externa. Usa temporales, mocks y reportes seguros para validar el ciclo:
-
-```text
-/idu → intención humana → guarded queue → semantic draft → proposals → learning rule → skill draft → AgentLab request/run → consolidation → loop inactive
-```
-
-También verifica que no se modifiquen repo real, `.agents`, `.atl`, Project Core, Constitution, blueprint/flows, `labPrompt` ni `AgentRouter`.
-
-## Reglas para futuras extensiones
-
-- Agregar lógica en módulos core, no dentro de handlers Telegram.
-- Mantener CLI y Telegram como adaptadores finos.
-- Escribir artifacts revisables en `reports/`.
-- Evitar cambios automáticos en Project Core, Constitution, flows o skills.
-- Usar tests de módulo para lógica y tests de wiring para comandos.
-- Repetir en salidas críticas: nada crítico se aplica sin confirmación humana.
+## Recoverencia de procesos muertos
+
+`getStatus()` detecta runs cuyo daemon y worker ya no existen. Si el log contiene la marca
+`=== PROCESS CLOSED WITH CODE n ===`, reconstruye el código de salida y el estado desde el
+log; si no, marca el run como `failed`. Esto evita que un run huérfano quede eternamente
+`running`.
+
+## Extinción
+
+Para agregar un harness nuevo basta con: una entrada en `DEFAULT_CONFIG.clis`, un `case` en
+`buildWorkerArgs` (más el parseo de `nativeSessionId` en `runner.ts` si expone sesiones
+nativas), y opcionalmente un perfil en `DEFAULT_PROFILES`. El modelo es un **pass-through
+opaco**: el harness no valida ni normaliza el nombre del modelo, lo que permite usar cualquier
+identificador que el CLI subyacente acepte.
