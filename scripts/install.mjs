@@ -246,7 +246,7 @@ function formatInstaller(detection, plan) {
 		"Seguridad:",
 		"- No ejecuta bootstrap remoto opaco ni scripts de dependencias.",
 		"- Usa pnpm-lock.yaml con --frozen-lockfile --ignore-scripts; pnpm puede descargar paquetes fijados desde el registry/cache configurado.",
-		"- No ejecuta Telegram ni AgentLabs.",
+		"- No lanza workers ni delega tareas: sólo instala el CLI y sus shims.",
 		"- No enrola proyectos ni crea Project Core.",
 		args.addPath
 			? "- PATH de usuario: se actualizará sólo porque pasaste --add-path."
