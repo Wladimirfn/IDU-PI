@@ -1,10 +1,10 @@
 # Arquitectura de IDU Cross-CLI
 
 `idu-cross-cli` es un router universal de terminales y arnés de calidad. Permite que un
-orquestador padre (**Claude Code**, **Pi**, **OpenCode**, **Antigravity**) delegue tareas a
-procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **Pi CLI**,
-**Kimi**, **Qwen**, **agy**, **cmdc**) mediante perfiles de costo/modelo, bajo la
-**ONE ORCHESTRATOR RULE**.
+orquestador padre (**Claude Code**, **Pi**, **OpenCode**, **Antigravity**, **minimax Code**)
+delegue tareas a procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**,
+**Pi CLI**, **minimax Code**, **Kimi**, **Qwen**, **agy**, **cmdc**) mediante perfiles de
+costo/modelo, bajo la **ONE ORCHESTRATOR RULE**.
 
 > **Nota de alcance.** Este documento describe el sistema que existe hoy. El bot de Telegram,
 > el módulo AgentLab, el Plan Maestro, el supervisor loop y el sistema de semantic memory que
@@ -16,7 +16,7 @@ procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **
 ## Vista general
 
 ```text
-Orquestador padre (Claude Code / Pi / OpenCode / Antigravity)
+Orquestador padre (Claude Code / Pi / OpenCode / Antigravity / minimax Code)
         │
         │  MCP (stdio, 13 herramientas)   ó   CLI directa
         ▼
