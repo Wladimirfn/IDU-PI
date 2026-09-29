@@ -306,6 +306,18 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 		try {
 			const parsed = JSON.parse(l);
 
+			// minimax Code (mcode exec) final result event. Its payload is
+			// a single JSON object, not an NDJSON stream, so without this
+			// branch the whole line would leak into the summary as raw JSON
+			// instead of the agent's answer.
+			if (parsed.type === "exec.result") {
+				if (typeof parsed.output === "string" && parsed.output.trim()) {
+					definitiveResult = parsed.output.trim();
+				} else if (typeof parsed.error === "string" && parsed.error.trim()) {
+					definitiveResult = `minimax Code error: ${parsed.error.trim()}`;
+				}
+			}
+
 			// Claude final result event has the highest priority
 			if (parsed.type === "result" && typeof parsed.result === "string" && parsed.result.trim()) {
 				definitiveResult = parsed.result.trim();

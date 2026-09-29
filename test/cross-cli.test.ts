@@ -44,6 +44,10 @@ const mockConfig: IduConfig = {
 			command: "cmdc.cmd",
 			argsTemplate: [],
 		},
+		mcode: {
+			command: "mcode.cmd",
+			argsTemplate: [],
+		},
 	},
 	defaultTimeoutMs: 10000,
 	maxConcurrentWorkers: 4,
@@ -277,6 +281,40 @@ test("extractCleanSummary extracts finalText from Command Code result JSON", () 
 	assert.equal(summary, "All implementation steps completed successfully.");
 });
 
+test("extractCleanSummary extracts the agent answer from a minimax Code exec.result object", () => {
+	// mcode exec emits ONE json object, not an NDJSON stream. Captured live
+	// from `mcode exec --output-format json` (2026-09-29).
+	const mcodeJson = JSON.stringify({
+		schemaVersion: 1,
+		type: "exec.result",
+		runId: "exec_turn_mun8i9to_24x3h4",
+		sessionId: "mvs_5866f6fb7f5640b7b4b9a3afd877e36c",
+		turnId: "turn_mun8i9to_24x3h4",
+		status: "succeeded",
+		output: "Refactor completo: 3 archivos, 49/49 tests verdes.",
+		model: { providerId: "minimax", modelId: "MiniMax-M3.1-Flash-Preview" },
+		usage: { inputTokens: 31501, outputTokens: 2, totalTokens: 31503 },
+		durationMs: 7768,
+	});
+
+	const summary = extractCleanSummary(mcodeJson, "mcode");
+	// Must be the agent's prose, never the serialized envelope.
+	assert.equal(summary, "Refactor completo: 3 archivos, 49/49 tests verdes.");
+	assert.ok(!summary.startsWith("{"), "raw exec.result JSON must never leak as the summary");
+});
+
+test("extractCleanSummary surfaces a minimax Code error instead of an empty summary", () => {
+	const mcodeError = JSON.stringify({
+		type: "exec.result",
+		status: "failed",
+		sessionId: "mvs_abc123",
+		error: "workspace permission denied",
+	});
+
+	const summary = extractCleanSummary(mcodeError, "mcode");
+	assert.equal(summary, "minimax Code error: workspace permission denied");
+});
+
 test("extractCleanSummary handles Command Code empty finalText and does not leak raw NDJSON", () => {
 	// Case 1: finalText is empty and text_delta has content
 	const cmdcDeltaOnly = [
@@ -438,6 +476,87 @@ test("Session Triad: buildWorkerArgs handles Command Code Turn 1, Turn 2 resume 
 	const forkedDegraded = buildWorkerArgs(cmdcProfile, "Fork task degraded", [], mockConfig, { parentSessionId: sessId, fork: true });
 	assert.ok(!forkedDegraded.args.includes("--session"));
 	assert.ok(!forkedDegraded.args.includes("--fork-session"));
+});
+
+test("buildWorkerArgs builds correct argv for minimax Code (mcode) as implementer", () => {
+	// Mirrors the real DEFAULT_PROFILES.mcode shape: full provider/model in
+	// `model` and NO separate `provider`. Declaring both would make
+	// buildWorkerArgs emit "minimax/minimax/MiniMax-...".
+	const profile: IduProfile = {
+		harness: "mcode",
+		model: "minimax/MiniMax-M3.1-Flash-Preview",
+		permissions: "workspace",
+	};
+	const { command, args } = buildWorkerArgs(profile, "Implementa el modulo", [], mockConfig);
+
+	assert.equal(command, "mcode.cmd");
+	assert.equal(args[0], "exec", "mcode must use the headless exec subcommand, not the TUI");
+	assert.ok(args.includes("--output-format"));
+	assert.equal(args[args.indexOf("--output-format") + 1], "json");
+
+	// The default policy is "smart", which prompts interactively and hangs a
+	// detached worker. Implementers must get "full" explicitly.
+	assert.ok(args.includes("--permission"));
+	assert.equal(args[args.indexOf("--permission") + 1], "full");
+
+	// A bare model is passed through; a provider-qualified one is not
+	// double-joined.
+	const model = args[args.indexOf("--model") + 1];
+	assert.equal(model, "minimax/MiniMax-M3.1-Flash-Preview");
+	assert.equal(model.split("/").length, 2, `model must not be provider-joined twice: ${model}`);
+
+	// Turn 1 must not pass --session.
+	assert.ok(!args.includes("--session"));
+	assert.equal(args[args.length - 1], "Implementa el modulo");
+});
+
+test("buildWorkerArgs joins provider and model at most once for minimax Code", () => {
+	// A profile that declares BOTH provider and a bare model must still
+	// produce a single provider prefix.
+	const profile: IduProfile = {
+		harness: "mcode",
+		provider: "minimax",
+		model: "MiniMax-M3.1-Flash-Preview",
+		permissions: "workspace",
+	};
+	const { args } = buildWorkerArgs(profile, "Task", [], mockConfig);
+	const model = args[args.indexOf("--model") + 1];
+	assert.equal(model, "minimax/MiniMax-M3.1-Flash-Preview");
+	assert.ok(!model.includes("minimax/minimax"), `double-joined model: ${model}`);
+});
+
+test("buildWorkerArgs gives minimax Code a read-only permission policy", () => {
+	const profile: IduProfile = { harness: "mcode", permissions: "read-only" };
+	const { args } = buildWorkerArgs(profile, "Audita esto", [], mockConfig);
+
+	assert.ok(args.includes("--permission"));
+	assert.equal(
+		args[args.indexOf("--permission") + 1],
+		"off",
+		"a read-only mcode worker must not be granted write access",
+	);
+});
+
+test("buildWorkerArgs resumes a minimax Code session and degrades safely on fork", () => {
+	const profile: IduProfile = { harness: "mcode", permissions: "workspace" };
+	const nativeId = "mvs_5866f6fb7f5640b7b4b9a3afd877e36c";
+
+	// Turn 2+: resumed with a verified native session id.
+	const turn2 = buildWorkerArgs(profile, "Continua", [], mockConfig, {
+		sessionId: nativeId,
+		nativeSessionId: nativeId,
+		isResumed: true,
+	});
+	assert.ok(turn2.args.includes("--session"));
+	assert.equal(turn2.args[turn2.args.indexOf("--session") + 1], nativeId);
+
+	// Fork: mcode exec has no fork flag, so a fork must start fresh rather
+	// than reusing the parent's session.
+	const forked = buildWorkerArgs(profile, "Fork", [], mockConfig, {
+		parentNativeSessionId: nativeId,
+		fork: true,
+	});
+	assert.ok(!forked.args.includes("--session"), "a forked mcode run must not reuse the parent session");
 });
 
 test("aliasToUuid maps non-UUID aliases deterministically to valid UUIDv4 strings", () => {

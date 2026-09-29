@@ -9,9 +9,53 @@ export interface ResolvedCommand {
 	isShell: boolean;
 }
 
+/**
+ * Locate a bare Windows command name on PATH, preferring the .cmd shim that
+ * npm installs. Returns null when nothing is found, so callers can fall back
+ * to their previous behaviour. Never throws.
+ */
+function resolveWindowsShim(cmdPath: string): string | null {
+	if (process.platform !== "win32" || cmdPath.includes("/") || cmdPath.includes("\\")) {
+		return null;
+	}
+	try {
+		const bare = `${cmdPath}.cmd`;
+		const bat = `${cmdPath}.bat`;
+		const out = execSync(`where ${bare}`, { stdio: ["ignore", "pipe", "ignore"] })
+			.toString()
+			.split(/\r?\n/)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		if (out.length > 0 && existsSync(out[0])) return out[0];
+		const outBat = execSync(`where ${bat}`, { stdio: ["ignore", "pipe", "ignore"] })
+			.toString()
+			.split(/\r?\n/)
+			.map((l) => l.trim())
+			.filter(Boolean);
+		if (outBat.length > 0 && existsSync(outBat[0])) return outBat[0];
+	} catch {
+		// not on PATH as a shim; caller decides what to do
+	}
+	return null;
+}
+
 export function unwrapCmdExecutable(cmdPath: string, args: string[]): ResolvedCommand {
 	if (process.platform !== "win32") {
 		return { command: cmdPath, args, isShell: false };
+	}
+
+	// A bare command name ("mcode", "claude") is not spawnable on Windows:
+	// npm installs these as .cmd shims, and spawn without a shell fails with
+	// ENOENT. If the bare name has no extension and is not directly
+	// executable, try the PATH shims before giving up. This keeps a default
+	// config working out of the box instead of requiring every user to
+	// hand-write absolute .cmd paths into ~/.idu/config.json.
+	const hasExtension = /\.[a-z0-9]+$/i.test(cmdPath);
+	if (!hasExtension && !existsSync(cmdPath)) {
+		const resolved = resolveWindowsShim(cmdPath);
+		if (resolved) {
+			return unwrapCmdExecutable(resolved, args);
+		}
 	}
 
 	const isCmd = cmdPath.toLowerCase().endsWith(".cmd") || cmdPath.toLowerCase().endsWith(".bat");
@@ -82,7 +126,6 @@ export interface BuildWorkerArgsOptions {
 function hasWorkspacePermissions(profile: IduProfile): boolean {
 	return profile.permissions === "workspace";
 }
-
 export function buildWorkerArgs(
 	profile: IduProfile,
 	task: string,
@@ -298,6 +341,36 @@ export function buildWorkerArgs(
 			}
 
 			args.push("-p", fullMessage);
+			break;
+		}
+
+		case "mcode":
+		case "minimax-code": {
+			args.push("exec");
+			args.push("--output-format", "json");
+
+			// mcode --permission accepts smart | full | off. The default is
+			// "smart", which asks for interactive confirmation and therefore
+			// HANGS a detached worker until the harness kills it. Always pass
+			// the policy explicitly: full for implementers, off for readers.
+			args.push("--permission", hasWorkspacePermissions(profile) ? "full" : "off");
+
+			if (profile.model) {
+				const fullModel = profile.provider ? `${profile.provider}/${profile.model}` : profile.model;
+				args.push("--model", fullModel);
+			}
+
+			// minimax Code Session Handling:
+			// Turn 1: do NOT pass --session (lets the CLI mint a fresh session).
+			// Turn 2+ (resume): --session <targetSession>
+			// Fork: mcode exec has no fork flag, so a fork degrades to a
+			// fresh session rather than branching the parent's history.
+			const targetSession = sessionOptions.nativeSessionId || sessionId;
+			if (!sessionOptions.fork && sessionOptions.isResumed && targetSession) {
+				args.push("--session", targetSession);
+			}
+
+			args.push(fullMessage);
 			break;
 		}
 

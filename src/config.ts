@@ -133,6 +133,19 @@ export const DEFAULT_PROFILES: ProfilesConfig = {
 			idleTimeoutMs: 300000,
 			hardCapMs: 7200000,
 		},
+		mcode: {
+			harness: "mcode",
+			// Full provider/model in `model`, no separate `provider` field:
+			// buildWorkerArgs joins them, so declaring both would produce
+			// "minimax/minimax/MiniMax-...". Same shape as `commandcode`.
+			model: "minimax/MiniMax-M3.1-Flash-Preview",
+			permissions: "workspace",
+			description: "minimax Code CLI (mcode exec) como segundo implementador, nativo a este protocolo",
+			streams: false,
+			timeoutMs: 1800000,
+			idleTimeoutMs: 300000,
+			hardCapMs: 7200000,
+		},
 	},
 };
 
@@ -151,6 +164,7 @@ const DEFAULT_CONFIG: IduConfig = {
 		qwen: { command: "qwen", argsTemplate: ["-p", "{task}"] },
 		antigravity: { command: "agy", argsTemplate: ["-p", "{task}"] },
 		commandcode: { command: "cmdc", argsTemplate: ["--output-format", "json", "--yolo", "--skip-onboarding", "-p", "{task}"] },
+		mcode: { command: "mcode", argsTemplate: ["exec", "--output-format", "json", "{task}"] },
 	},
 	defaultTimeoutMs: 300_000,
 	maxConcurrentWorkers: 4,

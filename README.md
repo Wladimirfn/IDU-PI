@@ -91,6 +91,7 @@ pnpm run cli capabilities
 | `cheap-debug` | OpenCode | deepseek-v4-flash | 30 minutos | 5 minutos | 2 horas |
 | `commandcode` | Command Code (`cmdc`) | deepseek/deepseek-v4.1-flash | 30 minutos | 5 minutos | 2 horas |
 | `fast` | Pi CLI | MiniMax-M3 | 3 minutos | N/A | 3 minutos |
+| `mcode` | minimax Code (`mcode`) | minimax/MiniMax-M3.1-Flash-Preview | 30 minutos | 5 minutos | 2 horas |
 | `kimi` | Kimi | (default del CLI) | 30 minutos | N/A | 2 horas |
 | `qwen` | Qwen | (default del CLI) | 30 minutos | N/A | 2 horas |
 | `antigravity` | Antigravity (`agy`) | gemini-3.8-flash-high | 30 minutos | 5 minutos | 2 horas |
