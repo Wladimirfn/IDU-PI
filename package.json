@@ -1,7 +1,7 @@
 {
   "name": "idu-cross-cli",
   "version": "2.1.0",
-  "description": "Cross-CLI Agent Router & Quality Harness for Claude Code, OpenCode, Pi, Codex and Antigravity",
+  "description": "Cross-CLI Agent Router & Quality Harness for Claude Code, OpenCode, Pi, Codex, Antigravity, Kimi, Qwen and Command Code",
   "private": true,
   "type": "module",
   "bin": {
@@ -16,7 +16,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
-    "test:guarded": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "test:guarded": "node scripts/run-tests-with-leak-guard.mjs",
+    "test:protocol-drift": "node scripts/check-protocol-tool-drift.mjs",
+    "test:repo-hygiene": "node scripts/check-repo-root-untracked.mjs",
+    "verify": "corepack pnpm test && corepack pnpm run test:protocol-drift && corepack pnpm run test:repo-hygiene",
     "cli": "node dist/src/cli.js",
     "mcp": "node dist/src/mcp-server.js",
     "start": "node dist/src/cli.js"

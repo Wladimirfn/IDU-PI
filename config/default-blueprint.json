@@ -1,36 +1,37 @@
 {
-  "projectName": "Idu-pi",
-  "projectGoal": "El objetivo de Idu-pi es actuar como supervisor/orquestador privado vía Telegram para coordinar agentes IA sobre proyectos locales, usando laboratorios aislados, reportes, validaciones y aprobación humana antes de cambios riesgosos.",
-  "projectType": "private-ai-orchestrator",
-  "version": "1.0.0",
+  "projectName": "IDU Cross-CLI",
+  "projectGoal": "Actuar como router universal de terminales y arnes de calidad: permitir que un orquestador padre delegue tareas a CLIs reales (Claude, OpenCode, Codex, Pi, Kimi, Qwen, Antigravity, Command Code) mediante perfiles de costo/modelo, bajo la ONE ORCHESTRATOR RULE.",
+  "projectType": "cross-cli-orchestration-harness",
+  "version": "2.1.0",
   "agentHierarchy": [
-    "Humano = gerente, decide cambios críticos.",
-    "Orquestador = coordina, no programa directo.",
-    "AgentLabs = auditan y validan.",
-    "Subagentes = ejecutan tareas específicas."
+    "Humano = decide los cambios criticos.",
+    "Orquestador activo = unico implementador; ejecuta los cambios en su propia sesion.",
+    "Workers externos = consultivos; recomiendan y auditan, nunca implementan ni delegan a su vez."
   ],
   "architectureRules": [
-    "JSONL sigue siendo la fuente principal de reportes.",
-    "SQLite sigue siendo una copia estructurada complementaria.",
-    "Los laboratorios deben ejecutarse en workspaces aislados.",
-    "Los cambios riesgosos requieren aprobación humana."
+    "El estado de runtime vive bajo ~/.idu (runtime, sessions, locks, logs, ledger), nunca en el arbol del repositorio.",
+    "Cada delegacion escribe un spec y lanza un daemon desligado: el orquestador no espera al worker.",
+    "El watchdog se apoya en el crecimiento del log como senal de actividad, no en un setTimeout ciego.",
+    "Los workers externos son consultivos; la implementacion primaria la hace el orquestador activo."
   ],
   "forbiddenActions": [
-    "Labs no pueden hacer commit.",
-    "Labs no pueden hacer push.",
-    "Labs no deben modificar repo real.",
-    "No se deben ejecutar cambios críticos sin aprobación humana."
+    "Delegar la implementacion primaria a un worker externo.",
+    "Permitir delegacion recursiva (IDU_WORKER=true en un worker).",
+    "Hacer commit o push desde un worker.",
+    "Escribir estado de runtime dentro del repositorio.",
+    "Ejecutar cambios criticos sin aprobacion humana."
   ],
   "qualityRules": [
     "Toda propuesta debe tener evidencia.",
     "No inventar bugs ni findings sin evidencia.",
-    "Cambios deben preservar build/test.",
+    "Los cambios deben preservar build y tests.",
     "Mejor devolver cero findings que registrar basura."
   ],
   "requiredValidation": [
     "corepack pnpm build",
-    "corepack pnpm test"
+    "corepack pnpm test",
+    "git diff --check"
   ],
   "createdAt": "2026-05-20T00:00:00.000Z",
-  "updatedAt": "2026-05-20T00:00:00.000Z"
+  "updatedAt": "2026-09-29T00:00:00.000Z"
 }

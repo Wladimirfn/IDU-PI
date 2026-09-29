@@ -8,9 +8,10 @@ procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **
 
 > **Nota de alcance.** Este documento describe el sistema que existe hoy. El bot de Telegram,
 > el módulo AgentLab, el Plan Maestro, el supervisor loop y el sistema de semantic memory que
-> aparecen en el historial del repositorio fueron retirados; su código quedó en
-> `legacy_archive/` hasta la purga de v2.1.1 y sus documentos en `docs/superpowers/`. No
-> reintroducirlos desde ahí.
+> aparecen en el historial del repositorio fueron retirados; su código quedó accesible en el
+> tag `legacy-archive-pre-purge` y ya no ocupa el árbol de trabajo. Sus últimos rastros —los
+> perfiles de `config/profiles/` y los scripts del cron `supervisor-tick`— se eliminaron con
+> la purga de vestigios. No reintroducirlos desde el tag.
 
 ## Vista general
 
