@@ -48,8 +48,9 @@ export function unwrapCmdExecutable(cmdPath: string, args: string[]): ResolvedCo
 				}
 			}
 
-			// Node script call (e.g. "%_prog%" "%dp0%\node_modules\...bundle\cli.js")
-			const jsMatch = trimmedLine.match(/"(?:%dp0%|%~dp0)?\\?([^"\r\n]+\.js)"/i);
+			// Node script call (e.g. "%_prog%" "%dp0%\node_modules\...bundle\cli.js"), including ES
+			// module entry points (`.mjs`/`.cjs`, e.g. Command Code's `dist\index.mjs`).
+			const jsMatch = trimmedLine.match(/"(?:%dp0%|%~dp0)?\\?([^"\r\n]+\.[cm]?js)"/i);
 			if (jsMatch) {
 				const target = resolve(dp0, jsMatch[1]);
 				if (existsSync(target)) {
