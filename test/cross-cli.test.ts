@@ -9,6 +9,9 @@ import {
 	killProcessTree,
 	writeJsonAtomic,
 	isProcessAlive,
+	resolveSessionProfile,
+	checkSessionHarnessAffinity,
+	shouldCountTurn,
 } from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -557,6 +560,88 @@ test("buildWorkerArgs resumes a minimax Code session and degrades safely on fork
 		fork: true,
 	});
 	assert.ok(!forked.args.includes("--session"), "a forked mcode run must not reuse the parent session");
+});
+
+// ---------------------------------------------------------------------------
+// Session lifecycle: profile affinity and transactional turns
+//
+// Regression cover for the incident captured in session
+// 16bfbe3e-b6d1-428c-801d-96073650afdd, where resuming a minimax Code session
+// without --profile fell back to the "fast" (pi) default: the run failed with
+// "No session found matching ...", yet the session's turnCount still went
+// from 1 to 2. A dead CLI was billed as a conversational turn.
+// ---------------------------------------------------------------------------
+
+test("resolveSessionProfile inherits the session's profile when none is named", () => {
+	const owner = { profile: "mcode" };
+
+	// The exact incident: no --profile given, the CLI default is "fast" (pi).
+	const inherited = resolveSessionProfile("fast", owner, { profileExplicit: false });
+	assert.equal(inherited.profileName, "mcode");
+	assert.equal(inherited.inherited, true);
+
+	// An explicit profile is never overridden.
+	const explicit = resolveSessionProfile("fast", owner, { profileExplicit: true });
+	assert.equal(explicit.profileName, "fast");
+	assert.equal(explicit.inherited, false);
+
+	// Forking starts a new session, so it keeps the requested profile.
+	const forked = resolveSessionProfile("fast", owner, { profileExplicit: false, fork: true });
+	assert.equal(forked.profileName, "fast");
+	assert.equal(forked.inherited, false);
+
+	// No owner (fresh session) keeps the requested profile.
+	const fresh = resolveSessionProfile("fast", undefined, { profileExplicit: false });
+	assert.equal(fresh.profileName, "fast");
+	assert.equal(fresh.inherited, false);
+
+	// Same profile on both sides is a no-op, not an "inherit" event.
+	const same = resolveSessionProfile("mcode", owner, { profileExplicit: false });
+	assert.equal(same.profileName, "mcode");
+	assert.equal(same.inherited, false);
+});
+
+test("checkSessionHarnessAffinity refuses a cross-harness resume and --force overrides it", () => {
+	const owner = { harness: "mcode", profile: "mcode" };
+	const same = { harness: "mcode", profileName: "mcode" };
+	const cross = { harness: "pi", profileName: "fast" };
+
+	// Same harness: legitimate resume.
+	assert.equal(checkSessionHarnessAffinity(owner, "sess-1", same), null);
+
+	// Cross-harness: refused, with an actionable message.
+	const refusal = checkSessionHarnessAffinity(owner, "sess-1", cross);
+	assert.ok(refusal, "a cross-harness resume must be refused");
+	assert.match(refusal!, /SESSION HARNESS MISMATCH/);
+	assert.match(refusal!, /"mcode"/);
+	assert.match(refusal!, /--force/);
+
+	// --force is the documented escape hatch.
+	assert.equal(checkSessionHarnessAffinity(owner, "sess-1", cross, true), null);
+
+	// No owner (fresh session) is always allowed.
+	assert.equal(checkSessionHarnessAffinity(undefined, "sess-1", cross), null);
+
+	// Missing harness on either side cannot be compared, so it passes.
+	assert.equal(checkSessionHarnessAffinity({ harness: "", profile: "x" }, "s", cross), null);
+});
+
+test("shouldCountTurn only counts runs that actually completed", () => {
+	// The happy path: exit 0, completed.
+	assert.equal(shouldCountTurn(0, "completed"), true);
+
+	// The incident: the wrong CLI exited non-zero. Not a turn.
+	assert.equal(shouldCountTurn(1, "failed"), false);
+	assert.equal(shouldCountTurn(137, "failed"), false);
+	assert.equal(shouldCountTurn(255, "failed"), false);
+
+	// A timeout is not a turn even if the exit code looks clean.
+	assert.equal(shouldCountTurn(0, "timeout"), false);
+	assert.equal(shouldCountTurn(1, "timeout"), false);
+
+	// A missing exit code (process never reported) is not a turn.
+	assert.equal(shouldCountTurn(null, "completed"), false);
+	assert.equal(shouldCountTurn(null, "failed"), false);
 });
 
 test("aliasToUuid maps non-UUID aliases deterministically to valid UUIDv4 strings", () => {

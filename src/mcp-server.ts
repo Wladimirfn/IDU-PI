@@ -211,6 +211,11 @@ export const TOOLS = [
 					description:
 						"If true, branches/forks from the specified session_id, inheriting prompt cache and conversation context without altering the parent session.",
 				},
+				force: {
+					type: "boolean",
+					description:
+						"If true, allows resuming a session with a profile whose harness differs from the one that created it. Off by default: the guard rejects cross-harness resumes because the new CLI cannot read a transcript it never wrote, which drops native session continuity. Use only when you accept a fresh conversation under the new harness.",
+				},
 			},
 			required: ["task", "profile"],
 		},
@@ -540,11 +545,16 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 				const sessionId = args.session_id ? String(args.session_id) : undefined;
 				const parentSessionId = args.parent_session_id ? String(args.parent_session_id) : undefined;
 				const fork = Boolean(args.fork);
+				const force = Boolean(args.force);
 
 				const result = await manager.delegate(
 					{
 						task,
 						profile,
+						// profile is a required arg here, so the caller always
+						// named it: never inherit the session's profile.
+						profileExplicit: true,
+						force,
 						workingDir,
 						parentOrchestrator: "orchestrator",
 						timeoutMs,

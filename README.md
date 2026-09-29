@@ -40,6 +40,12 @@ se eliminaron por completo. Ver `docs/architecture.md` para la arquitectura vige
 
 5. **Tríada de Sesiones Cross-CLI (`Session Triad`) y Bloqueos Concurrenciales**:
    - Soporte nativo para `--session-id`, `--resume` y `--fork` en Claude, OpenCode y Pi.
+- **Afinidad de harness al reanudar:** sin `--profile`, la sesión hereda el suyo en vez de caer al
+  default global. Con un `--profile` de otro harness, la operación se rechaza antes de arrancar;
+  `--force` la permite asumiendo que se pierde la continuidad nativa.
+- **Turnos transaccionales:** solo los runs completados incrementan `turnCount` y fijan
+  `nativeSessionId`. Un run fallido queda registrado en `runs` para auditoría, pero no cuenta como
+  turno.
    - Bloqueo atómico contra ejecuciones concurrentes en la misma sesión (`acquireSessionLock`) con validación de PID y protección contra eliminación foránea.
 
 6. **Integración Corregida con Codex CLI**:

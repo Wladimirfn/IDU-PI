@@ -219,13 +219,17 @@ async function main(): Promise<void> {
 
 		case "delegate": {
 			const profileIndex = args.indexOf("--profile");
-			const profile = profileIndex !== -1 ? args[profileIndex + 1] : "fast";
+			const profileExplicit = profileIndex !== -1;
+			const profile = profileExplicit ? args[profileIndex + 1] : "fast";
 			const sessionIndex = args.indexOf("--session");
 			const sessionId = sessionIndex !== -1 ? args[sessionIndex + 1] : undefined;
 			const parentIndex = args.indexOf("--parent");
 			const parentSessionId = parentIndex !== -1 ? args[parentIndex + 1] : undefined;
 			const fork = args.includes("--fork");
 			const verbose = args.includes("--verbose");
+			// --force allows resuming a session under a different harness.
+			// Off by default: a cross-harness resume drops the native session.
+			const force = args.includes("--force");
 
 			let workingDirIndex = args.indexOf("--working-dir");
 			if (workingDirIndex === -1) workingDirIndex = args.indexOf("--cwd");
@@ -243,6 +247,7 @@ async function main(): Promise<void> {
 				timeoutIndex, timeoutIndex !== -1 ? timeoutIndex + 1 : -1,
 				args.indexOf("--fork"),
 				args.indexOf("--verbose"),
+				args.indexOf("--force"),
 			]);
 
 			const taskArgs = args.slice(1).filter((_, i) => !flagsToFilter.has(i + 1));
@@ -252,6 +257,8 @@ async function main(): Promise<void> {
 			const result = await CrossCliProcessManager.getInstance().delegate({
 				task,
 				profile,
+				profileExplicit,
+				force,
 				parentOrchestrator: "cli",
 				sessionId,
 				parentSessionId,
@@ -278,6 +285,7 @@ async function main(): Promise<void> {
 			console.log("  idu delegate <task> --profile <p>       Directly delegate to a worker");
 			console.log("  idu delegate <task> --session <id>      Resume an existing session");
 			console.log("  idu delegate <task> --session <id> --fork Branch a child session");
+		console.log("  idu delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
 			console.log("  idu delegate <task> --working-dir <dir> Set target working directory");
 			console.log("  idu delegate <task> --timeout <ms>      Set timeout in milliseconds");
 			break;
