@@ -42,6 +42,20 @@ export type RunStatus = "pending" | "running" | "completed" | "failed" | "timeou
 export interface DelegateRequest {
 	task: string;
 	profile: string;
+	/**
+	 * True when the caller explicitly named the profile. When resuming a
+	 * session with this false, the session's own profile is inherited
+	 * instead of a global default, so a session can never be resumed
+	 * blind under a different harness.
+	 */
+	profileExplicit?: boolean;
+	/**
+	 * Bypass the harness-affinity guard: allows resuming a session with a
+	 * profile whose harness differs from the one that created it. Off by
+	 * default because a cross-harness resume silently discards the native
+	 * session id and corrupts the turn count.
+	 */
+	force?: boolean;
 	workingDir?: string;
 	parentOrchestrator?: string;
 	timeoutMs?: number;

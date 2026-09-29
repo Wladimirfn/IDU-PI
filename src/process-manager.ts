@@ -170,6 +170,67 @@ export function saveSessionTree(tree: Record<string, SessionTreeEntry>): void {
 	writeJsonAtomic(SESSION_TREE_PATH, tree);
 }
 
+/**
+ * Decide which profile a delegate request must actually use.
+ *
+ * A session is owned by the profile that created it. When the caller resumes
+ * a session WITHOUT naming a profile, the session's own profile wins over the
+ * caller's global default, so a resume can never silently land on a different
+ * CLI than the one holding the conversation.
+ *
+ * Pure: no I/O, so it is directly unit-testable.
+ */
+export function resolveSessionProfile(
+	requestedProfile: string,
+	owner: Pick<SessionTreeEntry, "profile"> | undefined,
+	opts: { profileExplicit?: boolean; fork?: boolean },
+): { profileName: string; inherited: boolean } {
+	if (owner?.profile && !opts.profileExplicit && !opts.fork && owner.profile !== requestedProfile) {
+		return { profileName: owner.profile, inherited: true };
+	}
+	return { profileName: requestedProfile, inherited: false };
+}
+
+/**
+ * Harness-affinity guard for resuming a session.
+ *
+ * Returns null when the resume is legitimate, or a message explaining why it
+ * was refused. Cross-harness resumes are refused because the incoming CLI
+ * cannot read a transcript it never wrote: the native session id is silently
+ * dropped and the run degrades to a fresh conversation while still being
+ * billed against the original session.
+ *
+ * Pure: no I/O, so it is directly unit-testable.
+ */
+export function checkSessionHarnessAffinity(
+	owner: Pick<SessionTreeEntry, "harness" | "profile"> | undefined,
+	sessionId: string,
+	target: { harness: string; profileName: string },
+	force = false,
+): string | null {
+	if (!owner?.harness || !target.harness) return null;
+	if (owner.harness === target.harness) return null;
+	if (force) return null;
+	return (
+		`SESSION HARNESS MISMATCH: session "${sessionId}" was created by harness "${owner.harness}" ` +
+		`(profile "${owner.profile}") but profile "${target.profileName}" uses harness "${target.harness}". ` +
+		`Resuming across harnesses would discard native session continuity and corrupt the turn count. ` +
+		`Re-run with the session's own profile ("${owner.profile}"), omit the profile to inherit it, ` +
+		`or pass --force to override deliberately.`
+	);
+}
+
+/**
+ * Whether a finished run counts as a conversational turn.
+ *
+ * A run that failed or timed out is an audited attempt, not a turn: it must
+ * not advance turnCount nor bind a native session id that the CLI never
+ * accepted. Pure, so it is directly unit-testable.
+ */
+export function shouldCountTurn(exitCode: number | null, status: string): boolean {
+	return exitCode === 0 && status !== "timeout";
+}
+
 export interface SessionLockHandle {
 	lockPath: string;
 	updatePid?: (newPid: number) => void;
@@ -531,16 +592,39 @@ export class CrossCliProcessManager {
 			}
 		}
 
-		// 2. Validate profile
-		const profile = getProfile(request.profile);
+		// 2. Resolve the session owner BEFORE resolving the profile, so a
+		// resume without an explicit --profile can inherit the session's own
+		// profile instead of falling back to a global default that belongs to
+		// a different harness.
+		const workingDir = request.workingDir || process.cwd();
+		const tree = loadSessionTree();
+
+		const lookupKey = request.sessionId?.trim()
+			? getSessionKey(workingDir, request.sessionId.trim())
+			: "";
+		const ownerEntry = lookupKey ? tree[lookupKey] : undefined;
+
+		let profileName = request.profile;
+		const resolution = resolveSessionProfile(request.profile, ownerEntry, {
+			profileExplicit: request.profileExplicit,
+			fork: request.fork,
+		});
+		profileName = resolution.profileName;
+
+		// 3. Validate profile
+		const profile = getProfile(profileName);
 		if (!profile) {
 			throw new Error(
-				`Profile "${request.profile}" not found in ~/.idu/profiles.json. Available profiles: ${Object.keys(loadProfilesConfig().profiles).join(", ")}`,
+				`Profile "${profileName}" not found in ~/.idu/profiles.json. Available profiles: ${Object.keys(loadProfilesConfig().profiles).join(", ")}`,
+			);
+		}
+		if (resolution.inherited) {
+			console.error(
+				`[info] resuming session "${request.sessionId}" without --profile: inheriting its profile "${profileName}" (harness "${profile.harness}") over the default "${request.profile}".`,
 			);
 		}
 
-		// 3. SDD WORK UNIT IMPLEMENTATION GUARD: Enforce local implementation ownership
-		const workingDir = request.workingDir || process.cwd();
+		// 4. SDD WORK UNIT IMPLEMENTATION GUARD: Enforce local implementation ownership
 		if (profile.permissions === "workspace") {
 			const sddCheck = checkActiveSddAttempt(workingDir, request.task);
 			if (sddCheck.blocked) {
@@ -550,8 +634,7 @@ export class CrossCliProcessManager {
 			}
 		}
 
-		// 4. Resolve session continuity and hierarchy (The Universal Triad: id / resume / fork)
-		const tree = loadSessionTree();
+		// 5. Resolve session continuity and hierarchy (The Universal Triad: id / resume / fork)
 
 		let requestedSessionId = request.sessionId?.trim();
 		let parentSessionId = request.parentSessionId?.trim();
@@ -594,10 +677,36 @@ export class CrossCliProcessManager {
 			isResumed = false;
 		}
 
-		// 4. Resolve native CLI session IDs if present (e.g. OpenCode ses_... IDs)
+		// 6. Resolve native CLI session IDs if present (e.g. OpenCode ses_... IDs)
 		const sessionKey = requestedSessionId ? getSessionKey(workingDir, requestedSessionId) : "";
 		const existingEntry = sessionKey ? tree[sessionKey] : undefined;
 		const nativeSessionId = existingEntry?.nativeSessionId;
+
+		// 6b. Session affinity guard (Option A).
+		// A session is owned by the harness that created it. Resuming it
+		// under a different harness silently drops the native session id and
+		// inflates the turn count, which is how a run against the wrong CLI
+		// ends up reported as a real conversational turn. Refused BEFORE
+		// spawn, so nothing is billed and no state is written.
+		const affinityError = checkSessionHarnessAffinity(
+			existingEntry,
+			requestedSessionId ?? "",
+			{ harness: profile.harness, profileName },
+			request.force,
+		);
+		if (affinityError) {
+			throw new Error(affinityError);
+		}
+		if (
+			existingEntry?.harness &&
+			profile.harness &&
+			existingEntry.harness !== profile.harness &&
+			request.force
+		) {
+			console.error(
+				`[warn] --force: resuming session "${requestedSessionId}" (harness "${existingEntry.harness}") under a different harness "${profile.harness}". Native session continuity is lost.`,
+			);
+		}
 
 		let parentNativeSessionId: string | undefined;
 		if (parentSessionId) {
@@ -605,7 +714,7 @@ export class CrossCliProcessManager {
 			parentNativeSessionId = tree[parentKey]?.nativeSessionId;
 		}
 
-		// 5. Build command line with session flags
+		// 7. Build command line with session flags
 		const runId = generateRunId(request.profile);
 		const { command: rawCommand, args: rawArgs } = buildWorkerArgs(
 			profile,
@@ -645,16 +754,16 @@ export class CrossCliProcessManager {
 			logPath,
 		};
 
-		// 6. Acquire session concurrency lock (prevent race conditions on the same session in workingDir)
+		// 8. Acquire session concurrency lock (prevent race conditions on the same session in workingDir)
 		const sessionLock = acquireSessionLock(effectiveSessionId, workingDir, process.pid);
 
-		// 7. Setup environment overrides with ONE ORCHESTRATOR RULE markers
+		// 9. Setup environment overrides with ONE ORCHESTRATOR RULE markers
 		const runnerEnv: Record<string, string> = {
 			IDU_WORKER: "true",
 			IDU_PARENT: request.parentOrchestrator || "idu-router",
 			IDU_ALLOW_DELEGATION: "false",
 			IDU_RUN_ID: runId,
-			IDU_PROFILE: request.profile,
+			IDU_PROFILE: profileName,
 			IDU_SESSION_ID: effectiveSessionId,
 		};
 
@@ -670,7 +779,7 @@ export class CrossCliProcessManager {
 		}
 		const startupGraceMs = profile.startupGraceMs ?? Math.max(effectiveIdleTimeoutMs, 120_000);
 
-		// 8. Build runner spec
+		// 10. Build runner spec
 		const spec: RunnerSpec = {
 			runId,
 			sessionId: effectiveSessionId,
@@ -700,7 +809,7 @@ export class CrossCliProcessManager {
 		writeJsonAtomic(specPath, spec);
 		writeJsonAtomic(sessionPath, record);
 
-		// 9. Spawn detached runner daemon
+		// 11. Spawn detached runner daemon
 		const runnerScript = getRunnerScriptPath();
 		let runnerProcess: ChildProcess;
 		try {
@@ -733,7 +842,7 @@ export class CrossCliProcessManager {
 				sessionId: effectiveSessionId,
 				parentSessionId,
 				isResumed,
-				profile: request.profile,
+				profile: profileName,
 				harness: profile.harness,
 				model: profile.model,
 				status: "running",

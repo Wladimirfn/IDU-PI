@@ -105,6 +105,16 @@ como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint
 - **Tríada universal:** identificador nuevo, `resume` de sesión existente, `fork` desde un padre.
   Cada CLI lo expresa con flags distintos (`--session-id`/`--resume`/`--fork-session`,
   `--session`/`--fork`, `--conversation`, …); `cmdline.ts` traduce.
+- **Afinidad de harness:** una sesión pertenece al harness que la creó. Reanudar **sin** `--profile`
+  hereda el perfil de la sesión en vez de caer al default global (`fast`/pi), y reanudar con un
+  `--profile` explícito de **otro** harness se rechaza antes del spawn
+  (`checkSessionHarnessAffinity`). Sin esa guarda, un CLI ajeno no puede leer una transcripción que
+  nunca escribió: el `nativeSessionId` se pierde en silencio y el run degrada a conversación nueva
+  mientras se imputa a la sesión original. `--force` es la salida deliberada, y avisa por stderr.
+- **Turnos transaccionales:** `turnCount` y `nativeSessionId` solo avanzan si el subproceso terminó
+  bien (`shouldCountTurn`: `exitCode === 0 && status !== "timeout"`). Un run fallido o expirado se
+  registra igual en `runs` para auditoría, pero no cuenta como turno conversacional ni ata la sesión
+  a un id nativo que el CLI nunca aceptó.
 - **Alias a UUID:** para Claude, un alias no-UUID se mapea a un UUIDv4 determinista
   (`aliasToUuid`), de modo que la misma conversación siempre resuelve al mismo identificador.
 - **Lock atómico:** `openSync(path, "wx")` sobre

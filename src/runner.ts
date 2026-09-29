@@ -18,6 +18,7 @@ import {
 	loadSessionTree,
 	saveSessionTree,
 	getSessionKey,
+	shouldCountTurn,
 } from "./process-manager.js";
 
 function parseArgs(): string {
@@ -219,25 +220,37 @@ async function runDaemon(): Promise<void> {
 				turnCount: 0,
 				runs: [],
 			};
-			if (!entry.nativeSessionId && fullOutput) {
-				if (spec.harness === "opencode") {
-					const m = fullOutput.match(/"sessionID"\s*:\s*"([^"]+)"/);
-					if (m) entry.nativeSessionId = m[1];
-				} else if (spec.harness === "antigravity" || spec.harness === "agy") {
-					const m = fullOutput.match(/"conversation_?id"\s*:\s*"([^"]+)"/i);
-					if (m) entry.nativeSessionId = m[1];
-				} else if (spec.harness === "commandcode" || spec.harness === "cmdc") {
-					const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
-					if (m) entry.nativeSessionId = m[1];
-				} else if (spec.harness === "mcode" || spec.harness === "minimax-code") {
-					// mcode exec emits a single exec.result object with a
-					// top-level sessionId (format: mvs_<hex>).
-					const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
-					if (m) entry.nativeSessionId = m[1];
+
+			// Transactional turns: a run is only a conversational turn if the
+			// subprocess actually completed. A failed or timed-out attempt is
+			// still recorded in `runs` for audit, but it must not advance
+			// turnCount or overwrite nativeSessionId — otherwise a dead CLI
+			// (wrong binary, crashed process, rejected session) silently
+			// inflates the metrics and can bind the session to a native id
+			// that was never accepted.
+			const runSucceeded = shouldCountTurn(exitCode, record.status);
+
+			if (runSucceeded) {
+				if (!entry.nativeSessionId && fullOutput) {
+					if (spec.harness === "opencode") {
+						const m = fullOutput.match(/"sessionID"\s*:\s*"([^"]+)"/);
+						if (m) entry.nativeSessionId = m[1];
+					} else if (spec.harness === "antigravity" || spec.harness === "agy") {
+						const m = fullOutput.match(/"conversation_?id"\s*:\s*"([^"]+)"/i);
+						if (m) entry.nativeSessionId = m[1];
+					} else if (spec.harness === "commandcode" || spec.harness === "cmdc") {
+						const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
+						if (m) entry.nativeSessionId = m[1];
+					} else if (spec.harness === "mcode" || spec.harness === "minimax-code") {
+						// mcode exec emits a single exec.result object with a
+						// top-level sessionId (format: mvs_<hex>).
+						const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
+						if (m) entry.nativeSessionId = m[1];
+					}
 				}
+				entry.turnCount += 1;
 			}
 			entry.lastActiveAt = record.completedAt;
-			entry.turnCount += 1;
 			if (!entry.runs.includes(spec.runId)) {
 				entry.runs.push(spec.runId);
 			}
