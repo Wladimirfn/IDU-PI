@@ -195,33 +195,39 @@ test("ONE ORCHESTRATOR RULE: IDU_ALLOW_DELEGATION alone does not block the orche
 	const manager = CrossCliProcessManager.getInstance();
 	// Not a worker. A leftover ALLOW_DELEGATION=false must not be read as
 	// worker identity, so the guard must stay out of the way.
+	// The profile deliberately does not exist. getProfile() throws at step 3,
+	// which is BEFORE the session lock (step 9) and the detached spawn
+	// (step 11). That is the only way to prove the guard let the call through
+	// without leaving a real worker process behind. An earlier version used a
+	// real profile with asyncExecution=true, which still spawned a detached
+	// runner and leaked it: asyncExecution only skips waitForCompletion.
 	process.env.IDU_ALLOW_DELEGATION = "false";
 
 	try {
-		const result = await manager.delegate(
-			{
-				task: "Orchestrator-level task, not a worker",
-				profile: "cheap-explore",
+		await assert.rejects(
+			async () => {
+				await manager.delegate({
+					task: "Orchestrator-level task, not a worker",
+					profile: "profile-that-does-not-exist-guard-probe",
+				});
 			},
-			true,
+			/not found in ~\/\.idu\/profiles\.json/,
 		);
-		assert.ok(result.runId, "the orchestrator itself must still be able to delegate");
-		// The guard passed: that assertion is the point of the test. Nothing was
-		// spawned to clean up because delegate(..., true) only prepares the run.
 	} finally {
 		delete process.env.IDU_ALLOW_DELEGATION;
 	}
 });
 
 test("ONE ORCHESTRATOR RULE rejects before any session file is written", async () => {
-	const { existsSync } = await import("node:fs");
-	const { join } = await import("node:path");
+	const { readdirSync } = await import("node:fs");
+	const { IDU_SESSIONS_DIR } = await import("../src/config.js");
 	const manager = CrossCliProcessManager.getInstance();
-	const runId = "IDU-TEST-NOSESSION";
 	process.env.IDU_WORKER = "true";
-	process.env.IDU_RUN_ID = runId;
+	process.env.IDU_RUN_ID = "IDU-TEST-NOSESSION";
 
 	try {
+		const before = new Set(readdirSync(IDU_SESSIONS_DIR));
+
 		await assert.rejects(
 			async () => {
 				await manager.delegate({
@@ -232,12 +238,13 @@ test("ONE ORCHESTRATOR RULE rejects before any session file is written", async (
 			/ONE ORCHESTRATOR RULE VIOLATION/,
 		);
 
-		const sessionPath = join(
-			process.env.IDU_HOME ?? join(process.cwd(), ".idu"),
-			"sessions",
-			`${runId}.json`,
-		);
-		assert.equal(existsSync(sessionPath), false, "a rejected delegation must not leave a session file");
+		// Assert on the whole sessions dir, not a guessed filename. The guard
+		// rejects before generateRunId() ever runs, so there is no runId to
+		// predict: a name-based check would be vacuously green. This version
+		// fails for real if a rejected delegation writes anything.
+		const after = new Set(readdirSync(IDU_SESSIONS_DIR));
+		const added = [...after].filter((f) => !before.has(f));
+		assert.deepEqual(added, [], `a rejected delegation must not write session files, found: ${added}`);
 	} finally {
 		delete process.env.IDU_WORKER;
 		delete process.env.IDU_RUN_ID;
@@ -245,58 +252,63 @@ test("ONE ORCHESTRATOR RULE rejects before any session file is written", async (
 });
 
 test("allowRecursiveDelegation no longer disables the guard", async () => {
-	const { readFileSync, writeFileSync, existsSync: fsExists } = await import("node:fs");
+	const { readFileSync, writeFileSync, renameSync, rmSync, existsSync: fsExists } = await import("node:fs");
 	const { join } = await import("node:path");
 	const { IDU_HOME } = await import("../src/config.js");
 	const configPath = join(IDU_HOME, "config.json");
+	const backupPath = join(IDU_HOME, `config.json.test-backup-${process.pid}`);
 
 	const manager = CrossCliProcessManager.getInstance();
-	const original = fsExists(configPath) ? readFileSync(configPath, "utf8") : null;
 
-	// Write the config BEFORE setting worker identity. checkActiveSddAttempt
-	// runs earlier in delegate() and would otherwise reject with its own
-	// message, which tells us nothing about the orchestrator guard.
-	writeFileSync(
-		configPath,
-		JSON.stringify(
-			{
-				version: "2.1.0",
-				oneOrchestratorRule: { enabled: true, allowRecursiveDelegation: true },
-			},
-			null,
-			2,
-		),
-		"utf8",
-	);
-
-	process.env.IDU_WORKER = "true";
-	process.env.IDU_RUN_ID = "IDU-TEST-BYPASS";
+	// Back the real config up by RENAME, not by copying. A copy leaves the
+	// window where a crash mid-test replaces the user's global config with a
+	// two-key stub. With a rename, the original bytes stay reachable at
+	// backupPath and the test never destroys them, whatever happens next.
+	if (fsExists(configPath)) {
+		renameSync(configPath, backupPath);
+	}
 
 	try {
-		await assert.rejects(
-			async () => {
-				await manager.delegate({
-					task: "Config flag must not disable the guard",
-					profile: "cheap-explore",
-				});
-			},
-			/ONE ORCHESTRATOR RULE VIOLATION/,
+		writeFileSync(
+			configPath,
+			JSON.stringify(
+				{
+					version: "2.1.0",
+					oneOrchestratorRule: { enabled: true, allowRecursiveDelegation: true },
+				},
+				null,
+				2,
+			),
+			"utf8",
 		);
+
+		process.env.IDU_WORKER = "true";
+		process.env.IDU_RUN_ID = "IDU-TEST-BYPASS";
+
+		try {
+			await assert.rejects(
+				async () => {
+					await manager.delegate({
+						task: "Config flag must not disable the guard",
+						profile: "cheap-explore",
+					});
+				},
+				/ONE ORCHESTRATOR RULE VIOLATION/,
+			);
+		} finally {
+			delete process.env.IDU_WORKER;
+			delete process.env.IDU_RUN_ID;
+		}
 	} finally {
-		delete process.env.IDU_WORKER;
-		delete process.env.IDU_RUN_ID;
-		if (original === null) {
-			rmSyncRaw(configPath);
-		} else {
-			writeFileSync(configPath, original, "utf8");
+		// Restore by rename so the original file comes back whole, then drop
+		// the stub. No require(): this package is ESM ("type": "module"), so a
+		// require here threw ReferenceError on any machine without a config.
+		rmSync(configPath, { force: true });
+		if (fsExists(backupPath)) {
+			renameSync(backupPath, configPath);
 		}
 	}
 });
-
-function rmSyncRaw(p: string): void {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	require("node:fs").rmSync(p, { force: true });
-}
 
 test("unwrapCmdExecutable unwraps Windows npm cmd wrappers to direct executables", async () => {
 	if (process.platform !== "win32") return;
