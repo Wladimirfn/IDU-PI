@@ -68,7 +68,7 @@ El servidor expone **13 herramientas de alto impacto** optimizadas para mínimo 
 | `idu_postflight` | Verificación post-edición: diffs reales vs esperados y blast radius en `working_dir`. |
 | `idu_decision_record` | Registra una decisión técnica, de arquitectura o de gobernanza en el ledger duradero. |
 | `idu_decision_list` | Consulta y filtra el historial de decisiones auditables. |
-| `idu_delegate` | Lanza un worker terminal real bajo un perfil configurado con `IDU_WORKER=true`. Un worker que vuelve a delegar recibe un error: la guarda es fail-closed y se apoya solo en la identidad de worker. |
+| `idu_delegate` | Lanza un worker terminal real bajo un perfil configurado con `IDU_WORKER=true`. Un worker que vuelve a delegar por esta vía recibe un error: la guarda es fail-closed y se apoya solo en la identidad de worker. |
 | `idu_delegate_parallel` | Lanza múltiples workers concurrentemente en paralelo. |
 | `idu_worker_status` | Monitorea en tiempo real estado, telemetría (`elapsedMs`, `health`, actividad) y logs. |
 | `idu_worker_wait` | Espera de forma síncrona/reactiva la finalización de un worker sin matarlo si expira. |

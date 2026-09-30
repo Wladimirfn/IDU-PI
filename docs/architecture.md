@@ -98,6 +98,10 @@ como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint
   sin el segundo flag pasaba el control en silencio. `allowRecursiveDelegation` **no** se
   consulta para este propósito; una relajación deliberada se hace con
   `oneOrchestratorRule.enabled`, que es explícito.
+  - **Alcance de esta guarda.** Cubre la llamada a `delegate()` desde un proceso marcado como
+    worker. **No** cubre todavía la vía del servidor MCP: `idu-pi` está registrado a scope de
+    usuario, así que un worker puede ver `idu_delegate` en su lista de herramientas sin pasar por
+    esta guarda. Ese aislamiento es un incremento pendiente, no una garantía actual.
 - **Guard de Work Unit SDD.** Si el perfil tiene `permissions: "workspace"` y hay un intento SDD
   activo en `openspec/changes` (o el prompt menciona `sdd-apply` / `WU…`), la delegación se
   bloquea. La implementación primaria la hace el orquestador activo; los workers externos son
