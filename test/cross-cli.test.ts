@@ -168,6 +168,136 @@ test("ONE ORCHESTRATOR RULE blocks recursive delegation when IDU_WORKER is set",
 	}
 });
 
+test("ONE ORCHESTRATOR RULE is fail-closed: IDU_WORKER alone blocks delegation", async () => {
+	const manager = CrossCliProcessManager.getInstance();
+	// Only the identity marker. No IDU_ALLOW_DELEGATION at all: this is the case
+	// that used to pass the old two-condition guard.
+	process.env.IDU_WORKER = "true";
+	process.env.IDU_RUN_ID = "IDU-TEST-FAILCLOSED";
+
+	try {
+		await assert.rejects(
+			async () => {
+				await manager.delegate({
+					task: "Recursive subagent call with identity only",
+					profile: "cheap-explore",
+				});
+			},
+			/ONE ORCHESTRATOR RULE VIOLATION/,
+		);
+	} finally {
+		delete process.env.IDU_WORKER;
+		delete process.env.IDU_RUN_ID;
+	}
+});
+
+test("ONE ORCHESTRATOR RULE: IDU_ALLOW_DELEGATION alone does not block the orchestrator", async () => {
+	const manager = CrossCliProcessManager.getInstance();
+	// Not a worker. A leftover ALLOW_DELEGATION=false must not be read as
+	// worker identity, so the guard must stay out of the way.
+	process.env.IDU_ALLOW_DELEGATION = "false";
+
+	try {
+		const result = await manager.delegate(
+			{
+				task: "Orchestrator-level task, not a worker",
+				profile: "cheap-explore",
+			},
+			true,
+		);
+		assert.ok(result.runId, "the orchestrator itself must still be able to delegate");
+		// The guard passed: that assertion is the point of the test. Nothing was
+		// spawned to clean up because delegate(..., true) only prepares the run.
+	} finally {
+		delete process.env.IDU_ALLOW_DELEGATION;
+	}
+});
+
+test("ONE ORCHESTRATOR RULE rejects before any session file is written", async () => {
+	const { existsSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const manager = CrossCliProcessManager.getInstance();
+	const runId = "IDU-TEST-NOSESSION";
+	process.env.IDU_WORKER = "true";
+	process.env.IDU_RUN_ID = runId;
+
+	try {
+		await assert.rejects(
+			async () => {
+				await manager.delegate({
+					task: "Should never persist state",
+					profile: "cheap-explore",
+				});
+			},
+			/ONE ORCHESTRATOR RULE VIOLATION/,
+		);
+
+		const sessionPath = join(
+			process.env.IDU_HOME ?? join(process.cwd(), ".idu"),
+			"sessions",
+			`${runId}.json`,
+		);
+		assert.equal(existsSync(sessionPath), false, "a rejected delegation must not leave a session file");
+	} finally {
+		delete process.env.IDU_WORKER;
+		delete process.env.IDU_RUN_ID;
+	}
+});
+
+test("allowRecursiveDelegation no longer disables the guard", async () => {
+	const { readFileSync, writeFileSync, existsSync: fsExists } = await import("node:fs");
+	const { join } = await import("node:path");
+	const { IDU_HOME } = await import("../src/config.js");
+	const configPath = join(IDU_HOME, "config.json");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const original = fsExists(configPath) ? readFileSync(configPath, "utf8") : null;
+
+	// Write the config BEFORE setting worker identity. checkActiveSddAttempt
+	// runs earlier in delegate() and would otherwise reject with its own
+	// message, which tells us nothing about the orchestrator guard.
+	writeFileSync(
+		configPath,
+		JSON.stringify(
+			{
+				version: "2.1.0",
+				oneOrchestratorRule: { enabled: true, allowRecursiveDelegation: true },
+			},
+			null,
+			2,
+		),
+		"utf8",
+	);
+
+	process.env.IDU_WORKER = "true";
+	process.env.IDU_RUN_ID = "IDU-TEST-BYPASS";
+
+	try {
+		await assert.rejects(
+			async () => {
+				await manager.delegate({
+					task: "Config flag must not disable the guard",
+					profile: "cheap-explore",
+				});
+			},
+			/ONE ORCHESTRATOR RULE VIOLATION/,
+		);
+	} finally {
+		delete process.env.IDU_WORKER;
+		delete process.env.IDU_RUN_ID;
+		if (original === null) {
+			rmSyncRaw(configPath);
+		} else {
+			writeFileSync(configPath, original, "utf8");
+		}
+	}
+});
+
+function rmSyncRaw(p: string): void {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
+	require("node:fs").rmSync(p, { force: true });
+}
+
 test("unwrapCmdExecutable unwraps Windows npm cmd wrappers to direct executables", async () => {
 	if (process.platform !== "win32") return;
 
