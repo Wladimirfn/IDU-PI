@@ -567,7 +567,15 @@ export class CrossCliProcessManager {
 		return {
 			installedClis,
 			profiles,
-			oneOrchestratorRule: config.oneOrchestratorRule,
+			// Reported as always-on regardless of what ~/.idu/config.json holds.
+			// Echoing the file here would let `idu status` print DISABLED while
+			// delegation was still being refused, which is the kind of small lie
+			// that turns into a real incident later.
+			oneOrchestratorRule: {
+				enabled: true,
+				allowRecursiveDelegation: false,
+				configurable: false,
+			},
 		};
 	}
 
@@ -581,18 +589,33 @@ export class CrossCliProcessManager {
 	public async delegate(request: DelegateRequest, asyncExecution = false): Promise<DelegateResult> {
 		const config = loadIduConfig();
 
-		// 1. ONE ORCHESTRATOR RULE: Enforce non-recursion.
+		// 1. ONE ORCHESTRATOR RULE: refuse to delegate from inside a worker.
 		//
-		// Fail-closed: the guard fires on worker identity alone. The previous
-		// form required IDU_WORKER === "true" AND IDU_ALLOW_DELEGATION === "false",
-		// so a worker whose environment was not fully injected passed the check
-		// silently. Identity is the security-relevant fact, not a second flag.
+		// This is a CONVENTION ENFORCED AGAINST MISTAKES, not a security
+		// boundary, and the earlier comment here called it "fail-closed", which
+		// was simply false. IDU_WORKER is an environment variable the worker
+		// itself owns. It can unset it, set it to "false", or never propagate it,
+		// and the guard cannot tell the difference. Measured on 2026-10-01: a
+		// delegated Pi worker that ran `$env:IDU_WORKER="false"` before calling
+		// this CLI spawned a nested worker, no complaint. Editing
+		// ~/.idu/config.json used to switch the rule off outright, which is why
+		// neither key is read here any more.
 		//
-		// allowRecursiveDelegation is deliberately NOT consulted here. Letting a
-		// config flag switch this guard off removed the protection without any
-		// code change. Relaxation, if ever needed, is oneOrchestratorRule.enabled,
-		// which is explicit and visible in the same config block.
-		if (config.oneOrchestratorRule.enabled && process.env.IDU_WORKER === "true") {
+		// What it does buy, which is worth having: a worker that has no idea it
+		// inherited the marker cannot walk into a loop by accident, and the
+		// refusal lands in the run log where a post-mortem can find it.
+		//
+		// The MCP filter hides the same tools, but it is not a second defence:
+		// isWorkerProcess() in mcp-server.ts is this same predicate, so a worker
+		// that clears the variable gets the full catalogue and calls through.
+		// Both surfaces rest on one cooperative identity contract. SECURITY.md
+		// carries the measured numbers.
+		//
+		// Closing this against a worker that controls its own shell means taking
+		// authority away from that worker (a supervisor process with
+		// authenticated IPC, or a separate OS user), not a sharper predicate
+		// here. See SECURITY.md for the full list of what the loop costs.
+		if (process.env.IDU_WORKER === "true") {
 			throw new Error(
 				`ONE ORCHESTRATOR RULE VIOLATION: Current process is already an active worker (IDU_RUN_ID: ${process.env.IDU_RUN_ID}). Recursive sub-delegation is disallowed.`,
 			);

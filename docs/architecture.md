@@ -91,17 +91,24 @@ como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint
 
 ## Guardas de gobernanza
 
-- **ONE ORCHESTRATOR RULE (fail-closed).** El worker se lanza con `IDU_WORKER=true`.
-  La guarda dispara **solo con esa identidad**: si `IDU_WORKER` no está en `"true"`, quien
-  llama es el orquestador y delega con normalidad. La condición anterior exigía dos
-  señales (`IDU_WORKER=true` **y** `IDU_ALLOW_DELEGATION=false`) y era fail-open: un worker
-  sin el segundo flag pasaba el control en silencio. `allowRecursiveDelegation` **no** se
-  consulta para este propósito; una relajación deliberada se hace con
-  `oneOrchestratorRule.enabled`, que es explícito.
-  - **Alcance de esta guarda.** Cubre la llamada a `delegate()` desde un proceso marcado como
-    worker. **No** cubre todavía la vía del servidor MCP: `idu-pi` está registrado a scope de
-    usuario, así que un worker puede ver `idu_delegate` en su lista de herramientas sin pasar por
-    esta guarda. Ese aislamiento es un incremento pendiente, no una garantía actual.
+- **ONE ORCHESTRATOR RULE (convención, no frontera).** El worker se lanza con `IDU_WORKER=true` y
+  la guarda dispara solo con esa identidad. **No es *fail-closed*.** `IDU_WORKER` es una variable de
+  entorno que controla el propio worker: puede borrarla, ponerla en `"false"` o no propagarla, y la
+  guarda no lo distingue. Medido el 2026-10-01 contra el binario: `IDU_WORKER=false` y la variable
+  ausente pasan el control y spawnean un worker anidado sin incidente.
+  - **Lo que la guarda compra.** Un worker que no sabe que heredó el marcador no entra en bucle por
+    accidente, y el rechazo queda en el log del run donde un post-mortem lo encuentra.
+  - **Lo que no compra.** La misma señal decide el filtro del servidor MCP (`isWorkerProcess()`), así
+    que ambas superficies descansan sobre un único contrato cooperativo en vez de dos defensas.
+  - **Configuración.** `oneOrchestratorRule` está **retirado**: ya no se lee ni se mergea. Era un
+    interruptor en `~/.idu/config.json`, archivo que todo worker puede escribir, y una sola edición
+    apagaba la regla de forma global. El warning que aparece al cargarlo dice que es inerte.
+  - **Alcance.** Cubre la vía idu-pi. **No** cubre que un worker invoque un harness directamente
+    (`claude -p ...`), ni que escriba `~/.idu/profiles.json` para inyectar un perfil con `command` y
+    `permissions` arbitrarios.
+  - Cerrar esto de verdad exige quitarle autoridad al worker, no afinar el predicado. Ver
+    [SECURITY.md](../SECURITY.md) para la lista medida de vías de evasión y para las dos formas que
+    sí PONdrían un techo (supervisor con IPC autenticado, o usuario de servicio con ACL).
 - **Guard de Work Unit SDD.** Si el perfil tiene `permissions: "workspace"` y hay un intento SDD
   activo en `openspec/changes` (o el prompt menciona `sdd-apply` / `WU…`), la delegación se
   bloquea. La implementación primaria la hace el orquestador activo; los workers externos son

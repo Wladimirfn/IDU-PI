@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 			const caps = CrossCliProcessManager.getInstance().getCapabilities();
 			console.log("\n=== IDU Cross-CLI Status ===");
 			console.log(`IDU Home: ${IDU_HOME}`);
-			console.log(`One Orchestrator Rule: ${caps.oneOrchestratorRule.enabled ? "ENABLED" : "DISABLED"}`);
+			console.log("One Orchestrator Rule: ACTIVE (always on, not configurable — see SECURITY.md)");
 			console.log("\nDetected CLIs:");
 			for (const cli of caps.installedClis) {
 				console.log(`  - ${cli.name.padEnd(10)} [${cli.available ? "OK" : "NOT FOUND"}]: ${cli.command}`);
