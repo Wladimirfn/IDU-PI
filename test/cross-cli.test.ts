@@ -146,6 +146,12 @@ test("CrossCliProcessManager gets capabilities reporting profiles and CLIs", () 
 });
 
 test("ONE ORCHESTRATOR RULE blocks recursive delegation when IDU_WORKER is set", async () => {
+	// Every guard test names a profile that does not exist, on purpose. These
+	// assertions live on the guard throwing, which happens before profile
+	// resolution, so the profile is never reached. But if the guard ever stopped
+	// firing, a REAL profile would resolve, take a session lock and spawn a
+	// detached opencode runner that this test would then wait on for hours. The
+	// failure mode has to be a fast red assertion, not a real worker.
 	const manager = CrossCliProcessManager.getInstance();
 	process.env.IDU_WORKER = "true";
 	process.env.IDU_ALLOW_DELEGATION = "false";
@@ -156,7 +162,7 @@ test("ONE ORCHESTRATOR RULE blocks recursive delegation when IDU_WORKER is set",
 			async () => {
 				await manager.delegate({
 					task: "Recursive subagent call",
-					profile: "cheap-explore",
+					profile: "profile-that-does-not-exist-guard-probe",
 				});
 			},
 			/ONE ORCHESTRATOR RULE VIOLATION/,
@@ -182,7 +188,7 @@ test("ONE ORCHESTRATOR RULE needs only the IDU_WORKER identity marker", async ()
 			async () => {
 				await manager.delegate({
 					task: "Recursive subagent call with identity only",
-					profile: "cheap-explore",
+					profile: "profile-that-does-not-exist-guard-probe",
 				});
 			},
 			/ONE ORCHESTRATOR RULE VIOLATION/,
@@ -234,7 +240,7 @@ test("ONE ORCHESTRATOR RULE rejects before any session file is written", async (
 			async () => {
 				await manager.delegate({
 					task: "Should never persist state",
-					profile: "cheap-explore",
+					profile: "profile-that-does-not-exist-guard-probe",
 				});
 			},
 			/ONE ORCHESTRATOR RULE VIOLATION/,
@@ -256,7 +262,7 @@ test("ONE ORCHESTRATOR RULE rejects before any session file is written", async (
 test("retired oneOrchestratorRule keys no longer disable the guard", async () => {
 	const { readFileSync, writeFileSync, renameSync, rmSync, existsSync: fsExists } = await import("node:fs");
 	const { join } = await import("node:path");
-	const { IDU_HOME } = await import("../src/config.js");
+	const { IDU_HOME, loadIduConfig } = await import("../src/config.js");
 	const configPath = join(IDU_HOME, "config.json");
 	const backupPath = join(IDU_HOME, `config.json.test-backup-${process.pid}`);
 
@@ -290,6 +296,25 @@ test("retired oneOrchestratorRule keys no longer disable the guard", async () =>
 			"utf8",
 		);
 
+		// The guard rejection on its own cannot prove this test means anything.
+		// The guard reads no config at all, so `enabled:false` on disk would not
+		// change its behaviour even if the file were still honoured: the test
+		// would collapse into "IDU_WORKER=true -> rejected", which two other tests
+		// already cover. Assert on the loader, because that is where the bypass
+		// actually lived. Re-merging `parsed.oneOrchestratorRule` in
+		// loadIduConfig() fails these two and says exactly what came back.
+		const loaded = loadIduConfig();
+		assert.equal(
+			loaded.oneOrchestratorRule.enabled,
+			true,
+			"loadIduConfig must not take `enabled` from the file: that was the one-edit bypass",
+		);
+		assert.equal(
+			loaded.oneOrchestratorRule.allowRecursiveDelegation,
+			false,
+			"loadIduConfig must not take `allowRecursiveDelegation` from the file either",
+		);
+
 		process.env.IDU_WORKER = "true";
 		process.env.IDU_RUN_ID = "IDU-TEST-BYPASS";
 
@@ -298,7 +323,7 @@ test("retired oneOrchestratorRule keys no longer disable the guard", async () =>
 				async () => {
 					await manager.delegate({
 						task: "Config flag must not disable the guard",
-						profile: "cheap-explore",
+						profile: "profile-that-does-not-exist-guard-probe",
 					});
 				},
 				/ONE ORCHESTRATOR RULE VIOLATION/,

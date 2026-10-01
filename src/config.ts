@@ -215,12 +215,21 @@ function warnAboutRetiredRuleFlags(config: IduConfig): void {
 		| { enabled?: unknown; allowRecursiveDelegation?: unknown }
 		| undefined;
 	if (!rule) return;
-	if (rule.enabled === undefined && rule.allowRecursiveDelegation === undefined) return;
+
+	// Only when a key holds a value that used to mean something. The default
+	// block { enabled: true, allowRecursiveDelegation: false } is what a
+	// generated config always contained, and warning about it would tell every
+	// user on every command that they had configured something they never did.
+	// Warn only where the setting was actually load-bearing and is now ignored.
+	const relaxingEnabled = rule.enabled === false;
+	const relaxingRecursion = rule.allowRecursiveDelegation === true;
+	if (!relaxingEnabled && !relaxingRecursion) return;
+
 	console.warn(
-		"[warn] oneOrchestratorRule is no longer read. " +
-			"The orchestrator guard now fires on worker identity alone and cannot be switched " +
-			"off from the config file. The whole oneOrchestratorRule block can be dropped; it has " +
-			"no effect. See SECURITY.md for what the guard does and does not hold.",
+		"[warn] oneOrchestratorRule is no longer read, so this setting is being ignored. " +
+			"The orchestrator guard fires on worker identity alone and cannot be switched off " +
+			"from the config file. The whole oneOrchestratorRule block can be dropped. " +
+			"See SECURITY.md for what the guard does and does not hold.",
 	);
 }
 
