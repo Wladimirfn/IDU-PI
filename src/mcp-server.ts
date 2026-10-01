@@ -338,7 +338,12 @@ export const TOOLS = [
 				include_quota: {
 					type: "boolean",
 					description:
-						"When true, probe each installed CLI for its account quota. Every figure is REMAINING, never used, and a CLI that cannot answer reports unknown with a reason instead of zero.",
+						"When true, read each installed CLI's own account quota. Every figure is REMAINING, never used, and a CLI that cannot answer reports unknown with a reason instead of zero. Served from a 10 minute cache; combine with fresh_quota to spend a live call.",
+				},
+				fresh_quota: {
+					type: "boolean",
+					description:
+						"Ignore the quota cache and query the accounts now. Costs about eleven seconds and, for claude and antigravity, a model call each. Only needed when a cached reading is too old to reason with.",
 				},
 			},
 		},
@@ -572,7 +577,7 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 			}
 
 			if (name === "idu_capabilities") {
-				const caps = await manager.getCapabilities({ includeQuota: args.include_quota === true });
+				const caps = await manager.getCapabilities({ includeQuota: args.include_quota === true, freshQuota: args.fresh_quota === true });
 				return {
 					content: [{ type: "text", text: JSON.stringify(caps, null, 2) }],
 				};

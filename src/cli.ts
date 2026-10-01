@@ -165,11 +165,11 @@ async function main(): Promise<void> {
 		}
 
 		case "quota": {
-			// Reads each installed CLI's own account. Two of the sources cost a
-			// model call, which is why this is a command and not something
-			// `status` or `capabilities` triggers on their own.
+			// Cached by default: two of the sources run a model, and a cold read
+			// takes about eleven seconds. `--fresh` is the explicit "spend it now".
 			const { readQuotaSnapshots, formatQuota } = await import("./quota.js");
-			console.log(formatQuota(await readQuotaSnapshots()));
+			const snapshots = await readQuotaSnapshots({ fresh: args.includes("--fresh") });
+			console.log(formatQuota(snapshots));
 			break;
 		}
 
@@ -289,7 +289,7 @@ async function main(): Promise<void> {
 			console.log("  idu wait <runId> [--follow]             Wait for background run (with optional live streaming)");
 			console.log("  idu sessions                            Display session hierarchy tree");
 			console.log("  idu capabilities                        Print JSON capabilities");
-			console.log("  idu quota                               Read each CLI's own account quota (costs a model call for some)"); console.log("  idu preflight <request> [--cwd <dir>]   Run preflight safety check");
+			console.log("  idu quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)"); console.log("  idu preflight <request> [--cwd <dir>]   Run preflight safety check");
 			console.log("  idu preflight <r> --expected-files <a,b>  Declare expected blast radius");
 			console.log("  idu delegate <task> --profile <p>       Directly delegate to a worker");
 			console.log("  idu delegate <task> --session <id>      Resume an existing session");

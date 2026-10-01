@@ -39,37 +39,10 @@ import type {
 
 const SESSION_TREE_PATH = join(IDU_SESSIONS_DIR, "tree.json");
 
-export function writeJsonAtomic(filePath: string, data: any): void {
-	const dir = dirname(filePath);
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-	writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
-
-	let retries = 5;
-	while (retries > 0) {
-		try {
-			renameSync(tmpPath, filePath);
-			return;
-		} catch (err: any) {
-			retries--;
-			if (retries === 0) {
-				try {
-					writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
-					try {
-						unlinkSync(tmpPath);
-					} catch {}
-					return;
-				} catch {
-					throw err;
-				}
-			}
-			const start = Date.now();
-			while (Date.now() - start < 15) {}
-		}
-	}
-}
+// Imported for local use and re-exported so the existing import path keeps
+// working. The implementation moved out to break a cycle with the quota layer.
+import { writeJsonAtomic } from "./json-file.js";
+export { writeJsonAtomic } from "./json-file.js";
 
 export function isProcessAlive(pid: number): boolean {
 	if (!pid || pid <= 0) return false;
@@ -555,7 +528,7 @@ export class CrossCliProcessManager {
 		return CrossCliProcessManager.instance;
 	}
 
-	public async getCapabilities(options: { includeQuota?: boolean } = {}): Promise<CapabilitiesResult> {
+	public async getCapabilities(options: { includeQuota?: boolean; freshQuota?: boolean } = {}): Promise<CapabilitiesResult> {
 		const config = loadIduConfig();
 		const { profiles } = loadProfilesConfig();
 
@@ -579,10 +552,13 @@ export class CrossCliProcessManager {
 			},
 		};
 
-		// Opt-in. Two of the quota sources cost a model call to answer, so this
-		// is never filled as a side effect of asking what the harness can do.
+		// Opt-in, and cached. Two of the quota sources run a model, so this is
+		// never filled as a side effect of asking what the harness can do. Note
+		// that "no probe" is not "no work": checkCliAvailable above shells out to
+		// `where`/`which` for every configured CLI, which is a preexisting cost
+		// of discovery and not part of the quota layer.
 		if (options.includeQuota) {
-			result.quota = await readQuotaSnapshots();
+			result.quota = await readQuotaSnapshots({ fresh: options.freshQuota === true });
 		}
 
 		return result;

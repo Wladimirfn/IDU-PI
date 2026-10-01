@@ -142,39 +142,67 @@ como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint
 
 ## Cuota de las cuentas
 
-idu-pi no guarda ninguna credencial. Cada fuente toma la sesión que ya existe
-en la máquina, la usa para **una** consulta y la descarta: la key o el token se
-leen del auth store del propio CLI en el momento de la sonda, nunca se
-escriben, nunca se registran, y ningún snapshot los transporta. Un test lo
-verifica plantando un secreto en el payload y comprobando que no aparece en la
-salida.
+idu-pi no guarda ninguna credencial. Cada fuente toma la sesion que ya existe
+en la maquina, la usa para **una** consulta y la descarta: la key o el token se
+leen del auth store del propio CLI en el momento de la sonda, nunca se escriben,
+nunca se registran, y ningun snapshot los transporta. Un test planta un secreto
+en el payload y comprueba que no aparece en la salida.
 
 Se pregunta al CLI, no se rascan sus archivos: un CLI conoce su propia cuenta.
-Medido el 2026-10-01 contra las cuatro cuentas de esta máquina:
+Medido el 2026-10-01 contra las cuatro cuentas de esta maquina:
 
-| Fuente | Cómo responde | Nota |
+| Fuente | Como responde | Nota |
 | --- | --- | --- |
-| `claude` | `claude -p "/usage"` | prosa: `Current session: 9% used · resets Oct 1, 11:39pm (…)` |
-| `agy` | `agy -p "/usage"` | TSV; separa dos medidores (Gemini vs Claude/GPT) en un mismo binario |
-| `cmdc` | `https://api.commandcode.ai/alpha/billing/credits` | `used/cap`; endpoint descubierto leyendo su propia statusline |
-| `codex` | `https://chatgpt.com/backend-api/wham/usage` | `plan_type` + ventanas + disponibilidad por modelo |
+| `claude` | `claude -p "/usage"` | prosa; la ventana semanal imprime `8pm` **sin minutos** |
+| `agy` | `agy -p "/usage"` | TSV; **dos medidores** (Gemini vs Claude/GPT) en un mismo binario |
+| `cmdc` | `https://api.commandcode.ai/alpha/billing/credits` | `used/cap`; endpoint descubierto leyendo su statusline |
+| `codex` | `https://chatgpt.com/backend-api/wham/usage` | `plan_type`, ventanas y **disponibilidad por modelo** |
 
-Tres reglas que el módulo sostiene y los tests fijan:
+Corroboracion independiente: el plugin `opencode-quota` de un tercero reporta
+`[OpenAI] (Plus) 5h 97% left, Weekly 21% left`, que coincide exactamente con lo
+que el adaptador de codex lee de la misma cuenta.
 
-1. **Todo se normaliza a `remaining`.** Claude reporta *used* y agy reporta
-   *remaining* para el mismo estado de cuenta. Un lector que tiene que saber
-   de qué CLI salió el número está a un refactor de enviarlo al revés. Hay un
-   test que compara un payload `used` contra uno `remaining` del mismo estado.
-2. **`unknown` con motivo, nunca `0`.** Un `0` que significa "agotado" y un `0`
-   que significa "no medido" se ven iguales en pantalla y llevan a decisiones
-   opuestas. Un `used` sin `cap` deja el porcentaje en `null`.
+### Medidor y ventana son cosas distintas
+
+Un `QuotaSnapshot` tiene `meters`, y cada medidor tiene `windows`. No es
+decorativo: antigravity reporta "Gemini Models" y "Claude and GPT models" como
+dos medidores distintos, y **ambos tienen una ventana de 5h**. Aplanarlos en claves
+tipo `"Gemini Models:5h"` hace que `windows["5h"]` de `undefined` para ese
+harness y entierra el eje que el llamador necesita: que bolsa se esta vaciando.
+Ademas se conserva la disponibilidad **por modelo** que solo codex reporta, que
+es mas accionable que un porcentaje.
+
+### Reglas que el modulo sostiene y los tests fijan
+
+1. **Todo se normaliza a `remaining`.** Claude reporta *used* y agy *remaining*
+   para el mismo estado. Hay un test que cruza un payload `used` contra uno
+   `remaining` y exige que coincidan. El plugin `opencode-quota` elige lo
+   mismo (`"percentDisplayMode": "remaining"`).
+2. **`unknown` con motivo, nunca `0`.** Un `0` que significa "agotado" y uno
+   que significa "no medido" se ven iguales y llevan a decisiones opuestas. Si
+   una ventana no trae porcentaje, sale `?`; si **ninguna** lo trae, la fuente
+   entera es `unknown` con su motivo. Todo CLI de la config aparece, tenga o no
+   sonda: la ausencia es ambigua, la respuesta desconocida no.
 3. **Unidades distintas por proveedor.** codex entrega el reset en epoch
-   **segundos** y cmdc en **milisegundos**. Leer el segundo como el primero
-   manda al worker a una ventana cerrada en 1970.
+   **segundos** y cmdc en **milisegundos**. Un rango de fechas saneado evita que
+   un `0` se vuelva 1970 o que un `1e300` lance un RangeError que tumba la
+   fuente entera.
+4. **Ningun mensaje de excepcion se interpola en un snapshot.** `JSON.parse`
+   cita el texto crudo alrededor del fallo, y en `auth.json` ese texto es la key.
+   Los motivos son cadenas fijas.
 
-La sonda **nunca** es automática: dos de las cuatro fuentes cuestan una llamada
-de modelo, así que `getCapabilities()` la omite salvo que se pida, `delegate()`
-no la dispara nunca, y el comando es `idu quota`.
+### Coste y cache
+
+La sonda **nunca** es automatica y esta cacheada 10 minutos en
+`~/.idu/runtime/quota-cache.json`, porque dos de las cuatro fuentes corren un
+modelo y una lectura en frio tarda unos 11 segundos. `getCapabilities()` la omite
+salvo que se pida, `delegate()` no la dispara nunca, y `--fresh` (CLI) o
+`fresh_quota` (MCP) fuerzan una llamada viva. La cache se rotula con `stale`.
+
+La exposicion es `idu_capabilities` con `include_quota`, documentada en las tres
+copias del protocolo porque una opcion que el orquestador no conoce es una
+opcion que no se usa. No se registro una herramienta nueva: el drift se queda en
+13.
 
 ## Estado en disco (`~/.idu`)
 

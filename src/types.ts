@@ -227,30 +227,67 @@ export interface CapabilitiesResult {
 }
 
 /**
- * One quota window on a provider account.
+ * One time window on a meter, always in REMAINING.
  *
- * Direction is the field that matters, so it is fixed once and never varies:
- * every source is converted to REMAINING on the way in. Claude reports "9% used"
- * and agy reports "98% remaining" for the same account state, and a reader that
- * has to know which CLI produced a number is one refactor away from shipping a
- * number that is backwards.
+ * Direction is fixed once and never varies. Claude reports "9% used" and agy
+ * reports "98% remaining" for the same account state, and a reader that has to
+ * know which CLI produced a number is one refactor away from shipping a number
+ * that is backwards.
  */
 export interface QuotaWindow {
 	/** 0-100 remaining. Null when the source did not report it. */
 	remainingPercent: number | null;
 	/** When the window resets, ISO 8601. Null when unreported or unparseable. */
 	resetsAt: string | null;
+	/**
+	 * Seconds until the reset, measured at `capturedAt`. Carried alongside the
+	 * absolute time so a consumer cannot recompute it later against a clock that
+	 * has moved, and so human output can say "in 4h 31m" without a date library.
+	 */
+	resetsInSeconds: number | null;
 	/** Length of the window in seconds, when the source names it. */
 	windowSeconds: number | null;
+}
+
+/** Per-model availability inside a meter, when a source reports it. */
+export interface QuotaModelAvailability {
+	available: boolean | null;
+	note: string | null;
+}
+
+/**
+ * A separate pool the account draws from.
+ *
+ * This is distinct from a window, and the distinction is load-bearing. One
+ * account can have several pools: antigravity reports "Gemini Models" and
+ * "Claude and GPT models" as separate meters inside a single binary, and both
+ * have a 5h window. Flattening them into keys like "Gemini Models:5h" would
+ * make `windows["5h"]` undefined for that harness, and would bury the axis a
+ * caller actually needs to reason about.
+ */
+export interface QuotaMeter {
+	/** Stable id within the snapshot, e.g. "gemini-models". */
+	id: string;
+	/** The source's own spelling, for display. */
+	label: string;
+	/** Windows keyed by a stable label ("5h", "week"), never by index. */
+	windows: Record<string, QuotaWindow>;
+	/**
+	 * Availability per model inside this meter. Only codex answers with this
+	 * today, and it is the one place that knows whether a specific model is
+	 * usable right now, which is more actionable than a percentage.
+	 */
+	models?: Record<string, QuotaModelAvailability>;
 }
 
 /**
  * What one CLI reports about its own account, as observed at one moment.
  *
  * `unknownReason` exists so that "this CLI cannot tell us" is a value the
- * caller can read and pass along, rather than a window silently missing from
- * the object. A snapshot with no numbers and no stated reason is the failure
- * mode this type is built to prevent.
+ * caller can read and pass along. Every configured CLI produces a snapshot,
+ * including the ones with no probe, so absence is never ambiguous: a snapshot
+ * with no numbers and no stated reason is the failure mode this type exists to
+ * prevent.
  */
 export interface QuotaSnapshot {
 	/** Stable id of the source, e.g. "codex". */
@@ -265,10 +302,11 @@ export interface QuotaSnapshot {
 	billingModel: "plan" | "api" | "subscription" | null;
 	/** Plan name when the source names one, e.g. "plus". */
 	plan: string | null;
-	/** Windows keyed by a stable label ("5h", "week"), never by index. */
-	windows: Record<string, QuotaWindow>;
+	meters: Record<string, QuotaMeter>;
 	/** When this observation was made. Never a file mtime, never the reset time. */
 	capturedAt: string;
+	/** True when this came from cache rather than a live call. */
+	stale: boolean;
 	/** Why there are no numbers, when there are none. */
 	unknownReason: string | null;
 }
