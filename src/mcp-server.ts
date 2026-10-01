@@ -27,6 +27,31 @@ interface JsonRpcResponse {
 
 const manager = CrossCliProcessManager.getInstance();
 
+/**
+ * A worker must not see idu-pi at all.
+ *
+ * The orchestrator hands a worker its own harness and nothing else: Pi keeps
+ * gentle-ai, CommandCode keeps its own subagents, every CLI keeps codegraph,
+ * engram and the rest. What a worker must never get is a way back into the
+ * orchestrator, because that is the loop the ONE ORCHESTRATOR RULE exists to
+ * prevent.
+ *
+ * Hiding the tools is stronger than letting the worker see them and fail at
+ * call time. A tool the model cannot see is not a tool it reaches for, and it
+ * costs no runtime error when it does try a name it was never offered.
+ *
+ * The guard in `delegate()` stays: it is the second line, and it still owns the
+ * direct CLI path, which never touches this server.
+ */
+function isWorkerProcess(): boolean {
+	return process.env.IDU_WORKER === "true";
+}
+
+const WORKER_HIDDEN_TOOL_ERROR =
+	"idu-pi is not available inside a delegated worker. " +
+	"Workers run on their own harness (native subagents, skills, codegraph, engram) and " +
+	"cannot re-enter the orchestrator. Ask the orchestrator if you need something delegated.";
+
 export const TOOLS = [
 	{
 		name: "idu_status",
@@ -422,11 +447,24 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 			return null;
 
 		case "tools/list":
-			return { tools: TOOLS };
+			// A worker gets an empty catalogue. Not a filtered subset, and not an
+			// error: the server answers normally, it simply offers nothing. Other
+			// MCP servers this harness configured are untouched.
+			return { tools: isWorkerProcess() ? [] : TOOLS };
 
 		case "tools/call": {
 			const name = String(params?.name || "");
 			const args = (params?.arguments || {}) as Record<string, unknown>;
+
+			// tools/list is advisory. A client that cached the orchestrator's
+			// catalogue can still name a tool by hand, so the call itself is
+			// refused rather than merely unlisted.
+			if (isWorkerProcess()) {
+				return {
+					isError: true,
+					content: [{ type: "text", text: WORKER_HIDDEN_TOOL_ERROR }],
+				};
+			}
 
 			const tool = TOOLS.find((t) => t.name === name);
 			if (!tool) {
