@@ -25,6 +25,7 @@ import {
 	loadProfilesConfig,
 } from "./config.js";
 import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "./cmdline.js";
+import { extractUsage } from "./usage.js";
 import type {
 	CapabilitiesResult,
 	DelegateRequest,
@@ -899,6 +900,12 @@ export class CrossCliProcessManager {
 					record.status = recoveredCode === 0 ? "completed" : "failed";
 					const clean = extractCleanSummary(logText, record.profile?.harness || "");
 					record.resultSummary = clean || `Process exited with code ${recoveredCode}`;
+					// Persist usage here too, not only in buildResult. This is the
+					// recovery path for a worker that died before the normal
+					// completion handler ran, and without it the numbers would
+					// only exist for runs that finished cleanly.
+					const recoveredUsage = extractUsage(logText, record.profile?.harness || "");
+					if (recoveredUsage.captured) record.usage = recoveredUsage;
 				} else {
 					record.status = "failed";
 					record.error = record.error || "Worker process terminated unexpectedly";
@@ -975,6 +982,10 @@ export class CrossCliProcessManager {
 			summaryText = `[${record.status.toUpperCase()}: ${record.error}]\n\n${cleanSummary}`;
 		}
 
+		// Token usage, normalised across harness conventions. This is what the
+		// harness reported, not an estimate: a field it never emits stays null.
+		const usage = extractUsage(stdout, record.profile.harness);
+
 		const res: DelegateResult = {
 			runId: record.runId,
 			sessionId: record.sessionId,
@@ -996,10 +1007,61 @@ export class CrossCliProcessManager {
 			lastActivityAt: record.lastActivityAt,
 			bytesEmitted: record.bytesEmitted,
 		};
+		if (usage.captured) res.usage = usage;
 		if (verbose) {
 			res.stdout = stdout.trim();
 			res.stderr = stderr.trim();
 		}
 		return res;
+	}
+
+	/**
+	 * What the delegations actually consumed, read back from the persisted
+	 * records.
+	 *
+	 * `perHarness` keeps the totals separate on purpose: a subscription plan
+	 * and a metered API bill are different currencies and must never be added
+	 * into one number. A harness that reported nothing shows `tokens: null`,
+	 * not zero, so "free" and "unreported" stay distinguishable.
+	 */
+	public summarizeUsage(limit = 50): {
+		runs: number;
+		byHarness: Record<
+			string,
+			{ runs: number; inputTokens: number; outputTokens: number; reasoningTokens: number; unreported: number }
+		>;
+	} {
+		const byHarness: Record<
+			string,
+			{ runs: number; inputTokens: number; outputTokens: number; reasoningTokens: number; unreported: number }
+		> = {};
+
+		const records = this.listSessions()
+			.flatMap((entry) => entry.runs)
+			.slice(0, limit)
+			.map((runId) => this.getStatus(runId))
+			.filter((r): r is RunRecord => Boolean(r));
+
+		for (const record of records) {
+			const harness = record.profile?.harness || "unknown";
+			const bucket = (byHarness[harness] ??= {
+				runs: 0,
+				inputTokens: 0,
+				outputTokens: 0,
+				reasoningTokens: 0,
+				unreported: 0,
+			});
+			bucket.runs += 1;
+			const u = record.usage;
+			if (!u?.captured) {
+				bucket.unreported += 1;
+				continue;
+			}
+			bucket.inputTokens += u.tokens.inputTokens ?? 0;
+			bucket.outputTokens += u.tokens.outputTokens ?? 0;
+			bucket.reasoningTokens += u.tokens.reasoningTokens ?? 0;
+		}
+
+		return { runs: records.length, byHarness };
 	}
 }

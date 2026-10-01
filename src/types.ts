@@ -66,6 +66,46 @@ export interface DelegateRequest {
 	fork?: boolean;
 }
 
+/**
+ * Token counts a harness reported for one delegation.
+ *
+ * `null` on a field means the harness did not report it, which is NOT the same
+ * as zero. A missing field must never be summed as 0, or the total silently
+ * under-reports and nobody can tell "free" apart from "unknown".
+ */
+export interface TokenUsage {
+	inputTokens: number | null;
+	outputTokens: number | null;
+	/** Reasoning tokens, when the harness separates them from output. */
+	reasoningTokens: number | null;
+	cacheReadTokens: number | null;
+	cacheWriteTokens: number | null;
+	/** Harness-reported total, when present. Recomputed only as a last resort. */
+	totalTokens: number | null;
+}
+
+/**
+ * What a harness actually reported, normalised across its own conventions.
+ *
+ * `harness` is the provenance: it tells the reader which CLI produced these
+ * numbers and therefore which conventions to trust. `reportedCostUsd` stays
+ * null unless a real price was known; a subscription plan has no per-token
+ * price, and inventing one is how a cost figure turns into a lie.
+ */
+export interface UsageReport {
+	harness: string;
+	tokens: TokenUsage;
+	/**
+	 * Dollar cost from the harness itself, or null when unknown. Never zero as
+	 * a stand-in for "not reported".
+	 */
+	reportedCostUsd: number | null;
+	/** True when at least one token field was read from a harness payload. */
+	captured: boolean;
+	/** True when some field is missing because that harness never emits it. */
+	incomplete: boolean;
+}
+
 export interface DelegateResult {
 	runId: string;
 	sessionId: string;
@@ -89,6 +129,7 @@ export interface DelegateResult {
 	lastActivityAt?: string;
 	bytesEmitted?: number;
 	instruction?: string;
+	usage?: UsageReport;
 }
 
 export interface RunRecord {
@@ -114,6 +155,12 @@ export interface RunRecord {
 	bytesEmitted?: number;
 	secondsSinceLastActivity?: number;
 	health?: "healthy" | "idle_warning" | "completed" | "interrupted";
+	/**
+	 * Persisted so the numbers survive a reread of the session. Without this,
+	 * usage is only ever visible in the first response and disappears on every
+	 * later `getResult` or `getStatus`.
+	 */
+	usage?: UsageReport;
 }
 
 export interface RunnerSpec {

@@ -20,6 +20,7 @@ import {
 	getSessionKey,
 	shouldCountTurn,
 } from "./process-manager.js";
+import { extractUsage } from "./usage.js";
 
 function parseArgs(): string {
 	const args = process.argv.slice(2);
@@ -204,6 +205,14 @@ async function runDaemon(): Promise<void> {
 				(exitCode === 0
 					? "Task completed successfully"
 					: `Process exited with code ${exitCode}`);
+		}
+
+		// Persist token usage alongside the summary. This is the normal
+		// completion path, so it is where the numbers are normally captured;
+		// process-manager only has the recovery path.
+		const usage = extractUsage(fullOutput, spec.harness);
+		if (usage.captured) {
+			record.usage = usage;
 		}
 
 		try {

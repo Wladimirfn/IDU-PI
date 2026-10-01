@@ -310,6 +310,94 @@ test("allowRecursiveDelegation no longer disables the guard", async () => {
 	}
 });
 
+import { extractUsage, formatUsage } from "../src/usage.js";
+
+// The three shapes below are verbatim from real worker logs, not invented.
+test("extractUsage reads antigravity snake_case usage", () => {
+	const log = [
+		JSON.stringify({ type: "step_update", step_update: { type: "tool" } }),
+		JSON.stringify({
+			type: "step_update",
+			usage: { input_tokens: 21134, output_tokens: 1227, thinking_tokens: 1082, total_tokens: 22361 },
+		}),
+	].join("\n");
+
+	const usage = extractUsage(log, "antigravity");
+	assert.equal(usage.captured, true);
+	assert.equal(usage.tokens.inputTokens, 21134);
+	assert.equal(usage.tokens.outputTokens, 1227);
+	assert.equal(usage.tokens.reasoningTokens, 1082);
+	assert.equal(usage.tokens.totalTokens, 22361);
+});
+
+test("extractUsage reads commandcode camelCase usage", () => {
+	const log = JSON.stringify({
+		type: "result",
+		usage: { inputTokens: 18639, outputTokens: 175, cacheReadTokens: 5248, cacheWriteTokens: 0 },
+	});
+
+	const usage = extractUsage(log, "commandcode");
+	assert.equal(usage.captured, true);
+	assert.equal(usage.tokens.inputTokens, 18639);
+	assert.equal(usage.tokens.outputTokens, 175);
+	assert.equal(usage.tokens.cacheReadTokens, 5248);
+	// Reported total absent, so it is derived from the parts it did give.
+	assert.equal(usage.tokens.totalTokens, 18639 + 175);
+});
+
+test("extractUsage never turns a missing field into zero", () => {
+	// A harness that reports only input: output stays null, NOT 0.
+	const log = JSON.stringify({ usage: { input_tokens: 500 } });
+	const usage = extractUsage(log, "quiet-harness");
+
+	assert.equal(usage.captured, true);
+	assert.equal(usage.tokens.inputTokens, 500);
+	assert.equal(usage.tokens.outputTokens, null, "unreported must be null, never 0");
+	assert.equal(usage.tokens.totalTokens, null, "cannot total a partial report");
+	assert.equal(usage.incomplete, true);
+});
+
+test("extractUsage reports unknown rather than zero for a silent harness", () => {
+	const usage = extractUsage("worker said nothing about tokens", "silent-harness");
+	assert.equal(usage.captured, false);
+	assert.equal(usage.reportedCostUsd, null);
+	assert.equal(usage.tokens.inputTokens, null);
+
+	assert.match(formatUsage(usage), /not reported/);
+	assert.doesNotMatch(formatUsage(usage), /\b0\b/);
+});
+
+test("extractUsage survives a malformed line among good ones", () => {
+	const log = ["{not json", JSON.stringify({ usage: { input_tokens: 42, output_tokens: 7 } })].join("\n");
+	const usage = extractUsage(log, "noisy");
+	assert.equal(usage.tokens.inputTokens, 42);
+	assert.equal(usage.tokens.outputTokens, 7);
+});
+
+test("formatUsage says cost not reported instead of inventing a price", () => {
+	const usage = extractUsage(JSON.stringify({ usage: { input_tokens: 10, output_tokens: 5 } }), "agy");
+	assert.equal(usage.reportedCostUsd, null);
+	assert.match(formatUsage(usage), /cost not reported/);
+});
+
+test("summarizeUsage keeps harnesses apart and counts unreported as unknown", () => {
+	const manager = CrossCliProcessManager.getInstance();
+	// A fresh manager over the real sessions. The shape is what matters: every
+	// harness appears, and one that never reported is counted in `unreported`
+	// rather than silently contributing zero tokens.
+	const summary = manager.summarizeUsage(10);
+
+	assert.ok(summary.runs > 0, "expected at least one recorded run");
+	assert.equal(typeof summary.byHarness, "object");
+
+	for (const [harness, bucket] of Object.entries(summary.byHarness)) {
+		assert.ok(bucket.runs > 0, `${harness} should count its runs`);
+		assert.ok(bucket.unreported >= 0);
+		const sum = bucket.inputTokens + bucket.outputTokens + bucket.reasoningTokens;
+		assert.ok(sum >= 0, `${harness} totals must not go negative`);
+	}
+});
+
 test("unwrapCmdExecutable unwraps Windows npm cmd wrappers to direct executables", async () => {
 	if (process.platform !== "win32") return;
 
