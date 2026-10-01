@@ -178,6 +178,7 @@ export function loadIduConfig(): IduConfig {
 	try {
 		const raw = readFileSync(IDU_CONFIG_PATH, "utf8");
 		const parsed = JSON.parse(raw) as IduConfig;
+		warnAboutRetiredRuleFlags(parsed);
 		return {
 			...DEFAULT_CONFIG,
 			...parsed,
@@ -194,6 +195,27 @@ export function loadIduConfig(): IduConfig {
 		console.error("Error loading IDU config, using default:", err);
 		return DEFAULT_CONFIG;
 	}
+}
+
+/**
+ * `oneOrchestratorRule.allowRecursiveDelegation` stopped being read when the
+ * orchestrator guard became fail-closed: it used to be a switch that disabled
+ * the whole guard straight from the config file. The key is still accepted so
+ * existing configs keep parsing, but it no longer has any effect.
+ *
+ * A user who relied on it would otherwise lose the relaxation with no signal,
+ * so say so out loud instead of letting the key rot into a zombi.
+ */
+function warnAboutRetiredRuleFlags(config: IduConfig): void {
+	const rule = config.oneOrchestratorRule as { allowRecursiveDelegation?: unknown } | undefined;
+	if (rule?.allowRecursiveDelegation === undefined) return;
+	if (rule.allowRecursiveDelegation === false) return;
+	console.warn(
+		"[warn] oneOrchestratorRule.allowRecursiveDelegation is no longer read. " +
+			"The orchestrator guard is fail-closed and ignores this key; it was the switch that " +
+			"used to disable the guard. To relax the rule, set oneOrchestratorRule.enabled=false, " +
+			"or drop the key entirely.",
+	);
 }
 
 export function loadProfilesConfig(): ProfilesConfig {

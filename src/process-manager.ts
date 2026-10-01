@@ -580,16 +580,21 @@ export class CrossCliProcessManager {
 	public async delegate(request: DelegateRequest, asyncExecution = false): Promise<DelegateResult> {
 		const config = loadIduConfig();
 
-		// 1. ONE ORCHESTRATOR RULE: Enforce non-recursion
-		if (
-			config.oneOrchestratorRule.enabled &&
-			!config.oneOrchestratorRule.allowRecursiveDelegation
-		) {
-			if (process.env.IDU_WORKER === "true" && process.env.IDU_ALLOW_DELEGATION === "false") {
-				throw new Error(
-					`ONE ORCHESTRATOR RULE VIOLATION: Current process is already an active worker (IDU_RUN_ID: ${process.env.IDU_RUN_ID}). Recursive sub-delegation is disallowed.`,
-				);
-			}
+		// 1. ONE ORCHESTRATOR RULE: Enforce non-recursion.
+		//
+		// Fail-closed: the guard fires on worker identity alone. The previous
+		// form required IDU_WORKER === "true" AND IDU_ALLOW_DELEGATION === "false",
+		// so a worker whose environment was not fully injected passed the check
+		// silently. Identity is the security-relevant fact, not a second flag.
+		//
+		// allowRecursiveDelegation is deliberately NOT consulted here. Letting a
+		// config flag switch this guard off removed the protection without any
+		// code change. Relaxation, if ever needed, is oneOrchestratorRule.enabled,
+		// which is explicit and visible in the same config block.
+		if (config.oneOrchestratorRule.enabled && process.env.IDU_WORKER === "true") {
+			throw new Error(
+				`ONE ORCHESTRATOR RULE VIOLATION: Current process is already an active worker (IDU_RUN_ID: ${process.env.IDU_RUN_ID}). Recursive sub-delegation is disallowed.`,
+			);
 		}
 
 		// 2. Resolve the session owner BEFORE resolving the profile, so a
