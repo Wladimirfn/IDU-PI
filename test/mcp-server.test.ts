@@ -2,6 +2,62 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleMcpMethod, TOOLS } from "../src/mcp-server.js";
 
+test("MCP tools/list is empty inside a delegated worker", async () => {
+	process.env.IDU_WORKER = "true";
+	try {
+		const listed = (await handleMcpMethod("tools/list", undefined)) as {
+			tools: Array<{ name: string }>;
+		};
+		assert.deepEqual(
+			listed.tools,
+			[],
+			"a worker must not see any idu-pi tool, least of all idu_delegate",
+		);
+	} finally {
+		delete process.env.IDU_WORKER;
+	}
+});
+
+test("MCP tools/call is refused inside a worker even if a tool is named by hand", async () => {
+	process.env.IDU_WORKER = "true";
+	try {
+		// tools/list is advisory. A client that cached the orchestrator's
+		// catalogue can still name a tool, so the call itself must be refused.
+		const result = (await handleMcpMethod("tools/call", {
+			name: "idu_capabilities",
+			arguments: {},
+		})) as { isError: boolean; content: Array<{ text: string }> };
+
+		assert.equal(result.isError, true);
+		assert.match(result.content[0].text, /not available inside a delegated worker/);
+	} finally {
+		delete process.env.IDU_WORKER;
+	}
+});
+
+test("MCP idu_delegate cannot be called from a worker through the MCP path", async () => {
+	process.env.IDU_WORKER = "true";
+	try {
+		const result = (await handleMcpMethod("tools/call", {
+			name: "idu_delegate",
+			arguments: { task: "should never run", profile: "cheap-explore" },
+		})) as { isError: boolean };
+
+		assert.equal(result.isError, true, "the MCP path must refuse delegation from a worker");
+	} finally {
+		delete process.env.IDU_WORKER;
+	}
+});
+
+test("MCP tools/list is complete for the orchestrator", async () => {
+	delete process.env.IDU_WORKER;
+	const listed = (await handleMcpMethod("tools/list", undefined)) as {
+		tools: Array<{ name: string }>;
+	};
+	assert.equal(listed.tools.length, TOOLS.length);
+	assert.ok(listed.tools.some((t) => t.name === "idu_delegate"));
+});
+
 test("MCP server exposes exactly 13 tools", () => {
 	assert.equal(TOOLS.length, 13);
 	const names = TOOLS.map((t) => t.name);
