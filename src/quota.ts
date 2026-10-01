@@ -156,6 +156,14 @@ export function parseCodexUsagePayload(payload: unknown, now: number): QuotaSnap
 		if (Object.keys(models).length > 0) meter.models = models;
 	}
 
+	// Same rule as the other parsers: a table of question marks is not an
+	// answer. Without a single percentage there is no quota to report, and
+	// saying so beats printing "5h ?" and letting the reader assume zero.
+	const withNumbers = Object.values(meter.windows).some((w) => w.remainingPercent !== null);
+	if (!withNumbers) {
+		return unknownSnapshot("codex", "codex", "la respuesta no trajo porcentajes de cuota", now);
+	}
+
 	return {
 		source: "codex",
 		harness: "codex",
@@ -484,7 +492,7 @@ export const agyQuotaSource: QuotaSource = {
 	harness: "antigravity",
 	available: () => existsSync(join(homedir(), ".gemini")),
 	async read(now = Date.now()) {
-		const text = await runProbe("agy", ["-p", "/usage"]);
+		const text = await runProbe("antigravity", ["-p", "/usage"]);
 		return text === null ? unknownSnapshot("agy", "antigravity", REASON_NO_QUOTA_LINES, now) : parseAgyUsageTsv(text, now);
 	},
 };
@@ -583,7 +591,32 @@ export function readCacheIfFresh(cachePath: string, now: number, ttlMs: number):
 	if (cached?.version !== 1 || !Array.isArray(cached.snapshots)) return null;
 	const age = now - Date.parse(cached.cachedAt);
 	if (!Number.isFinite(age) || age < 0 || age >= ttlMs) return null;
-	return cached.snapshots.map((snap) => ({ ...snap, stale: true }));
+
+	// Valid JSON is not a valid cache. A hand-edited file, a half-written one
+	// from another writer, or a future schema version would otherwise reach the
+	// formatter as a snapshot with no `meters`, and crash the command that was
+	// only trying to print a cache hit. Dropping what is unusable here is what
+	// makes a bad cache a performance problem rather than a correctness one.
+	const usable = cached.snapshots.filter(isUsableSnapshot);
+	if (usable.length === 0) return null;
+
+	return usable.map((snap) => ({ ...snap, stale: true }));
+}
+
+/**
+ * The minimum shape the formatter relies on. Deliberately structural and
+ * shallow: this guards the cache boundary, it does not re-validate a source.
+ */
+function isUsableSnapshot(value: unknown): value is QuotaSnapshot {
+	if (!value || typeof value !== "object") return false;
+	const snap = value as Partial<QuotaSnapshot>;
+	return (
+		typeof snap.source === "string" &&
+		typeof snap.harness === "string" &&
+		!!snap.meters &&
+		typeof snap.meters === "object" &&
+		!Array.isArray(snap.meters)
+	);
 }
 
 /** Cache writes never take the caller down with them. */
@@ -659,7 +692,7 @@ export function formatQuota(snapshots: QuotaSnapshot[]): string {
 		}
 
 		const meterLines: string[] = [];
-		for (const meter of Object.values(snap.meters)) {
+		for (const meter of Object.values(snap.meters ?? {})) {
 			const parts = orderWindows(meter.windows).map(([label, w]) => {
 				const pct = w.remainingPercent === null ? "?" : `${w.remainingPercent}%`;
 				return `${label} ${pct} left, ${relative(w.resetsInSeconds)}`;

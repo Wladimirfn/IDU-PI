@@ -467,3 +467,42 @@ test("formatQuota lists a model that is unavailable right now", () => {
 	const out = formatQuota([parseCodexUsagePayload(CODEX_FIXTURE, FIXED_NOW)]);
 	assert.match(out, /modelos no disponibles ahora: gpt-5\.6-luna/, out);
 });
+
+test("codex with no percentages is unknown, not a table of question marks", () => {
+	// If codex ever renames used_percent, rate_limit still arrives and the
+	// windows would print as "5h ? left". A question mark next to no reason
+	// reads like a zero quota, which is the one output this layer exists to
+	// make impossible. cmdc already fails this way; codex now does too.
+	const renamed = parseCodexUsagePayload(
+		{ plan_type: "plus", rate_limit: { primary_window: {}, secondary_window: {} } },
+		FIXED_NOW,
+	);
+	assert.equal(renamed.unknownReason, "la respuesta no trajo porcentajes de cuota");
+	assert.match(formatQuota([renamed]), /unknown — la respuesta no trajo porcentajes/);
+});
+
+test("a cache full of unusable entries is a miss, not a crash", () => {
+	// Valid JSON with the wrong shape is still valid JSON. It must not reach
+	// the formatter as a snapshot with no `meters` and take the command down.
+	const dir = mkdtempSync(join(tmpdir(), "idu-quota-shape-"));
+	const path = join(dir, "quota-cache.json");
+	try {
+		writeFileSync(path, JSON.stringify({ version: 1, cachedAt: new Date(FIXED_NOW).toISOString(), snapshots: [{}] }));
+		assert.equal(readCacheIfFresh(path, FIXED_NOW, QUOTA_CACHE_TTL_MS), null);
+
+		// One good entry among the bad is still worth reading.
+		writeFileSync(
+			path,
+			JSON.stringify({
+				version: 1,
+				cachedAt: new Date(FIXED_NOW).toISOString(),
+				snapshots: [{}, parseCodexUsagePayload(CODEX_FIXTURE, FIXED_NOW)],
+			}),
+		);
+		const mixed = readCacheIfFresh(path, FIXED_NOW, QUOTA_CACHE_TTL_MS);
+		assert.equal(mixed?.length, 1);
+		assert.equal(mixed?.[0].source, "codex");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
