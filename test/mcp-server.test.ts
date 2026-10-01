@@ -1,6 +1,34 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleMcpMethod, TOOLS } from "../src/mcp-server.js";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { QUOTA_CACHE_PATH } from "../src/json-file.js";
+import { writeCache } from "../src/quota.js";
+import type { QuotaSnapshot } from "../src/types.js";
+
+/**
+ * A cache entry seeded by the MCP test below. The figures are the real ones
+ * codex reported on 2026-10-01, so the assertion reads like a real reading
+ * rather than a placeholder that would pass against any implementation.
+ */
+const CACHE_SEEDED_SNAPSHOT: QuotaSnapshot = {
+	source: "codex",
+	harness: "codex",
+	billingModel: "plan",
+	plan: "plus",
+	meters: {
+		"rate-limit": {
+			id: "rate-limit",
+			label: "Rate limit",
+			windows: {
+				"5h": { remainingPercent: 97, resetsAt: null, resetsInSeconds: null, windowSeconds: 18000 },
+			},
+		},
+	},
+	capturedAt: "2026-10-01T20:00:00.000Z",
+	stale: false,
+	unknownReason: null,
+};
 
 test("MCP tools/list is empty inside a delegated worker", async () => {
 	process.env.IDU_WORKER = "true";
@@ -403,5 +431,55 @@ test("Regression: destructive preflight on a clean tree does not claim a phantom
 	} finally {
 		try { rmSync(scratch, { recursive: true, force: true }); } catch {}
 	}
+});
+
+test("MCP idu_capabilities adds quota only when the orchestrator asks for it", async () => {
+	const read = async (args: Record<string, unknown>) => {
+		const res = (await handleMcpMethod("tools/call", {
+			name: "idu_capabilities",
+			arguments: args,
+		})) as { isError?: boolean; content: Array<{ text: string }> };
+		return { isError: res.isError === true, body: JSON.parse(res.content[0].text) as Record<string, unknown> };
+	};
+
+	// No argument at all. Two of the four sources spend a model call to answer,
+	// so this must stay a cheap local read: no quota field, no probe.
+	const bare = await read({});
+	assert.ok(
+		!("quota" in bare.body),
+		"quota must be opt-in: probing is a deliberate act, not a side effect of looking at the catalogue",
+	);
+
+	// include_quota: true. The cache is seeded first so this asserts the MCP
+	// plumbing without spending a live call or waiting on one.
+	const hadCache = existsSync(QUOTA_CACHE_PATH);
+	const previous = hadCache ? readFileSync(QUOTA_CACHE_PATH, "utf8") : null;
+	try {
+		writeCache(QUOTA_CACHE_PATH, [CACHE_SEEDED_SNAPSHOT], Date.now());
+
+		const asked = await read({ include_quota: true });
+		assert.equal(asked.isError, false);
+		const quota = asked.body.quota as QuotaSnapshot[] | undefined;
+		assert.ok(Array.isArray(quota), "include_quota: true must add the quota field");
+		assert.equal(quota.length, 1);
+		assert.equal(quota[0].source, "codex");
+		assert.equal(quota[0].stale, true, "a cache reading must admit that it came from cache");
+		assert.equal(quota[0].meters["rate-limit"]?.windows["5h"]?.remainingPercent, 97);
+	} finally {
+		if (previous === null) rmSync(QUOTA_CACHE_PATH, { force: true });
+		else writeFileSync(QUOTA_CACHE_PATH, previous, "utf8");
+	}
+});
+
+test("MCP idu_capabilities rejects a non-boolean include_quota", async () => {
+	// An MCP client that stringifies its args must be told no, not silently
+	// handed an off quota: "true" is not true, and truthiness would say yes.
+	const res = (await handleMcpMethod("tools/call", {
+		name: "idu_capabilities",
+		arguments: { include_quota: "true" },
+	})) as { isError: boolean; content: Array<{ text: string }> };
+
+	assert.equal(res.isError, true);
+	assert.match(res.content[0].text, /Schema validation failed for tool 'idu_capabilities'/);
 });
 
