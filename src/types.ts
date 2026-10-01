@@ -216,4 +216,59 @@ export interface CapabilitiesResult {
 	}>;
 	profiles: Record<string, IduProfile>;
 	oneOrchestratorRule: OneOrchestratorRule;
+	/**
+	 * Quota for the accounts behind the installed CLIs, read on demand.
+	 *
+	 * Probing is a deliberate act, never a side effect of delegating: two of
+	 * the sources cost a model call to answer, so `getCapabilities()` fills this
+	 * only when asked, and `delegate()` never triggers it.
+	 */
+	quota?: QuotaSnapshot[];
+}
+
+/**
+ * One quota window on a provider account.
+ *
+ * Direction is the field that matters, so it is fixed once and never varies:
+ * every source is converted to REMAINING on the way in. Claude reports "9% used"
+ * and agy reports "98% remaining" for the same account state, and a reader that
+ * has to know which CLI produced a number is one refactor away from shipping a
+ * number that is backwards.
+ */
+export interface QuotaWindow {
+	/** 0-100 remaining. Null when the source did not report it. */
+	remainingPercent: number | null;
+	/** When the window resets, ISO 8601. Null when unreported or unparseable. */
+	resetsAt: string | null;
+	/** Length of the window in seconds, when the source names it. */
+	windowSeconds: number | null;
+}
+
+/**
+ * What one CLI reports about its own account, as observed at one moment.
+ *
+ * `unknownReason` exists so that "this CLI cannot tell us" is a value the
+ * caller can read and pass along, rather than a window silently missing from
+ * the object. A snapshot with no numbers and no stated reason is the failure
+ * mode this type is built to prevent.
+ */
+export interface QuotaSnapshot {
+	/** Stable id of the source, e.g. "codex". */
+	source: string;
+	/** The CLI whose credentials and endpoint were used. */
+	harness: string;
+	/**
+	 * Which meter this is. A subscriber plan and a metered API account are the
+	 * same vendor with different counters, so they must never share a bucket.
+	 * Null when the source does not say which one it is.
+	 */
+	billingModel: "plan" | "api" | "subscription" | null;
+	/** Plan name when the source names one, e.g. "plus". */
+	plan: string | null;
+	/** Windows keyed by a stable label ("5h", "week"), never by index. */
+	windows: Record<string, QuotaWindow>;
+	/** When this observation was made. Never a file mtime, never the reset time. */
+	capturedAt: string;
+	/** Why there are no numbers, when there are none. */
+	unknownReason: string | null;
 }

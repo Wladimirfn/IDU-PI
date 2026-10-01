@@ -331,10 +331,16 @@ export const TOOLS = [
 	{
 		name: "idu_capabilities",
 		description:
-			"Lists available worker profiles in ~/.idu/profiles.json, detects installed terminal CLIs (Claude, OpenCode, Pi, Codex), and reports the active ONE ORCHESTRATOR rule status.",
+			"Lists available worker profiles in ~/.idu/profiles.json, detects installed terminal CLIs (Claude, OpenCode, Pi, Codex), and reports the active ONE ORCHESTRATOR rule status. With include_quota, also reads each CLI's own account quota (remaining % and reset time per window) so you can avoid dispatching to a model that is nearly exhausted. Off by default: two of the quota sources cost a model call to answer.",
 		inputSchema: {
 			type: "object",
-			properties: {},
+			properties: {
+				include_quota: {
+					type: "boolean",
+					description:
+						"When true, probe each installed CLI for its account quota. Every figure is REMAINING, never used, and a CLI that cannot answer reports unknown with a reason instead of zero.",
+				},
+			},
 		},
 	},
 	{
@@ -566,7 +572,7 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 			}
 
 			if (name === "idu_capabilities") {
-				const caps = manager.getCapabilities();
+				const caps = await manager.getCapabilities({ includeQuota: args.include_quota === true });
 				return {
 					content: [{ type: "text", text: JSON.stringify(caps, null, 2) }],
 				};

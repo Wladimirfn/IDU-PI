@@ -137,12 +137,15 @@ test("buildWorkerArgs builds correct argv for Command Code with model and yolo p
 	assert.equal(args[args.length - 1], "Implement feature");
 });
 
-test("CrossCliProcessManager gets capabilities reporting profiles and CLIs", () => {
+test("CrossCliProcessManager gets capabilities reporting profiles and CLIs", async () => {
 	const manager = CrossCliProcessManager.getInstance();
-	const caps = manager.getCapabilities();
+	// No include_quota: probing costs a model call for two of the sources, so
+	// asking what the harness can do must not quietly spend one.
+	const caps = await manager.getCapabilities();
 	assert.ok(caps.profiles["cheap-explore"]);
 	assert.ok(Array.isArray(caps.installedClis));
 	assert.equal(caps.oneOrchestratorRule.enabled, true);
+	assert.equal(caps.quota, undefined, "quota must be opt-in, never a side effect of discovery");
 });
 
 test("ONE ORCHESTRATOR RULE blocks recursive delegation when IDU_WORKER is set", async () => {

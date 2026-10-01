@@ -26,6 +26,7 @@ import {
 } from "./config.js";
 import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "./cmdline.js";
 import { extractUsage } from "./usage.js";
+import { readQuotaSnapshots } from "./quota.js";
 import type {
 	CapabilitiesResult,
 	DelegateRequest,
@@ -554,7 +555,7 @@ export class CrossCliProcessManager {
 		return CrossCliProcessManager.instance;
 	}
 
-	public getCapabilities(): CapabilitiesResult {
+	public async getCapabilities(options: { includeQuota?: boolean } = {}): Promise<CapabilitiesResult> {
 		const config = loadIduConfig();
 		const { profiles } = loadProfilesConfig();
 
@@ -564,7 +565,7 @@ export class CrossCliProcessManager {
 			available: checkCliAvailable(def.command),
 		}));
 
-		return {
+		const result: CapabilitiesResult = {
 			installedClis,
 			profiles,
 			// Reported as always-on regardless of what ~/.idu/config.json holds.
@@ -577,6 +578,14 @@ export class CrossCliProcessManager {
 				configurable: false,
 			},
 		};
+
+		// Opt-in. Two of the quota sources cost a model call to answer, so this
+		// is never filled as a side effect of asking what the harness can do.
+		if (options.includeQuota) {
+			result.quota = await readQuotaSnapshots();
+		}
+
+		return result;
 	}
 
 	public listSessions(): SessionTreeEntry[] {

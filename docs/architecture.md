@@ -140,6 +140,42 @@ como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint
 - **Árbol de sesiones:** `~/.idu/sessions/tree.json`, escrito de forma atómica
   (tmp + `rename`), con `turnCount` y lista de runs por sesión.
 
+## Cuota de las cuentas
+
+idu-pi no guarda ninguna credencial. Cada fuente toma la sesión que ya existe
+en la máquina, la usa para **una** consulta y la descarta: la key o el token se
+leen del auth store del propio CLI en el momento de la sonda, nunca se
+escriben, nunca se registran, y ningún snapshot los transporta. Un test lo
+verifica plantando un secreto en el payload y comprobando que no aparece en la
+salida.
+
+Se pregunta al CLI, no se rascan sus archivos: un CLI conoce su propia cuenta.
+Medido el 2026-10-01 contra las cuatro cuentas de esta máquina:
+
+| Fuente | Cómo responde | Nota |
+| --- | --- | --- |
+| `claude` | `claude -p "/usage"` | prosa: `Current session: 9% used · resets Oct 1, 11:39pm (…)` |
+| `agy` | `agy -p "/usage"` | TSV; separa dos medidores (Gemini vs Claude/GPT) en un mismo binario |
+| `cmdc` | `https://api.commandcode.ai/alpha/billing/credits` | `used/cap`; endpoint descubierto leyendo su propia statusline |
+| `codex` | `https://chatgpt.com/backend-api/wham/usage` | `plan_type` + ventanas + disponibilidad por modelo |
+
+Tres reglas que el módulo sostiene y los tests fijan:
+
+1. **Todo se normaliza a `remaining`.** Claude reporta *used* y agy reporta
+   *remaining* para el mismo estado de cuenta. Un lector que tiene que saber
+   de qué CLI salió el número está a un refactor de enviarlo al revés. Hay un
+   test que compara un payload `used` contra uno `remaining` del mismo estado.
+2. **`unknown` con motivo, nunca `0`.** Un `0` que significa "agotado" y un `0`
+   que significa "no medido" se ven iguales en pantalla y llevan a decisiones
+   opuestas. Un `used` sin `cap` deja el porcentaje en `null`.
+3. **Unidades distintas por proveedor.** codex entrega el reset en epoch
+   **segundos** y cmdc en **milisegundos**. Leer el segundo como el primero
+   manda al worker a una ventana cerrada en 1970.
+
+La sonda **nunca** es automática: dos de las cuatro fuentes cuestan una llamada
+de modelo, así que `getCapabilities()` la omite salvo que se pida, `delegate()`
+no la dispara nunca, y el comando es `idu quota`.
+
 ## Estado en disco (`~/.idu`)
 
 ```text

@@ -104,7 +104,7 @@ async function main(): Promise<void> {
 				console.log(JSON.stringify(status, null, 2));
 				break;
 			}
-			const caps = CrossCliProcessManager.getInstance().getCapabilities();
+			const caps = await CrossCliProcessManager.getInstance().getCapabilities();
 			console.log("\n=== IDU Cross-CLI Status ===");
 			console.log(`IDU Home: ${IDU_HOME}`);
 			console.log("One Orchestrator Rule: ACTIVE (always on, not configurable — see SECURITY.md)");
@@ -159,8 +159,17 @@ async function main(): Promise<void> {
 		}
 
 		case "capabilities": {
-			const caps = CrossCliProcessManager.getInstance().getCapabilities();
+			const caps = await CrossCliProcessManager.getInstance().getCapabilities();
 			console.log(JSON.stringify(caps, null, 2));
+			break;
+		}
+
+		case "quota": {
+			// Reads each installed CLI's own account. Two of the sources cost a
+			// model call, which is why this is a command and not something
+			// `status` or `capabilities` triggers on their own.
+			const { readQuotaSnapshots, formatQuota } = await import("./quota.js");
+			console.log(formatQuota(await readQuotaSnapshots()));
 			break;
 		}
 
@@ -280,7 +289,7 @@ async function main(): Promise<void> {
 			console.log("  idu wait <runId> [--follow]             Wait for background run (with optional live streaming)");
 			console.log("  idu sessions                            Display session hierarchy tree");
 			console.log("  idu capabilities                        Print JSON capabilities");
-			console.log("  idu preflight <request> [--cwd <dir>]   Run preflight safety check");
+			console.log("  idu quota                               Read each CLI's own account quota (costs a model call for some)"); console.log("  idu preflight <request> [--cwd <dir>]   Run preflight safety check");
 			console.log("  idu preflight <r> --expected-files <a,b>  Declare expected blast radius");
 			console.log("  idu delegate <task> --profile <p>       Directly delegate to a worker");
 			console.log("  idu delegate <task> --session <id>      Resume an existing session");
