@@ -605,9 +605,11 @@ export class CrossCliProcessManager {
 		// inherited the marker cannot walk into a loop by accident, and the
 		// refusal lands in the run log where a post-mortem can find it.
 		//
-		// The MCP surface is the part that genuinely holds: a worker's tool
-		// catalogue comes back empty and tools/call refuses by name. That is
-		// hiding, not denying — a worker can still spawn this binary directly.
+		// The MCP filter hides the same tools, but it is not a second defence:
+		// isWorkerProcess() in mcp-server.ts is this same predicate, so a worker
+		// that clears the variable gets the full catalogue and calls through.
+		// Both surfaces rest on one cooperative identity contract. SECURITY.md
+		// carries the measured numbers.
 		//
 		// Closing this against a worker that controls its own shell means taking
 		// authority away from that worker (a supervisor process with
