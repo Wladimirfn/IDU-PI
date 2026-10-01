@@ -23,6 +23,13 @@ export interface CliDefinition {
 export interface OneOrchestratorRule {
 	enabled: boolean;
 	allowRecursiveDelegation: boolean;
+	/**
+	 * Whether a config file can turn the guard off. Always false now: both keys
+	 * are retired and the guard reads no config. Present so `idu status` can say
+	 * "not configurable" instead of printing an ENABLED/DISABLED that a stale
+	 * config file could contradict. Optional so older mock configs still compile.
+	 */
+	configurable?: boolean;
 }
 
 export interface IduConfig {

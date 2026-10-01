@@ -186,10 +186,11 @@ export function loadIduConfig(): IduConfig {
 				...DEFAULT_CONFIG.clis,
 				...(parsed.clis ?? {}),
 			},
-			oneOrchestratorRule: {
-				...DEFAULT_CONFIG.oneOrchestratorRule,
-				...(parsed.oneOrchestratorRule ?? {}),
-			},
+			// oneOrchestratorRule is deliberately NOT merged from the file. Both
+			// of its keys used to switch the guard off, and the file lives in a
+			// home directory every delegated worker can write to. Taking the
+			// value from the file made a one-line bypass the cheapest way in.
+			oneOrchestratorRule: { ...DEFAULT_CONFIG.oneOrchestratorRule },
 		};
 	} catch (err) {
 		console.error("Error loading IDU config, using default:", err);
@@ -198,23 +199,28 @@ export function loadIduConfig(): IduConfig {
 }
 
 /**
- * `oneOrchestratorRule.allowRecursiveDelegation` stopped being read when the
- * orchestrator guard became fail-closed: it used to be a switch that disabled
- * the whole guard straight from the config file. The key is still accepted so
- * existing configs keep parsing, but it no longer has any effect.
+ * `oneOrchestratorRule` is retired in full.
  *
- * A user who relied on it would otherwise lose the relaxation with no signal,
- * so say so out loud instead of letting the key rot into a zombi.
+ * `allowRecursiveDelegation` was the direct switch and `enabled` wrapped the
+ * whole condition, so either one disabled the guard from `~/.idu/config.json`.
+ * The guard now fires on `IDU_WORKER === "true"` and reads no config at all.
+ *
+ * The keys are still accepted so existing configs keep parsing, and this warns
+ * rather than leaving the block to rot into a switch nobody reads and everybody
+ * assumes is still live. Silently ignoring a knob that used to work is how you
+ * find out about it from a support ticket.
  */
 function warnAboutRetiredRuleFlags(config: IduConfig): void {
-	const rule = config.oneOrchestratorRule as { allowRecursiveDelegation?: unknown } | undefined;
-	if (rule?.allowRecursiveDelegation === undefined) return;
-	if (rule.allowRecursiveDelegation === false) return;
+	const rule = config.oneOrchestratorRule as
+		| { enabled?: unknown; allowRecursiveDelegation?: unknown }
+		| undefined;
+	if (!rule) return;
+	if (rule.enabled === undefined && rule.allowRecursiveDelegation === undefined) return;
 	console.warn(
-		"[warn] oneOrchestratorRule.allowRecursiveDelegation is no longer read. " +
-			"The orchestrator guard is fail-closed and ignores this key; it was the switch that " +
-			"used to disable the guard. To relax the rule, set oneOrchestratorRule.enabled=false, " +
-			"or drop the key entirely.",
+		"[warn] oneOrchestratorRule is no longer read. " +
+			"The orchestrator guard now fires on worker identity alone and cannot be switched " +
+			"off from the config file. The whole oneOrchestratorRule block can be dropped; it has " +
+			"no effect. See SECURITY.md for what the guard does and does not hold.",
 	);
 }
 
