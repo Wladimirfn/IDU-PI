@@ -198,10 +198,30 @@ pnpm run verify
 
 | Script | Qué comprueba |
 | :--- | :--- |
-| `pnpm test` | 49 pruebas unitarias: arnés cross-cli, ciclo de vida de procesos, locks, watchdog y contrato de las 13 herramientas MCP. |
+| `pnpm test` | 106 pruebas unitarias contra un `IDU_HOME` temporal: arnés cross-cli, ciclo de vida de procesos, locks, watchdog, contrato de las 13 herramientas MCP y capa de cuota. |
 | `pnpm run test:guarded` | La misma suite envuelta en `scripts/run-tests-with-leak-guard.mjs`, que falla si los tests dejan archivos nuevos en el temp. |
 | `pnpm run test:protocol-drift` | Que el SKILL.md del protocolo documente exactamente las 13 herramientas canónicas, sin fantasmas. |
 | `pnpm run test:repo-hygiene` | Que las pruebas no filtren estado a la raíz del repo. |
+| `pnpm run test:unisolated` | La misma suite **sin** aislamiento, escribiendo en tu `~/.idu` real. Existe para reproducir un fallo en condiciones contaminated, no para uso normal. |
+
+### `IDU_HOME`
+
+Todo el estado que idu-pi guarda —ledger de decisiones, caché de cuota, árbol de sesiones,
+locks y logs— vive bajo `~/.idu`. `IDU_HOME` permite apuntar esa raiz a otro lado:
+
+```bash
+IDU_HOME=/tmp/idu-sandbox pnpm run cli -- status
+```
+
+`pnpm test` la usa siempre, contra un directorio temporal que se borra al terminar. Sin eso,
+una corrida de tests escribia en tu ledger real: se acumulaban entradas `test-proj` con la
+decision `"Use lean MCP server"`, una por corrida, y cada una consumia un id, asi que la
+numeracion nunca mostraba el hueco.
+
+Ojo con el alcance: `IDU_HOME` cubre `~/.idu` y nada mas. Los auth stores de los CLIs
+(`~/.codex/auth.json`, `~/.commandcode/auth.json`) viven fuera y no se pueden redirigir, asi
+que aislar el home de idu-pi no evita que una sonda de cuota en vivo lea una credencial real.
+Para eso esta `include_quota`, que es opt-in y ademas pasa por la cache de 10 minutos.
 
 La suite completa pasa al 100% y cubre el arnés cross-cli, el ciclo de vida de procesos, el
 aislamiento de locks, el watchdog de timeouts, el contrato de las 13 herramientas MCP y la

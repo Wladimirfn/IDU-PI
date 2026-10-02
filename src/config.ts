@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { IduConfig, IduProfile, ProfilesConfig } from "./types.js";
 
-export const IDU_HOME = join(homedir(), ".idu");
+export const IDU_HOME = process.env.IDU_HOME || join(homedir(), ".idu");
 export const IDU_CONFIG_PATH = join(IDU_HOME, "config.json");
 export const IDU_PROFILES_PATH = join(IDU_HOME, "profiles.json");
 export const IDU_RUNTIME_DIR = join(IDU_HOME, "runtime");

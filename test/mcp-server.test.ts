@@ -483,3 +483,45 @@ test("MCP idu_capabilities rejects a non-boolean include_quota", async () => {
 	assert.match(res.content[0].text, /Schema validation failed for tool 'idu_capabilities'/);
 });
 
+test("IDU_HOME is injectable, so a run cannot write into the real home", async () => {
+	const { spawnSync } = await import("node:child_process");
+	const { fileURLToPath, pathToFileURL } = await import("node:url");
+	const { dirname, join } = await import("node:path");
+	const { mkdtempSync, rmSync, existsSync, readFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+
+	// A child process, because IDU_HOME is a module constant resolved at import
+	// time: a test that set the variable in its own body would be asserting
+	// against a value the module already froze before the test ran. file://
+	// URLs because a bare Windows path is not a valid ESM specifier.
+	const srcDir = join(dirname(dirname(fileURLToPath(import.meta.url))), "src");
+	const isolated = mkdtempSync(join(tmpdir(), "idu-home-"));
+	try {
+		const res = spawnSync(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`import { IDU_HOME } from ${JSON.stringify(pathToFileURL(join(srcDir, "config.js")).href)};
+import { recordDecision } from ${JSON.stringify(pathToFileURL(join(srcDir, "decision-ledger.js")).href)};
+recordDecision({ projectId: "isolated-probe", decidedBy: "test", decision: "written by a child process" });
+console.log(IDU_HOME);`,
+			],
+			{ env: { ...process.env, IDU_HOME: isolated }, encoding: "utf8" },
+		);
+
+		assert.equal(res.status, 0, res.stderr);
+		assert.equal(
+			res.stdout.trim(),
+			isolated,
+			"IDU_HOME must resolve from the environment when it is set",
+		);
+
+		const ledger = join(isolated, "decision_ledger.json");
+		assert.ok(existsSync(ledger), "the child must write into the isolated home, not the user's");
+		assert.match(readFileSync(ledger, "utf8"), /isolated-probe/);
+	} finally {
+		try { rmSync(isolated, { recursive: true, force: true }); } catch {}
+	}
+});
+
