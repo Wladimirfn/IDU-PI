@@ -1004,8 +1004,32 @@ export class CrossCliProcessManager {
 				record.secondsSinceLastActivity = Math.round((now - new Date(record.lastActivityAt).getTime()) / 1000);
 			}
 			if (record.status === "running") {
-				const idleSec = record.secondsSinceLastActivity ?? 0;
-				record.health = idleSec > 300 ? "idle_warning" : "healthy";
+				// Liveness, not log silence. `lastActivityAt` only advances when
+				// the log file grows (watchdog in runner.ts), and a worker
+				// streaming a reasoning model can legitimately emit nothing for
+				// many minutes while it is genuinely working. The previous check
+				// called that `idle_warning` using a counter derived from the log
+				// while this same function had already established, a few lines
+				// above, that the process was alive — so a healthy worker was
+				// reported as suspicious, and a caller that trusted the field
+				// could not tell "not working" from "not talking". That silence
+				// is real information, but it belongs to the number that already
+				// carries it: `secondsSinceLastActivity`. The silence ceiling
+				// that is actually enforced is the idle timeout in runner.ts,
+				// and it kills the worker; if execution reached here, it did not
+				// trip.
+				const runnerAlive = record.runnerPid ? isProcessAlive(record.runnerPid) : false;
+				const workerAlive = record.pid ? isProcessAlive(record.pid) : false;
+				const anyPidRecorded = Boolean(record.runnerPid || record.pid);
+				// Only positive evidence of death downgrades the verdict. A record
+				// carrying no pid at all is missing evidence, not a dead worker,
+				// so it keeps whatever its author claimed — the same rule the
+				// quota layer follows with `unknown` instead of `0`. In practice
+				// the recovery path above already resolved every case where pids
+				// exist and are gone, so this guard rarely fires; it is here so
+				// that the status can never say "running" and "interrupted" at
+				// the same time.
+				record.health = anyPidRecorded && !runnerAlive && !workerAlive ? "interrupted" : "healthy";
 			} else if (record.status === "completed") {
 				record.health = "completed";
 			} else {
