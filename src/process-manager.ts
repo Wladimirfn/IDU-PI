@@ -960,8 +960,28 @@ export class CrossCliProcessManager {
 		if (record && (record.status === "running" || record.status === "pending")) {
 			const runnerAlive = record.runnerPid ? isProcessAlive(record.runnerPid) : false;
 			const workerAlive = record.pid ? isProcessAlive(record.pid) : false;
+			const anyPidRecorded = Boolean(record.runnerPid || record.pid);
+			// A run that never recorded a pid produced no evidence of death, and the
+			// old gate demanded a pid before it would look at anything, so such a
+			// record stayed `running` forever. Measured: one from 63 hours earlier,
+			// with no pid and no log left, still claimed to be running. The clock is
+			// the only signal available for that case, exactly as it is for health.
+			// The isFinite guard matters: a record with a corrupt or future
+			// startedAt yields a negative elapsed time, and that must not read as
+			// "past the cap".
+			const capMs = record.profile?.hardCapMs ?? record.profile?.timeoutMs ?? 0;
+			const startedAt = new Date(record.startedAt).getTime();
+			const pastCap = capMs > 0 && Number.isFinite(startedAt) && Date.now() - startedAt > capMs;
 
-			if ((record.runnerPid || record.pid) && !runnerAlive && !workerAlive) {
+			// One rule, matching the one health already uses. Past the cap the clock
+			// decides on its own: the runner enforces that cap, so a run beyond it
+			// cannot still be working, and pids that survive are somebody else
+			// entirely. Inside the cap, every recorded pid gone is positive
+			// evidence of death. A run with no pid at all inside the cap is the one
+			// case left open, and it is left open on purpose: absence of evidence
+			// is not evidence of death.
+			const unreconcilable = pastCap || (anyPidRecorded && !runnerAlive && !workerAlive);
+			if (unreconcilable) {
 				let recoveredCode: number | null = null;
 				let logText = "";
 				if (existsSync(record.logPath)) {
@@ -989,7 +1009,14 @@ export class CrossCliProcessManager {
 					if (recoveredUsage.captured) record.usage = recoveredUsage;
 				} else {
 					record.status = "failed";
-					record.error = record.error || "Worker process terminated unexpectedly";
+					// Say which of the two cases this was. "Unexpectedly" is honest for a
+					// worker whose processes vanished, and vague for a record that never
+					// had a pid to lose; conflating them is the same kind of imprecision
+					// this recovery path exists to remove.
+					record.error = record.error
+						|| (pastCap
+							? "Run is past its hard cap and left no exit marker behind"
+							: "Worker process terminated unexpectedly");
 				}
 				record.completedAt = record.completedAt || new Date().toISOString();
 				writeJsonAtomic(sessionPath, record);
