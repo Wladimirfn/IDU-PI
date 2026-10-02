@@ -1167,6 +1167,54 @@ test("getStatus computes live telemetry (elapsedMs, secondsSinceLastActivity, he
 	}
 });
 
+test("a running worker is healthy while it is quiet, and the quietness stays visible as a number", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-silent-worker-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// process.pid is this test runner, so it is provably alive. The worker pid
+	// is provably not. That is the whole point: the verdict has a true liveness
+	// to find, so it cannot be reached from log silence the way it used to be.
+	const quietSince = Date.now() - 12 * 60 * 1000;
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-silent",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3" },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		pid: 999991,
+		runnerPid: process.pid,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(quietSince - 60_000).toISOString(),
+		logPath: "dummy.log",
+		lastActivityAt: new Date(quietSince).toISOString(),
+		bytesEmitted: 4096,
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		// The defect: twelve minutes of silence was reported as `idle_warning`
+		// on a worker whose process was demonstrably alive, which is exactly
+		// the state an orchestrator reads as "this is stuck".
+		assert.equal(status.health, "healthy");
+		// Silence is still reported, by the field that already carries it,
+		// rather than as a verdict on the worker.
+		assert.ok(
+			typeof status.secondsSinceLastActivity === "number" && status.secondsSinceLastActivity >= 719,
+		);
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
 test("hardCapMs=0 sentinel is recognized and does not cause premature timeout", () => {
 	const profileWithZeroHardCap: IduProfile = {
 		harness: "claude",
