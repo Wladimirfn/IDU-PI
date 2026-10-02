@@ -338,7 +338,7 @@ export const TOOLS = [
 				include_quota: {
 					type: "boolean",
 					description:
-						"When true, read each installed CLI's own account quota. Every figure is REMAINING, never used, and a CLI that cannot answer reports unknown with a reason instead of zero. Served from a 10 minute cache; combine with fresh_quota to spend a live call.",
+					"When true, read each installed CLI's own account quota. Every figure is REMAINING, never used, and a CLI that cannot answer reports unknown with a reason instead of zero. Read from a 10 minute cache by default. stale=true means the reading came FROM that cache and is not expired: capturedAt is when it was taken, and any snapshot older than the TTL is re-read rather than served. fresh_quota re-reads now, which is free for codex and commandcode but costs one model call each for claude and antigravity.",
 				},
 				fresh_quota: {
 					type: "boolean",

@@ -143,12 +143,15 @@ como `timeout`, preservando la salida parcial (`partial: true`) y el `resumeHint
 ## Cuota de las cuentas
 
 idu-pi no guarda ninguna credencial. Cada fuente toma la sesion que ya existe
-en la maquina, la usa para **una** consulta y la descarta: la key o el token se
-leen del auth store del propio CLI en el momento de la sonda, nunca se escriben,
-nunca se registran, y ningun snapshot los transporta. Un test planta un secreto
-en el payload y comprueba que no aparece en la salida.
+en la maquina, la usa para **una** consulta y la descarta: nunca se escribe, nunca
+se registra, y ningun snapshot la transporta. Un test planta un secreto en el
+payload y comprueba que no aparece en la salida.
 
-Se pregunta al CLI, no se rascan sus archivos: un CLI conoce su propia cuenta.
+No se raspa ningun archivo de estado: se le pregunta a la cuenta. Como se le
+pregunta depende del CLI, y la diferencia importa porque tiene costo. Claude y
+agy lo responden **ejecutando su propio `/usage`**, que gasta una llamada de
+modelo. Codex y cmdc lo responden por **HTTP contra el endpoint del proveedor**,
+con el token de su auth store, y eso no cuesta nada.
 Medido el 2026-10-01 contra las cuatro cuentas de esta maquina:
 
 | Fuente | Como responde | Nota |
