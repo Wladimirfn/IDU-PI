@@ -517,7 +517,7 @@ console.log(IDU_HOME);`,
 			"IDU_HOME must resolve from the environment when it is set",
 		);
 
-		const ledger = join(isolated, "decision_ledger.json");
+		const ledger = join(isolated, "decisions.jsonl");
 		assert.ok(existsSync(ledger), "the child must write into the isolated home, not the user's");
 		assert.match(readFileSync(ledger, "utf8"), /isolated-probe/);
 	} finally {

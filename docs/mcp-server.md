@@ -14,7 +14,7 @@ para delegar trabajo y para pasar por los gates de calidad.
 | `idu_status` / `idu_project_status` | Rama, árbol sucio, conteo y hasta 20 archivos modificados, `iduHome`. |
 | `idu_preflight` | Riesgo antes de tocar código. `request` (req), `expected_files`, `change_mode`, `working_dir`/`cwd`. |
 | `idu_postflight` | Blast radius después. `task_id` y `expected_files` (req), `working_dir`/`cwd`. Registra en el ledger. |
-| `idu_decision_record` | Escribe una decisión en `~/.idu/decision_ledger.json`. |
+| `idu_decision_record` | Añade una decisión a `~/.idu/decisions.jsonl`. |
 | `idu_decision_list` | Lee el ledger, con filtro `project_id` y `limit`. |
 | `idu_delegate` | Lanza un worker. Es el núcleo. |
 | `idu_delegate_parallel` | Lanza varios `tasks[]` en paralelo, todos en modo async. |
@@ -115,7 +115,12 @@ del proyecto.
 
 - `idu_postflight` con `expected_files: []` marca **todo** cambio observado como violación de
   blast radius. Es intencional: es la forma de afirmar "no toqué nada".
-- El ledger es un JSON plano en `~/.idu/decision_ledger.json`, con relectura y reescritura
-  completa en cada alta. Crece sin poda automática.
+- El ledger es un log append-only en `~/.idu/decisions.jsonl`: una decisión por línea, y cada
+  alta es un append. Es a propósito. La versión anterior guardaba todo en un array JSON y lo
+  reescribía entero en cada alta, que es un read-modify-write sobre un archivo compartido: dos
+  escritores leen el mismo estado, ambos escriben, y una entrada desaparece sin error. Peor aún,
+  un lector que encontraba el archivo a medio escribir lo interpretaba como "no hay decisiones
+  todavía" y escribía una sola entrada encima de todas. Catorce decisiones pasaron a ser una, en
+  silencio, con `id: 1`. El append no tiene ninguno de esos dos fallos. Crece sin poda automática.
 - El esquema de sesión y el de `verify` viven en `openspec/specs/` cuando esa carpeta está
   versionada; el repo la excluye por `.gitignore`, así que en un clone fresco no están.
