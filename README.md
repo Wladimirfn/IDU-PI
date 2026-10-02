@@ -74,7 +74,7 @@ El servidor expone **13 herramientas de alto impacto** optimizadas para mínimo 
 | `idu_worker_wait` | Espera de forma síncrona/reactiva la finalización de un worker sin matarlo si expira. |
 | `idu_worker_result` | Recupera la salida completa estructurada, diffs y reporte del worker. |
 | `idu_session_list` | Lista las sesiones activas o históricas con su CLI, timestamp y bloqueo. |
-| `idu_capabilities` | Informa los perfiles disponibles en `~/.idu/profiles.json` y CLIs detectados. |
+| `idu_capabilities` | Informa los perfiles disponibles en `~/.idu/profiles.json` y CLIs detectados. Con `include_quota: true` agrega además la cuota de cada cuenta, leyendo lo que el propio CLI reporta. |
 
 ---
 

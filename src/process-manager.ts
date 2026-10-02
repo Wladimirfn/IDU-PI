@@ -26,6 +26,7 @@ import {
 } from "./config.js";
 import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "./cmdline.js";
 import { extractUsage } from "./usage.js";
+import { readQuotaSnapshots } from "./quota.js";
 import type {
 	CapabilitiesResult,
 	DelegateRequest,
@@ -38,37 +39,10 @@ import type {
 
 const SESSION_TREE_PATH = join(IDU_SESSIONS_DIR, "tree.json");
 
-export function writeJsonAtomic(filePath: string, data: any): void {
-	const dir = dirname(filePath);
-	if (!existsSync(dir)) {
-		mkdirSync(dir, { recursive: true });
-	}
-	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-	writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
-
-	let retries = 5;
-	while (retries > 0) {
-		try {
-			renameSync(tmpPath, filePath);
-			return;
-		} catch (err: any) {
-			retries--;
-			if (retries === 0) {
-				try {
-					writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
-					try {
-						unlinkSync(tmpPath);
-					} catch {}
-					return;
-				} catch {
-					throw err;
-				}
-			}
-			const start = Date.now();
-			while (Date.now() - start < 15) {}
-		}
-	}
-}
+// Imported for local use and re-exported so the existing import path keeps
+// working. The implementation moved out to break a cycle with the quota layer.
+import { writeJsonAtomic } from "./json-file.js";
+export { writeJsonAtomic } from "./json-file.js";
 
 export function isProcessAlive(pid: number): boolean {
 	if (!pid || pid <= 0) return false;
@@ -554,7 +528,7 @@ export class CrossCliProcessManager {
 		return CrossCliProcessManager.instance;
 	}
 
-	public getCapabilities(): CapabilitiesResult {
+	public async getCapabilities(options: { includeQuota?: boolean; freshQuota?: boolean } = {}): Promise<CapabilitiesResult> {
 		const config = loadIduConfig();
 		const { profiles } = loadProfilesConfig();
 
@@ -564,7 +538,7 @@ export class CrossCliProcessManager {
 			available: checkCliAvailable(def.command),
 		}));
 
-		return {
+		const result: CapabilitiesResult = {
 			installedClis,
 			profiles,
 			// Reported as always-on regardless of what ~/.idu/config.json holds.
@@ -577,6 +551,17 @@ export class CrossCliProcessManager {
 				configurable: false,
 			},
 		};
+
+		// Opt-in, and cached. Two of the quota sources run a model, so this is
+		// never filled as a side effect of asking what the harness can do. Note
+		// that "no probe" is not "no work": checkCliAvailable above shells out to
+		// `where`/`which` for every configured CLI, which is a preexisting cost
+		// of discovery and not part of the quota layer.
+		if (options.includeQuota) {
+			result.quota = await readQuotaSnapshots({ fresh: options.freshQuota === true });
+		}
+
+		return result;
 	}
 
 	public listSessions(): SessionTreeEntry[] {
