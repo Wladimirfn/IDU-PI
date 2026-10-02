@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "test": "tsc -p tsconfig.json && node scripts/run-tests-isolated.mjs",
+    "test:unisolated": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
     "test:guarded": "node scripts/run-tests-with-leak-guard.mjs",
     "test:protocol-drift": "node scripts/check-protocol-tool-drift.mjs",
     "test:repo-hygiene": "node scripts/check-repo-root-untracked.mjs",
