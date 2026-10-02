@@ -216,7 +216,7 @@ runtime/             <runId>.spec.json, .pid, .runner.pid  (efímeros)
 sessions/            <runId>.json (registro) + tree.json
 locks/               sess_*.lock
 logs/                <runId>.log  (stdout+stderr crudo del worker)
-decision_ledger.json decisiones y auditorías de postflight
+decisions.jsonl            decisiones y auditorias de postflight (log append-only)
 ```
 
 ## Recoverencia de procesos muertos
