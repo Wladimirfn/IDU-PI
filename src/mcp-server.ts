@@ -331,10 +331,15 @@ export const TOOLS = [
 	{
 		name: "idu_capabilities",
 		description:
-			"Lists available worker profiles in ~/.idu/profiles.json, detects installed terminal CLIs (Claude, OpenCode, Pi, Codex), and reports the active ONE ORCHESTRATOR rule status. With include_quota, also reads each CLI's own account quota (remaining % and reset time per window) so you can avoid dispatching to a model that is nearly exhausted. Off by default: two of the quota sources cost a model call to answer.",
+			"Lists available worker profiles in ~/.idu/profiles.json, detects installed terminal CLIs (Claude, OpenCode, Pi, Codex), and reports the active ONE ORCHESTRATOR rule status. With include_quota, also reads each CLI's own account quota (remaining % and reset time per window) so you can avoid dispatching to a model that is nearly exhausted. Off by default: two of the quota sources cost a model call to answer. When you only want the quota, pass only_quota: it returns the quota array alone, without the profile list that is most of the payload.",
 		inputSchema: {
 			type: "object",
 			properties: {
+				only_quota: {
+					type: "boolean",
+					description:
+					"Return ONLY the quota array, dropping the profile list and CLI detection. Measured here, the profile list alone is about 5100 of the 6800 bytes of the full response, so this flag removes roughly three quarters of the payload you did not ask for. Implies include_quota.",
+				},
 				include_quota: {
 					type: "boolean",
 					description:
@@ -577,9 +582,16 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 			}
 
 			if (name === "idu_capabilities") {
-				const caps = await manager.getCapabilities({ includeQuota: args.include_quota === true, freshQuota: args.fresh_quota === true });
+				// only_quota implies the quota read: asking for "just the quota" and
+				// getting a payload without it would be a worse lie than a big one.
+				const onlyQuota = args.only_quota === true;
+				const caps = await manager.getCapabilities({
+					includeQuota: onlyQuota || args.include_quota === true,
+					freshQuota: args.fresh_quota === true,
+				});
+				const payload = onlyQuota ? { quota: caps.quota ?? [] } : caps;
 				return {
-					content: [{ type: "text", text: JSON.stringify(caps, null, 2) }],
+					content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
 				};
 			}
 

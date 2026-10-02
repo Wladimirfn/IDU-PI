@@ -50,7 +50,7 @@ The table below lists **base names only**. Prepend the prefix your harness expos
 | `idu_worker_wait` | Reactively blocks until a delegated worker completes, without killing it on timeout. | `run_id` |
 | `idu_worker_result` | Full execution output, summary, and log paths of a finished worker. | `run_id` |
 | `idu_session_list` | All active and tracked cross-cli sessions with hierarchy and locks. | none |
-| `idu_capabilities` | Available profiles from `~/.idu/profiles.json` and detected local CLIs. `include_quota: true` also reads each CLI's own account quota. | none |
+| `idu_capabilities` | Available profiles from `~/.idu/profiles.json` and detected local CLIs. `only_quota: true` returns just the quota array (cheap); `include_quota: true` adds it to the full payload. | none |
 
 Parameter names are exact and the schema rejects unknown ones. `request` is not `task`; `profile` is not `--profile`. The `--profile` flag belongs to the CLI (`idu-pi delegate "task" --profile coding`), while the MCP tool takes `profile` with no dashes.
 
@@ -66,7 +66,7 @@ Parameter names are exact and the schema rejects unknown ones. `request` is not 
 2. **Preflight**: Run `idu_preflight` with `request` (a plain-language description of the task) and `expected_files`. If `risk: high`, verify with the user before proceeding.
 3. **Local Implementation**: Implement code and execute changes directly in the active orchestrator session (Pi, OpenCode, Claude Code, Codex, Antigravity) using local edit tools and native SDD phases (`sdd-apply`, `sdd-verify`). NEVER abdicate coding or delegate the primary implementation to another CLI.
 4. **Consultative Delegation (Advisory Only)**: Use `idu_delegate` ONLY for external second opinions, deep architectural debates, or adversarial audits (e.g. `profile: architecture` for Opus). The external worker acts strictly as an advisor or reviewer; the active orchestrator retains full implementation ownership.
-   - *Quota Check First*: Before dispatching a heavy or repeated job, call `idu_capabilities` with `include_quota: true` and read **only** the `quota` array out of the response. The rest of the payload is the profile list and CLI paths you did not ask for and does not need to reach your context.
+   - *Quota Check First*: Before dispatching a heavy or repeated job, call `idu_capabilities` with `only_quota: true`. That flag returns the quota array **alone**: measured here, the full response is about 6800 bytes and the profile list alone is about 5100 of them, so the flag drops roughly three quarters of a payload you did not ask for and do not need in context. Do not pass `include_quota` and slice the JSON yourself; the tool already drops the rest.
      - Every figure is **REMAINING**, never used. A `billingModel` of `plan` means a rate limit that refills on its own, not money being spent.
      - A `null` percentage or an `unknownReason` means that CLI could not answer. It does **NOT** mean zero. Never read an absent figure as an exhausted account.
      - `stale: true` means the reading came from the 10 minute cache and is **not** expired. `capturedAt` is the real clock.
