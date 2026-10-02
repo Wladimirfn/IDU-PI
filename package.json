@@ -19,8 +19,10 @@
     "test:unisolated": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
     "test:guarded": "node scripts/run-tests-with-leak-guard.mjs",
     "test:protocol-drift": "node scripts/check-protocol-tool-drift.mjs",
+    "test:protocol-params": "node scripts/check-protocol-skill-params.mjs",
+    "test:protocol-install": "node scripts/install-protocol-skill.mjs --check",
     "test:repo-hygiene": "node scripts/check-repo-root-untracked.mjs",
-    "verify": "corepack pnpm test && corepack pnpm run test:protocol-drift && corepack pnpm run test:repo-hygiene",
+    "verify": "corepack pnpm test && corepack pnpm run test:protocol-drift && corepack pnpm run test:protocol-params && corepack pnpm run test:protocol-install && corepack pnpm run test:repo-hygiene",
     "cli": "node dist/src/cli.js",
     "mcp": "node dist/src/mcp-server.js",
     "start": "node dist/src/cli.js"
