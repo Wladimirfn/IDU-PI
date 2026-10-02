@@ -1215,6 +1215,82 @@ test("a running worker is healthy while it is quiet, and the quietness stays vis
 	}
 });
 
+test("a run past its own hard cap is interrupted even when its pid is alive", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-pid-reuse-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// The regression this pins down is Windows pid reuse, not a dead process.
+	// A real run from 159 hours earlier reported `healthy` because its pids
+	// 1200 and 4780 had been recycled onto csrss and svchost by the time it was
+	// read. process.pid stands in for that: genuinely alive, definitively not
+	// the worker this record describes. What separates the two is the clock.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-pid-reuse",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		pid: process.pid,
+		runnerPid: process.pid,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 159 * 3_600_000).toISOString(),
+		logPath: "dummy.log",
+		lastActivityAt: new Date(Date.now() - 159 * 3_600_000).toISOString(),
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		// A live pid is evidence that something holds that number, not that our
+		// worker does. Past the cap the clock is the only trustworthy signal.
+		assert.equal(status.health, "interrupted");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("a run with no pid at all is interrupted once it is past its cap", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-no-pid-past-cap-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// No pid means no evidence either way, so inside the cap the record keeps
+	// whatever it claims. Past the cap the clock still decides, which is the
+	// only reason a 63 hour old record with no pids stopped claiming healthy.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-no-pid",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 63 * 3_600_000).toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.health, "interrupted");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
 test("hardCapMs=0 sentinel is recognized and does not cause premature timeout", () => {
 	const profileWithZeroHardCap: IduProfile = {
 		harness: "claude",

@@ -1004,33 +1004,41 @@ export class CrossCliProcessManager {
 				record.secondsSinceLastActivity = Math.round((now - new Date(record.lastActivityAt).getTime()) / 1000);
 			}
 			if (record.status === "running") {
-				// Liveness, not log silence. `lastActivityAt` only advances when
-				// the log file grows (watchdog in runner.ts), and a worker
-				// streaming a reasoning model can legitimately emit nothing for
-				// many minutes while it is genuinely working. The previous check
-				// called that `idle_warning` using a counter derived from the log
-				// while this same function had already established, a few lines
-				// above, that the process was alive — so a healthy worker was
-				// reported as suspicious, and a caller that trusted the field
-				// could not tell "not working" from "not talking". That silence
-				// is real information, but it belongs to the number that already
-				// carries it: `secondsSinceLastActivity`. The silence ceiling
-				// that is actually enforced is the idle timeout in runner.ts,
-				// and it kills the worker; if execution reached here, it did not
-				// trip.
-				const runnerAlive = record.runnerPid ? isProcessAlive(record.runnerPid) : false;
-				const workerAlive = record.pid ? isProcessAlive(record.pid) : false;
+				// Two independent signals, because neither one alone is sound.
+				//
+				// Log silence is not death. `lastActivityAt` only advances when
+				// the log grows, and a worker streaming a reasoning model can emit
+				// nothing for many minutes while it genuinely works. That is why
+				// `idle_warning` was removed as a verdict instead of kept.
+				//
+				// Process liveness is not identity either, which is the harder
+				// lesson. Windows recycles pids aggressively and low numbers land
+				// on long-lived system processes. Measured on 2026-10-02: a run
+				// from 159 hours earlier reported running and healthy because its
+				// recorded pids 1200 and 4780 were by then csrss and svchost. A
+				// live pid is evidence that *something* holds that number, not
+				// that the worker we started still does.
+				//
+				// The clock is what holds. A worker cannot outrun the cap its own
+				// profile sets, and that check needs no pid at all, so it decides
+				// alone once the cap is passed. Pids are consulted only while the
+				// run is still inside its cap, where a match means something.
+				const capMs = record.profile?.hardCapMs ?? record.profile?.timeoutMs ?? 0;
+				const pastCap = capMs > 0 && now - start > capMs;
+				let alive = false;
+				if (!pastCap) {
+					alive =
+						(record.runnerPid ? isProcessAlive(record.runnerPid) : false) ||
+						(record.pid ? isProcessAlive(record.pid) : false);
+				}
+				// Past the cap nothing but the clock is trusted. Inside the cap a
+				// recorded pid set that is entirely gone is positive evidence of
+				// death, while a record carrying no pid at all is missing evidence,
+				// not a dead worker, and keeps whatever its author claimed.
 				const anyPidRecorded = Boolean(record.runnerPid || record.pid);
-				// Only positive evidence of death downgrades the verdict. A record
-				// carrying no pid at all is missing evidence, not a dead worker,
-				// so it keeps whatever its author claimed — the same rule the
-				// quota layer follows with `unknown` instead of `0`. In practice
-				// the recovery path above already resolved every case where pids
-				// exist and are gone, so this guard rarely fires; it is here so
-				// that the status can never say "running" and "interrupted" at
-				// the same time.
-				record.health = anyPidRecorded && !runnerAlive && !workerAlive ? "interrupted" : "healthy";
-			} else if (record.status === "completed") {
+				const dead = pastCap || (anyPidRecorded && !alive);
+				record.health = dead ? "interrupted" : "healthy";
+} else if (record.status === "completed") {
 				record.health = "completed";
 			} else {
 				record.health = "interrupted";
