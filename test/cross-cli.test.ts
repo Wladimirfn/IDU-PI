@@ -12,6 +12,7 @@ import {
 	resolveSessionProfile,
 	checkSessionHarnessAffinity,
 	shouldCountTurn,
+	resolveHardCapMs,
 } from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -1443,6 +1444,96 @@ test("a record whose startedAt is in the future is never treated as past its cap
 	} finally {
 		try { unlinkSync(mockSessionPath); } catch {}
 	}
+});
+test("a run past its own timeoutMs is NOT closed when the profile has no hardCapMs", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-cap-floor-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// The defect adversarial review caught. The runner resolves an absent
+	// hardCapMs to Math.max(timeoutMs, 4 hours), so a 30 minute profile is
+	// allowed to run for four. Re-deriving the cap as `hardCapMs ?? timeoutMs`
+	// made getStatus close the record at thirty minutes, and because the
+	// recovery path persists, *reading* a healthy run destroyed it.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-cap-floor",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", timeoutMs: 1_800_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		pid: process.pid,
+		runnerPid: process.pid,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "running", "the reader must not end a run the runner still allows");
+		assert.equal(status.health, "healthy");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("a queued run reports pending, not interrupted", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-pending-health-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// The health chain tested `running`, then `completed`, then fell through to
+	// `interrupted` for everything else. A run that has not started yet is
+	// neither finished nor broken, so a queued worker was reported as a dead
+	// one. Also found by adversarial review.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-pending",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "pending",
+		exitCode: null,
+		startedAt: new Date().toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "pending");
+		assert.equal(status.health, "pending");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("resolveHardCapMs agrees with the runner, including the four hour floor and the disabled sentinel", () => {
+	// These are the exact values the runner builds its RunnerSpec from. If this
+	// function and the delegate path ever disagree again, reading a run can
+	// end it, so the rule is pinned here rather than only in the call site.
+	assert.equal(resolveHardCapMs({ profileHardCapMs: 7_200_000, profileTimeoutMs: 1_800_000 }), 7_200_000);
+	assert.equal(resolveHardCapMs({ profileTimeoutMs: 1_800_000 }), 14_400_000);
+	assert.equal(resolveHardCapMs({ profileTimeoutMs: 180_000 }), 14_400_000);
+	assert.equal(resolveHardCapMs({ requestTimeoutMs: 7_200_000, profileTimeoutMs: 1_800_000 }), 14_400_000);
+	// Zero is the "no cap" sentinel on both sides.
+	assert.equal(resolveHardCapMs({ profileHardCapMs: 0, profileTimeoutMs: 1_800_000 }), 0);
+	assert.equal(resolveHardCapMs({ requestTimeoutMs: 0, profileTimeoutMs: 1_800_000 }), 0);
+	assert.equal(resolveHardCapMs({}), 14_400_000);
 });
 test("hardCapMs=0 sentinel is recognized and does not cause premature timeout", () => {
 	const profileWithZeroHardCap: IduProfile = {
