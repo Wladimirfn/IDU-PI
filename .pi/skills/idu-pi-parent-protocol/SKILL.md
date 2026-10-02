@@ -37,14 +37,26 @@ The table below lists **base names only**. Prepend the prefix your harness expos
 | `idu_worker_wait` | Reactively blocks until a delegated worker completes (without killing worker on timeout). | When waiting for a background worker to complete its task. |
 | `idu_worker_result` | Retrieves full execution output, summary, and log paths of a finished worker. | Once a worker has finished execution to inspect its output. |
 | `idu_session_list` | Lists all active and tracked cross-cli sessions with hierarchy and locks. | To inspect session history or prepare for session resumption (`--session`). |
-| `idu_capabilities` | Reports available profiles from `~/.idu/profiles.json` and detected local CLIs. Pass `include_quota: true` to also read each CLI's own account quota (remaining % and reset per window, plus per-model availability where the provider reports it). Add `fresh_quota: true` to ignore the 10 minute cache. | To inspect available models, cost tiers, and CLI executables. To avoid dispatching to a worker whose account is nearly exhausted, call it with `include_quota: true` BEFORE step 4 and pick a profile with real headroom. |
+| `idu_capabilities` | Reports available profiles from `~/.idu/profiles.json` and detected local CLIs. Pass `include_quota: true` to also read each CLI's own account quota. | To inspect available models and to avoid dispatching into an exhausted account. See step 4. |
 
 ## 5-Step Operational Protocol
 
 1. **Session Start**: Run `idu_status` (pass `project_path` if working on an external directory).
+   - *If the tool is missing or errors*: the MCP server is not connected, and every rule below is unfollowable. Diagnose it before doing anything else:
+     ```bash
+     node dist/src/cli.js mcp          # the server must answer initialize on stdin
+     opencode mcp list                 # note: this command can report wrongly; trust the log
+     ```
+     The authoritative status is in `~/.local/share/opencode/log/opencode.log`, lines `mcp connected server=<name> tools=<n>` and `mcp connect failed`. The 13 tools must be connected before any of this protocol applies.
+
 2. **Preflight**: Run `idu_preflight` with your task and `expected_files`. If `risk: high`, verify with the user before proceeding.
 3. **Local Implementation**: Implement code and execute changes directly in the active orchestrator session (Pi, OpenCode, Claude Code, Codex, Antigravity) using local edit tools and native SDD phases (`sdd-apply`, `sdd-verify`). NEVER abdicate coding or delegate the primary implementation to another CLI.
 4. **Consultative Delegation (Advisory Only)**: Use `idu_delegate` ONLY for external second opinions, deep architectural debates, or adversarial audits (e.g. `--profile architecture` for Opus). The external worker acts strictly as an advisor or reviewer; the active orchestrator retains full implementation ownership.
-   - *Quota Check First*: Before delegating a heavy or repeated job, call `idu_capabilities` with `include_quota: true` and read the `quota` array. Every figure is REMAINING, never used, and a `billingModel` of `plan` means a rate limit that refills on its own rather than money being spent. A `null` percentage or an `unknownReason` means that CLI could not answer; it does NOT mean zero. If the chosen profile's headroom is thin, say so and propose a profile that has room instead of dispatching into a wall.
-   - *Wait & Monitor*: If `idu_delegate` is called with `async: true`, the worker runs in a detached daemon. Stay blocked without token bloat by running terminal command: `idu wait <run_id> --timeout 540000` (or `node dist/src/cli.js wait <run_id> --timeout 540000`). DO NOT use `--follow` (it injects raw NDJSON logs into prompt context). If the command exits with code 124 (timeout) while the worker is healthy, re-invoke it. NEVER end your turn saying "I'll wait" or "checking later". You can also use `idu_worker_wait` or `idu_worker_status`.
+   - *Quota Check First*: Before dispatching a heavy or repeated job, call `idu_capabilities` with `include_quota: true` and read **only** the `quota` array out of the response. The rest of the payload is profiles and CLI paths you did not ask for and does not need to reach your context.
+     - Every figure is **REMAINING**, never used. A `billingModel` of `plan` means a rate limit that refills on its own, not money being spent.
+     - A `null` percentage or an `unknownReason` means that CLI could not answer. It does **NOT** mean zero. Never read an absent figure as an exhausted account.
+     - `stale: true` means the reading came from the 10 minute cache and is **not** expired. `capturedAt` is the real clock.
+     - If the chosen profile's headroom is thin, say so and propose a profile that has room instead of dispatching into a wall.
+     - Do NOT pass `fresh_quota` reflexively. Codex and commandcode answer over HTTP for free; claude and antigravity each spend one model call to answer. Only pay for a live read when the cached one is too old to reason with.
+   - *Wait & Monitor*: If `idu_delegate` is called with `async: true`, the worker runs in a detached daemon. Stay blocked without token bloat by running terminal command `node dist/src/cli.js wait <run_id> --timeout 540000` from the idu-pi repo. DO NOT use `--follow` (it injects raw NDJSON logs into prompt context). If the command exits with code 124 (timeout) while the worker is healthy, re-invoke it. NEVER end your turn saying "I'll wait" or "checking later". You can also use `idu_worker_wait` or `idu_worker_status`.
 5. **Postflight & Ledger**: Run `idu_postflight` with `expected_files` and document major decisions with `idu_decision_record`.
