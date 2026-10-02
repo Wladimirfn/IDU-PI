@@ -128,6 +128,36 @@ export function aliasToUuid(alias: string): string {
 	return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 }
 
+/**
+ * The cap the runner actually enforces, resolved exactly the way the runner
+ * resolves it when it builds a `RunnerSpec`.
+ *
+ * `getStatus` must not re-derive this as `hardCapMs ?? timeoutMs`, and an
+ * earlier version of this file did. That re-derivation was a real bug and it
+ * was found by adversarial review: the runner gives a profile with no
+ * explicit `hardCapMs` a floor of four hours, while `?? timeoutMs` closed
+ * the record at `timeoutMs`, which is thirty minutes on the default
+ * profiles. So merely *reading* a healthy run past the thirty minute mark
+ * would declare it failed and persist that, killing a worker the runner was
+ * still perfectly happy to keep. A reader must never be more eager than the
+ * thing it is reading about.
+ *
+ * Returns 0 for "no cap", which is the sentinel the runner already uses for
+ * an explicitly disabled cap.
+ */
+export function resolveHardCapMs(input: {
+	requestTimeoutMs?: number;
+	profileHardCapMs?: number;
+	profileTimeoutMs?: number;
+}): number {
+	if (input.requestTimeoutMs === 0 || input.profileHardCapMs === 0) return 0;
+	if (input.profileHardCapMs !== undefined) return input.profileHardCapMs;
+	// The runner substitutes config.defaultTimeoutMs here. Omitting it does not
+	// change the result, because the floor below is larger than that default
+	// and than any timeout a profile is shipped with.
+	return Math.max(input.requestTimeoutMs ?? input.profileTimeoutMs ?? 0, 14_400_000);
+}
+
 export function getSessionKey(cwd: string, sessionId: string): string {
 	return `${resolve(cwd)}::${sessionId}`;
 }
@@ -856,14 +886,13 @@ export class CrossCliProcessManager {
 
 		const effectiveTimeoutMs = request.timeoutMs ?? profile.timeoutMs ?? config.defaultTimeoutMs;
 		const effectiveIdleTimeoutMs = profile.idleTimeoutMs ?? (profile.streams ? 300_000 : 0);
-		let effectiveHardCapMs: number;
-		if (request.timeoutMs === 0 || profile.hardCapMs === 0) {
-			effectiveHardCapMs = 0; // Explicitly disabled
-		} else if (profile.hardCapMs !== undefined) {
-			effectiveHardCapMs = profile.hardCapMs;
-		} else {
-			effectiveHardCapMs = Math.max(effectiveTimeoutMs, 14_400_000); // 4 hours default
-		}
+		// Shared with getStatus on purpose: the reader and the runner must agree
+		// on what the cap is, or reading a run can end it.
+		const effectiveHardCapMs = resolveHardCapMs({
+			requestTimeoutMs: request.timeoutMs,
+			profileHardCapMs: profile.hardCapMs,
+			profileTimeoutMs: effectiveTimeoutMs,
+		});
 		const startupGraceMs = profile.startupGraceMs ?? Math.max(effectiveIdleTimeoutMs, 120_000);
 
 		// 10. Build runner spec
@@ -957,11 +986,42 @@ export class CrossCliProcessManager {
 			return null;
 		}
 
+		// One clock reading and one cap for the whole function. Sampling `now`
+		// twice could let the recovery gate and the health block disagree across
+		// a cap boundary, producing a record that says `running` and
+		// `interrupted` at the same time.
+		const observedAt = Date.now();
+		const startTime = record ? new Date(record.startedAt).getTime() : NaN;
+		const capMs = record
+			? resolveHardCapMs({
+					requestTimeoutMs: record.request?.timeoutMs,
+					profileHardCapMs: record.profile?.hardCapMs,
+					profileTimeoutMs: record.profile?.timeoutMs,
+				})
+			: 0;
+		// isFinite matters: a corrupt or future startedAt yields a negative
+		// elapsed time, and that must never read as "past the cap".
+		const pastCap = capMs > 0 && Number.isFinite(startTime) && observedAt - startTime > capMs;
+
 		if (record && (record.status === "running" || record.status === "pending")) {
 			const runnerAlive = record.runnerPid ? isProcessAlive(record.runnerPid) : false;
 			const workerAlive = record.pid ? isProcessAlive(record.pid) : false;
+			const anyPidRecorded = Boolean(record.runnerPid || record.pid);
+			// A run that never recorded a pid produced no evidence of death, and the
+			// old gate demanded a pid before it would look at anything, so such a
+			// record stayed `running` forever. Measured: one from 63 hours earlier,
+			// with no pid and no log left, still claimed to be running. The clock is
+			// the only signal available for that case, exactly as it is for health.
 
-			if ((record.runnerPid || record.pid) && !runnerAlive && !workerAlive) {
+			// One rule, matching the one health already uses. Past the cap the clock
+			// decides on its own: the runner enforces that cap, so a run beyond it
+			// cannot still be working, and pids that survive are somebody else
+			// entirely. Inside the cap, every recorded pid gone is positive
+			// evidence of death. A run with no pid at all inside the cap is the one
+			// case left open, and it is left open on purpose: absence of evidence
+			// is not evidence of death.
+			const unreconcilable = pastCap || (anyPidRecorded && !runnerAlive && !workerAlive);
+			if (unreconcilable) {
 				let recoveredCode: number | null = null;
 				let logText = "";
 				if (existsSync(record.logPath)) {
@@ -989,7 +1049,14 @@ export class CrossCliProcessManager {
 					if (recoveredUsage.captured) record.usage = recoveredUsage;
 				} else {
 					record.status = "failed";
-					record.error = record.error || "Worker process terminated unexpectedly";
+					// Say which of the two cases this was. "Unexpectedly" is honest for a
+					// worker whose processes vanished, and vague for a record that never
+					// had a pid to lose; conflating them is the same kind of imprecision
+					// this recovery path exists to remove.
+					record.error = record.error
+						|| (pastCap
+							? "Run is past its hard cap and left no exit marker behind"
+							: "Worker process terminated unexpectedly");
 				}
 				record.completedAt = record.completedAt || new Date().toISOString();
 				writeJsonAtomic(sessionPath, record);
@@ -997,9 +1064,8 @@ export class CrossCliProcessManager {
 		}
 
 		if (record) {
-			const start = new Date(record.startedAt).getTime();
-			const now = Date.now();
-			record.elapsedMs = (record.completedAt ? new Date(record.completedAt).getTime() : now) - start;
+			const now = observedAt;
+			record.elapsedMs = (record.completedAt ? new Date(record.completedAt).getTime() : now) - startTime;
 			if (record.lastActivityAt) {
 				record.secondsSinceLastActivity = Math.round((now - new Date(record.lastActivityAt).getTime()) / 1000);
 			}
@@ -1023,8 +1089,6 @@ export class CrossCliProcessManager {
 				// profile sets, and that check needs no pid at all, so it decides
 				// alone once the cap is passed. Pids are consulted only while the
 				// run is still inside its cap, where a match means something.
-				const capMs = record.profile?.hardCapMs ?? record.profile?.timeoutMs ?? 0;
-				const pastCap = capMs > 0 && now - start > capMs;
 				let alive = false;
 				if (!pastCap) {
 					alive =
@@ -1038,8 +1102,13 @@ export class CrossCliProcessManager {
 				const anyPidRecorded = Boolean(record.runnerPid || record.pid);
 				const dead = pastCap || (anyPidRecorded && !alive);
 				record.health = dead ? "interrupted" : "healthy";
-} else if (record.status === "completed") {
+			} else if (record.status === "completed") {
 				record.health = "completed";
+			} else if (record.status === "pending") {
+				// A run that has not started yet is neither finished nor broken, and
+				// falling through to `interrupted` is how a queued worker got
+				// reported as a dead one. Found by adversarial review.
+				record.health = "pending";
 			} else {
 				record.health = "interrupted";
 			}

@@ -161,7 +161,7 @@ export interface RunRecord {
 	lastActivityAt?: string;
 	bytesEmitted?: number;
 	secondsSinceLastActivity?: number;
-	health?: "healthy" | "completed" | "interrupted";
+	health?: "pending" | "healthy" | "completed" | "interrupted";
 	/**
 	 * Persisted so the numbers survive a reread of the session. Without this,
 	 * usage is only ever visible in the first response and disappears on every

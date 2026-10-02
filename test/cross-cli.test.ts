@@ -12,6 +12,7 @@ import {
 	resolveSessionProfile,
 	checkSessionHarnessAffinity,
 	shouldCountTurn,
+	resolveHardCapMs,
 } from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -1290,6 +1291,249 @@ test("a run with no pid at all is interrupted once it is past its cap", async ()
 	} finally {
 		try { unlinkSync(mockSessionPath); } catch {}
 	}
+});
+test("a run with no pid is reconciled once it is past its hard cap", async () => {
+	const { writeFileSync, readFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-nopid-reconcile-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+	const mockLogPath = join(IDU_SESSIONS_DIR, `${mockRunId}.log`);
+
+	// The gate used to demand a pid before it would look at anything, so a
+	// record that never recorded one claimed to be running forever. Measured on
+	// the real ledger: 63 hours old, no pid, log already reaped.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-nopid",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 63 * 3_600_000).toISOString(),
+		logPath: mockLogPath,
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "failed");
+		assert.equal(status.health, "interrupted");
+		assert.ok(status.completedAt, "a reconciled run must stop being unfinished");
+		assert.ok(status.error && status.error.includes("hard cap"));
+		// It has to survive the write, or the next read would claim again that
+		// the run is going. This is the part that made the ghost permanent.
+		const onDisk = JSON.parse(readFileSync(mockSessionPath, "utf8")) as RunRecord;
+		assert.equal(onDisk.status, "failed");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("a run with no pid inside its cap is left alone, because silence is not death", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-nopid-inflight-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// The mirror image, and the case that keeps the fix from becoming a lie in
+	// the other direction: no pid and no clock say it is finished, so it stays
+	// running. Absence of evidence is not evidence of death.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-nopid-inflight",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 60_000).toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "running");
+		assert.equal(status.health, "healthy");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("a run past its cap with an exit marker in the log recovers as completed", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-pastcap-exitmarker-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+	const mockLogPath = join(IDU_SESSIONS_DIR, `${mockRunId}.log`);
+
+	// Reconciliation must not throw away a clean exit just because the record
+	// is old. The marker is better evidence than the clock.
+	writeFileSync(mockLogPath, "All unit tests passed successfully\n\n=== PROCESS CLOSED WITH CODE 0 ===\n", "utf8");
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-exitmarker",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 100 * 3_600_000).toISOString(),
+		logPath: mockLogPath,
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "completed");
+		assert.equal(status.exitCode, 0);
+		assert.ok(status.resultSummary?.includes("All unit tests passed successfully"));
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+		try { unlinkSync(mockLogPath); } catch {}
+	}
+});
+
+test("a record whose startedAt is in the future is never treated as past its cap", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-future-start-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// There is a real record in the ledger whose elapsed time computes as
+	// negative, and a future timestamp must never read as "past the cap": that
+	// would close a run that is, by its own account, just starting.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-future",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() + 3_600_000).toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "running");
+		assert.equal(status.health, "healthy");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+test("a run past its own timeoutMs is NOT closed when the profile has no hardCapMs", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-cap-floor-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// The defect adversarial review caught. The runner resolves an absent
+	// hardCapMs to Math.max(timeoutMs, 4 hours), so a 30 minute profile is
+	// allowed to run for four. Re-deriving the cap as `hardCapMs ?? timeoutMs`
+	// made getStatus close the record at thirty minutes, and because the
+	// recovery path persists, *reading* a healthy run destroyed it.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-cap-floor",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", timeoutMs: 1_800_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		pid: process.pid,
+		runnerPid: process.pid,
+		status: "running",
+		exitCode: null,
+		startedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "running", "the reader must not end a run the runner still allows");
+		assert.equal(status.health, "healthy");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("a queued run reports pending, not interrupted", async () => {
+	const { writeFileSync, unlinkSync } = await import("node:fs");
+	const { join } = await import("node:path");
+
+	const manager = CrossCliProcessManager.getInstance();
+	const mockRunId = "IDU-test-pending-health-001";
+	const mockSessionPath = join(IDU_SESSIONS_DIR, `${mockRunId}.json`);
+
+	// The health chain tested `running`, then `completed`, then fell through to
+	// `interrupted` for everything else. A run that has not started yet is
+	// neither finished nor broken, so a queued worker was reported as a dead
+	// one. Also found by adversarial review.
+	const mockRecord: RunRecord = {
+		runId: mockRunId,
+		sessionId: "test-sess-pending",
+		request: { task: "Test", profile: "fast" },
+		profile: { harness: "pi", model: "MiniMax-M3", hardCapMs: 7_200_000 },
+		command: "pi.cmd",
+		args: ["-p", "test"],
+		status: "pending",
+		exitCode: null,
+		startedAt: new Date().toISOString(),
+		logPath: "dummy.log",
+	};
+
+	writeFileSync(mockSessionPath, JSON.stringify(mockRecord, null, 2), "utf8");
+
+	try {
+		const status = manager.getStatus(mockRunId);
+		assert.ok(status);
+		assert.equal(status.status, "pending");
+		assert.equal(status.health, "pending");
+	} finally {
+		try { unlinkSync(mockSessionPath); } catch {}
+	}
+});
+
+test("resolveHardCapMs agrees with the runner, including the four hour floor and the disabled sentinel", () => {
+	// These are the exact values the runner builds its RunnerSpec from. If this
+	// function and the delegate path ever disagree again, reading a run can
+	// end it, so the rule is pinned here rather than only in the call site.
+	assert.equal(resolveHardCapMs({ profileHardCapMs: 7_200_000, profileTimeoutMs: 1_800_000 }), 7_200_000);
+	assert.equal(resolveHardCapMs({ profileTimeoutMs: 1_800_000 }), 14_400_000);
+	assert.equal(resolveHardCapMs({ profileTimeoutMs: 180_000 }), 14_400_000);
+	assert.equal(resolveHardCapMs({ requestTimeoutMs: 7_200_000, profileTimeoutMs: 1_800_000 }), 14_400_000);
+	// Zero is the "no cap" sentinel on both sides.
+	assert.equal(resolveHardCapMs({ profileHardCapMs: 0, profileTimeoutMs: 1_800_000 }), 0);
+	assert.equal(resolveHardCapMs({ requestTimeoutMs: 0, profileTimeoutMs: 1_800_000 }), 0);
+	assert.equal(resolveHardCapMs({}), 14_400_000);
 });
 test("hardCapMs=0 sentinel is recognized and does not cause premature timeout", () => {
 	const profileWithZeroHardCap: IduProfile = {
