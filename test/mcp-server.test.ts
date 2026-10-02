@@ -471,6 +471,50 @@ test("MCP idu_capabilities adds quota only when the orchestrator asks for it", a
 	}
 });
 
+test("MCP idu_capabilities only_quota returns the quota alone, and still returns it", async () => {
+	const read = async (args: Record<string, unknown>) => {
+		const res = (await handleMcpMethod("tools/call", {
+			name: "idu_capabilities",
+			arguments: args,
+		})) as { isError?: boolean; content: Array<{ text: string }> };
+		return { isError: res.isError === true, text: res.content[0].text, body: JSON.parse(res.content[0].text) as Record<string, unknown> };
+	};
+
+	const hadCache = existsSync(QUOTA_CACHE_PATH);
+	const previous = hadCache ? readFileSync(QUOTA_CACHE_PATH, "utf8") : null;
+	try {
+		writeCache(QUOTA_CACHE_PATH, [CACHE_SEEDED_SNAPSHOT], Date.now());
+
+		// Asked for the quota on its own, without also passing include_quota.
+		// only_quota implies the read: an orchestrator that says "just the quota"
+		// must not come back with a payload that has no quota in it.
+		const only = await read({ only_quota: true });
+		assert.equal(only.isError, false);
+		assert.deepEqual(
+			Object.keys(only.body),
+			["quota"],
+			"only_quota must drop the profile list and the CLI detection, not merely hide them",
+		);
+		assert.ok(Array.isArray(only.body.quota), "only_quota implies include_quota");
+		assert.equal((only.body.quota as QuotaSnapshot[])[0].source, "codex");
+
+		// The point of the flag is payload removed, so measure it instead of
+		// asserting a number quoted from somewhere else. Compared against the
+		// profile block rather than the whole response, so the assertion still
+		// means something when more quota sources start answering.
+		const full = await read({ include_quota: true });
+		const profilesBytes = JSON.stringify(full.body.profiles, null, 2).length;
+		const saved = full.text.length - only.text.length;
+		assert.ok(
+			saved >= profilesBytes * 0.95,
+			`only_quota must remove the profile list it promises to drop: saved ${saved} of ${profilesBytes} profile bytes`,
+		);
+	} finally {
+		if (previous === null) rmSync(QUOTA_CACHE_PATH, { force: true });
+		else writeFileSync(QUOTA_CACHE_PATH, previous, "utf8");
+	}
+});
+
 test("MCP idu_capabilities rejects a non-boolean include_quota", async () => {
 	// An MCP client that stringifies its args must be told no, not silently
 	// handed an off quota: "true" is not true, and truthiness would say yes.
