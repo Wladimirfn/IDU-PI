@@ -1,6 +1,7 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
+	appendFileSync,
 	existsSync,
 	readFileSync,
 	writeFileSync,
@@ -38,6 +39,7 @@ import type {
 } from "./types.js";
 
 const SESSION_TREE_PATH = join(IDU_SESSIONS_DIR, "tree.json");
+const SESSION_TREE_LOG_PATH = join(IDU_SESSIONS_DIR, "tree.jsonl");
 
 // Imported for local use and re-exported so the existing import path keeps
 // working. The implementation moved out to break a cycle with the quota layer.
@@ -130,19 +132,90 @@ export function getSessionKey(cwd: string, sessionId: string): string {
 	return `${resolve(cwd)}::${sessionId}`;
 }
 
+/**
+ * The session tree is a log of upserts, not a document.
+ *
+ * It used to be one JSON object rewritten in full by every finished run. Two
+ * runs finishing at the same time (which `idu_delegate_parallel` produces on
+ * purpose) read the same tree, both wrote, and one session vanished. And a
+ * reader that caught the file mid-rewrite got unparseable JSON, was handed an
+ * empty object, and then wrote that object back over everything.
+ *
+ * An append has neither failure. Every run appends one line; a line that does
+ * not parse costs one run's record, never the file.
+ */
 export function loadSessionTree(): Record<string, SessionTreeEntry> {
 	ensureIduDirectories();
-	if (!existsSync(SESSION_TREE_PATH)) return {};
+	migrateSessionTreeJson();
+
+	if (!existsSync(SESSION_TREE_LOG_PATH)) return {};
+	const out: Record<string, SessionTreeEntry> = {};
+	let raw: string;
 	try {
-		return JSON.parse(readFileSync(SESSION_TREE_PATH, "utf8"));
+		raw = readFileSync(SESSION_TREE_LOG_PATH, "utf8");
 	} catch {
 		return {};
 	}
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		try {
+			const record = JSON.parse(trimmed) as { key?: unknown; entry?: unknown };
+			if (typeof record?.key !== "string" || !record.entry || typeof record.entry !== "object") continue;
+			out[record.key] = record.entry as SessionTreeEntry;
+		} catch {
+			/* one torn line costs one run's record, not the tree */
+		}
+	}
+	return out;
 }
 
-export function saveSessionTree(tree: Record<string, SessionTreeEntry>): void {
+/**
+ * Records one session entry by appending it. The caller must not load, mutate
+ * and save: that shape is what loses entries when two writers overlap, and
+ * verifying after the write does not help because the loser already returned.
+ */
+export function upsertSessionTreeEntry(key: string, entry: SessionTreeEntry): void {
 	ensureIduDirectories();
-	writeJsonAtomic(SESSION_TREE_PATH, tree);
+	migrateSessionTreeJson();
+	appendFileSync(SESSION_TREE_LOG_PATH, `${JSON.stringify({ key, entry })}\n`, "utf8");
+}
+
+/**
+ * Brings a `tree.json` written by the previous format over, once. The old file
+ * is renamed rather than deleted, and an unreadable one is left untouched.
+ */
+function migrateSessionTreeJson(): void {
+	if (!existsSync(SESSION_TREE_PATH)) return;
+	if (existsSync(SESSION_TREE_LOG_PATH) && readFileSyncSafe(SESSION_TREE_LOG_PATH) !== "") return;
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(SESSION_TREE_PATH, "utf8"));
+	} catch {
+		// Torn legacy file. Leaving it in place keeps it recoverable by hand;
+		// writing an empty log over it would destroy it.
+		return;
+	}
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+
+	const payload = Object.entries(parsed as Record<string, SessionTreeEntry>)
+		.map(([key, entry]) => `${JSON.stringify({ key, entry })}\n`)
+		.join("");
+	if (payload) appendFileSync(SESSION_TREE_LOG_PATH, payload, "utf8");
+	try {
+		renameSync(SESSION_TREE_PATH, `${SESSION_TREE_PATH}.migrated-${randomUUID().slice(0, 8)}`);
+	} catch {
+		/* migration already succeeded; leaving the old file is the safe outcome */
+	}
+}
+
+function readFileSyncSafe(path: string): string {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return "";
+	}
 }
 
 /**
@@ -850,7 +923,7 @@ export class CrossCliProcessManager {
 		}
 
 		if (asyncExecution) {
-			const instructionMsg = `Worker process is RUNNING in background daemon (runId: ${runId}). DO NOT end your turn saying you will check back later. Execute this command now in your terminal tool to stay blocked without token bloat until completion:\nnode dist/src/cli.js wait ${runId} --timeout 540000\nIf the command exits with code 124 (timeout) and the worker is still healthy, re-invoke it to continue waiting. DO NOT use --follow (it dumps raw logs and bloats prompt tokens).`;
+			const instructionMsg = `Worker process is RUNNING in background daemon (runId: ${runId}). DO NOT end your turn saying you will check back later. Execute this command now in your terminal tool to stay blocked without token bloat until completion:\nidu-pi wait ${runId} --timeout 540000\nIf the command exits with code 124 (timeout) and the worker is still healthy, re-invoke it to continue waiting. DO NOT use --follow (it dumps raw logs and bloats prompt tokens).`;
 			return {
 				runId,
 				sessionId: effectiveSessionId,
@@ -861,7 +934,7 @@ export class CrossCliProcessManager {
 				model: profile.model,
 				status: "running",
 				exitCode: null,
-				summary: `Worker started in background daemon with runner PID ${runnerProcess.pid || "unknown"}. Wait silently using:\n  node dist/src/cli.js wait ${runId} --timeout 540000`,
+				summary: `Worker started in background daemon with runner PID ${runnerProcess.pid || "unknown"}. Wait silently using:\n  idu-pi wait ${runId} --timeout 540000`,
 				startedAt,
 				logPath,
 				instruction: instructionMsg,

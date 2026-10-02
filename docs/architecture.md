@@ -205,18 +205,14 @@ salvo que se pida, `delegate()` no la dispara nunca, y `--fresh` (CLI) o
 La exposicion es `idu_capabilities` con `include_quota`, documentada en las tres
 copias del protocolo porque una opcion que el orquestador no conoce es una
 opcion que no se usa. No se registro una herramienta nueva: el drift se queda en
-13.
-
-## Estado en disco (`~/.idu`)
-
 ```text
-config.json          configuración de CLIs y de la ONE ORCHESTRATOR RULE
+config.json          configuracion de los CLIs
 profiles.json        perfiles del usuario (mergean sobre los del proyecto)
-runtime/             <runId>.spec.json, .pid, .runner.pid  (efímeros)
-sessions/            <runId>.json (registro) + tree.json
+sessions/            <runId>.json (registro de cada run)
+  tree.jsonl         arbol de sesiones: log append-only, una linea de upsert por run
 locks/               sess_*.lock
 logs/                <runId>.log  (stdout+stderr crudo del worker)
-decisions.jsonl            decisiones y auditorias de postflight (log append-only)
+decisions.jsonl      decisiones y auditorias de postflight (log append-only)
 ```
 
 ## Recoverencia de procesos muertos
