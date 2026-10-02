@@ -123,7 +123,7 @@ async function main(): Promise<void> {
 		case "result": {
 			const targetRunId = args[1];
 			if (!targetRunId || targetRunId.startsWith("-")) {
-				console.error("Error: runId is required. Usage: idu result <runId> [--verbose]");
+				console.error("Error: runId is required. Usage: idu-pi result <runId> [--verbose]");
 				process.exit(1);
 			}
 			const verbose = args.includes("--verbose");
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
 		case "wait": {
 			const runId = args[1];
 			if (!runId || runId.startsWith("-")) {
-				console.error("Error: runId is required. Usage: idu wait <runId> [--timeout <ms>] [--follow] [--verbose]");
+				console.error("Error: runId is required. Usage: idu-pi wait <runId> [--timeout <ms>] [--follow] [--verbose]");
 				process.exit(1);
 			}
 
@@ -283,20 +283,20 @@ async function main(): Promise<void> {
 		default: {
 			console.log("IDU Cross-CLI Agent Router v2.1.0");
 			console.log("Usage:");
-			console.log("  idu mcp                                 Run stdio MCP server");
-			console.log("  idu status [runId]                      Display detected CLIs & profiles or status of run");
-			console.log("  idu result <runId> [--verbose]          Display final execution result of run");
-			console.log("  idu wait <runId> [--follow]             Wait for background run (with optional live streaming)");
-			console.log("  idu sessions                            Display session hierarchy tree");
-			console.log("  idu capabilities                        Print JSON capabilities");
-			console.log("  idu quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)"); console.log("  idu preflight <request> [--cwd <dir>]   Run preflight safety check");
-			console.log("  idu preflight <r> --expected-files <a,b>  Declare expected blast radius");
-			console.log("  idu delegate <task> --profile <p>       Directly delegate to a worker");
-			console.log("  idu delegate <task> --session <id>      Resume an existing session");
-			console.log("  idu delegate <task> --session <id> --fork Branch a child session");
-		console.log("  idu delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
-			console.log("  idu delegate <task> --working-dir <dir> Set target working directory");
-			console.log("  idu delegate <task> --timeout <ms>      Set timeout in milliseconds");
+			console.log("  idu-pi mcp                                 Run stdio MCP server");
+			console.log("  idu-pi status [runId]                      Display detected CLIs & profiles or status of run");
+			console.log("  idu-pi result <runId> [--verbose]          Display final execution result of run");
+			console.log("  idu-pi wait <runId> [--follow]             Wait for background run (with optional live streaming)");
+			console.log("  idu-pi sessions                            Display session hierarchy tree");
+			console.log("  idu-pi capabilities                        Print JSON capabilities");
+			console.log("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)"); console.log("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
+			console.log("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");
+			console.log("  idu-pi delegate <task> --profile <p>       Directly delegate to a worker");
+			console.log("  idu-pi delegate <task> --session <id>      Resume an existing session");
+			console.log("  idu-pi delegate <task> --session <id> --fork Branch a child session");
+		console.log("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
+			console.log("  idu-pi delegate <task> --working-dir <dir> Set target working directory");
+			console.log("  idu-pi delegate <task> --timeout <ms>      Set timeout in milliseconds");
 			break;
 		}
 	}

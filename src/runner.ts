@@ -16,7 +16,7 @@ import {
 	killProcessTree,
 	extractCleanSummary,
 	loadSessionTree,
-	saveSessionTree,
+	upsertSessionTreeEntry,
 	getSessionKey,
 	shouldCountTurn,
 } from "./process-manager.js";
@@ -264,7 +264,7 @@ async function runDaemon(): Promise<void> {
 				entry.runs.push(spec.runId);
 			}
 			tree[key] = entry;
-			saveSessionTree(tree);
+			upsertSessionTreeEntry(key, entry);
 		} catch {
 			// best effort
 		}
