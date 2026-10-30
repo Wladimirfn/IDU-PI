@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleMcpMethod, TOOLS } from "../src/mcp-server.js";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { QUOTA_CACHE_PATH } from "../src/json-file.js";
 import { writeCache } from "../src/quota.js";
 import type { QuotaSnapshot } from "../src/types.js";
@@ -86,8 +88,8 @@ test("MCP tools/list is complete for the orchestrator", async () => {
 	assert.ok(listed.tools.some((t) => t.name === "idu_delegate"));
 });
 
-test("MCP server exposes exactly 13 tools", () => {
-	assert.equal(TOOLS.length, 13);
+test("MCP server exposes exactly 14 tools", () => {
+	assert.equal(TOOLS.length, 14);
 	const names = TOOLS.map((t) => t.name);
 	assert.ok(names.includes("idu_status"));
 	assert.ok(names.includes("idu_preflight"));
@@ -101,6 +103,7 @@ test("MCP server exposes exactly 13 tools", () => {
 	assert.ok(names.includes("idu_worker_wait"));
 	assert.ok(names.includes("idu_capabilities"));
 	assert.ok(names.includes("idu_session_list"));
+	assert.ok(names.includes("idu_arbitrate"));
 });
 
 test("MCP initialize returns valid 2024-11-05 protocol", async () => {
@@ -110,7 +113,7 @@ test("MCP initialize returns valid 2024-11-05 protocol", async () => {
 	};
 	assert.equal(res.protocolVersion, "2024-11-05");
 	assert.equal(res.serverInfo.name, "idu-cross-cli");
-	assert.equal(res.serverInfo.version, "2.1.0");
+	assert.equal(res.serverInfo.version, "2.2.0");
 });
 
 test("MCP idu_status returns git and workspace health", async () => {
@@ -244,7 +247,7 @@ test("buildWorkerArgs enforces fail-closed permissions", async () => {
 	assert.ok(res4.args.includes("bypassPermissions"), "Strict workspace must allow bypass");
 });
 
-test("Protocol Guard: SKILL.md documents exactly the 13 canonical tools with zero ghosts", async () => {
+test("Protocol Guard: SKILL.md documents exactly the 14 canonical tools with zero ghosts", async () => {
 	const { readFileSync } = await import("node:fs");
 	const { resolve } = await import("node:path");
 
@@ -266,7 +269,7 @@ test("Protocol Guard: SKILL.md documents exactly the 13 canonical tools with zer
 	const mentionedTools = Array.from(tableText.matchAll(/`idu_[a-z0-9_]+`/g)).map((m) => m[0].replace(/`/g, ""));
 	const uniqueMentioned = Array.from(new Set(mentionedTools));
 
-	assert.equal(uniqueMentioned.length, 13, `Expected exactly 13 unique tools in SKILL table, found: ${uniqueMentioned.length}`);
+	assert.equal(uniqueMentioned.length, 14, `Expected exactly 14 unique tools in SKILL table, found: ${uniqueMentioned.length}`);
 
 	// Verify byte identity across copies
 	const agentsSkillPath = resolve(".agents/skills/idu-pi-parent-protocol/SKILL.md");
@@ -565,6 +568,53 @@ console.log(IDU_HOME);`,
 		assert.ok(existsSync(ledger), "the child must write into the isolated home, not the user's");
 		assert.match(readFileSync(ledger, "utf8"), /isolated-probe/);
 	} finally {
+		try { rmSync(isolated, { recursive: true, force: true }); } catch {}
+	}
+});
+
+test("MCP idu_arbitrate evaluates options deterministically offline", async () => {
+	delete process.env.IDU_WORKER;
+	const prevKey = process.env.TYPESAFE_API_KEY;
+	const prevJev = process.env.JEV_API_KEY;
+	delete process.env.TYPESAFE_API_KEY;
+	delete process.env.JEV_API_KEY;
+
+	const isolated = mkdtempSync(join(tmpdir(), "idu-arb-test-"));
+	// Point IDU_HOME at an empty temp dir so resolveTypeSafeApiKey/Endpoint cannot
+	// reach the real ~/.idu/config.json (which may hold a live key and endpoint) and
+	// the test stays hermetic with zero network I/O.
+	const prevIduHome = process.env.IDU_HOME;
+	process.env.IDU_HOME = isolated;
+	try {
+		const res = (await handleMcpMethod("tools/call", {
+			name: "idu_arbitrate",
+			arguments: {
+				options: [
+					{ id: "opt_low", description: "Low risk tweak" },
+					{ id: "opt_high", description: "High risk debt mitigation", isHighRiskMitigation: true },
+				],
+				state_summary: "Testing offline deterministic arbitration",
+				working_dir: isolated,
+			},
+		})) as { content: Array<{ type: string; text: string }> };
+
+		assert.ok(res.content?.[0]?.text);
+		const parsed = JSON.parse(res.content[0].text);
+		assert.equal(parsed.selectedOptionId, "opt_high");
+		assert.equal(parsed.source, "deterministic_fallback");
+
+		// The autonomous decision must leave an auditable trace in the ledger (J).
+		const ledgerPath = join(isolated, "decisions.jsonl");
+		assert.ok(existsSync(ledgerPath), "idu_arbitrate must record the decision in the ledger");
+		const ledgerText = readFileSync(ledgerPath, "utf8");
+		assert.match(ledgerText, /"projectId":"arbitration"/);
+		assert.match(ledgerText, /"targetId":"opt_high"/);
+		assert.match(ledgerText, /idu_arbitrate\//);
+	} finally {
+		if (prevIduHome === undefined) delete process.env.IDU_HOME;
+		else process.env.IDU_HOME = prevIduHome;
+		if (prevKey !== undefined) process.env.TYPESAFE_API_KEY = prevKey;
+		if (prevJev !== undefined) process.env.JEV_API_KEY = prevJev;
 		try { rmSync(isolated, { recursive: true, force: true }); } catch {}
 	}
 });

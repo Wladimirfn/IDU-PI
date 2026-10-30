@@ -6,6 +6,7 @@ import { CrossCliProcessManager } from "./process-manager.js";
 import { IDU_HOME } from "./config.js";
 import { runPreflight, runPostflight, type ChangeMode } from "./quality.js";
 import { recordDecision, listDecisions } from "./decision-ledger.js";
+import { arbitrate, looksLikeHighRiskMitigation, normalizeThreshold } from "./arbitration.js";
 
 interface JsonRpcRequest {
 	jsonrpc: "2.0";
@@ -362,6 +363,48 @@ export const TOOLS = [
 			properties: {},
 		},
 	},
+	{
+		name: "idu_arbitrate",
+		description:
+			"Autonomous decision arbitration via TypeSafe Jev (System One Model) or local Kev. Evaluates candidate options probabilistically against a state summary with calibrated confidence and fallback.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				options: {
+					type: "array",
+					description:
+						"List of candidate options to arbitrate between. Each option can be an object with 'id' and 'description' or a string 'id:description'.",
+				},
+				state_summary: {
+					type: "string",
+					description: "Summary of the current state, context, or decision problem.",
+				},
+				stateSummary: {
+					type: "string",
+					description: "Alias for state_summary.",
+				},
+				threshold: {
+					type: "number",
+					description:
+						"Confidence threshold (0.0 to 1.0) above which Jev's choice is accepted without human review (defaults to 0.85).",
+				},
+				offline: {
+					type: "boolean",
+					description:
+						"When true, skips local Kev and cloud Jev and returns the deterministic Risk-First policy with zero network I/O.",
+				},
+				working_dir: {
+					type: "string",
+					description: "Target workspace directory for resolving local .env config.",
+				},
+				cwd: {
+					type: "string",
+					description: "Alias for working_dir.",
+				},
+			},
+			required: ["options"],
+		},
+	},
 ];
 
 export function validateToolInput(
@@ -455,7 +498,7 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 				},
 				serverInfo: {
 					name: "idu-cross-cli",
-					version: "2.1.0",
+					version: "2.2.0",
 				},
 			};
 
@@ -705,6 +748,65 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 				const sessions = manager.listSessions();
 				return {
 					content: [{ type: "text", text: JSON.stringify(sessions, null, 2) }],
+				};
+			}
+
+			if (name === "idu_arbitrate") {
+				const rawOptions = Array.isArray(args.options) ? args.options : [];
+				const optionsList: Array<{ id: string; description: string; isHighRiskMitigation?: boolean }> = [];
+				for (let idx = 0; idx < rawOptions.length; idx++) {
+					const opt = rawOptions[idx];
+					if (typeof opt === "string") {
+						const sep = opt.indexOf(":");
+						if (sep !== -1) {
+							optionsList.push({
+								id: opt.slice(0, sep).trim(),
+								description: opt.slice(sep + 1).trim(),
+								isHighRiskMitigation: looksLikeHighRiskMitigation(opt),
+							});
+						} else {
+							optionsList.push({ id: opt, description: opt });
+						}
+					} else if (typeof opt === "object" && opt !== null) {
+						const obj = opt as Record<string, unknown>;
+						optionsList.push({
+							id: String(obj.id || `opt_${idx + 1}`),
+							description: String(obj.description || obj.id || `Option ${idx + 1}`),
+							isHighRiskMitigation: obj.isHighRiskMitigation === true,
+						});
+					}
+				}
+
+				if (optionsList.length === 0) {
+					return {
+						isError: true,
+						content: [{ type: "text", text: "At least one option is required for idu_arbitrate." }],
+					};
+				}
+
+				const stateSummary = String(args.state_summary || args.stateSummary || "Workspace arbitration");
+				const threshold = normalizeThreshold(args.threshold);
+				const cwd = args.working_dir ? String(args.working_dir) : args.cwd ? String(args.cwd) : undefined;
+
+				const decision = await arbitrate({
+					stateSummary,
+					options: optionsList,
+					confidenceThreshold: threshold,
+					cwd,
+					offline: args.offline === true,
+				});
+
+				// An autonomous decision must leave an auditable trace (J).
+				recordDecision({
+					projectId: "arbitration",
+					decision: `idu_arbitrate selected '${decision.selectedOptionId}' (source: ${decision.source}, confidence: ${decision.confidence}, humanReview: ${decision.requiresHumanReview}). Options: ${optionsList.map((o) => o.id).join(", ")}. State: ${stateSummary.slice(0, 200)}`,
+					decidedBy: `idu_arbitrate/${decision.source}`,
+					targetKind: "arbitration-decision",
+					targetId: decision.selectedOptionId,
+				});
+
+				return {
+					content: [{ type: "text", text: JSON.stringify(decision, null, 2) }],
 				};
 			}
 

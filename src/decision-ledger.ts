@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { IDU_HOME, ensureIduDirectories } from "./config.js";
+import { ensureIduDirectories, getIduHome } from "./config.js";
 
 export interface DecisionRecord {
 	id?: number;
@@ -22,11 +22,11 @@ export interface ListDecisionsOptions {
 
 function getLedgerPath(): string {
 	ensureIduDirectories();
-	return join(IDU_HOME, "decisions.jsonl");
+	return join(getIduHome(), "decisions.jsonl");
 }
 
 function getLegacyPath(): string {
-	return join(IDU_HOME, "decision_ledger.json");
+	return join(getIduHome(), "decision_ledger.json");
 }
 
 /**

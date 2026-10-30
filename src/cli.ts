@@ -280,8 +280,116 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "arbitrate": {
+			const { arbitrate, looksLikeHighRiskMitigation, normalizeThreshold } = await import("./arbitration.js");
+			const stateIndex = args.indexOf("--state");
+			let state = "Current workspace state and backlog triage";
+			if (stateIndex !== -1 && args[stateIndex + 1]) {
+				state = args[stateIndex + 1];
+			}
+
+			const thresholdIndex = args.indexOf("--threshold");
+			const threshold = thresholdIndex !== -1 ? normalizeThreshold(args[thresholdIndex + 1]) : 0.85;
+
+			const cwdIndex = args.indexOf("--cwd");
+			const targetCwd = cwdIndex !== -1 && args[cwdIndex + 1] ? args[cwdIndex + 1] : process.cwd();
+
+			const apiKeyIndex = args.indexOf("--api-key");
+			if (apiKeyIndex !== -1) {
+				console.error(
+					"WARNING: --api-key is deprecated: the value is visible in the OS process table and shell history." +
+					" Prefer TYPESAFE_API_KEY in the environment, a .env file, or ~/.idu/config.json.",
+				);
+			}
+			const explicitApiKey = apiKeyIndex !== -1 && args[apiKeyIndex + 1] ? args[apiKeyIndex + 1] : undefined;
+
+			const endpointIndex = args.indexOf("--endpoint");
+			const explicitEndpoint = endpointIndex !== -1 && args[endpointIndex + 1] ? args[endpointIndex + 1] : undefined;
+
+			const offline = args.includes("--offline");
+
+			const optionsList: Array<{ id: string; description: string; isHighRiskMitigation?: boolean }> = [];
+
+			for (let i = 1; i < args.length; i++) {
+				if (args[i] === "--option" && args[i + 1]) {
+					const val = args[i + 1];
+					const sep = val.indexOf(":");
+					if (sep !== -1) {
+						optionsList.push({
+							id: val.slice(0, sep).trim(),
+							description: val.slice(sep + 1).trim(),
+							isHighRiskMitigation: looksLikeHighRiskMitigation(val),
+						});
+					} else {
+						optionsList.push({ id: val, description: val });
+					}
+					i++;
+				}
+			}
+
+			if (optionsList.length === 0) {
+				// Walk once, marking known flags and their values as consumed. An
+				// unknown flag is skipped along with its value so a typo can never
+				// inject a positional candidate into the decision (F). Any flag token
+				// (single or double dash) consumes the token right after it, so a
+				// repeated known flag or `-x` cannot leak its value as a candidate.
+				const consumed = new Set<number>();
+				for (const flagIdx of [stateIndex, thresholdIndex, cwdIndex, apiKeyIndex, endpointIndex]) {
+					if (flagIdx !== -1) {
+						consumed.add(flagIdx);
+						consumed.add(flagIdx + 1);
+					}
+				}
+				for (let i = 1; i < args.length; i++) {
+					if (args[i].startsWith("-")) {
+						consumed.add(i);
+						if (args[i + 1] && !args[i + 1].startsWith("-")) {
+							consumed.add(i + 1);
+						}
+					}
+				}
+				const positional = args.slice(1).filter((_, idx) => !consumed.has(idx + 1));
+				for (let idx = 0; idx < positional.length; idx++) {
+					const item = positional[idx];
+					optionsList.push({
+						id: `opt_${idx + 1}`,
+						description: item,
+						isHighRiskMitigation: looksLikeHighRiskMitigation(item),
+					});
+				}
+			}
+
+			if (optionsList.length === 0) {
+				console.error('Usage: idu-pi arbitrate --option "id1:description 1" --option "id2:description 2" [--state "summary"] [--cwd <dir>] [--threshold <0..1>] [--offline]');
+				process.exit(1);
+			}
+
+			const decision = await arbitrate({
+				stateSummary: state,
+				options: optionsList,
+				confidenceThreshold: threshold,
+				cwd: targetCwd,
+				apiKey: explicitApiKey,
+				endpoint: explicitEndpoint,
+				offline,
+			});
+
+			// Same auditable trace as the MCP path (J asymmetry fix).
+			const { recordDecision } = await import("./decision-ledger.js");
+			recordDecision({
+				projectId: "arbitration",
+				decision: `idu-pi arbitrate selected '${decision.selectedOptionId}' (source: ${decision.source}, confidence: ${decision.confidence}, humanReview: ${decision.requiresHumanReview}). Options: ${optionsList.map((o) => o.id).join(", ")}. State: ${state.slice(0, 200)}`,
+				decidedBy: `cli-arbitrate/${decision.source}`,
+				targetKind: "arbitration-decision",
+				targetId: decision.selectedOptionId,
+			});
+
+			console.log(JSON.stringify(decision, null, 2));
+			break;
+		}
+
 		default: {
-			console.log("IDU Cross-CLI Agent Router v2.1.0");
+			console.log("IDU Cross-CLI Agent Router v2.2.0");
 			console.log("Usage:");
 			console.log("  idu-pi mcp                                 Run stdio MCP server");
 			console.log("  idu-pi status [runId]                      Display detected CLIs & profiles or status of run");
@@ -289,12 +397,14 @@ async function main(): Promise<void> {
 			console.log("  idu-pi wait <runId> [--follow]             Wait for background run (with optional live streaming)");
 			console.log("  idu-pi sessions                            Display session hierarchy tree");
 			console.log("  idu-pi capabilities                        Print JSON capabilities");
-			console.log("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)"); console.log("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
+			console.log("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)");
+			console.log("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
 			console.log("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");
+			console.log("  idu-pi arbitrate --option <id:desc> ...    Autonomous task decision via Kev/Jev");
 			console.log("  idu-pi delegate <task> --profile <p>       Directly delegate to a worker");
 			console.log("  idu-pi delegate <task> --session <id>      Resume an existing session");
 			console.log("  idu-pi delegate <task> --session <id> --fork Branch a child session");
-		console.log("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
+			console.log("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
 			console.log("  idu-pi delegate <task> --working-dir <dir> Set target working directory");
 			console.log("  idu-pi delegate <task> --timeout <ms>      Set timeout in milliseconds");
 			break;

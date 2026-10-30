@@ -29,8 +29,8 @@ difference. Measured on 2026-10-01 against the shipped binary:
 | `IDU_WORKER` | `tools/list` | `tools/call idu_delegate` | CLI `delegate` |
 | --- | --- | --- | --- |
 | `true` | 0 tools | refused | refused |
-| `false` | **13 tools** | **passes** | **passes** |
-| unset | **13 tools** | **passes** | **passes** |
+| `false` | **14 tools** | **passes** | **passes** |
+| unset | **14 tools** | **passes** | **passes** |
 
 So this is not one strong defence and one weak one. It is a single cooperative
 identity contract, implemented in two places.

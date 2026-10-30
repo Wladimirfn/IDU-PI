@@ -18,7 +18,7 @@ costo/modelo, bajo la **ONE ORCHESTRATOR RULE**.
 ```text
 Orquestador padre (Claude Code / Pi / OpenCode / Antigravity / minimax Code)
         │
-        │  MCP (stdio, 13 herramientas)   ó   CLI directa
+        │  MCP (stdio, 14 herramientas)   ó   CLI directa
         ▼
 ┌───────────────────────────────────────────────────────────────┐
 │  process-manager.ts — CrossCliProcessManager (singleton)       │
@@ -45,7 +45,7 @@ estado en disco. Si el orquestador muere, el worker sigue vivo.
 
 | Capa | Módulo | Responsabilidad |
 | --- | --- | --- |
-| Transporte MCP | `mcp-server.ts` | Servidor stdio, 13 herramientas, JSON-RPC por líneas, validación estricta de esquema. |
+| Transporte MCP | `mcp-server.ts` | Servidor stdio, 14 herramientas, JSON-RPC por líneas, validación estricta de esquema. |
 | Transporte CLI | `cli.ts` | `status`, `result`, `wait`, `capabilities`, `preflight`, `sessions`, `delegate`. |
 | Orquestación | `process-manager.ts` | `CrossCliProcessManager`: guardas, sesiones, locks, árbol, construcción del spec. |
 | Ejecución | `runner.ts` | Daemon que posee el proceso hijo, el watchdog y el cierre del registro. |

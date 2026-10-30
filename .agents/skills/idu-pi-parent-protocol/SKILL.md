@@ -6,7 +6,7 @@ description: |
   Codex, Antigravity) to manage tasks with the IDU Cross-CLI harness.
 ---
 
-# idu-pi Parent Protocol (v2.1.0)
+# idu-pi Parent Protocol (v2.2.0)
 
 > **Audience**: Parent / orchestrator model (Claude Code, OpenCode, Pi, Codex, Antigravity).
 > **Role**: You are the orchestrator and implementer. Execute code and native SDD workflows locally. IDU-PI is your quality gate, pre/post-flight auditor, decision ledger, and consultative arnés.
@@ -34,7 +34,7 @@ The IDU-PI MCP server exposes the same tool surface under two prefixes, one per 
 
 The table below lists **base names only**. Prepend the prefix your harness exposes. **Never invent a base name** — if it is not in this table, it does not exist.
 
-## Canonical Tool Catalog (13 Tools)
+## Canonical Tool Catalog (14 Tools)
 
 | Base Tool | Purpose | Required Parameters |
 |---|---|---|
@@ -51,6 +51,7 @@ The table below lists **base names only**. Prepend the prefix your harness expos
 | `idu_worker_result` | Full execution output, summary, and log paths of a finished worker. | `run_id` |
 | `idu_session_list` | All active and tracked cross-cli sessions with hierarchy and locks. | none |
 | `idu_capabilities` | Available profiles from `~/.idu/profiles.json` and detected local CLIs. `only_quota: true` returns just the quota array (cheap); `include_quota: true` adds it to the full payload. | none |
+| `idu_arbitrate` | Autonomous decision arbitration via TypeSafe Jev (System One Model) or local Kev. | `options` |
 
 Parameter names are exact and the schema rejects unknown ones. `request` is not `task`; `profile` is not `--profile`. The `--profile` flag belongs to the CLI (`idu-pi delegate "task" --profile coding`), while the MCP tool takes `profile` with no dashes.
 
@@ -61,7 +62,7 @@ Parameter names are exact and the schema rejects unknown ones. `request` is not 
      ```bash
      idu-pi status     # the CLI works; if this fails the install itself is broken
      ```
-     For OpenCode specifically, `opencode mcp list` is **not** authoritative: it can report "No MCP servers configured" while all servers are connected. The truth is in `~/.local/share/opencode/log/opencode.log`, lines `mcp connected server=<name> tools=<n>` and `mcp connect failed`. For another harness, read its own MCP log. Until the 13 tools are connected, none of this protocol applies.
+     For OpenCode specifically, `opencode mcp list` is **not** authoritative: it can report "No MCP servers configured" while all servers are connected. The truth is in `~/.local/share/opencode/log/opencode.log`, lines `mcp connected server=<name> tools=<n>` and `mcp connect failed`. For another harness, read its own MCP log. Until the 14 tools are connected, none of this protocol applies.
 
 2. **Preflight**: Run `idu_preflight` with `request` (a plain-language description of the task) and `expected_files`. If `risk: high`, verify with the user before proceeding.
 3. **Local Implementation**: Implement code and execute changes directly in the active orchestrator session (Pi, OpenCode, Claude Code, Codex, Antigravity) using local edit tools and native SDD phases (`sdd-apply`, `sdd-verify`). NEVER abdicate coding or delegate the primary implementation to another CLI.

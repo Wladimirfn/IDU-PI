@@ -1,6 +1,6 @@
 # MCP Server — IDU Cross-CLI
 
-El servidor expone **13 herramientas** por stdio. Es la superficie que usan los orquestadores
+El servidor expone **14 herramientas** por stdio. Es la superficie que usan los orquestadores
 para delegar trabajo y para pasar por los gates de calidad.
 
 > Este documento antes listaba ~52 herramientas (`idu_master_plan_*`, `idu_source_*`,
@@ -23,6 +23,7 @@ para delegar trabajo y para pasar por los gates de calidad.
 | `idu_worker_result` | Resultado final, con `stdout`/`stderr` solo si `verbose`. |
 | `idu_session_list` | Árbol de sesiones con padre, perfil, turnos y última actividad. |
 | `idu_capabilities` | Perfiles cargados, CLIs detectados y estado de la ONE ORCHESTRATOR RULE. |
+| `idu_arbitrate` | Decisión autónoma entre opciones: Kev local (GPU) -> Jev cloud -> fallback determinista. `options` (req), `state_summary`/`stateSummary`, `threshold`, `working_dir`/`cwd`. Devuelve `selectedOptionId`, `confidence`, `source` y `requiresHumanReview`. |
 
 ## `idu_delegate`
 

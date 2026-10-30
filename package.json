@@ -1,6 +1,6 @@
 {
   "name": "idu-cross-cli",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Cross-CLI Agent Router & Quality Harness for Claude Code, OpenCode, Pi, Codex, Antigravity, Kimi, Qwen and Command Code",
   "private": true,
   "type": "module",

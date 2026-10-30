@@ -36,6 +36,10 @@ const mockConfig: IduConfig = {
 			command: "pi.cmd",
 			argsTemplate: [],
 		},
+		"gentle-shell": {
+			command: "gentle-shell.cmd",
+			argsTemplate: [],
+		},
 		codex: {
 			command: "codex.cmd",
 			argsTemplate: [],
@@ -101,6 +105,22 @@ test("buildWorkerArgs builds correct argv for Pi CLI with provider and task flag
 	assert.ok(args.includes("MiniMax-M3"));
 	assert.ok(args.includes("-p"));
 	assert.equal(args[args.length - 1], "Run scout");
+});
+
+test("buildWorkerArgs builds correct argv for Gentle Shell with provider, model and task flag", () => {
+	const profile: IduProfile = {
+		harness: "gentle-shell",
+		provider: "minimax",
+		model: "MiniMax-M3",
+	};
+	const { command, args } = buildWorkerArgs(profile, "Run scout in gentle-shell", [], mockConfig);
+	assert.equal(command, "gentle-shell.cmd");
+	assert.ok(args.includes("--provider"));
+	assert.ok(args.includes("minimax"));
+	assert.ok(args.includes("--model"));
+	assert.ok(args.includes("MiniMax-M3"));
+	assert.ok(args.includes("-p"));
+	assert.equal(args[args.length - 1], "Run scout in gentle-shell");
 });
 
 test("buildWorkerArgs builds correct argv for Antigravity (agy) with model and permissions", () => {
