@@ -1,4 +1,4 @@
-export type HarnessEngine = "claude" | "opencode" | "pi" | "codex" | "kimi" | "qwen" | "antigravity" | "commandcode" | "cmdc" | string;
+export type HarnessEngine = "claude" | "opencode" | "pi" | "codex" | "kimi" | "qwen" | "antigravity" | "commandcode" | "cmdc" | "gentle-shell" | string;
 
 export type PermissionLevel = "read-only" | "workspace" | string[];
 
@@ -32,12 +32,19 @@ export interface OneOrchestratorRule {
 	configurable?: boolean;
 }
 
+export interface TypeSafeConfig {
+	apiKey?: string;
+	endpoint?: string;
+}
+
 export interface IduConfig {
 	version: string;
 	oneOrchestratorRule: OneOrchestratorRule;
 	clis: Record<string, CliDefinition>;
 	defaultTimeoutMs: number;
 	maxConcurrentWorkers: number;
+	typesafe?: TypeSafeConfig;
+	typesafeApiKey?: string;
 }
 
 export interface ProfilesConfig {

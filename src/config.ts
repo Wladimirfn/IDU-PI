@@ -5,6 +5,20 @@ import type { IduConfig, IduProfile, ProfilesConfig } from "./types.js";
 
 export const IDU_HOME = process.env.IDU_HOME || join(homedir(), ".idu");
 export const IDU_CONFIG_PATH = join(IDU_HOME, "config.json");
+
+/**
+ * Runtime-resolvable config path: unlike IDU_CONFIG_PATH (fixed at import time),
+ * this re-reads IDU_HOME from the environment on every call, so tests and embedded
+ * callers can isolate the home directory per invocation.
+ */
+export function getIduConfigPath(): string {
+	return join(process.env.IDU_HOME || IDU_HOME, "config.json");
+}
+
+export function getIduHome(): string {
+	return process.env.IDU_HOME || IDU_HOME;
+}
+
 export const IDU_PROFILES_PATH = join(IDU_HOME, "profiles.json");
 export const IDU_RUNTIME_DIR = join(IDU_HOME, "runtime");
 export const IDU_SESSIONS_DIR = join(IDU_HOME, "sessions");
@@ -105,7 +119,7 @@ export const DEFAULT_PROFILES: ProfilesConfig = {
 		},
 		antigravity: {
 			harness: "antigravity",
-			model: "gemini-3.8-flash-high",
+			model: "gemini-4-argon-high",
 			permissions: "workspace",
 			description: "Google DeepMind Antigravity CLI agent (agy)",
 			streams: true,
@@ -115,7 +129,7 @@ export const DEFAULT_PROFILES: ProfilesConfig = {
 		},
 		"antigravity-advisory": {
 			harness: "antigravity",
-			model: "gemini-3.8-flash-high",
+			model: "gemini-4-argon-high",
 			permissions: "read-only",
 			description: "Antigravity (agy) en modo consulta: auditoria y dictamen, sin escritura",
 			streams: true,
@@ -150,7 +164,7 @@ export const DEFAULT_PROFILES: ProfilesConfig = {
 };
 
 const DEFAULT_CONFIG: IduConfig = {
-	version: "2.1.0",
+	version: "2.2.0",
 	oneOrchestratorRule: {
 		enabled: true,
 		allowRecursiveDelegation: false,
@@ -160,6 +174,7 @@ const DEFAULT_CONFIG: IduConfig = {
 		opencode: { command: "opencode", argsTemplate: ["run", "--auto", "{task}"] },
 		codex: { command: "codex", argsTemplate: ["exec", "{task}"] },
 		pi: { command: "pi", argsTemplate: ["-p", "{task}"] },
+		"gentle-shell": { command: "gentle-shell", argsTemplate: ["-p", "{task}"] },
 		kimi: { command: "kimi", argsTemplate: ["-p", "{task}"] },
 		qwen: { command: "qwen", argsTemplate: ["-p", "{task}"] },
 		antigravity: { command: "agy", argsTemplate: ["-p", "{task}"] },

@@ -1,21 +1,32 @@
-# IDU Cross-CLI Agent Router & Quality Harness (v2.1.0)
+# IDU Cross-CLI Agent Router & Quality Harness (v2.2.0)
 
 <a href="https://github.com/Gentleman-Programming/gentle-ai">
   <img width="220" src="https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/docs/assets/brand/built-with-gentle-ai.png" alt="Built with Gentle-AI" />
 </a>
 
-**IDU Cross-CLI** es un router universal de terminales y arnés de calidad que permite a cualquier agente orquestador padre (**Claude Code**, **Pi**, **OpenCode** o **Antigravity**) delegar tareas a procesos de terminal reales (**Claude CLI**, **OpenCode CLI**, **Codex CLI**, **Pi CLI**) mediante perfiles de costos/modelos bajo la estricta **ONE ORCHESTRATOR RULE**.
+**IDU Cross-CLI (`idu-pi`)** es un arnés de orquestación que hace tres cosas:
+
+1. **Delega** tareas a terminales reales (Claude Code, OpenCode, Codex, Pi, Antigravity, Kimi, Qwen, minimax Code, Command Code) mediante perfiles de costo/modelo, con sesiones reanudables y locks de concurrencia.
+2. **Audita** cada cambio con gates de calidad: `preflight` antes de tocar código, `postflight` contra el blast radius esperado, y un ledger duradero de decisiones.
+3. **Arbitra** decisiones autónomas (`idu-pi arbitrate`) con un motor de tres capas: Kev local en GPU, TypeSafe Jev en la nube, o fallback determinista Risk-First a costo cero.
+
+Todo bajo la **ONE ORCHESTRATOR RULE**: un worker nunca vuelve a delegar. Ver [SECURITY.md](SECURITY.md) para el alcance real de esa guarda.
+
+<details>
+<summary><strong>Historia del proyecto (purgas v2.1.0)</strong></summary>
 
 Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas, AgentLab, Plan
 Maestro y cron loops) fue retirado en dos pasos: primero en el commit `92f8380` y después con
 la purga de vestigios que borró los 15 perfiles de `config/profiles/` y los 14 scripts del
 cron `supervisor-tick` y de un solo uso que quedaban colgados. Su código está en el tag
-`legacy-archive-pre-purge` y ya no ocupa el árbol de trabajo; sus documentos de planificación
-se eliminaron por completo. Ver `docs/architecture.md` para la arquitectura vigente.
+`legacy-archive-pre-purge` y ya no ocupa el árbol de trabajo. Ver `docs/architecture.md` para
+la arquitectura vigente.
 
 > **Nombre de la carpeta.** El repositorio se llama `idu-cross-cli` (mismo `name` de
 > `package.json`). Si tu clon todavía vive en un directorio llamado `pi-telegram-bridge`, es
 > un nombre histórico: renómbralo y actualiza la ruta absoluta que declara tu cliente MCP.
+
+</details>
 
 ---
 
@@ -58,7 +69,7 @@ se eliminaron por completo. Ver `docs/architecture.md` para la arquitectura vige
 
 ## Catálogo de Herramientas MCP (`dist/src/mcp-server.js`)
 
-El servidor expone **13 herramientas de alto impacto** optimizadas para mínimo consumo de contexto:
+El servidor expone **14 herramientas de alto impacto** optimizadas para mínimo consumo de contexto:
 
 | Herramienta | Descripción |
 | :--- | :--- |
@@ -75,6 +86,7 @@ El servidor expone **13 herramientas de alto impacto** optimizadas para mínimo 
 | `idu_worker_result` | Recupera la salida completa estructurada, diffs y reporte del worker. |
 | `idu_session_list` | Lista las sesiones activas o históricas con su CLI, timestamp y bloqueo. |
 | `idu_capabilities` | Informa los perfiles disponibles en `~/.idu/profiles.json` y CLIs detectados. Con `include_quota: true` agrega además la cuota de cada cuenta, leyendo lo que el propio CLI reporta. |
+| `idu_arbitrate` | Arbitraje autónomo de decisiones: evalúa opciones candidatas vía Kev local (GPU), TypeSafe Jev (nube) o fallback determinista Risk-First, con confianza calibrada y escalado a humano por umbral. |
 
 ---
 
@@ -90,7 +102,7 @@ pnpm run cli capabilities
 | Perfil | CLI | Modelo | Timeout Trabajo | Inactividad (Idle) | Techo Máximo |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `architecture` | Claude Code | opus | 1 hora | 5 minutos | 4 horas |
-| `antigravity-advisory` | Antigravity (`agy`) | gemini-3.8-flash-high | 1 hora | 5 minutos | 4 horas |
+| `antigravity-advisory` | Antigravity (`agy`) | gemini-4-argon-high | 1 hora | 5 minutos | 4 horas |
 | `deep-refactor` | Claude Code | sonnet | 1 hora | 5 minutos | 4 horas |
 | `coding` | Codex CLI | gpt-5.6-luna | 1 hora | N/A | 4 horas |
 | `cheap-explore` | OpenCode | MiniMax-M3 | 30 minutos | 5 minutos | 2 horas |
@@ -100,7 +112,7 @@ pnpm run cli capabilities
 | `mcode` | minimax Code (`mcode`) | minimax/MiniMax-M3.1-Flash-Preview | 30 minutos | 5 minutos | 2 horas |
 | `kimi` | Kimi | (default del CLI) | 30 minutos | N/A | 2 horas |
 | `qwen` | Qwen | (default del CLI) | 30 minutos | N/A | 2 horas |
-| `antigravity` | Antigravity (`agy`) | gemini-3.8-flash-high | 30 minutos | 5 minutos | 2 horas |
+| `antigravity` | Antigravity (`agy`) | gemini-4-argon-high | 30 minutos | 5 minutos | 2 horas |
 
 **El nombre del modelo es un pass-through opaco.** El arnés no lo valida ni lo normaliza: lo
 reenvía al CLI subyacente, que acepta cualquier identificador que entienda. Para usar un
@@ -171,6 +183,9 @@ pnpm run cli preflight "Refactorizar autenticación" --cwd "C:/ruta/al/proyecto"
 # Delegar directamente a un worker desde la terminal
 pnpm run cli delegate "Auditar arquitectura del módulo IoT" --profile architecture
 
+# Arbitrar una decisión autónoma (Kev local -> Jev cloud -> fallback determinista)
+pnpm run cli arbitrate --option "opt_a:Escanear deuda tecnica" --option "opt_b:Refactorizar modulo X" --state "Estado actual del sprint"
+
 # Esperar en silencio a un worker lanzado con async
 node dist/src/cli.js wait <run_id> --timeout 540000
 
@@ -198,9 +213,9 @@ pnpm run verify
 
 | Script | Qué comprueba |
 | :--- | :--- |
-| `pnpm test` | 106 pruebas unitarias contra un `IDU_HOME` temporal: arnés cross-cli, ciclo de vida de procesos, locks, watchdog, contrato de las 13 herramientas MCP y capa de cuota. |
+| `pnpm test` | 150 pruebas unitarias contra un `IDU_HOME` temporal: arnés cross-cli, ciclo de vida de procesos, locks, watchdog, motor de arbitraje, contrato de las 14 herramientas MCP y capa de cuota. |
 | `pnpm run test:guarded` | La misma suite envuelta en `scripts/run-tests-with-leak-guard.mjs`, que falla si los tests dejan archivos nuevos en el temp. |
-| `pnpm run test:protocol-drift` | Que el SKILL.md del protocolo documente exactamente las 13 herramientas canónicas, sin fantasmas. |
+| `pnpm run test:protocol-drift` | Que el SKILL.md del protocolo documente exactamente las 14 herramientas canónicas, sin fantasmas. |
 | `pnpm run test:repo-hygiene` | Que las pruebas no filtren estado a la raíz del repo. |
 | `pnpm run test:unisolated` | La misma suite **sin** aislamiento, escribiendo en tu `~/.idu` real. Existe para reproducir un fallo en condiciones contaminated, no para uso normal. |
 
@@ -224,5 +239,5 @@ que aislar el home de idu-pi no evita que una sonda de cuota en vivo lea una cre
 Para eso esta `include_quota`, que es opt-in y ademas pasa por la cache de 10 minutos.
 
 La suite completa pasa al 100% y cubre el arnés cross-cli, el ciclo de vida de procesos, el
-aislamiento de locks, el watchdog de timeouts, el contrato de las 13 herramientas MCP y la
-ausencia de drift entre este README y los perfiles reales del código.
+aislamiento de locks, el watchdog de timeouts, el motor de arbitraje, el contrato de las 14
+herramientas MCP y la ausencia de drift entre este README y los perfiles reales del código.

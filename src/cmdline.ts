@@ -219,7 +219,8 @@ export function buildWorkerArgs(
 		}
 
 		case "pi":
-		case "pi-cli": {
+		case "pi-cli":
+		case "gentle-shell": {
 			if (profile.provider) {
 				args.push("--provider", profile.provider);
 			}
@@ -301,6 +302,7 @@ export function buildWorkerArgs(
 				let model = profile.model;
 				if (model === "flash") model = "gemini-3.8-flash-high";
 				else if (model === "pro") model = "gemini-3.1-pro-high";
+				else if (model === "argon") model = "gemini-4-argon-high";
 				args.push("--model", model);
 			}
 			args.push("--output-format", "stream-json");

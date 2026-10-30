@@ -37,7 +37,7 @@ const DEPLOYED_PROTOCOLS = [
 //
 // Registered tools the protocol intentionally does not document. The list was
 // frozen on 2026-08-03 and emptied by the post-v2.1.0 purge: every tool that
-// used to be registered but undocumented is gone, and the surviving 13 are all
+// used to be registered but undocumented is gone, and the surviving 14 are all
 // documented. Keep it empty unless a tool is deliberately withheld, and say
 // why. It can only shrink; it cannot grow during normal maintenance. A retired
 // entry is fine: the staleAllowlist check at the bottom warns to remove it.
