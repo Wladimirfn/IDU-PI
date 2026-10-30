@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Benchmark IDU-PI — Resultados 2026-10-30</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0f1420;
+    color: #e8ecf4;
+    padding: 32px 20px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 1.7rem; margin-bottom: 4px; }
+  h1 .v { color: #4ade80; }
+  .sub { color: #8b94a7; margin-bottom: 28px; font-size: .95rem; }
+  h2 { font-size: 1.15rem; margin: 34px 0 12px; color: #a5b4fc; border-left: 3px solid #6366f1; padding-left: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin-bottom: 8px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #232b3d; }
+  th { color: #8b94a7; font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.gold td { background: rgba(250, 204, 21, .07); }
+  td .medal { margin-right: 4px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: .72rem; font-weight: 600; }
+  .ok { background: rgba(74, 222, 128, .15); color: #4ade80; }
+  .fail { background: rgba(248, 113, 113, .15); color: #f87171; }
+  .nr { color: #64748b; }
+  .bar-cell { min-width: 140px; }
+  .bar { height: 12px; border-radius: 6px; background: #232b3d; position: relative; overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 6px; }
+  .b-tok { background: linear-gradient(90deg, #6366f1, #818cf8); }
+  .b-time { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+  .b-score { background: linear-gradient(90deg, #10b981, #34d399); }
+  .foot { color: #64748b; font-size: .8rem; margin-top: 4px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 16px; }
+  .card { background: #171e2e; border: 1px solid #232b3d; border-radius: 12px; padding: 16px; }
+  .card h3 { font-size: .85rem; color: #a5b4fc; margin-bottom: 8px; }
+  .card p { font-size: .85rem; color: #c7cfdd; }
+  .card b { color: #fff; }
+  .verdict { background: #171e2e; border: 1px solid #2d3a55; border-radius: 12px; padding: 18px 20px; margin-top: 10px; }
+  .verdict li { margin: 6px 0 6px 18px; font-size: .92rem; }
+  .legend { display: flex; gap: 18px; margin: 8px 0 0; font-size: .78rem; color: #8b94a7; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Benchmark IDU-PI <span class="v">v2.2.0</span></h1>
+<div class="sub">9 configuraciones · 3 pruebas · 2026-10-30 · verificadores automáticos con tests ocultos · orquestado con idu-pi</div>
+
+<h2>Prueba 1 — Algorítmica (implementar spec con 13 tests ocultos)</h2>
+<table>
+  <tr><th>#</th><th>Configuración</th><th>Harness</th><th class="num">Tests</th><th class="num">Tokens</th><th class="bar-cell">Tokens (escala)</th><th class="num">Tiempo</th></tr>
+  <tr class="gold"><td><span class="medal">🥇</span></td><td>claude-sonnet-high</td><td>Claude Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">3,830</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:7%"></div></div></td><td class="num">53s</td></tr>
+  <tr class="gold"><td><span class="medal">🥈</span></td><td>architecture (opus 5.5)</td><td>Claude Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">4,687</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:8%"></div></div></td><td class="num">58s</td></tr>
+  <tr class="gold"><td><span class="medal">🥉</span></td><td>mcode-glm-max</td><td>mcode</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">23,127</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:40%"></div></div></td><td class="num">72s</td></tr>
+  <tr><td>4</td><td>claude-haiku-fast</td><td>Claude Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">7,965</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:14%"></div></div></td><td class="num">62s</td></tr>
+  <tr><td>5</td><td>mcode (M3.1-flash)</td><td>mcode</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">48,663</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:84%"></div></div></td><td class="num">2.9min</td></tr>
+  <tr><td>6</td><td>antigravity-advisory-opus (opus vía agy)</td><td>Antigravity</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">57,712</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:100%"></div></div></td><td class="num">2.7min</td></tr>
+  <tr><td>7</td><td>commandcode (deepseek flash)</td><td>Command Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">147,382</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:100%"></div></div></td><td class="num">39s</td></tr>
+  <tr><td>8</td><td>gshell-nan-max</td><td>gentle-shell</td><td class="num"><span class="tag ok">13/13</span></td><td class="num nr">n/r</td><td class="bar-cell"><span class="nr">—</span></td><td class="num">3.4min</td></tr>
+  <tr><td>9</td><td>cheap-explore (opencode/nan)</td><td>OpenCode</td><td class="num"><span class="tag ok">13/13</span></td><td class="num nr">n/r</td><td class="bar-cell"><span class="nr">—</span></td><td class="num"><b>1.3min</b> ⚡</td></tr>
+  <tr><td>—</td><td>mimo (mimo-v2.6-pro)</td><td>Command Code</td><td class="num"><span class="tag fail">bloqueado</span></td><td class="num">105,905</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:73%"></div></div></td><td class="num">1.4min</td></tr>
+</table>
+<div class="foot">mimo: perfil read-only bloqueó edit_file — diseñó la solución correcta pero no pudo escribirla. n/r = el CLI no reporta tokens.</div>
+
+<h2>Prueba 2 — Debugging (3 bugs ocultos en cola de tareas, 7 tests)</h2>
+<table>
+  <tr><th>Configuración</th><th class="num">Tests</th><th class="num">TSC strict</th><th>FIXES.md</th><th class="num">Tiempo</th><th class="num">Tokens</th></tr>
+  <tr><td>commandcode</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">4.1min</td><td class="num">423,962</td></tr>
+  <tr><td>mcode</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">7.1min</td><td class="num">102,048</td></tr>
+  <tr><td>cheap-explore</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num"><b>3.2min</b> ⚡</td><td class="num nr">n/r</td></tr>
+  <tr><td>gshell-nan-max (gentle-shell)</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">7.1min</td><td class="num nr">n/r</td></tr>
+  <tr><td>agy38 (gemini-3.8-high)</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">9.6min</td><td class="num">215,744</td></tr>
+  <tr><td>mimo-workspace</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>NO ⚠️</td><td class="num">27.5min</td><td class="num">580,754</td></tr>
+</table>
+<div class="foot">mimo: fix correcto en disco, pero el proveedor cortó el run a los 27min ("high risk") antes de entregar FIXES.md — run más caro del benchmark.</div>
+
+<h2>Prueba 3 — Resistencia de comunicación (auditoría exhaustiva del repo)</h2>
+<table>
+  <tr><th>Configuración</th><th class="num">Informe</th><th class="num">Tiempo</th><th>Cierre del proceso</th></tr>
+  <tr><td>cheap-explore (opencode v2)</td><td class="num">36.9 KB</td><td class="num">2.8min</td><td><span class="tag ok">código 0, limpio</span></td></tr>
+  <tr><td>gentle-nan (streaming)</td><td class="num">38.1 KB</td><td class="num">3.5min</td><td><span class="tag ok">código 0, limpio</span></td></tr>
+</table>
+<div class="foot">Histórico completo (~70 runs): opencode con logs de 367KB y gentle-shell con 41 runs — cero cortes de comunicación. El miedo al corte a los 20 min no se confirma.</div>
+
+<h2>Ranking general (score = tests × eficiencia × fiabilidad)</h2>
+<table>
+  <tr><th>#</th><th>Configuración</th><th class="num">Tests totales</th><th class="bar-cell">Score</th><th>Veredicto</th></tr>
+  <tr class="gold"><td><span class="medal">🥇</span></td><td><b>mcode</b></td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:95%"></div></div></td><td>Mejor calidad/costo. Reportó casos que ni el verificador cubría.</td></tr>
+  <tr class="gold"><td><span class="medal">🥈</span></td><td><b>cheap-explore</b> (opencode)</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:90%"></div></div></td><td>El más rápido en todo. OpenCode v2: sin cortes de comunicación.</td></tr>
+  <tr class="gold"><td><span class="medal">🥉</span></td><td><b>claude-sonnet</b></td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:88%"></div></div></td><td>El más eficiente en tokens (3.8K). Ideal orquestador.</td></tr>
+  <tr><td>4</td><td>claude-opus 5.5 (nativo)</td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:85%"></div></div></td><td>Precisión quirúrgica. Reservar para arquitectura.</td></tr>
+  <tr><td>5</td><td>commandcode</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:75%"></div></div></td><td>Fiable pero glotón (571K tokens).</td></tr>
+  <tr><td>6</td><td>gentle-shell (gshell-nan-max)</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:72%"></div></div></td><td>Sólido; thinking max sin ventaja medible.</td></tr>
+  <tr><td>7</td><td>agy38 (gemini-3.8-high)</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:70%"></div></div></td><td>Impecable pero lento. Para dictámenes con tiempo.</td></tr>
+  <tr><td>8</td><td>claude-haiku</td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:60%"></div></div></td><td>2x más caro que Sonnet; ignora idioma. Sin caso de uso.</td></tr>
+  <tr><td>9</td><td>mimo-v2.6-pro</td><td class="num">14/14*</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:55%"></div></div></td><td>Capacidad real, bloqueado por guards. Requiere yolo/workspace.</td></tr>
+  <tr><td>—</td><td>opus-via-agy</td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:50%"></div></div></td><td>Mismo Opus 12x más caro vía agy. Evitar wrapper.</td></tr>
+</table>
+<div class="legend"><span><span class="dot b-tok"></span>Tokens (menor=mejor)</span><span><span class="dot b-time"></span>Tiempo</span><span><span class="dot b-score"></span>Score general</span></div>
+
+<h2>Configuración recomendada</h2>
+<div class="cards">
+  <div class="card"><h3>🎯 Orquestador</h3><p><b>Claude Sonnet</b> — 3.8K tokens/tarea, disciplina perfecta de instrucciones (idioma, alcance). Opus 5.5 nativo solo para arquitectura crítica.</p></div>
+  <div class="card"><h3>🔨 Obrero principal</h3><p><b>mcode</b> — mejor calidad por token (150K totales en 2 tareas vs 571K de cmdc). Alternativa rápida: <b>cheap-explore</b>.</p></div>
+  <div class="card"><h3>🔍 Exploración</h3><p><b>cheap-explore</b> (opencode/nan) — 1.3min por tarea, comunicación estable probada en runs largos.</p></div>
+  <div class="card"><h3>🧠 Análisis profundo</h3><p><b>mimo-v2.6-pro</b> (con workspace) o <b>agy38</b> — asumiendo costo alto. argon (1M ctx) como reemplazo de Claude si la cuota aprieta.</p></div>
+</div>
+
+<div class="verdict">
+<b>Hallazgos clave del ciclo completo:</b>
+<ul>
+  <li>Ningún harness delegó internamente en tareas acotadas — el multi-agente solo aparece cuando se le exige (sonda obligada: los 4 confirmaron con tool_use real en logs).</li>
+  <li>La varianza run-a-run de mcode (23K vs 48K tokens, mismo modelo) es mayor que la diferencia entre modelos: el harness importa más que el modelo de fondo.</li>
+  <li>mcode ignora overrides de modelo (router fijado a glm5.3-flash); deepseek-v4.1-flash en mcode no es posible hoy.</li>
+  <li>Opus vía agy cuesta 12x más tokens que vía Claude nativo: evitar wrappers para el mismo modelo.</li>
+  <li>El fix del arnés (S1: key cloud a localhost) fue aplicado y subido a main durante este ciclo (PR #563).</li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>
