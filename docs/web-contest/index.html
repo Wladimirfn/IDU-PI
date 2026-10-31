@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Contest — mismo modelo, 4 harnesses</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Source+Serif+4:ital,wght@0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap');
+  :root {
+    --bg:#06080f; --fg:#f3f6f9; --sub:#8394A3; --line:#313342; --gray1:#1c212c;
+    --magenta:#ff8dd7; --blue:#7fb4ca; --green:#b7cc85; --yellow:#dfbd76;
+    --c1:#d15a94; --c2:#3f89b8; --c3:#b3881a; --c4:#3f7a45;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Space Grotesk',sans-serif; background:var(--bg); color:var(--fg); line-height:1.55; padding:60px 24px; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  .eyebrow { font-family:'JetBrains Mono',monospace; font-size:.66rem; letter-spacing:.3em; text-transform:uppercase; color:var(--blue); margin-bottom:14px; }
+  h1 { font-family:'Source Serif 4',serif; font-size:clamp(2.2rem,5vw,3.6rem); letter-spacing:-.02em; line-height:1.05; margin-bottom:14px; }
+  h1 em { font-style:italic; color:var(--magenta); }
+  .sub { color:var(--sub); max-width:680px; margin-bottom:44px; }
+  h2 { font-family:'JetBrains Mono',monospace; font-size:.72rem; letter-spacing:.22em; text-transform:uppercase; color:var(--sub); margin:44px 0 18px; font-weight:400; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:16px; }
+  .web {
+    border:1px solid var(--line); border-radius:4px; padding:24px; text-decoration:none; color:var(--fg);
+    display:block; background:linear-gradient(160deg, rgba(28,33,44,.7), rgba(6,8,15,.3));
+    transition:transform .4s cubic-bezier(.2,.7,.2,1), border-color .3s, box-shadow .3s;
+  }
+  .web:hover { transform:translateY(-4px); border-color:var(--blue); box-shadow:0 14px 44px -18px rgba(127,180,202,.4); }
+  .web .n { font-family:'JetBrains Mono',monospace; font-size:.62rem; letter-spacing:.2em; text-transform:uppercase; color:var(--sub); margin-bottom:10px; }
+  .web .who { font-family:'Source Serif 4',serif; font-size:1.5rem; font-weight:700; margin-bottom:8px; }
+  .web .d { color:var(--sub); font-size:.84rem; margin-bottom:16px; }
+  .web .open { font-family:'JetBrains Mono',monospace; font-size:.7rem; color:var(--yellow); letter-spacing:.08em; }
+  .web.c1 { border-top:2px solid var(--c1); } .web.c2 { border-top:2px solid var(--c2); }
+  .web.c3 { border-top:2px solid var(--c3); } .web.c4 { border-top:2px solid var(--c4); }
+  .note { border:1px solid var(--line); border-left:3px solid var(--magenta); border-radius:4px; padding:20px 24px; margin-top:40px; color:var(--sub); font-size:.88rem; }
+  .note b { color:var(--fg); font-weight:500; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">web contest · deepseek v4.1 flash · 4 harnesses</p>
+  <h1>El mismo modelo.<br>Cuatro <em>interpretaciones.</em></h1>
+  <p class="sub">Mismo brief, mismo modelo de fondo (DeepSeek V4.1 Flash), cuatro harnesses del arnés. La variable no es el modelo: es cómo cada CLI orquesta sus capacidades. Ábrelas, compáralas, y nota que ninguna es un template.</p>
+
+  <h2>Las cuatro entregas</h2>
+  <div class="grid">
+    <a class="web c1" href="designer.html" target="_blank">
+      <p class="n">HARNESS/01 · COMMAND CODE</p>
+      <p class="who">designer</p>
+      <p class="d">81 KB — el perfil oficial de diseño del arnés. Disciplina de skills (kanagawa-html).</p>
+      <span class="open">ABRIR →</span>
+    </a>
+    <a class="web c2" href="gentle-shell.html" target="_blank">
+      <p class="n">HARNESS/02 · GENTLE-SHELL</p>
+      <p class="who">gentle-shell</p>
+      <p class="d">139 KB — la más ambiciosa: la entrega más grande del concurso.</p>
+      <span class="open">ABRIR →</span>
+    </a>
+    <a class="web c3" href="opencode.html" target="_blank">
+      <p class="n">HARNESS/03 · OPENCODE</p>
+      <p class="who">cheap-explore</p>
+      <p class="d">89 KB — hero con canvas y film dibujado cuadro por cuadro. El inicio cinematográfico.</p>
+      <span class="open">ABRIR →</span>
+    </a>
+    <a class="web c4" href="mimo.html" target="_blank">
+      <p class="n">HARNESS/04 · COMMAND CODE / MIMO</p>
+      <p class="who">mimo-workspace</p>
+      <p class="d">80 KB — cortada por el guard del proveedor, pero entrega completa.</p>
+      <span class="open">ABRIR →</span>
+    </a>
+  </div>
+
+  <div class="note">
+    <b>Brief idéntico para los cuatro:</b> presentación visual de idu-pi con estilo premium dark, mínimo 6 animaciones cinematográficas, mínimo 4 iconos SVG originales con metáfora del producto, timeline seek(t) con 5+ escenas, cero dependencias externas, 3 cards explicativas. Calidad sobre velocidad.
+  </div>
+</div>
+</body>
+</html>
