@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IDU-PI — El arnés que orquesta tus IAs</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700&family=Source+Serif+4:ital,wght@0,500;0,700;1,400;1,700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root {
+    --bg: #06080f; --fg: #f3f6f9; --subtext: #8394A3;
+    --gray1: #1c212c; --gray2: #232a36; --gray3: #2a3142; --line: #313342;
+    --red: #cb7c94; --green: #b7cc85; --yellow: #dfbd76; --purple: #a3b5d6;
+    --magenta: #ff8dd7; --orange: #deba87; --blue: #7fb4ca; --cyan: #7aa89f;
+    --accent: #e0c15a;
+    --c1: #d15a94; --c2: #3f89b8; --c3: #b3881a; --c4: #3f7a45;
+    --ease-sig: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scrollbar-width: none; }
+  html::-webkit-scrollbar { display: none; }
+  body { font-family: 'Space Grotesk', sans-serif; background: var(--bg); color: var(--fg); line-height: 1.55; overflow-x: hidden; }
+  #scrollSpace { height: 900vh; } /* el scroll real vive aqui; el mundo visible es fixed */
+
+  /* ===== MUNDO VISIBLE: fixed, viaja con el scroll virtual ===== */
+  #viewport {
+    position: fixed; inset: 0; z-index: 2;
+    overflow: hidden;
+  }
+
+  /* anti-borroso: el texto NUNCA vive en un plano con translateZ.
+     La perspectiva se aplica solo a los contenedores de decoracion;
+     las escenas se mueven con scale+opacity (rasterizado 1:1, nitido). */
+  .scene-3d {
+    backface-visibility: hidden;
+    transform: translateZ(0);           /* fuerza capa GPU sin Z real */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .ambient { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .ambient::before, .ambient::after { content: ""; position: absolute; border-radius: 999px; filter: blur(140px); opacity: .15; animation: drift 26s ease-in-out infinite alternate; }
+  .ambient::before { width: 46vw; height: 46vw; left: -12vw; top: -10vw; background: var(--magenta); }
+  .ambient::after { width: 40vw; height: 40vw; right: -10vw; bottom: -12vw; background: var(--blue); animation-delay: -13s; }
+  @keyframes drift { 0% {transform:translate(0,0) scale(1)} 50% {transform:translate(4vw,-3vh) scale(1.1)} 100% {transform:translate(-3vw,4vh) scale(.94)} }
+  .grid-bg { position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(131,148,163,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(131,148,163,.05) 1px, transparent 1px);
+    background-size: 72px 72px; mask-image: radial-gradient(ellipse 80% 55% at 50% 0%, black 20%, transparent 70%); }
+  #particles { position: absolute; inset: 0; opacity: .5; }
+  .film-progress { position: fixed; top: 0; left: 0; height: 2px; background: linear-gradient(90deg, var(--magenta), var(--blue)); width: 0%; z-index: 20; }
+
+  /* ===== ESCENAS: cada una es un "plano" que viaja en Z ===== */
+  .scene-3d {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 0 6vw;
+    opacity: 0; pointer-events: none;
+    transform-style: preserve-3d;
+    will-change: transform, opacity;
+  }
+  .scene-3d.live { pointer-events: auto; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: 'JetBrains Mono', monospace; font-size: .66rem; letter-spacing: .3em;
+    text-transform: uppercase; color: var(--cyan); margin-bottom: 26px;
+  }
+  .badge::before { content: ""; width: 40px; height: 1px; background: var(--cyan); }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .title-xl {
+    font-family: 'Source Serif 4', serif; font-weight: 700;
+    font-size: clamp(2.6rem, 7vw, 5.6rem); line-height: 1.04; letter-spacing: -.025em;
+  }
+  .title-xl em {
+    font-style: italic; font-weight: 400;
+    background: linear-gradient(110deg, var(--magenta), var(--purple) 55%, var(--blue));
+    background-size: 220% auto; -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; animation: shine 7s linear infinite;
+  }
+  @keyframes shine { to { background-position: 220% center; } }
+  .lead { margin-top: 24px; color: var(--subtext); font-size: clamp(.95rem, 1.4vw, 1.08rem); max-width: 640px; margin-left: auto; margin-right: auto; }
+
+  .btn { font-family: 'JetBrains Mono', monospace; font-size: .78rem; letter-spacing: .1em; padding: 13px 26px; border-radius: 4px; text-decoration: none; cursor: pointer; border: 1px solid var(--line); color: var(--fg); transition: all .3s var(--ease-sig); background: transparent; }
+  .btn.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  .btn.primary:hover { background: var(--magenta); border-color: var(--magenta); box-shadow: 0 8px 32px -8px rgba(255,141,215,.5); }
+  .btn.ghost:hover { border-color: var(--blue); color: var(--blue); }
+  .cta-row { margin-top: 38px; display: flex; gap: 14px; justify-content: center; }
+
+  /* ===== PLANO: pipeline ===== */
+  .pipeline { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; max-width: 1080px; width: 100%; background: linear-gradient(160deg, rgba(28,33,44,.75), rgba(6,8,15,.4)); backdrop-filter: blur(8px); }
+  .stage { padding: 30px 26px 34px; text-align: left; transition: background .4s; }
+  .stage + .stage { border-left: 1px solid var(--line); }
+  .stage:hover { background: rgba(35,42,54,.5); }
+  .stage .n { font-family: 'JetBrains Mono', monospace; font-size: .6rem; letter-spacing: .2em; color: var(--subtext); margin-bottom: 16px; }
+  .stage .what { font-family: 'Source Serif 4', serif; font-size: 1.25rem; font-weight: 700; margin-bottom: 8px; }
+  .stage .how { color: var(--subtext); font-size: .84rem; margin-bottom: 18px; }
+  .who { font-family: 'JetBrains Mono', monospace; font-size: .68rem; padding: 5px 10px; border-radius: 3px; display: inline-block; margin: 3px 4px 0 0; }
+  .who.w1 { background: rgba(209,90,148,.12); color: var(--c1); }
+  .who.w2 { background: rgba(63,137,184,.12); color: var(--c2); }
+  .who.w3 { background: rgba(179,136,26,.12); color: var(--c3); }
+
+  /* ===== PLANO: player pineado ===== */
+  .player {
+    border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: #000;
+    max-width: 960px; width: 100%;
+    background: linear-gradient(160deg, rgba(28,33,44,.75), rgba(6,8,15,.4)); backdrop-filter: blur(8px);
+  }
+  .screen { position: relative; aspect-ratio: 16/9; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 120%, rgba(255,141,215,.08), transparent 60%), var(--bg);
+    display: grid; grid-template-rows: 1fr auto; }
+  .scene { position: absolute; inset: 0; display: grid; grid-template-rows: 1fr auto; align-items: center; padding: 5% 6% 0; opacity: 0; pointer-events: none; transition: opacity .45s; }
+  .scene.on { opacity: 1; pointer-events: auto; }
+  .scene .main { display: grid; justify-items: center; align-content: center; gap: clamp(14px, 2.5vh, 26px); min-height: 0; }
+  .scene .big { font-family: 'Source Serif 4', serif; font-weight: 700; font-size: clamp(1.3rem, 3.6vh + .5vw, 3.2rem); letter-spacing: -.02em; line-height: 1.14; text-align: center; }
+  .scene .big em { font-style: italic; color: var(--magenta); }
+  .scene .cap-row { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 0 clamp(12px, 3vh, 24px); }
+  .scene .cap-row::before, .scene .cap-row::after { content: ""; width: 26px; height: 1px; background: rgba(131,148,163,.4); }
+  .scene .cap { font-family: 'JetBrains Mono', monospace; font-size: clamp(.58rem, 1.1vh, .7rem); letter-spacing: .26em; text-transform: uppercase; color: var(--subtext); white-space: nowrap; }
+  .zoom-el { will-change: transform, opacity; display: grid; justify-items: center; }
+  .scene-art { width: clamp(70px, 14vh, 120px); height: clamp(70px, 14vh, 120px); }
+  .scene-art svg { width: 100%; height: 100%; overflow: visible; }
+
+  .scene-chips { position: absolute; top: 18px; left: 20px; display: flex; gap: 6px; }
+  .chip { width: 26px; height: 3px; border-radius: 2px; background: rgba(131,148,163,.3); transition: background .3s; }
+  .chip.on { background: var(--magenta); }
+  .controls { display: flex; align-items: center; gap: 16px; padding: 14px 18px; border-top: 1px solid var(--line); background: rgba(28,33,44,.9); }
+  .play-btn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: var(--fg); color: var(--bg); font-size: .95rem; cursor: pointer; display: grid; place-items: center; transition: all .25s var(--ease-sig); flex: none; }
+  .play-btn:hover { background: var(--magenta); border-color: var(--magenta); transform: scale(1.06); }
+  .timeline { flex: 1; height: 4px; background: var(--gray1); border-radius: 2px; cursor: pointer; position: relative; }
+  .timeline > i { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--magenta), var(--blue)); width: 0%; }
+  .timecode { font-family: 'JetBrains Mono', monospace; font-size: .7rem; color: var(--subtext); font-variant-numeric: tabular-nums; }
+  .scrub-note { position: absolute; top: 18px; right: 20px; font-family: 'JetBrains Mono', monospace; font-size: .6rem; letter-spacing: .18em; text-transform: uppercase; color: rgba(131,148,163,.6); }
+
+  /* ===== PLANO: tabla veredicto ===== */
+  .verdict-table { max-width: 1000px; width: 100%; background: linear-gradient(160deg, rgba(28,33,44,.75), rgba(6,8,15,.4)); backdrop-filter: blur(8px); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+  th { font-family: 'JetBrains Mono', monospace; font-weight: 400; font-size: .6rem; letter-spacing: .18em; text-transform: uppercase; color: var(--subtext); text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  td { padding: 13px 14px; border-bottom: 1px solid rgba(49,51,66,.45); }
+  tbody tr:hover td { background: rgba(127,180,202,.05); }
+  tbody tr.top td { background: linear-gradient(90deg, rgba(255,141,215,.06), transparent 60%); border-left: 2px solid var(--magenta); }
+  .name { font-weight: 500; } .harness { display: block; font-family: 'JetBrains Mono', monospace; font-size: .66rem; color: var(--subtext); margin-top: 2px; }
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: .66rem; border: 1px solid; }
+  .tag.ok { background: rgba(183,204,133,.1); color: var(--green); border-color: rgba(183,204,133,.25); }
+  .bar { height: 6px; border-radius: 2px; background: var(--gray1); min-width: 110px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; border-radius: 2px; background: linear-gradient(90deg, var(--c2), var(--c4)); transition: width 1.5s cubic-bezier(.2,.7,.2,1); }
+
+  /* ===== PLANO: skills ===== */
+  .skill-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; max-width: 960px; width: 100%; }
+  .sk { border: 1px solid var(--line); border-radius: 4px; padding: 26px; text-align: left; background: linear-gradient(160deg, rgba(28,33,44,.75), rgba(6,8,15,.4)); backdrop-filter: blur(8px); position: relative; overflow: hidden; }
+  .sk::after { content: ""; position: absolute; inset: 0; background: radial-gradient(400px circle at var(--mx,50%) var(--my,50%), rgba(127,180,202,.08), transparent 45%); opacity: 0; transition: opacity .4s; pointer-events: none; }
+  .sk:hover::after { opacity: 1; }
+  .sk .code { font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .2em; color: var(--cyan); margin-bottom: 14px; }
+  .sk h3 { font-family: 'Source Serif 4', serif; font-size: 1.45rem; font-weight: 700; margin-bottom: 10px; }
+  .sk p { color: var(--subtext); font-size: .86rem; margin-bottom: 14px; }
+  .sk .demo { font-family: 'JetBrains Mono', monospace; font-size: .68rem; color: var(--yellow); letter-spacing: .06em; }
+  .sk.a h3 em { color: var(--magenta); font-style: italic; }
+  .sk.b h3 em { color: var(--blue); font-style: italic; }
+
+  .progress-label { position: fixed; bottom: 24px; left: 24px; z-index: 20; font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .24em; text-transform: uppercase; color: rgba(131,148,163,.6); }
+
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  @media (max-width: 900px) {
+    .pipeline { grid-template-columns: 1fr; }
+    .stage + .stage { border-left: none; border-top: 1px solid var(--line); }
+    .skill-cards { grid-template-columns: 1fr; }
+    .frame-pad { padding: 0 22px; }
+    .progress-label { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="scrollSpace"></div>
+
+<div id="viewport">
+  <div class="ambient"></div>
+  <div class="grid-bg"></div>
+  <canvas id="particles"></canvas>
+  <div class="film-progress" id="progress"></div>
+  <div class="progress-label" id="plabel">ESCENA/01 · EL ARNÉS</div>
+
+  <!-- ===== PLANO 1: HERO ===== -->
+  <div class="scene-3d" id="s-hero">
+    <p class="badge"><span class="dot"></span> idu-pi · cross-cli quality harness</p>
+    <h1 class="title-xl">Tu orquestador<br>habla con <em>nueve IAs.</em></h1>
+    <p class="lead">Un arnés de calidad que delega, audita y arbitra decisiones entre Claude, OpenCode, mcode, gentle-shell y más — bajo una sola regla: ningún worker vuelve a delegar.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="#/skip/pipeline">Ver cómo funciona</a>
+      <a class="btn ghost" href="#/skip/video">Ver el video</a>
+    </div>
+  </div>
+
+  <!-- ===== PLANO 2: PIPELINE ===== -->
+  <div class="scene-3d" id="s-pipeline">
+    <p class="badge"><span class="dot"></span> escena 01 · el flujo</p>
+    <h2 class="title-xl" style="font-size: clamp(2rem, 4.6vw, 3.8rem)">Delega. Verifica. <em style="font-style: italic; color: var(--magenta);">Arbitra.</em></h2>
+    <p class="lead">Tres pruebas, nueve configuraciones, cero intervención manual — todo fluyó por el arnés.</p>
+    <div class="pipeline">
+      <div class="stage">
+        <p class="n">FASE/01 — DELEGAR</p>
+        <p class="what">La misma tarea, nueve veces</p>
+        <p class="how">Tareas con tests ocultos en paralelo a cada harness: mismo working dir, misma instrucción exacta.</p>
+        <span class="who w1">mcode</span><span class="who w2">cmdc</span><span class="who w3">agy</span><span class="who w1">opencode</span><span class="who w2">gentle</span><span class="who w3">claude</span>
+      </div>
+      <div class="stage">
+        <p class="n">FASE/02 — VERIFICAR</p>
+        <p class="what">Tests que nadie vio</p>
+        <p class="how">Verificadores automáticos en sandbox aislado: 13 + 7 tests que los workers jamás conocieron.</p>
+        <span class="who w2">node --test</span><span class="who w1">tsc strict</span><span class="who w3">sandbox</span>
+      </div>
+      <div class="stage">
+        <p class="n">FASE/03 — ARBITRAR</p>
+        <p class="what">El veredicto con datos</p>
+        <p class="how">Score = tests × eficiencia × fiabilidad. La paleta y el ranking salen de scripts que validan.</p>
+        <span class="who w1">idu_arbitrate</span><span class="who w2">validate_palette</span><span class="who w3">ledger</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PLANO 3: VIDEO (player pineado con scrub) ===== -->
+  <div class="scene-3d" id="s-video">
+    <p class="badge"><span class="dot"></span> escena 02 · el film</p>
+    <h2 class="title-xl" style="font-size: clamp(2rem, 4.6vw, 3.8rem)">30 segundos. <em>Cinco escenas.</em></h2>
+    <p class="lead">El video avanza con tu scroll (scrub) — o dale play. 100% DOM con springs, sin MP4.</p>
+    <div class="player">
+      <div class="screen" id="screen">
+        <div class="scene" data-s="0"><div class="zoom-el"><div class="main"><div class="scene-art"><svg viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="34" stroke="#ff8dd7" stroke-width="1.2" stroke-dasharray="3 5"/><circle cx="20" cy="50" r="4" fill="#ff8dd7"/><circle cx="80" cy="50" r="4" fill="#7fb4ca"/><circle cx="50" cy="18" r="4" fill="#dfbd76"/><circle cx="50" cy="82" r="4" fill="#b7cc85"/></svg></div><p class="big"><em>nueve arneses.</em><br>un árbitro.</p></div><div class="cap-row"><span class="cap">escena 01 · el reto</span></div></div></div>
+        <div class="scene" data-s="1"><div class="zoom-el"><div class="main"><div class="scene-art"><svg viewBox="0 0 100 100" fill="none"><rect x="14" y="30" width="18" height="40" rx="3" stroke="#3f89b8" stroke-width="1.5"/><rect x="41" y="30" width="18" height="40" rx="3" stroke="#3f89b8" stroke-width="1.5"/><rect x="68" y="30" width="18" height="40" rx="3" stroke="#3f89b8" stroke-width="1.5"/><path d="M32 50 H41 M59 50 H68" stroke="#ff8dd7" stroke-width="1.5"><animate attributeName="stroke-dasharray" values="0 20;20 0" dur="2s" repeatCount="indefinite"/></path></svg></div><p class="big">la misma tarea,<br><em>trece tests ocultos.</em></p></div><div class="cap-row"><span class="cap">escena 02 · delegar</span></div></div></div>
+        <div class="scene" data-s="2"><div class="zoom-el"><div class="main"><div class="scene-art"><svg viewBox="0 0 100 100" fill="none"><path d="M30 55 L45 70 L72 35" stroke="#b7cc85" stroke-width="2.5" stroke-linecap="round"><animate attributeName="stroke-dasharray" values="0 100;100 0" dur="1.8s" repeatCount="indefinite"/></path><circle cx="72" cy="35" r="6" fill="none" stroke="#b7cc85" stroke-width="1"><animate attributeName="r" values="4;12;4" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;.2;1" dur="1.8s" repeatCount="indefinite"/></circle></svg></div><p class="big">nadie vio los tests.<br><em>20/20 el ganador.</em></p></div><div class="cap-row"><span class="cap">escena 03 · verificar</span></div></div></div>
+        <div class="scene" data-s="3"><div class="zoom-el"><div class="main"><div class="scene-art"><svg viewBox="0 0 100 100" fill="none"><rect x="15" y="20" width="70" height="60" rx="4" stroke="#dfbd76" stroke-width="1.2"/><rect x="22" y="30" width="40" height="6" rx="2" fill="#dfbd76"><animate attributeName="width" values="0;40;0" dur="3s" repeatCount="indefinite"/></rect><rect x="22" y="44" width="25" height="6" rx="2" fill="#7fb4ca"><animate attributeName="width" values="0;25;0" dur="3s" begin="0.5s" repeatCount="indefinite"/></rect><rect x="22" y="58" width="50" height="6" rx="2" fill="#ff8dd7"><animate attributeName="width" values="0;50;0" dur="3s" begin="1s" repeatCount="indefinite"/></rect></svg></div><p class="big">mcode: 20/20<br>con <em>la mitad</em> de tokens.</p></div><div class="cap-row"><span class="cap">escena 04 · el veredicto</span></div></div></div>
+        <div class="scene" data-s="4"><div class="zoom-el"><div class="main"><div class="scene-art"><svg viewBox="0 0 100 100" fill="none"><circle cx="50" cy="50" r="38" stroke="#7fb4ca" stroke-width="1"><animate attributeName="r" values="38;44;38" dur="4s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;.4;1" dur="4s" repeatCount="indefinite"/></circle><text x="50" y="58" text-anchor="middle" font-family="JetBrains Mono" font-size="14" fill="#f3f6f9">idu-pi</text></svg></div><p class="big">delega. audita.<br><em>arbitra.</em></p></div><div class="cap-row"><span class="cap">escena 05 · idu-pi</span></div></div></div>
+        <div class="scene-chips" id="chips"><span class="chip on"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span><span class="chip"></span></div>
+        <div class="scrub-note">SCRUB CON SCROLL · O PLAY</div>
+      </div>
+      <div class="controls">
+        <button class="play-btn" id="playBtn">▶</button>
+        <div class="timeline" id="timeline"><i id="tfill"></i></div>
+        <span class="timecode" id="timecode">0.0 / 30.0s</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== PLANO 4: VEREDICTO ===== -->
+  <div class="scene-3d" id="s-verdict">
+    <p class="badge"><span class="dot"></span> escena 03 · el veredicto</p>
+    <h2 class="title-xl" style="font-size: clamp(2rem, 4.6vw, 3.8rem)">Datos, <em>no gustos.</em></h2>
+    <p class="lead">Score = tests × eficiencia en tokens × fiabilidad.</p>
+    <div class="verdict-table">
+      <table>
+        <tr><th></th><th>Configuración</th><th>Tests</th><th>Score</th><th>Lo esencial</th></tr>
+        <tr class="top"><td>01</td><td><span class="name">mcode</span><span class="harness">MCODE</span></td><td><span class="tag ok">20/20</span></td><td><div class="bar"><i data-w="95"></i></div></td><td>Mejor calidad por token.</td></tr>
+        <tr><td>02</td><td><span class="name">cheap-explore</span><span class="harness">OPENCODE</span></td><td><span class="tag ok">20/20</span></td><td><div class="bar"><i data-w="90"></i></div></td><td>El más rápido en todo.</td></tr>
+        <tr><td>03</td><td><span class="name">claude-sonnet</span><span class="harness">CLAUDE CODE</span></td><td><span class="tag ok">13/13</span></td><td><div class="bar"><i data-w="88"></i></div></td><td>Ideal orquestador: 3.8K tokens.</td></tr>
+        <tr><td>04</td><td><span class="name">claude-opus 5.5</span><span class="harness">CLAUDE CODE</span></td><td><span class="tag ok">13/13</span></td><td><div class="bar"><i data-w="85"></i></div></td><td>Precisión quirúrgica.</td></tr>
+        <tr><td>05</td><td><span class="name">commandcode</span><span class="harness">CMD</span></td><td><span class="tag ok">20/20</span></td><td><div class="bar"><i data-w="75"></i></div></td><td>Fiable pero glotón.</td></tr>
+      </table>
+    </div>
+    <p class="lead" style="font-size:.8rem; margin-top: 18px;">Informe completo de las 10 configuraciones: docs/benchmark-harness-2026-10-30.html</p>
+  </div>
+
+  <!-- ===== PLANO 5: SKILLS / AGENTE DE DISEÑO ===== -->
+  <div class="scene-3d" id="s-skills">
+    <p class="badge"><span class="dot"></span> escena 04 · el stack creativo</p>
+    <h2 class="title-xl" style="font-size: clamp(2rem, 4.6vw, 3.8rem)">El agente de diseño<br><em>y sus dos rutas.</em></h2>
+    <p class="lead">El perfil <b style="color:var(--yellow)">designer</b> (DeepSeek V4.1 Flash, workspace) decide la ruta por contenido y ejecuta con skills propias.</p>
+    <div class="skill-cards">
+      <div class="sk a">
+        <p class="code">RUTA A · KANAGAWA-HTML</p>
+        <h3>Escena web con <em>código.</em></h3>
+        <p>UI, dashboards, benchmarks, reportes, presentaciones. Timeline seek(t) determinista, springs de forma cerrada, paleta de gráficos validada por script.</p>
+        <span class="demo">ESTA PÁGINA ES EL RESULTADO →</span>
+      </div>
+      <div class="sk b">
+        <p class="code">RUTA B · HIGGSFIELD-SCENE</p>
+        <h3>Prompt que <em>dirige al generador.</em></h3>
+        <p>Gente actuando, producto filmado, ambientes reales. MCSLA + hook de 2 segundos + capas de sonido, paste-ready para Seedance/Higgsfield.</p>
+        <span class="demo">DECISIÓN: TEXTO/DATOS→A · GENTE/MUNDO→B</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   MOTOR PROPIO: scroll virtual con lerp + cámara Z + escenas
+   (patrón unseen/epic, sin three.js ni GSAP — todo nuestro)
+   ============================================================ */
+
+// ---- 1. LERP SCROLL: el scroll fisico alimenta un target; current lo persigue
+const scrollState = { target: 0, current: 0 };
+addEventListener('scroll', () => {
+  const max = document.documentElement.scrollHeight - innerHeight;
+  scrollState.target = Math.min(1, Math.max(0, scrollY / Math.max(1, max)));
+}, { passive: true });
+
+// ---- 2. ESCENAS: cada plano ocupa un rango del viaje 0..1
+// (hero, pipeline, video, veredicto, skills) + duracion de transicion
+const PLANES = [
+  { el: null, id: 's-hero',     start: 0.00, span: 0.16, label: 'ESCENA/01 · EL ARNÉS' },
+  { el: null, id: 's-pipeline', start: 0.18, span: 0.18, label: 'ESCENA/02 · EL FLUJO' },
+  { el: null, id: 's-video',    start: 0.40, span: 0.30, label: 'ESCENA/03 · EL FILM' },
+  { el: null, id: 's-verdict',  start: 0.74, span: 0.13, label: 'ESCENA/04 · EL VEREDICTO' },
+  { el: null, id: 's-skills',   start: 0.89, span: 0.11, label: 'ESCENA/05 · EL STACK' },
+];
+PLANES.forEach(p => { p.el = document.getElementById(p.id); });
+
+// ---- 3. el video: seek por scrub dentro de su plano
+const video = { t: 0, playing: false, last: null, manual: false };
+const VDUR = 30;
+const VSCENES = [[0,6],[6,12],[12,18],[18,24],[24,30]];
+const screen = document.getElementById('screen');
+const vScenes = [...screen.querySelectorAll('.scene')];
+const vZooms = [...screen.querySelectorAll('.zoom-el')];
+const chips = [...document.getElementById('chips').children];
+const vBtn = document.getElementById('playBtn');
+const vFill = document.getElementById('tfill');
+const vTc = document.getElementById('timecode');
+const vTimeline = document.getElementById('timeline');
+
+function stepR(tau, w, z) {
+  if (tau <= 0) return 0;
+  if (z >= 1) { const x = w*tau; return 1 - Math.exp(-x)*(1+x); }
+  const wd = w * Math.sqrt(1 - z*z);
+  return 1 - Math.exp(-z*w*tau) * (Math.cos(wd*tau) + (z*w/wd)*Math.sin(wd*tau));
+}
+
+function videoSeek(nt) {
+  video.t = Math.max(0, Math.min(VDUR, nt));
+  vScenes.forEach((sc, i) => {
+    const [a, b] = VSCENES[i];
+    const on = video.t >= a && video.t < b;
+    sc.classList.toggle('on', on);
+    chips[i].classList.toggle('on', on);
+    const local = video.t - a;
+    const prog = Math.min(1, Math.max(0, (video.t - a) / (b - a)));
+    const enter = stepR(local, 16, 0.8);
+    const scale = 1.14 - 0.14 * prog;
+    const y = (1 - enter) * 34;
+    const el = vZooms[i];
+    el.style.transform = 'translateY(' + y.toFixed(1) + 'px) scale(' + (0.92 + .08*enter).toFixed(3) + ')';
+    const fadeOut = prog > .85 ? Math.max(0, (1 - prog) / .15) : 1;
+    el.style.opacity = (enter * fadeOut).toFixed(3);
+  });
+  vFill.style.width = (video.t / VDUR * 100) + '%';
+  vTc.textContent = video.t.toFixed(1) + ' / ' + VDUR + '.0s';
+}
+
+function vLoop(now) {
+  if (video.playing && video.last !== null) {
+    videoSeek(video.t + (now - video.last) / 1000);
+    if (video.t >= VDUR) { videoSeek(VDUR); vSetPlaying(false); return; }
+  }
+  video.last = now;
+  if (video.playing) requestAnimationFrame(vLoop);
+  else video.last = null;
+}
+function vSetPlaying(p) {
+  video.playing = p;
+  vBtn.textContent = p ? '❚❚' : '▶';
+  if (p) { video.manual = true; video.last = null; requestAnimationFrame(vLoop); }
+}
+vBtn.addEventListener('click', () => {
+  if (!video.playing && video.t >= VDUR) videoSeek(0);
+  vSetPlaying(!video.playing);
+});
+vTimeline.addEventListener('click', (e) => {
+  const r = vTimeline.getBoundingClientRect();
+  videoSeek((e.clientX - r.left) / r.width * VDUR);
+});
+
+// ---- 4. partículas (con semilla: deterministic-friendly)
+(function() {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let W, H, parts = [];
+  const COLORS = ['255,141,215', '127,180,202', '163,181,214', '224,193,90'];
+  function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+  addEventListener('resize', resize); resize();
+  let seed = 1337;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const N = Math.min(70, Math.floor(innerWidth / 20));
+  for (let i = 0; i < N; i++) parts.push({
+    x: rnd()*W, y: rnd()*H, r: rnd()*1.7+.4,
+    vx: (rnd()-.5)*.22, vy: (rnd()-.5)*.22-.05,
+    c: COLORS[Math.floor(rnd()*COLORS.length)],
+    a: rnd()*.4+.15, tw: rnd()*Math.PI*2, tws: rnd()*.02+.005
+  });
+  (function tick() {
+    ctx.clearRect(0,0,W,H);
+    for (const p of parts) {
+      p.x += p.vx; p.y += p.vy; p.tw += p.tws;
+      if (p.x<-10) p.x=W+10; if (p.x>W+10) p.x=-10;
+      if (p.y<-10) p.y=H+10; if (p.y>H+10) p.y=-10;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba('+p.c+','+(p.a*(.6+.4*Math.sin(p.tw)))+')';
+      ctx.fill();
+    }
+    requestAnimationFrame(tick);
+  })();
+})();
+
+// ---- 5. el motor: cada frame computa el estado del mundo desde current
+const progress = document.getElementById('progress');
+const plabel = document.getElementById('plabel');
+const barsAnimated = new Set();
+
+function frame() {
+  // lerp: current persigue target — el anti-tiron (mas suave y con snap al final)
+  const dist = scrollState.target - scrollState.current;
+  // si el delta es minimo, snap para no vibrar; si no, lerp
+  if (Math.abs(dist) < 0.0004) scrollState.current = scrollState.target;
+  else scrollState.current += dist * 0.085;
+  const p = scrollState.current;
+
+  // progreso global
+  progress.style.width = (p * 100).toFixed(1) + '%';
+
+  // cada plano: transicion CONTINUA sin saltos — una sola formula de viaje
+  PLANES.forEach((pl) => {
+    const local = (p - pl.start) / pl.span;           // 0..1 dentro del plano (puede ser <0 o >1)
+
+    // fuera de rango amplio: invisible (con margen generoso para que no poppee)
+    if (local < -0.6 || local > 1.8) {
+      pl.el.style.opacity = '0';
+      pl.el.style.visibility = 'hidden';
+      pl.el.classList.remove('live');
+      return;
+    }
+    pl.el.style.visibility = 'visible';
+    pl.el.classList.add('live');
+
+    // CURVA UNICA de viaje con SCALE (no translateZ): nitidez 1:1 siempre.
+    // entrada (local<0):  scale 0.82 -> 0.94 (lejos, pequeno)
+    // asiento (0..1):     scale 0.94 -> 1.02  (avanza lento, legible)
+    // salida  (local>1):  scale 1.02 -> 1.35  (pasa la camara y se va)
+    let scale;
+    if (local < 0) {
+      const k = Math.max(0, 1 + local / 0.6);
+      scale = 0.82 + 0.12 * (1 - Math.pow(1 - k, 3));
+    } else if (local > 1) {
+      const k = Math.min(1, (local - 1) / 0.6);
+      scale = 1.02 + 0.33 * (k * k);
+    } else {
+      scale = 0.94 + 0.08 * local;
+    }
+    // parallax vertical continuo
+    const y = -90 * local;
+    // opacidad: fade in/out continuo
+    const oIn = Math.min(1, Math.max(0, (local + 0.45) / 0.35));
+    const oOut = Math.min(1, Math.max(0, (1.55 - local) / 0.35));
+    const o = Math.min(oIn, oOut);
+
+    pl.el.style.transform = 'translate3d(0,' + y.toFixed(1) + 'px,0) scale(' + scale.toFixed(4) + ')';
+    pl.el.style.opacity = o.toFixed(3);
+  });
+
+  // video scrub: dentro del plano del film, el scroll controla el video
+  const film = PLANES[2];
+  const filmLocal = (p - film.start) / film.span;
+  if (filmLocal >= 0 && filmLocal <= 1 && !video.manual) {
+    videoSeek(filmLocal * VDUR);
+  }
+
+  // barras del veredicto al entrar su plano
+  const vt = PLANES[3];
+  if (p >= vt.start && !barsAnimated.has('v')) {
+    barsAnimated.add('v');
+    vt.el.querySelectorAll('.bar > i').forEach((bar, i) => {
+      const w = bar.dataset.w;
+      setTimeout(() => bar.style.width = w + '%', i * 120);
+    });
+  }
+
+  // label de escena
+  const active = PLANES.findIndex(pl => p >= pl.start && p < pl.start + pl.span);
+  if (active !== -1) plabel.textContent = PLANES[active].label;
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// links de salto: fijan el target directamente (navegacion por escena)
+document.querySelectorAll('a[href^="#/skip/"]').forEach(a => {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const id = a.getAttribute('href').replace('#/skip/', '');
+    const pl = PLANES.find(x => x.id === 's-' + id);
+    if (pl) {
+      const max = document.documentElement.scrollHeight - innerHeight;
+      scrollTo({ top: (pl.start + 0.02) * max, behavior: 'smooth' });
+    }
+  });
+});
+</script>
+</body>
+</html>

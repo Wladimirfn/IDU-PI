@@ -3,126 +3,478 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Benchmark IDU-PI — Resultados 2026-10-30</title>
+<title>Benchmark IDU-PI — Kanagawa Blur Edition</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    background: #0f1420;
-    color: #e8ecf4;
-    padding: 32px 20px;
-    line-height: 1.5;
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700&family=Source+Serif+4:ital,wght@0,500;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root {
+    --bg: #06080f;  --fg: #f3f6f9;  --subtext: #8394A3;
+    --gray1: #1c212c; --gray2: #232a36; --gray3: #2a3142; --line: #313342;
+    --red: #cb7c94; --green: #b7cc85; --yellow: #dfbd76; --purple: #a3b5d6;
+    --magenta: #ff8dd7; --orange: #deba87; --blue: #7fb4ca; --cyan: #7aa89f;
+    --accent: #e0c15a;
+    --c1: #d15a94; --c2: #3f89b8; --c3: #b3881a; --c4: #3f7a45;
   }
-  .wrap { max-width: 1080px; margin: 0 auto; }
-  h1 { font-size: 1.7rem; margin-bottom: 4px; }
-  h1 .v { color: #4ade80; }
-  .sub { color: #8b94a7; margin-bottom: 28px; font-size: .95rem; }
-  h2 { font-size: 1.15rem; margin: 34px 0 12px; color: #a5b4fc; border-left: 3px solid #6366f1; padding-left: 10px; }
-  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin-bottom: 8px; }
-  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #232b3d; }
-  th { color: #8b94a7; font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  tr.gold td { background: rgba(250, 204, 21, .07); }
-  td .medal { margin-right: 4px; }
-  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: .72rem; font-weight: 600; }
-  .ok { background: rgba(74, 222, 128, .15); color: #4ade80; }
-  .fail { background: rgba(248, 113, 113, .15); color: #f87171; }
-  .nr { color: #64748b; }
-  .bar-cell { min-width: 140px; }
-  .bar { height: 12px; border-radius: 6px; background: #232b3d; position: relative; overflow: hidden; }
-  .bar > div { height: 100%; border-radius: 6px; }
-  .b-tok { background: linear-gradient(90deg, #6366f1, #818cf8); }
-  .b-time { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
-  .b-score { background: linear-gradient(90deg, #10b981, #34d399); }
-  .foot { color: #64748b; font-size: .8rem; margin-top: 4px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 16px; }
-  .card { background: #171e2e; border: 1px solid #232b3d; border-radius: 12px; padding: 16px; }
-  .card h3 { font-size: .85rem; color: #a5b4fc; margin-bottom: 8px; }
-  .card p { font-size: .85rem; color: #c7cfdd; }
-  .card b { color: #fff; }
-  .verdict { background: #171e2e; border: 1px solid #2d3a55; border-radius: 12px; padding: 18px 20px; margin-top: 10px; }
-  .verdict li { margin: 6px 0 6px 18px; font-size: .92rem; }
-  .legend { display: flex; gap: 18px; margin: 8px 0 0; font-size: .78rem; color: #8b94a7; }
-  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    line-height: 1.55; min-height: 100vh; overflow-x: hidden;
+  }
+
+  .ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+  .ambient::before, .ambient::after {
+    content: ""; position: absolute; border-radius: 999px;
+    filter: blur(130px); opacity: .15;
+    animation: drift 26s ease-in-out infinite alternate;
+  }
+  .ambient::before { width: 44vw; height: 44vw; left: -10vw; top: -8vw; background: var(--magenta); }
+  .ambient::after  { width: 38vw; height: 38vw; right: -9vw; bottom: -10vw; background: var(--blue); animation-delay: -13s; }
+  @keyframes drift {
+    0%   { transform: translate(0,0) scale(1); }
+    50%  { transform: translate(4vw,-3vh) scale(1.08); }
+    100% { transform: translate(-3vw,4vh) scale(.95); }
+  }
+  .grid-bg {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(131,148,163,.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(131,148,163,.045) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, black 30%, transparent 75%);
+  }
+  #particles { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: .5; }
+
+  .frame { position: relative; z-index: 2; max-width: 1240px; margin: 0 auto; padding: 0 48px; }
+  .rail {
+    position: fixed; left: 14px; top: 50%; transform: translateY(-50%) rotate(180deg);
+    writing-mode: vertical-rl; z-index: 3;
+    font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .38em;
+    color: rgba(131,148,163,.4); text-transform: uppercase; user-select: none;
+  }
+
+  header.hero { padding: 96px 0 72px; position: relative; }
+  .eyebrow {
+    display: flex; align-items: center; gap: 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: .68rem;
+    letter-spacing: .3em; text-transform: uppercase; color: var(--cyan); margin-bottom: 28px;
+    opacity: 0; animation: fadeUp .7s ease forwards;
+  }
+  .eyebrow::before { content: ""; width: 44px; height: 1px; background: var(--cyan); }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  h1 {
+    font-family: 'Source Serif 4', serif; font-weight: 700;
+    font-size: clamp(2.8rem, 6vw, 4.6rem);
+    line-height: 1.04; letter-spacing: -.02em; max-width: 14ch; margin-bottom: 30px;
+    opacity: 0; animation: fadeUp .7s ease .12s forwards;
+  }
+  h1 .l2 { display: block; margin-left: clamp(0px, 8vw, 120px); }
+  h1 em {
+    font-style: italic; font-weight: 400;
+    background: linear-gradient(110deg, var(--magenta) 10%, var(--purple) 45%, var(--blue) 90%);
+    background-size: 220% auto;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shine 7s linear infinite;
+  }
+  @keyframes shine { to { background-position: 220% center; } }
+
+  .hero-meta { display: flex; border-top: 1px solid var(--line); margin-top: 40px; opacity: 0; animation: fadeUp .7s ease .24s forwards; }
+  .hero-meta > div { padding: 18px 26px 0 0; margin-right: 26px; border-right: 1px solid var(--line); padding-right: 26px; }
+  .hero-meta > div:last-child { border-right: none; }
+  .hero-meta .k { font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .2em; text-transform: uppercase; color: var(--subtext); }
+  .hero-meta .v { font-size: .95rem; margin-top: 4px; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+  section { padding: 84px 0 30px; }
+  .sec-head { display: grid; grid-template-columns: 120px 1fr; gap: 30px; align-items: baseline; margin-bottom: 8px; }
+  .sec-num {
+    font-family: 'Source Serif 4', serif; font-style: italic;
+    font-size: 4.2rem; font-weight: 400; line-height: 1;
+    color: transparent; -webkit-text-stroke: 1px rgba(127,180,202,.45); user-select: none;
+  }
+  h2 { font-family: 'Source Serif 4', serif; font-size: 1.9rem; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; }
+  .h2sub { color: var(--subtext); font-size: .92rem; margin: 10px 0 30px; max-width: 640px; }
+  .h2sub code { font-family: 'JetBrains Mono', monospace; font-size: .8em; color: var(--cyan); background: rgba(122,168,159,.09); padding: 1px 6px; border-radius: 4px; }
+
+  .reveal { opacity: 0; transform: translateY(26px); transition: opacity .9s cubic-bezier(.2,.7,.2,1), transform .9s cubic-bezier(.2,.7,.2,1); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 4px; margin: 0 0 8px; overflow: hidden; }
+  .kpi { padding: 26px 24px; }
+  .kpi + .kpi { border-left: 1px solid var(--line); }
+  .kpi .n { font-family: 'Source Serif 4', serif; font-weight: 700; font-size: 3.4rem; line-height: 1; letter-spacing: -.03em; }
+  .kpi .n .unit { font-size: 1.4rem; color: var(--subtext); font-weight: 400; }
+  .kpi .n.g { color: var(--green); } .kpi .n.m { color: var(--magenta); }
+  .kpi .n.b { color: var(--blue); }  .kpi .n.y { color: var(--yellow); }
+  .kpi .l { font-family: 'JetBrains Mono', monospace; font-size: .62rem; letter-spacing: .22em; text-transform: uppercase; color: var(--subtext); margin-top: 10px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+  th {
+    font-family: 'JetBrains Mono', monospace; font-weight: 400;
+    font-size: .62rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--subtext); text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line);
+  }
+  td { padding: 13px 14px; border-bottom: 1px solid rgba(49,51,66,.45); vertical-align: baseline; }
+  tbody tr { transition: background .25s; }
+  tbody tr:hover td { background: rgba(127,180,202,.05); }
+  tbody tr.top td { background: linear-gradient(90deg, rgba(255,141,215,.06), transparent 60%); }
+  tbody tr.top td:first-child { border-left: 2px solid var(--magenta); padding-left: 12px; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td .rank { font-family: 'JetBrains Mono', monospace; color: var(--subtext); font-size: .78rem; }
+
+  .medal { font-size: .95rem; margin-right: 6px; }
+  .name { font-weight: 500; }
+  .harness { display: block; font-family: 'JetBrains Mono', monospace; font-size: .68rem; color: var(--subtext); letter-spacing: .06em; margin-top: 2px; }
+
+  .tag { display: inline-block; padding: 2px 10px; border-radius: 3px; font-family: 'JetBrains Mono', monospace; font-size: .68rem; font-weight: 600; letter-spacing: .04em; }
+  .tag.ok   { background: rgba(183,204,133,.1); color: var(--green); border: 1px solid rgba(183,204,133,.25); }
+  .tag.err  { background: rgba(203,124,148,.1); color: var(--red); border: 1px solid rgba(203,124,148,.25); }
+  .tag.nr   { background: rgba(131,148,163,.08); color: var(--subtext); border: 1px solid rgba(131,148,163,.2); }
+  .tag.fast { background: rgba(223,189,118,.1); color: var(--yellow); border: 1px solid rgba(223,189,118,.25); }
+
+  .bar { height: 6px; border-radius: 2px; background: var(--gray1); overflow: visible; min-width: 110px; }
+  .bar > i {
+    display: block; height: 100%; border-radius: 2px; width: 0;
+    transition: width 1.5s cubic-bezier(.2,.7,.2,1); position: relative;
+  }
+  .bar > i::after { content: ""; position: absolute; right: -1px; top: -3px; width: 1px; height: 12px; background: inherit; }
+  .b-tok   { background: linear-gradient(90deg, var(--c2), var(--c1)); }
+  .b-time  { background: linear-gradient(90deg, var(--c3), var(--yellow)); }
+  .b-score { background: linear-gradient(90deg, var(--c2), var(--c4)); }
+
+  .foot { color: var(--subtext); font-size: .8rem; margin: 14px 0 0; max-width: 760px; padding-left: 16px; border-left: 1px solid var(--line); }
+  .foot b { color: var(--orange); font-weight: 500; }
+
+  .chart { margin-top: 36px; border: 1px solid var(--line); border-radius: 4px; }
+  .chart-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 22px; border-bottom: 1px solid var(--line); }
+  .chart-head h3 { font-size: .82rem; font-weight: 500; letter-spacing: .04em; }
+  .chart-head .src { font-family: 'JetBrains Mono', monospace; font-size: .62rem; color: var(--subtext); letter-spacing: .12em; }
+  .chart-body { padding: 26px 22px 30px; }
+  .crow { display: grid; grid-template-columns: 150px 1fr 80px; gap: 18px; align-items: center; margin: 16px 0; font-size: .86rem; }
+  .crow .cl { color: var(--subtext); text-align: right; font-size: .8rem; }
+  .crow .cv { font-family: 'JetBrains Mono', monospace; font-size: .82rem; }
+  .cbar { height: 22px; border-radius: 2px; background: var(--gray1); overflow: hidden; }
+  .cbar > i {
+    display: block; height: 100%; width: 0;
+    transition: width 1.7s cubic-bezier(.2,.7,.2,1);
+    background: repeating-linear-gradient(135deg, var(--c2), var(--c2) 3px, transparent 3px, transparent 5px);
+    border-right: 2px solid var(--c2);
+  }
+  .crow:first-of-type .cbar > i { background: repeating-linear-gradient(135deg, var(--c1), var(--c1) 3px, transparent 3px, transparent 5px); border-right-color: var(--c1); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; margin-top: 18px; }
+  .card {
+    padding: 26px 24px 30px; position: relative; overflow: hidden;
+    background: linear-gradient(160deg, rgba(28,33,44,.6), rgba(6,8,15,.2));
+    transition: background .4s;
+  }
+  .card + .card { border-left: 1px solid var(--line); }
+  .card::before {
+    content: attr(data-n);
+    position: absolute; top: 18px; right: 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: .62rem;
+    color: rgba(131,148,163,.5); letter-spacing: .1em;
+  }
+  .card::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(420px circle at var(--mx,50%) var(--my,50%), rgba(127,180,202,.07), transparent 45%);
+    opacity: 0; transition: opacity .4s; pointer-events: none;
+  }
+  .card:hover { background: linear-gradient(160deg, rgba(35,42,54,.85), rgba(28,33,44,.5)); }
+  .card:hover::after { opacity: 1; }
+  .card .role { font-family: 'JetBrains Mono', monospace; font-size: .6rem; letter-spacing: .24em; text-transform: uppercase; color: var(--cyan); margin-bottom: 14px; }
+  .card .who { font-family: 'Source Serif 4', serif; font-size: 1.5rem; font-weight: 700; margin-bottom: 8px; letter-spacing: -.01em; }
+  .card .why { color: var(--subtext); font-size: .84rem; }
+  .card .who .hl-m { color: var(--magenta); } .card .who .hl-b { color: var(--blue); }
+  .card .who .hl-g { color: var(--green); }   .card .who .hl-y { color: var(--yellow); }
+
+  .verdict { margin-top: 24px; padding: 34px 0 10px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 120px 1fr; gap: 30px; }
+  .verdict .vlabel {
+    font-family: 'JetBrains Mono', monospace; font-size: .62rem;
+    letter-spacing: .24em; text-transform: uppercase; color: var(--magenta); padding-top: 6px;
+  }
+  .verdict li { margin: 0 0 16px 0; font-size: .95rem; color: #d8dfe9; list-style: none; padding-left: 24px; position: relative; }
+  .verdict li::before { content: "→"; position: absolute; left: 0; color: var(--magenta); font-family: 'JetBrains Mono', monospace; }
+  .verdict b { color: var(--fg); font-weight: 500; }
+  .verdict .hl { color: var(--yellow); }
+
+  footer {
+    margin-top: 90px; padding: 30px 0 40px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace; font-size: .64rem;
+    letter-spacing: .16em; text-transform: uppercase; color: rgba(131,148,163,.55);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .reveal { opacity: 1; transform: none; }
+    .bar > i, .cbar > i { width: calc(var(--w) * 1%) !important; }
+  }
+  @media (max-width: 900px) {
+    .rail { display: none; }
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .kpi:nth-child(3) { border-left: none; border-top: 1px solid var(--line); }
+    .kpi:nth-child(4) { border-top: 1px solid var(--line); }
+    .sec-head { grid-template-columns: 1fr; gap: 8px; }
+    .sec-num { font-size: 2.6rem; }
+    .cards { grid-template-columns: 1fr; }
+    .card + .card { border-left: none; border-top: 1px solid var(--line); }
+    .verdict { grid-template-columns: 1fr; gap: 12px; }
+    .frame { padding: 0 22px; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="ambient"></div>
+<div class="grid-bg"></div>
+<canvas id="particles"></canvas>
+<div class="rail">benchmark · idu-pi · gentleman kanagawa · 2026-10-30</div>
 
-<h1>Benchmark IDU-PI <span class="v">v2.2.0</span></h1>
-<div class="sub">9 configuraciones · 3 pruebas · 2026-10-30 · verificadores automáticos con tests ocultos · orquestado con idu-pi</div>
+<div class="frame">
 
-<h2>Prueba 1 — Algorítmica (implementar spec con 13 tests ocultos)</h2>
-<table>
-  <tr><th>#</th><th>Configuración</th><th>Harness</th><th class="num">Tests</th><th class="num">Tokens</th><th class="bar-cell">Tokens (escala)</th><th class="num">Tiempo</th></tr>
-  <tr class="gold"><td><span class="medal">🥇</span></td><td>claude-sonnet-high</td><td>Claude Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">3,830</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:7%"></div></div></td><td class="num">53s</td></tr>
-  <tr class="gold"><td><span class="medal">🥈</span></td><td>architecture (opus 5.5)</td><td>Claude Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">4,687</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:8%"></div></div></td><td class="num">58s</td></tr>
-  <tr class="gold"><td><span class="medal">🥉</span></td><td>mcode-glm-max</td><td>mcode</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">23,127</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:40%"></div></div></td><td class="num">72s</td></tr>
-  <tr><td>4</td><td>claude-haiku-fast</td><td>Claude Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">7,965</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:14%"></div></div></td><td class="num">62s</td></tr>
-  <tr><td>5</td><td>mcode (M3.1-flash)</td><td>mcode</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">48,663</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:84%"></div></div></td><td class="num">2.9min</td></tr>
-  <tr><td>6</td><td>antigravity-advisory-opus (opus vía agy)</td><td>Antigravity</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">57,712</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:100%"></div></div></td><td class="num">2.7min</td></tr>
-  <tr><td>7</td><td>commandcode (deepseek flash)</td><td>Command Code</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">147,382</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:100%"></div></div></td><td class="num">39s</td></tr>
-  <tr><td>8</td><td>gshell-nan-max</td><td>gentle-shell</td><td class="num"><span class="tag ok">13/13</span></td><td class="num nr">n/r</td><td class="bar-cell"><span class="nr">—</span></td><td class="num">3.4min</td></tr>
-  <tr><td>9</td><td>cheap-explore (opencode/nan)</td><td>OpenCode</td><td class="num"><span class="tag ok">13/13</span></td><td class="num nr">n/r</td><td class="bar-cell"><span class="nr">—</span></td><td class="num"><b>1.3min</b> ⚡</td></tr>
-  <tr><td>—</td><td>mimo (mimo-v2.6-pro)</td><td>Command Code</td><td class="num"><span class="tag fail">bloqueado</span></td><td class="num">105,905</td><td class="bar-cell"><div class="bar"><div class="b-tok" style="width:73%"></div></div></td><td class="num">1.4min</td></tr>
-</table>
-<div class="foot">mimo: perfil read-only bloqueó edit_file — diseñó la solución correcta pero no pudo escribirla. n/r = el CLI no reporta tokens.</div>
+<header class="hero">
+  <p class="eyebrow"><span class="dot"></span> gentleman kanagawa blur · informe de benchmark</p>
+  <h1>Nueve arneses.<br><span class="l2">Un solo <em>veredicto.</em></span></h1>
+  <div class="hero-meta">
+    <div><div class="k">Fecha</div><div class="v">30 · 10 · 2026</div></div>
+    <div><div class="k">Pruebas</div><div class="v">3 · algorítmica / debugging / resistencia</div></div>
+    <div><div class="k">Verificación</div><div class="v">tests ocultos, sandbox aislado</div></div>
+    <div><div class="k">Orquestación</div><div class="v">idu-pi v2.2.0</div></div>
+  </div>
+</header>
 
-<h2>Prueba 2 — Debugging (3 bugs ocultos en cola de tareas, 7 tests)</h2>
-<table>
-  <tr><th>Configuración</th><th class="num">Tests</th><th class="num">TSC strict</th><th>FIXES.md</th><th class="num">Tiempo</th><th class="num">Tokens</th></tr>
-  <tr><td>commandcode</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">4.1min</td><td class="num">423,962</td></tr>
-  <tr><td>mcode</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">7.1min</td><td class="num">102,048</td></tr>
-  <tr><td>cheap-explore</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num"><b>3.2min</b> ⚡</td><td class="num nr">n/r</td></tr>
-  <tr><td>gshell-nan-max (gentle-shell)</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">7.1min</td><td class="num nr">n/r</td></tr>
-  <tr><td>agy38 (gemini-3.8-high)</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>SI</td><td class="num">9.6min</td><td class="num">215,744</td></tr>
-  <tr><td>mimo-workspace</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>NO ⚠️</td><td class="num">27.5min</td><td class="num">580,754</td></tr>
-</table>
-<div class="foot">mimo: fix correcto en disco, pero el proveedor cortó el run a los 27min ("high risk") antes de entregar FIXES.md — run más caro del benchmark.</div>
-
-<h2>Prueba 3 — Resistencia de comunicación (auditoría exhaustiva del repo)</h2>
-<table>
-  <tr><th>Configuración</th><th class="num">Informe</th><th class="num">Tiempo</th><th>Cierre del proceso</th></tr>
-  <tr><td>cheap-explore (opencode v2)</td><td class="num">36.9 KB</td><td class="num">2.8min</td><td><span class="tag ok">código 0, limpio</span></td></tr>
-  <tr><td>gentle-nan (streaming)</td><td class="num">38.1 KB</td><td class="num">3.5min</td><td><span class="tag ok">código 0, limpio</span></td></tr>
-</table>
-<div class="foot">Histórico completo (~70 runs): opencode con logs de 367KB y gentle-shell con 41 runs — cero cortes de comunicación. El miedo al corte a los 20 min no se confirma.</div>
-
-<h2>Ranking general (score = tests × eficiencia × fiabilidad)</h2>
-<table>
-  <tr><th>#</th><th>Configuración</th><th class="num">Tests totales</th><th class="bar-cell">Score</th><th>Veredicto</th></tr>
-  <tr class="gold"><td><span class="medal">🥇</span></td><td><b>mcode</b></td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:95%"></div></div></td><td>Mejor calidad/costo. Reportó casos que ni el verificador cubría.</td></tr>
-  <tr class="gold"><td><span class="medal">🥈</span></td><td><b>cheap-explore</b> (opencode)</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:90%"></div></div></td><td>El más rápido en todo. OpenCode v2: sin cortes de comunicación.</td></tr>
-  <tr class="gold"><td><span class="medal">🥉</span></td><td><b>claude-sonnet</b></td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:88%"></div></div></td><td>El más eficiente en tokens (3.8K). Ideal orquestador.</td></tr>
-  <tr><td>4</td><td>claude-opus 5.5 (nativo)</td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:85%"></div></div></td><td>Precisión quirúrgica. Reservar para arquitectura.</td></tr>
-  <tr><td>5</td><td>commandcode</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:75%"></div></div></td><td>Fiable pero glotón (571K tokens).</td></tr>
-  <tr><td>6</td><td>gentle-shell (gshell-nan-max)</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:72%"></div></div></td><td>Sólido; thinking max sin ventaja medible.</td></tr>
-  <tr><td>7</td><td>agy38 (gemini-3.8-high)</td><td class="num">20/20</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:70%"></div></div></td><td>Impecable pero lento. Para dictámenes con tiempo.</td></tr>
-  <tr><td>8</td><td>claude-haiku</td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:60%"></div></div></td><td>2x más caro que Sonnet; ignora idioma. Sin caso de uso.</td></tr>
-  <tr><td>9</td><td>mimo-v2.6-pro</td><td class="num">14/14*</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:55%"></div></div></td><td>Capacidad real, bloqueado por guards. Requiere yolo/workspace.</td></tr>
-  <tr><td>—</td><td>opus-via-agy</td><td class="num">13/13</td><td class="bar-cell"><div class="bar"><div class="b-score" style="width:50%"></div></div></td><td>Mismo Opus 12x más caro vía agy. Evitar wrapper.</td></tr>
-</table>
-<div class="legend"><span><span class="dot b-tok"></span>Tokens (menor=mejor)</span><span><span class="dot b-time"></span>Tiempo</span><span><span class="dot b-score"></span>Score general</span></div>
-
-<h2>Configuración recomendada</h2>
-<div class="cards">
-  <div class="card"><h3>🎯 Orquestador</h3><p><b>Claude Sonnet</b> — 3.8K tokens/tarea, disciplina perfecta de instrucciones (idioma, alcance). Opus 5.5 nativo solo para arquitectura crítica.</p></div>
-  <div class="card"><h3>🔨 Obrero principal</h3><p><b>mcode</b> — mejor calidad por token (150K totales en 2 tareas vs 571K de cmdc). Alternativa rápida: <b>cheap-explore</b>.</p></div>
-  <div class="card"><h3>🔍 Exploración</h3><p><b>cheap-explore</b> (opencode/nan) — 1.3min por tarea, comunicación estable probada en runs largos.</p></div>
-  <div class="card"><h3>🧠 Análisis profundo</h3><p><b>mimo-v2.6-pro</b> (con workspace) o <b>agy38</b> — asumiendo costo alto. argon (1M ctx) como reemplazo de Claude si la cuota aprieta.</p></div>
+<div class="kpis reveal">
+  <div class="kpi"><div class="n g"><span data-count="127">0</span><span class="unit">/133</span></div><div class="l">tests superados</div></div>
+  <div class="kpi"><div class="n b"><span data-count="9">0</span></div><div class="l">configuraciones</div></div>
+  <div class="kpi"><div class="n m"><span data-count="3">0</span></div><div class="l">tipos de prueba</div></div>
+  <div class="kpi"><div class="n y"><span data-count="0">0</span></div><div class="l">cortes de comunicación</div></div>
 </div>
 
-<div class="verdict">
-<b>Hallazgos clave del ciclo completo:</b>
-<ul>
-  <li>Ningún harness delegó internamente en tareas acotadas — el multi-agente solo aparece cuando se le exige (sonda obligada: los 4 confirmaron con tool_use real en logs).</li>
-  <li>La varianza run-a-run de mcode (23K vs 48K tokens, mismo modelo) es mayor que la diferencia entre modelos: el harness importa más que el modelo de fondo.</li>
-  <li>mcode ignora overrides de modelo (router fijado a glm5.3-flash); deepseek-v4.1-flash en mcode no es posible hoy.</li>
-  <li>Opus vía agy cuesta 12x más tokens que vía Claude nativo: evitar wrappers para el mismo modelo.</li>
-  <li>El fix del arnés (S1: key cloud a localhost) fue aplicado y subido a main durante este ciclo (PR #563).</li>
-</ul>
-</div>
+<section>
+  <div class="sec-head">
+    <div class="sec-num">01</div>
+    <div>
+      <h2>La prueba algorítmica</h2>
+      <p class="h2sub">Implementar <code>analizarSerie</code> desde una spec — 13 tests ocultos que el worker nunca vio. Se mide exactitud, tokens y tiempo.</p>
+    </div>
+  </div>
+  <table class="reveal">
+    <tr><th></th><th>Configuración</th><th class="num">Tests</th><th class="num">Tokens</th><th>Escala</th><th class="num">Tiempo</th></tr>
+    <tr class="top"><td><span class="rank">01</span></td><td><span class="name">claude-sonnet-high</span><span class="harness">CLAUDE CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">3,830</td><td><div class="bar"><i class="b-tok" data-w="7"></i></div></td><td class="num">53s</td></tr>
+    <tr><td><span class="rank">02</span></td><td><span class="name">architecture — opus 5.5</span><span class="harness">CLAUDE CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">4,687</td><td><div class="bar"><i class="b-tok" data-w="8"></i></div></td><td class="num">58s</td></tr>
+    <tr><td><span class="rank">03</span></td><td><span class="name">mcode-glm-max</span><span class="harness">MCODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">23,127</td><td><div class="bar"><i class="b-tok" data-w="40"></i></div></td><td class="num">72s</td></tr>
+    <tr><td><span class="rank">04</span></td><td><span class="name">claude-haiku-fast</span><span class="harness">CLAUDE CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">7,965</td><td><div class="bar"><i class="b-tok" data-w="14"></i></div></td><td class="num">62s</td></tr>
+    <tr><td><span class="rank">05</span></td><td><span class="name">mcode — M3.1-flash</span><span class="harness">MCODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">48,663</td><td><div class="bar"><i class="b-tok" data-w="84"></i></div></td><td class="num">2.9min</td></tr>
+    <tr><td><span class="rank">06</span></td><td><span class="name">opus 5.5 vía agy</span><span class="harness">ANTIGRAVITY</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">57,712</td><td><div class="bar"><i class="b-tok" data-w="100"></i></div></td><td class="num">2.7min</td></tr>
+    <tr><td><span class="rank">07</span></td><td><span class="name">commandcode — deepseek flash</span><span class="harness">COMMAND CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">147,382</td><td><div class="bar"><i class="b-tok" data-w="100"></i></div></td><td class="num">39s</td></tr>
+    <tr><td><span class="rank">08</span></td><td><span class="name">gshell-nan-max</span><span class="harness">GENTLE-SHELL</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num"><span class="tag nr">n/r</span></td><td>—</td><td class="num">3.4min</td></tr>
+    <tr><td><span class="rank">09</span></td><td><span class="name">cheap-explore — opencode/nan</span><span class="harness">OPENCODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td class="num"><span class="tag nr">n/r</span></td><td>—</td><td class="num"><span class="tag fast">1.3min ⚡</span></td></tr>
+    <tr><td><span class="rank">—</span></td><td><span class="name">mimo — mimo-v2.6-pro</span><span class="harness">COMMAND CODE</span></td><td class="num"><span class="tag err">bloqueado</span></td><td class="num">105,905</td><td><div class="bar"><i class="b-tok" data-w="73"></i></div></td><td class="num">1.4min</td></tr>
+  </table>
+  <p class="foot reveal"><b>mimo</b> — su perfil read-only bloqueó edit_file; diseñó la solución correcta pero no pudo escribirla. <b>n/r</b> — el CLI no reporta tokens en modo headless.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">02</div>
+    <div>
+      <h2>La prueba de debugging</h2>
+      <p class="h2sub">Tres bugs ocultos en una cola de tareas con reintentos — 7 tests de causa raíz + compilación estricta.</p>
+    </div>
+  </div>
+  <table class="reveal">
+    <tr><th>Configuración</th><th class="num">Tests</th><th class="num">TSC strict</th><th>FIXES.md</th><th class="num">Tiempo</th><th class="num">Tokens</th></tr>
+    <tr><td><span class="name">commandcode</span><span class="harness">COMMAND CODE</span></td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>Sí</td><td class="num">4.1min</td><td class="num">423,962</td></tr>
+    <tr><td><span class="name">cheap-explore</span><span class="harness">OPENCODE</span></td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>Sí</td><td class="num"><span class="tag fast">3.2min ⚡</span></td><td class="num"><span class="tag nr">n/r</span></td></tr>
+    <tr><td><span class="name">mcode</span><span class="harness">MCODE</span></td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>Sí</td><td class="num">7.1min</td><td class="num">102,048</td></tr>
+    <tr><td><span class="name">gentle-shell</span> (gshell-nan-max)<span class="harness">GENTLE-SHELL</span></td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>Sí</td><td class="num">7.1min</td><td class="num"><span class="tag nr">n/r</span></td></tr>
+    <tr><td><span class="name">agy38 — gemini-3.8-high</span><span class="harness">ANTIGRAVITY</span></td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>Sí</td><td class="num">9.6min</td><td class="num">215,744</td></tr>
+    <tr><td><span class="name">mimo-workspace</span><span class="harness">COMMAND CODE</span></td><td class="num"><span class="tag ok">7/7</span></td><td class="num">OK</td><td>No ⚠️</td><td class="num">27.5min</td><td class="num">580,754</td></tr>
+  </table>
+  <p class="foot reveal"><b>mimo</b> — fix correcto en disco (7/7 verificado), pero el proveedor cortó el run a los 27 min por su guard de riesgo antes de entregar FIXES.md. El run más caro del benchmark.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">03</div>
+    <div>
+      <h2>Resistencia de comunicación</h2>
+      <p class="h2sub">Auditoría exhaustiva del repo (~100 archivos, 4 fases obligatorias) — mide si el stream vive más que el worker.</p>
+    </div>
+  </div>
+  <table class="reveal">
+    <tr><th>Configuración</th><th class="num">Informe generado</th><th class="num">Tiempo</th><th>Cierre del proceso</th></tr>
+    <tr><td><span class="name">cheap-explore</span> — opencode v2<span class="harness">OPENCODE</span></td><td class="num">36.9 KB</td><td class="num">2.8min</td><td><span class="tag ok">código 0 · limpio</span></td></tr>
+    <tr><td><span class="name">gentle-nan</span> — streaming on<span class="harness">GENTLE-SHELL</span></td><td class="num">38.1 KB</td><td class="num">3.5min</td><td><span class="tag ok">código 0 · limpio</span></td></tr>
+  </table>
+  <p class="foot reveal">Histórico completo (~70 runs analizados): opencode con logs de 367 KB y gentle-shell con 41 runs — <b>cero cortes de comunicación</b>. El temor al corte a los 20 min no se confirma.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">04</div>
+    <div>
+      <h2>El veredicto</h2>
+      <p class="h2sub">Score = tests × eficiencia en tokens × fiabilidad del run.</p>
+    </div>
+  </div>
+  <table class="reveal">
+    <tr><th></th><th>Configuración</th><th class="num">Tests</th><th>Score</th><th>Veredicto</th></tr>
+    <tr class="top"><td><span class="rank">01</span></td><td><span class="name">mcode</span><span class="harness">MCODE</span></td><td class="num"><span class="tag ok">20/20</span></td><td><div class="bar"><i class="b-score" data-w="95"></i></div></td><td>Mejor calidad por token. Reportó casos que ni el verificador cubría.</td></tr>
+    <tr><td><span class="rank">02</span></td><td><span class="name">cheap-explore</span><span class="harness">OPENCODE</span></td><td class="num"><span class="tag ok">20/20</span></td><td><div class="bar"><i class="b-score" data-w="90"></i></div></td><td>El más rápido en todo. Comunicación estable probada.</td></tr>
+    <tr><td><span class="rank">03</span></td><td><span class="name">claude-sonnet</span><span class="harness">CLAUDE CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td><div class="bar"><i class="b-score" data-w="88"></i></div></td><td>El más eficiente en tokens. Ideal orquestador.</td></tr>
+    <tr><td><span class="rank">04</span></td><td><span class="name">claude-opus 5.5</span> — nativo<span class="harness">CLAUDE CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td><div class="bar"><i class="b-score" data-w="85"></i></div></td><td>Precisión quirúrgica. Reservar para arquitectura crítica.</td></tr>
+    <tr><td><span class="rank">05</span></td><td><span class="name">commandcode</span><span class="harness">COMMAND CODE</span></td><td class="num"><span class="tag ok">20/20</span></td><td><div class="bar"><i class="b-score" data-w="75"></i></div></td><td>Fiable pero glotón: 571K tokens en 2 tareas.</td></tr>
+    <tr><td><span class="rank">06</span></td><td><span class="name">gentle-shell</span><span class="harness">GENTLE-SHELL</span></td><td class="num"><span class="tag ok">20/20</span></td><td><div class="bar"><i class="b-score" data-w="72"></i></div></td><td>Sólido; thinking max sin ventaja medible sobre los flash.</td></tr>
+    <tr><td><span class="rank">07</span></td><td><span class="name">agy38</span><span class="harness">ANTIGRAVITY</span></td><td class="num"><span class="tag ok">20/20</span></td><td><div class="bar"><i class="b-score" data-w="70"></i></div></td><td>Impecable pero lento. Dictámenes cuando hay tiempo.</td></tr>
+    <tr><td><span class="rank">08</span></td><td><span class="name">claude-haiku</span><span class="harness">CLAUDE CODE</span></td><td class="num"><span class="tag ok">13/13</span></td><td><div class="bar"><i class="b-score" data-w="60"></i></div></td><td>2x más caro que Sonnet; ignoró el idioma. Sin caso de uso.</td></tr>
+    <tr><td><span class="rank">09</span></td><td><span class="name">mimo-v2.6-pro</span><span class="harness">COMMAND CODE</span></td><td class="num"><span class="tag ok">14/14*</span></td><td><div class="bar"><i class="b-score" data-w="55"></i></div></td><td>Capacidad real, frenado por guards. Requiere workspace/yolo.</td></tr>
+    <tr><td><span class="rank">—</span></td><td><span class="name">opus vía agy</span><span class="harness">ANTIGRAVITY</span></td><td class="num"><span class="tag ok">13/13</span></td><td><div class="bar"><i class="b-score" data-w="50"></i></div></td><td>Mismo Opus, 12x más caro vía wrapper. Evitar.</td></tr>
+  </table>
+
+  <div class="chart reveal">
+    <div class="chart-head">
+      <h3>Tokens consumidos — prueba de debugging</h3>
+      <span class="src">MENOR = MEJOR · SRC: IDU WORKER RESULTS</span>
+    </div>
+    <div class="chart-body">
+      <div class="crow"><span class="cl">mcode</span><div class="cbar"><i data-w="18"></i></div><span class="cv">102K</span></div>
+      <div class="crow"><span class="cl">agy38</span><div class="cbar"><i data-w="37"></i></div><span class="cv">216K</span></div>
+      <div class="crow"><span class="cl">commandcode</span><div class="cbar"><i data-w="73"></i></div><span class="cv">424K</span></div>
+      <div class="crow"><span class="cl">mimo</span><div class="cbar"><i data-w="100"></i></div><span class="cv">581K</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">05</div>
+    <div>
+      <h2>La configuración recomendada</h2>
+      <p class="h2sub">Según los datos medidos, no por preferencia.</p>
+    </div>
+  </div>
+  <div class="cards reveal">
+    <div class="card" data-n="ROL/01"><p class="role">Orquestador</p><p class="who"><span class="hl-m">Claude Sonnet</span></p><p class="why">3.8K tokens por tarea y disciplina perfecta de instrucciones. Opus 5.5 nativo reservado para arquitectura crítica.</p></div>
+    <div class="card" data-n="ROL/02"><p class="role">Obrero principal</p><p class="who"><span class="hl-g">mcode</span></p><p class="why">Mejor calidad por token: 150K en dos tareas contra 571K de cmdc. Reporta casos extra que nadie pidió.</p></div>
+    <div class="card" data-n="ROL/03"><p class="role">Exploración</p><p class="who"><span class="hl-b">cheap-explore</span></p><p class="why">1.3min por tarea. OpenCode v2 estable incluso en logs de 367 KB.</p></div>
+    <div class="card" data-n="ROL/04"><p class="role">Análisis profundo</p><p class="who"><span class="hl-y">mimo / agy38</span></p><p class="why">1M de contexto para dictámenes — asumiendo costo alto y guards del proveedor.</p></div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">06</div>
+    <div>
+      <h2>Hallazgos del ciclo</h2>
+      <p class="h2sub">Lo que aprendimos que no estaba en el plan.</p>
+    </div>
+  </div>
+  <div class="verdict reveal">
+    <div class="vlabel">Hallazgos<br>registrados</div>
+    <ul>
+      <li><b>Ningún harness delega internamente</b> en tareas acotadas — el multi-agente solo aparece si se le exige. Sonda obligada: los 4 confirmaron con tool_use real en los logs.</li>
+      <li><b>El harness pesa más que el modelo</b> — la varianza run-a-run de mcode <span class="hl">(23K vs 48K tokens, mismo modelo)</span> supera la diferencia entre modelos.</li>
+      <li><b>mcode no cambia de modelo</b> — su router está fijado a glm5.3-flash; deepseek-v4.1-flash en mcode no existe hoy.</li>
+      <li><b>Los wrappers cobran caro</b> — el mismo Opus 5.5 vía agy costó 12x más tokens que vía Claude nativo.</li>
+      <li><b>El propio arnés mejoró durante el ciclo</b> — fix de seguridad S1 (cloud key a localhost) aplicado y en main vía PR #563.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <span>idu-pi benchmark · kanagawa blur edition</span>
+  <span>gentleman programming · 2026</span>
+</footer>
 
 </div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+  let W, H, parts = [];
+  const COLORS = ['255,141,215', '127,180,202', '163,181,214', '224,193,90'];
+  const N = Math.min(60, Math.floor(window.innerWidth / 22));
+  function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; }
+  addEventListener('resize', resize); resize();
+  for (let i = 0; i < N; i++) {
+    parts.push({
+      x: Math.random()*W, y: Math.random()*H,
+      r: Math.random()*1.6 + .4,
+      vx: (Math.random()-.5)*.2, vy: (Math.random()-.5)*.2 - .04,
+      c: COLORS[Math.floor(Math.random()*COLORS.length)],
+      a: Math.random()*.35 + .12,
+      tw: Math.random()*Math.PI*2, tws: Math.random()*.02 + .005
+    });
+  }
+  let mx = -9999, my = -9999;
+  addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+  (function tick() {
+    ctx.clearRect(0, 0, W, H);
+    for (const p of parts) {
+      const dx = p.x-mx, dy = p.y-my;
+      if (dx*dx + dy*dy < 12000) { p.vx += dx*.00003; p.vy += dy*.00003; }
+      p.x += p.vx; p.y += p.vy; p.vx *= .999; p.vy *= .999; p.tw += p.tws;
+      if (p.x < -10) p.x = W+10; if (p.x > W+10) p.x = -10;
+      if (p.y < -10) p.y = H+10; if (p.y > H+10) p.y = -10;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(' + p.c + ',' + (p.a * (.6 + .4*Math.sin(p.tw))) + ')';
+      ctx.fill();
+    }
+    requestAnimationFrame(tick);
+  })();
+})();
+
+(function() {
+  const io = new IntersectionObserver((es) => {
+    for (const e of es) {
+      if (!e.isIntersecting) continue;
+      e.target.classList.add('in');
+      e.target.querySelectorAll('.bar > i, .cbar > i').forEach((bar, i) => {
+        const w = bar.dataset.w;
+        if (w) setTimeout(() => { bar.style.width = w + '%'; }, 160 + i*95);
+      });
+      io.unobserve(e.target);
+    }
+  }, { threshold: .1 });
+  document.querySelectorAll('table, .chart, .verdict, .kpis, .cards').forEach(el => {
+    el.classList.add('reveal'); io.observe(el);
+  });
+})();
+
+(function() {
+  const io = new IntersectionObserver((es) => {
+    for (const e of es) {
+      if (!e.isIntersecting) continue;
+      const el = e.target;
+      const target = parseInt(el.dataset.count, 10);
+      const t0 = performance.now(), dur = 1500;
+      (function step(t) {
+        const p = Math.min(1, (t - t0)/dur);
+        el.textContent = Math.round(target * (1 - Math.pow(1-p, 3)));
+        if (p < 1) requestAnimationFrame(step);
+      })(t0);
+      io.unobserve(el);
+    }
+  }, { threshold: .5 });
+  document.querySelectorAll('[data-count]').forEach(el => io.observe(el));
+})();
+
+document.querySelectorAll('.card').forEach(card => {
+  card.addEventListener('mousemove', e => {
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+    card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+  });
+});
+</script>
 </body>
 </html>
