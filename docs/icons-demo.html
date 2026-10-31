@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>idu-pi · iconografía con alma</title>
+<meta name="description" content="Ocho iconos SVG dibujados a mano para idu-pi: delegar, verificar, arbitrar, sesión, ledger, watchdog, quota y one-orchestrator.">
+<style>
+  :root {
+    --bg: #16161d;
+    --card: #1a1a23;
+    --ink: #dcd7ba;
+    --ink-soft: #c8c093;
+    --muted: #85848c;
+    --line: rgba(220, 215, 186, .14);
+    --line-strong: rgba(220, 215, 186, .26);
+    --crystal: #7e9cd8;
+    --carp: #e6c384;
+    --red: #c34043;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { background: var(--bg); }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    background:
+      radial-gradient(900px 540px at 82% -8%, rgba(126, 156, 216, .08), transparent 70%),
+      radial-gradient(720px 520px at 4% 6%, rgba(230, 195, 132, .035), transparent 70%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: rgba(126, 156, 216, .32); color: #fff; }
+
+  .page { max-width: 1320px; margin: 0 auto; padding: 0 48px 24px; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(250px, .5fr);
+    gap: 56px;
+    align-items: end;
+    padding: 76px 0 50px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin: 0;
+    font: 10px/1 var(--mono);
+    letter-spacing: .24em;
+    text-transform: uppercase;
+    color: var(--crystal);
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 0 3px rgba(195, 64, 67, .16);
+  }
+
+  h1 {
+    margin: 24px 0 20px;
+    font-family: var(--serif);
+    font-size: clamp(44px, 6vw, 78px);
+    font-weight: 400;
+    line-height: .98;
+    letter-spacing: -.035em;
+    color: var(--ink);
+  }
+
+  h1 em { font-style: italic; color: var(--carp); }
+
+  .lede {
+    max-width: 60ch;
+    margin: 0;
+    font-size: 17px;
+    line-height: 1.65;
+    color: var(--ink-soft);
+  }
+
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  .spec { margin: 0; border-left: 1px solid var(--line); padding-left: 26px; }
+
+  .spec div {
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--line);
+    font: 11px/1.5 var(--mono);
+    letter-spacing: .04em;
+  }
+
+  .spec div:last-child { border-bottom: 0; }
+
+  .spec dt {
+    margin: 0;
+    font-size: 9.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .spec dd { margin: 0; color: var(--ink-soft); text-align: right; }
+
+  /* ---------- soul strip ---------- */
+
+  .soul {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .soul > div { padding: 26px 30px 32px; border-left: 1px solid var(--line); }
+  .soul > div:first-child { border-left: 0; padding-left: 0; }
+
+  .soul .k {
+    font: 9.5px/1 var(--mono);
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .soul .v { margin: 11px 0 0; font-size: 13.5px; line-height: 1.65; color: var(--ink-soft); }
+  .soul .v b { color: var(--carp); font-weight: 600; }
+
+  /* ---------- section heads ---------- */
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 54px 0 20px;
+  }
+
+  .section-head h2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0;
+    font: 500 10.5px/1 var(--mono);
+    letter-spacing: .26em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .section-head h2::before {
+    content: "";
+    width: 18px;
+    height: 1px;
+    background: var(--line-strong);
+  }
+
+  .section-head p {
+    margin: 0;
+    font: 11px/1.5 var(--mono);
+    letter-spacing: .03em;
+    color: var(--muted);
+  }
+
+  /* ---------- shelf ---------- */
+
+  .shelf {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border-block: 1px solid var(--line);
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 12px 24px;
+    background: var(--card);
+    text-align: center;
+    transition: background .35s ease;
+  }
+
+  .card:hover { background: #1f2029; }
+
+  .idx {
+    align-self: flex-start;
+    font: 9.5px/1 var(--mono);
+    letter-spacing: .14em;
+    color: #63636d;
+    transition: color .35s ease;
+  }
+
+  .card:hover .idx { color: var(--carp); }
+
+  .glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 106px;
+    color: var(--ink);
+    transition: color .35s ease;
+  }
+
+  .card:hover .glyph { color: var(--crystal); }
+
+  .glyph svg { display: block; width: 72px; height: 72px; }
+
+  .card h3 {
+    margin: 13px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .012em;
+    line-height: 1.3;
+    color: var(--ink);
+  }
+
+  .card p {
+    margin: 5px 0 0;
+    max-width: 16ch;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  /* ---------- family test ---------- */
+
+  .family-note {
+    max-width: 68ch;
+    margin: 0 0 20px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+
+  .strips { display: grid; gap: 12px; }
+
+  .strip {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    min-height: 68px;
+    padding: 16px 24px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+  }
+
+  .strip .tag {
+    flex: 0 0 152px;
+    font: 9.5px/1.6 var(--mono);
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .family-row {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    color: var(--ink);
+  }
+
+  .family-row svg {
+    display: block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+  }
+
+  .strip--light {
+    background: #efe9d9;
+    border-color: #efe9d9;
+    color: #1f1f28;
+  }
+
+  .strip--light .tag { color: #77746a; }
+  .strip--light .family-row { color: #1f1f28; }
+
+  /* ---------- footer ---------- */
+
+  .foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 9px;
+    padding: 26px 0 54px;
+    border-top: 1px solid var(--line);
+    margin-top: 44px;
+  }
+
+  .chip {
+    font: 9.5px/1 var(--mono);
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 8px 12px;
+  }
+
+  .foot .note {
+    margin-left: auto;
+    font: 11px/1.5 var(--mono);
+    letter-spacing: .02em;
+    color: var(--muted);
+  }
+
+  .noscript {
+    padding: 14px 18px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* ---------- icon motion ---------- */
+
+  .icon { overflow: visible; }
+
+  .icon .halo,
+  .icon .core,
+  .icon .lead-halo,
+  .icon .checkpoint {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .icon .orbit,
+  .icon .iris {
+    transform-box: view-box;
+    transform-origin: 12px 12px;
+  }
+
+  @keyframes emit {
+    0%        { transform: translateX(0); opacity: 0; }
+    12%       { opacity: 1; }
+    70%       { transform: translateX(2.7px); opacity: 1; }
+    82%, 100% { transform: translateX(2.7px); opacity: 0; }
+  }
+
+  @keyframes halo {
+    0%, 100% { transform: scale(.9); opacity: .15; }
+    50%      { transform: scale(1.12); opacity: .5; }
+  }
+
+  @keyframes orbit {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(.94); }
+    50%      { transform: scale(1.04); }
+  }
+
+  @keyframes resumepulse {
+    0%, 100% { opacity: .75; }
+    50%      { opacity: 1; }
+  }
+
+  @keyframes cpulse {
+    0%, 100% { opacity: .7; }
+    50%      { opacity: 1; }
+  }
+
+  @keyframes write {
+    0%, 56%, 100% { opacity: var(--o); }
+    10%           { opacity: 1; }
+  }
+
+  @keyframes scan {
+    0%, 100% { transform: translateX(-.5px); }
+    50%      { transform: translateX(.5px); }
+  }
+
+  @keyframes rise {
+    0%, 100% { transform: translateY(0); }
+    40%, 72% { transform: translateY(-4.2px); }
+  }
+
+  @keyframes flow {
+    to { stroke-dashoffset: -5.2; }
+  }
+
+  /* delegar */
+  .icon--delegar .emit {
+    animation: emit 2.4s cubic-bezier(.4, 0, .2, 1) infinite;
+  }
+
+  /* verificar */
+  .icon--verificar .halo {
+    animation: halo 3.8s ease-in-out infinite;
+  }
+
+  /* arbitrar */
+  .icon--arbitrar .orbit {
+    animation: orbit 40s linear infinite;
+  }
+  .icon--arbitrar .lead-halo {
+    animation: halo 2.8s ease-in-out infinite;
+  }
+  .icon--arbitrar .core {
+    animation: breathe 5.5s ease-in-out infinite;
+  }
+
+  /* sesion */
+  .icon--sesion .checkpoint {
+    animation: cpulse 2.6s ease-in-out infinite;
+  }
+  .icon--sesion .resume {
+    animation: resumepulse 3.4s ease-in-out infinite;
+  }
+
+  /* ledger */
+  .icon--ledger .b1 { --o: 1;    opacity: 1;   animation: write 6.4s ease-in-out infinite; }
+  .icon--ledger .b2 { --o: .68;  opacity: .68; animation: write 6.4s .22s ease-in-out infinite; }
+  .icon--ledger .b3 { --o: .45;  opacity: .45; animation: write 6.4s .44s ease-in-out infinite; }
+
+  /* watchdog */
+  .icon--watchdog .iris {
+    animation: orbit 24s linear infinite;
+  }
+  .icon--watchdog .gaze {
+    animation: scan 7s ease-in-out infinite;
+  }
+
+  /* quota */
+  .icon--quota .level {
+    animation: rise 5.6s cubic-bezier(.4, 0, .2, 1) infinite;
+  }
+
+  /* one-orchestrator */
+  .icon--one-orch .spoke {
+    stroke-dasharray: 2 3.2;
+    animation: flow 1.8s linear infinite;
+  }
+  .icon--one-orch .spoke:nth-child(2) { animation-delay: -.3s; }
+  .icon--one-orch .spoke:nth-child(3) { animation-delay: -.6s; }
+  .icon--one-orch .spoke:nth-child(4) { animation-delay: -.9s; }
+  .icon--one-orch .spoke:nth-child(5) { animation-delay: -1.2s; }
+  .icon--one-orch .spoke:nth-child(6) { animation-delay: -1.5s; }
+  .icon--one-orch .core {
+    animation: breathe 3.8s ease-in-out infinite;
+  }
+
+  /* static clones used by the family test */
+  .icon--static,
+  .icon--static * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .icon--static * {
+    stroke-dasharray: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+
+  /* ---------- reduced motion ---------- */
+
+  @media (prefers-reduced-motion: reduce) {
+    .icon,
+    .icon * {
+      animation: none !important;
+      transition: none !important;
+    }
+    .icon * {
+      stroke-dasharray: none !important;
+      stroke-dashoffset: 0 !important;
+    }
+    .icon .node,
+    .icon .gaze,
+    .icon .level {
+      transform: none !important;
+    }
+  }
+
+  /* ---------- responsive ---------- */
+
+  @media (max-width: 1120px) {
+    .shelf { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .masthead { grid-template-columns: minmax(0, 1.5fr) minmax(220px, .5fr); gap: 36px; }
+  }
+
+  @media (max-width: 760px) {
+    .page { padding: 0 24px 16px; }
+    .masthead { grid-template-columns: 1fr; gap: 30px; padding-top: 52px; }
+    .spec { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+    .soul { grid-template-columns: 1fr; }
+    .soul > div { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0 24px; }
+    .soul > div:first-child { border-top: 0; }
+    .section-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+  }
+
+  @media (max-width: 620px) {
+    .shelf { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .glyph svg { width: 64px; height: 64px; }
+    .glyph { height: 90px; }
+    .strip { flex-direction: column; align-items: flex-start; gap: 16px; }
+    .strip .tag { flex: none; }
+    .family-row { gap: 18px; flex-wrap: wrap; }
+    .foot .note { margin-left: 0; flex-basis: 100%; }
+  }
+
+  /* ============================================================
+     ELEVACIÓN
+     Capa añadida. No toca el ADN del set: misma paleta, mismos
+     trazos, misma metáfora. Solo le da atmósfera y entrada.
+     ============================================================ */
+
+  .page { position: relative; z-index: 1; }
+
+  /* campo de partículas fijo, detrás del contenido */
+  .field {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* barra de progreso de scroll: 2px, crystal → carp */
+  .progress {
+    position: fixed;
+    inset: 0 0 auto 0;
+    height: 2px;
+    z-index: 60;
+    pointer-events: none;
+    background: transparent;
+  }
+
+  .progress__fill {
+    display: block;
+    width: 100%;
+    height: 100%;
+    transform: scaleX(0);
+    transform-origin: 0 50%;
+    background: linear-gradient(90deg, var(--crystal), var(--carp));
+    box-shadow: 0 0 12px rgba(126, 156, 216, .35);
+  }
+
+  /* entrada de página: fade-up escalonado */
+  .js [data-reveal] {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity .9s cubic-bezier(.16, 1, .3, 1) var(--d, 0s),
+      transform .9s cubic-bezier(.16, 1, .3, 1) var(--d, 0s);
+  }
+
+  .js [data-reveal].is-in { opacity: 1; transform: none; }
+
+  /* glow radial que sigue al puntero, crystal al 10% */
+  .card {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(
+      circle 240px at var(--mx, 50%) var(--my, 50%),
+      rgba(126, 156, 216, .10),
+      rgba(126, 156, 216, .045) 42%,
+      transparent 72%
+    );
+    transition: opacity .45s ease;
+  }
+
+  .card:hover::after { opacity: 1; }
+
+  .card > * { position: relative; z-index: 1; }
+
+  .glyph > svg {
+    transform-origin: 50% 50%;
+    transition: transform .55s cubic-bezier(.16, 1, .3, 1);
+  }
+
+  .card:hover .glyph > svg { transform: scale(1.08); }
+
+  /* mientras se dibuja, la vida ambiente se congela y luego despierta */
+  .icon.is-drawing,
+  .icon.is-drawing * {
+    animation: none !important;
+  }
+
+  .icon .node,
+  .icon .core-dot,
+  .icon .pupil {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  @keyframes nodePulse {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.35); }
+  }
+
+  /* hover: la órbita acelera, los nodos laten */
+  @media (hover: hover) and (pointer: fine) {
+    .card:hover .icon--delegar .node {
+      animation: nodePulse 1.5s ease-in-out infinite;
+    }
+    .card:hover .icon--verificar .halo { animation-duration: 1.9s; }
+    .card:hover .icon--arbitrar .orbit { animation-duration: 12s; }
+    .card:hover .icon--arbitrar .lead-halo { animation-duration: 1.7s; }
+    .card:hover .icon--arbitrar .core { animation-duration: 2.4s; }
+    .card:hover .icon--sesion .checkpoint { animation-duration: 1.5s; }
+    .card:hover .icon--watchdog .iris { animation-duration: 9s; }
+    .card:hover .icon--watchdog .pupil { animation: nodePulse 1.7s ease-in-out infinite; }
+    .card:hover .icon--ledger .blk { animation-duration: 3.2s; }
+    .card:hover .icon--quota .level { animation-duration: 2.8s; }
+    .card:hover .icon--one-orch .spoke { animation-duration: .9s; }
+    .card:hover .icon--one-orch .core { animation-duration: 2s; }
+  }
+
+  /* todo quieto, pero visible y completo */
+  @media (prefers-reduced-motion: reduce) {
+    .js [data-reveal] {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+    .card::after { display: none; }
+    .glyph > svg,
+    .card:hover .glyph > svg { transform: none; }
+    .progress__fill { box-shadow: none; }
+  }
+</style>
+<script>document.documentElement.classList.add("js");</script>
+</head>
+<body>
+<canvas class="field" aria-hidden="true"></canvas>
+<div class="progress" aria-hidden="true"><span class="progress__fill"></span></div>
+<div class="page">
+
+  <header class="masthead" data-reveal>
+    <div>
+      <p class="eyebrow">idu-pi · sistema de iconos</p>
+      <h1>El alma en <em>24 × 24</em></h1>
+      <p class="lede">Ocho formas para un arnés que delega a nueve IAs, verifica con tests ocultos y arbitra el resultado. La metáfora no cambia: <b>un árbitro inmóvil en el centro de una órbita</b>.</p>
+    </div>
+    <dl class="spec">
+      <div><dt>ViewBox</dt><dd>24 × 24</dd></div>
+      <div><dt>Stroke</dt><dd>1.5 · round</dd></div>
+      <div><dt>Color</dt><dd>currentColor</dd></div>
+      <div><dt>Regla</dt><dd>un solo orquestador</dd></div>
+    </dl>
+  </header>
+
+  <section class="soul" aria-label="El alma del producto" data-reveal style="--d:.08s">
+    <div>
+      <p class="k">Acción</p>
+      <p class="v">Delegar a nueve IAs, verificar con tests ocultos y arbitrar en tres capas: <b>Kev, Jev y fallback determinista</b>.</p>
+    </div>
+    <div>
+      <p class="k">Metáfora</p>
+      <p class="v">El <b>árbitro inmóvil</b> en el centro de una órbita; el arnés que sujeta los cabos y no deja que un worker re-delegue.</p>
+    </div>
+    <div>
+      <p class="k">Formas</p>
+      <p class="v"><b>Órbita · nodo · conector</b>. Dirección radial: del centro hacia fuera, o de fuera al centro.</p>
+    </div>
+  </section>
+
+  <main>
+    <div class="section-head" data-reveal style="--d:.16s">
+      <h2>Los ocho</h2>
+      <p>densidad equilibrada · prueba de fila</p>
+    </div>
+
+    <section class="shelf" aria-label="Set de ocho iconos" data-reveal style="--d:.22s">
+
+      <article class="card">
+        <span class="idx">01</span>
+        <div class="glyph">
+          <svg class="icon icon--delegar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Delegar: el arnés emite un nodo hacia un worker">
+            <path class="harness" d="M10 7.4C5.2 8.9 5.2 15.1 10 16.6"/>
+            <path class="jaw" d="M10 7.4h2.1"/>
+            <path class="jaw" d="M10 16.6h2.1"/>
+            <path class="link" d="M12.7 12h2.9" opacity=".55"/>
+            <path class="emit" d="M12.9 12h.01" opacity="0"/>
+            <circle class="node" cx="18.2" cy="12" r="1.5"/>
+          </svg>
+        </div>
+        <h3>Delegar</h3>
+        <p>el arnés emite un nodo</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">02</span>
+        <div class="glyph">
+          <svg class="icon icon--verificar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Verificar: un check dentro de un pulso orbital">
+            <circle class="halo" cx="12" cy="12" r="8.2" opacity=".35"/>
+            <path class="check" d="M6.2 12.3l3.3 3.3 8.3-8.9"/>
+          </svg>
+        </div>
+        <h3>Verificar</h3>
+        <p>check con pulso</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">03</span>
+        <div class="glyph">
+          <svg class="icon icon--arbitrar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Arbitrar: nueve nodos orbitan un único centro">
+            <circle class="orbit-ring" cx="12" cy="12" r="7.3" opacity=".25"/>
+            <g class="orbit">
+              <path class="orb-dot" d="M16.69 6.41h.01" opacity=".6"/>
+              <path class="orb-dot" d="M19.19 10.73h.01" opacity=".6"/>
+              <path class="orb-dot" d="M18.32 15.65h.01" opacity=".6"/>
+              <path class="orb-dot" d="M14.5 18.86h.01" opacity=".6"/>
+              <path class="orb-dot" d="M9.5 18.86h.01" opacity=".6"/>
+              <path class="orb-dot" d="M5.68 15.65h.01" opacity=".6"/>
+              <path class="orb-dot" d="M4.81 10.73h.01" opacity=".6"/>
+              <path class="orb-dot" d="M7.31 6.41h.01" opacity=".6"/>
+              <circle class="lead-halo" cx="12" cy="4.7" r="1.5" opacity=".35"/>
+              <path class="lead" d="M12 4.7h.01"/>
+            </g>
+            <circle class="core" cx="12" cy="12" r="2.2"/>
+            <path class="core-dot" d="M12 12h.01"/>
+          </svg>
+        </div>
+        <h3>Arbitrar</h3>
+        <p>9 nodos, una órbita, un centro</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">04</span>
+        <div class="glyph">
+          <svg class="icon icon--sesion" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Sesión: una línea que se reanuda sobre un checkpoint">
+            <path class="seg" d="M3.5 14H9.7" opacity=".7"/>
+            <circle class="checkpoint" cx="9.7" cy="14" r="1.15"/>
+            <path class="resume" d="M11.6 14C12.8 8.2 16.2 8.2 17.4 14"/>
+            <path class="seg2" d="M17.4 14h3.1" opacity=".7"/>
+          </svg>
+        </div>
+        <h3>Sesión</h3>
+        <p>la línea se reanuda</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">05</span>
+        <div class="glyph">
+          <svg class="icon icon--ledger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ledger: bloques apilados y encuadernados">
+            <path class="spine" d="M5 5.4v13.2" opacity=".75"/>
+            <path class="bind" d="M5 6.6h1.8" opacity=".5"/>
+            <path class="bind" d="M5 12h1.8" opacity=".5"/>
+            <path class="bind" d="M5 17.4h1.8" opacity=".5"/>
+            <rect class="blk b1" x="6.8" y="4.4" width="11.8" height="4.4" rx="1.5"/>
+            <path class="tie" d="M12.7 8.8v1" opacity=".5"/>
+            <rect class="blk b2" x="6.8" y="9.8" width="11.8" height="4.4" rx="1.5"/>
+            <path class="tie" d="M12.7 14.2v1" opacity=".5"/>
+            <rect class="blk b3" x="6.8" y="15.2" width="11.8" height="4.4" rx="1.5"/>
+          </svg>
+        </div>
+        <h3>Ledger</h3>
+        <p>bloques apilados</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">06</span>
+        <div class="glyph">
+          <svg class="icon icon--watchdog" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Watchdog: un ojo abierto que nunca duerme">
+            <path class="eye" d="M3.8 12c3-6.1 13.4-6.1 16.4 0-3 6.1-13.4 6.1-16.4 0Z"/>
+            <g class="gaze">
+              <circle class="iris" cx="12" cy="12" r="3.4" opacity=".45" stroke-dasharray="2.8 2.6"/>
+              <circle class="pupil" cx="12" cy="12" r="1.8"/>
+              <path class="pupil-dot" d="M12 12h.01"/>
+            </g>
+          </svg>
+        </div>
+        <h3>Watchdog</h3>
+        <p>el ojo que no duerme</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">07</span>
+        <div class="glyph">
+          <svg class="icon icon--quota" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Quota: una barra con techo">
+            <path class="roof" d="M5.6 7.2V5.6h12.8v1.6"/>
+            <rect class="track" x="8.8" y="7" width="6.4" height="13.3" rx="2" opacity=".5"/>
+            <path class="level" d="M9.9 12.4h4.2"/>
+          </svg>
+        </div>
+        <h3>Quota</h3>
+        <p>la barra y su techo</p>
+      </article>
+
+      <article class="card">
+        <span class="idx">08</span>
+        <div class="glyph">
+          <svg class="icon icon--one-orch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="One Orchestrator: un solo nodo manda sobre los demás y ningún worker re-delega">
+            <g class="spokes">
+              <path class="spoke" d="M15.1 12h4.1" opacity=".55"/>
+              <path class="spoke" d="M13.55 14.68l2.05 3.55" opacity=".55"/>
+              <path class="spoke" d="M10.45 14.68l-2.05 3.55" opacity=".55"/>
+              <path class="spoke" d="M8.9 12H4.8" opacity=".55"/>
+              <path class="spoke" d="M10.45 9.32 8.4 5.76" opacity=".55"/>
+              <path class="spoke" d="M13.55 9.32l2.05-3.56" opacity=".55"/>
+            </g>
+            <path class="far" d="M20.2 12h.01" opacity=".7"/>
+            <path class="far" d="M16.1 19.1h.01" opacity=".7"/>
+            <path class="far" d="M7.9 19.1h.01" opacity=".7"/>
+            <path class="far" d="M3.8 12h.01" opacity=".7"/>
+            <path class="far" d="M7.9 4.9h.01" opacity=".7"/>
+            <path class="far" d="M16.1 4.9h.01" opacity=".7"/>
+            <circle class="core" cx="12" cy="12" r="2.2"/>
+            <path class="core-dot" d="M12 12h.01"/>
+          </svg>
+        </div>
+        <h3>One Orchestrator</h3>
+        <p>un punto manda sobre los demás</p>
+      </article>
+
+    </section>
+
+    <div class="section-head" data-reveal style="--d:.06s">
+      <h2>Prueba de familia</h2>
+      <p>mismos trazos · sin animación · tamaño real</p>
+    </div>
+
+    <section aria-label="Prueba de legibilidad a 16 píxeles" data-reveal style="--d:.12s">
+      <p class="family-note">El set completo a 16 px, sobre sumi y sobre papel. Aquí se comprueba la silueta: la C del arnés, el check, la órbita de puntos, el ojo, la barra con techo y el hub con radios. Si alguno desaparece, sobra detalle.</p>
+
+      <div class="strips">
+        <div class="strip">
+          <span class="tag">Sumi · 16 px</span>
+          <div class="family-row" data-family aria-hidden="true"></div>
+        </div>
+        <div class="strip strip--light">
+          <span class="tag">Papel · 16 px</span>
+          <div class="family-row" data-family aria-hidden="true"></div>
+        </div>
+      </div>
+      <noscript><p class="noscript">Activa JavaScript para generar la prueba de familia desde los mismos SVG del set.</p></noscript>
+    </section>
+  </main>
+
+  <footer class="foot" data-reveal style="--d:.08s">
+    <span class="chip">24 × 24</span>
+    <span class="chip">stroke 1.5</span>
+    <span class="chip">round caps</span>
+    <span class="chip">currentColor</span>
+    <span class="chip">sin texto</span>
+    <span class="note">prefers-reduced-motion: los iconos quedan quietos y completos.</span>
+  </footer>
+
+</div>
+
+<script>
+  (() => {
+    const reduceMQ = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const reduced = () => reduceMQ.matches;
+
+    /* ---------- prueba de familia: clones estáticos, intactos ---------- */
+    const icons = Array.from(document.querySelectorAll(".shelf .glyph > svg"));
+    const rows = document.querySelectorAll("[data-family]");
+
+    if (icons.length && rows.length) {
+      rows.forEach((row) => {
+        icons.forEach((svg) => {
+          const clone = svg.cloneNode(true);
+          clone.classList.add("icon--static");
+          clone.setAttribute("width", "16");
+          clone.setAttribute("height", "16");
+          clone.setAttribute("aria-hidden", "true");
+          clone.removeAttribute("role");
+          clone.removeAttribute("aria-label");
+          row.appendChild(clone);
+        });
+      });
+    }
+
+    /* ---------- entrada de página ---------- */
+    const reveals = Array.from(document.querySelectorAll("[data-reveal]"));
+
+    if (reveals.length) {
+      if (!("IntersectionObserver" in window) || reduced()) {
+        reveals.forEach((el) => el.classList.add("is-in"));
+      } else {
+        const revealIO = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            entry.target.classList.add("is-in");
+            revealIO.unobserve(entry.target);
+          });
+        }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+
+        reveals.forEach((el) => revealIO.observe(el));
+      }
+    }
+
+    /* ---------- los ocho se dibujan al entrar en viewport ---------- */
+    if (icons.length && !reduced()) {
+      const lengthOf = (el) => {
+        try { return el.getTotalLength(); } catch (_) { return 0; }
+      };
+
+      const plans = icons.map((svg, cardIndex) => {
+        svg.classList.add("is-drawing");
+        const items = [];
+
+        svg.querySelectorAll("path, circle, rect, ellipse, line, polyline, polygon").forEach((el) => {
+          const len = lengthOf(el);
+
+          if (len > 1) {
+            el.style.strokeDasharray = len + " " + len;
+            el.style.strokeDashoffset = String(len);
+            items.push({ el, len, dot: false });
+          } else {
+            // nodos de longitud cero: no se pueden trazar, se encienden
+            const op = parseFloat(getComputedStyle(el).opacity);
+            if (op > 0.05) {
+              el.style.opacity = "0";
+              items.push({ el, len: 0, dot: true, op });
+            }
+          }
+        });
+
+        return { svg, items, cardIndex, played: false };
+      });
+
+      const play = (plan) => {
+        if (plan.played) return;
+        plan.played = true;
+
+        const base = plan.cardIndex * 70;
+        const step = 45;
+        const dur = 1200;
+
+        requestAnimationFrame(() => {
+          plan.items.forEach((it) => { it.el.style.transition = "none"; });
+          void plan.svg.getBoundingClientRect();
+
+          requestAnimationFrame(() => {
+            plan.items.forEach((it, i) => {
+              const delay = base + i * step;
+
+              if (it.dot) {
+                it.el.style.transition = "opacity .6s ease " + (delay + 180) + "ms";
+                it.el.style.opacity = String(it.op);
+              } else {
+                it.el.style.transition =
+                  "stroke-dashoffset " + dur + "ms cubic-bezier(.16,1,.3,1) " + delay + "ms";
+                it.el.style.strokeDashoffset = "0";
+              }
+            });
+          });
+        });
+
+        const total = base + plan.items.length * step + dur + 160;
+
+        window.setTimeout(() => {
+          plan.items.forEach((it) => {
+            it.el.style.transition = "";
+            it.el.style.strokeDasharray = "";
+            it.el.style.strokeDashoffset = "";
+            it.el.style.opacity = "";
+          });
+          plan.svg.classList.remove("is-drawing");
+          plan.svg.classList.add("is-drawn");
+        }, total);
+      };
+
+      if (!("IntersectionObserver" in window)) {
+        plans.forEach(play);
+      } else {
+        const drawIO = new IntersectionObserver((entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            const plan = plans.find((p) => p.svg === entry.target);
+            if (plan) play(plan);
+            drawIO.unobserve(entry.target);
+          });
+        }, { threshold: 0.28 });
+
+        plans.forEach((plan) => drawIO.observe(plan.svg));
+      }
+    }
+
+    /* ---------- glow que sigue al puntero ---------- */
+    if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+      document.querySelectorAll(".card").forEach((card) => {
+        card.addEventListener("pointermove", (event) => {
+          const rect = card.getBoundingClientRect();
+          card.style.setProperty("--mx", (event.clientX - rect.left) + "px");
+          card.style.setProperty("--my", (event.clientY - rect.top) + "px");
+        }, { passive: true });
+      });
+    }
+
+    /* ---------- progreso de scroll ---------- */
+    const fill = document.querySelector(".progress__fill");
+
+    if (fill) {
+      let ticking = false;
+
+      const paint = () => {
+        ticking = false;
+        const doc = document.documentElement;
+        const max = doc.scrollHeight - window.innerHeight;
+        const p = max > 0 ? window.scrollY / max : 0;
+        fill.style.transform = "scaleX(" + Math.min(1, Math.max(0, p)) + ")";
+      };
+
+      const onScroll = () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(paint);
+      };
+
+      window.addEventListener("scroll", onScroll, { passive: true });
+      window.addEventListener("resize", onScroll);
+      paint();
+    }
+
+    /* ---------- campo de partículas (seed determinista) ---------- */
+    const canvas = document.querySelector(".field");
+
+    if (canvas && canvas.getContext) {
+      const ctx = canvas.getContext("2d");
+      const RGB = [[126, 156, 216], [230, 195, 132], [195, 64, 67]];
+
+      const SPRITES = RGB.map((rgb) => {
+        const size = 64;
+        const sprite = document.createElement("canvas");
+        sprite.width = sprite.height = size;
+
+        const g = sprite.getContext("2d");
+        const [r, gr, b] = rgb;
+        const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+
+        grad.addColorStop(0, "rgba(" + r + "," + gr + "," + b + ",.95)");
+        grad.addColorStop(.18, "rgba(" + r + "," + gr + "," + b + ",.5)");
+        grad.addColorStop(.45, "rgba(" + r + "," + gr + "," + b + ",.12)");
+        grad.addColorStop(1, "rgba(" + r + "," + gr + "," + b + ",0)");
+
+        g.fillStyle = grad;
+        g.fillRect(0, 0, size, size);
+        return sprite;
+      });
+
+      const mulberry32 = (seed) => () => {
+        seed |= 0;
+        seed = seed + 0x6D2B79F5 | 0;
+        let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+
+      const rand = mulberry32(0x1D0B2024);
+      const particles = [];
+
+      let width = 0;
+      let height = 0;
+      let dpr = 1;
+
+      const build = () => {
+        const count = Math.max(26, Math.min(92, Math.round((width * height) / 19000)));
+        particles.length = 0;
+
+        for (let i = 0; i < count; i++) {
+          const pick = rand();
+          const ci = pick < .64 ? 0 : pick < .9 ? 1 : 2;
+
+          particles.push({
+            x: rand(),
+            y: rand(),
+            r: .6 + rand() * 1.5,
+            ci,
+            base: .09 + rand() * .22,
+            speed: .35 + rand() * 1.15,
+            phase: rand() * Math.PI * 2,
+            wob: .7 + rand() * .6
+          });
+        }
+      };
+
+      const sizeCanvas = () => {
+        dpr = Math.min(2, window.devicePixelRatio || 1);
+        width = canvas.clientWidth;
+        height = canvas.clientHeight;
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      };
+
+      const render = (t) => {
+        ctx.clearRect(0, 0, width, height);
+
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          const tw = .5 + .5 * Math.sin(t * p.speed + p.phase);
+          const alpha = p.base * (.45 + .55 * tw);
+          const size = (p.r * 5.4 + 4) * (.88 + .24 * p.wob * tw);
+
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(SPRITES[p.ci], p.x * width - size / 2, p.y * height - size / 2, size, size);
+        }
+
+        ctx.globalAlpha = 1;
+      };
+
+      let raf = 0;
+      let origin = 0;
+
+      const loop = (now) => {
+        if (!origin) origin = now;
+        render((now - origin) / 1000);
+        raf = requestAnimationFrame(loop);
+      };
+
+      const startLoop = () => {
+        if (reduced() || document.hidden || raf) return;
+        origin = 0;
+        raf = requestAnimationFrame(loop);
+      };
+
+      const stopLoop = () => {
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
+      };
+
+      sizeCanvas();
+      build();
+
+      if (reduced()) {
+        render(0);
+      } else {
+        startLoop();
+      }
+
+      window.addEventListener("resize", () => {
+        sizeCanvas();
+        if (reduced()) render(0);
+      });
+
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          stopLoop();
+        } else if (!reduced()) {
+          startLoop();
+        }
+      });
+
+      if (reduceMQ.addEventListener) {
+        reduceMQ.addEventListener("change", () => {
+          if (reduced()) {
+            stopLoop();
+            render(0);
+          } else {
+            startLoop();
+          }
+        });
+      }
+    }
+  })();
+</script>
+</body>
+</html>
