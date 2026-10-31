@@ -12,6 +12,35 @@
 
 Todo bajo la **ONE ORCHESTRATOR RULE**: un worker nunca vuelve a delegar. Ver [SECURITY.md](SECURITY.md) para el alcance real de esa guarda.
 
+---
+
+## 🎨 El agente de diseño y el stack creativo
+
+El perfil **`designer`** (Command Code + DeepSeek V4.1 Flash, workspace) es el especialista
+visual del arnés. Decide la ruta por contenido y ejecuta con dos skills propias:
+
+| Ruta | Skill | Cuándo | Entrega |
+|---|---|---|---|
+| **A · Escena web** | `.agents/skills/kanagawa-html/` | UI, dashboards, benchmarks, reportes, texto/datos legibles | HTML premium con motion cinematográfico → PDF (print-to-pdf) o MP4 (HyperFrames) |
+| **B · Footage IA** | `.agents/skills/higgsfield-scene/` | Gente actuando, producto filmado, ambientes reales, emoción facial | Prompt de producción paste-ready (MCSLA + hook de 2s + sound layers) para Seedance/Higgsfield |
+
+**Regla de decisión**: los modelos de video IA renderizan mal el texto y la UI — toda escena
+con datos legibles va por la ruta A (código, determinista, gratis); la ruta B es solo para
+lo que un modelo generativo debe crear. Proyectos híbridos usan ambas.
+
+### Qué garantiza la ruta A (kanagawa-html)
+
+- **Design system Gentleman Kanagawa**: paleta dark con ambient blur, partículas, tipografía Source Serif + Space Grotesk.
+- **Motion craft de films**: springs de forma cerrada (`stepR`), ease por rol, "entra lento sale limpio", motion personality Premium.
+- **Dataviz validado por script**: la paleta de gráficos (`KANAGAWA-CHART`) pasa los 5 checks de colorblind-safety con `validate_palette.js` — el color se calcula, no se elige.
+- **Motor de scroll-cámara propio** (ver [docs/idupi-showcase.html](docs/idupi-showcase.html)): scroll virtual con lerp + planos que viajan con scale — sin three.js, sin GSAP, sin dependencias.
+- **Export garantizado**: receta exacta de PDF (headless Chrome + `@media print`) y de MP4 (HyperFrames con composición determinista seek(t)).
+
+### Demo
+
+- [docs/idupi-showcase.html](docs/idupi-showcase.html) — la super-web: cámara de scroll, video del benchmark scrubable con springs, y el veredicto. Resultado canónico de la ruta A.
+- [docs/benchmark-harness-2026-10-30.html](docs/benchmark-harness-2026-10-30.html) — informe completo del benchmark (9 configuraciones, 3 pruebas).
+
 <details>
 <summary><strong>Historia del proyecto (purgas v2.1.0)</strong></summary>
 
