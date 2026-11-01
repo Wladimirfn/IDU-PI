@@ -356,13 +356,31 @@
   <div class="sec-head">
     <div class="sec-num">05</div>
     <div>
+      <h2>Benchmark TERRA — gpt-6.1-terra en 4 harnesses</h2>
+      <p class="h2sub">Ronda adicional (2026-10-31): mismo modelo effort high en Codex nativo, Command Code, gentle-shell y OpenCode. Las dos mismas pruebas del benchmark.</p>
+    </div>
+  </div>
+  <table class="reveal">
+    <tr><th>Harness</th><th class="num">T1 algorítmica</th><th class="num">T1 tiempo</th><th class="num">T1 tokens</th><th class="num">T2 debugging</th><th class="num">T2 tiempo</th><th class="num">T2 tokens</th></tr>
+    <tr class="top"><td><b>commandcode</b></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">28.5s ⚡</td><td class="num">125K</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">44s</td><td class="num">183K</td></tr>
+    <tr><td><b>codex</b> (nativo)</td><td class="num"><span class="tag ok">13/13</span></td><td class="num">42.6s</td><td class="num">200K</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">40s ⚡</td><td class="num">260K</td></tr>
+    <tr><td><b>opencode</b></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">64.3s</td><td class="num nr">n/r</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">64s</td><td class="num nr">n/r</td></tr>
+    <tr><td><b>gentle-shell</b></td><td class="num"><span class="tag ok">13/13</span></td><td class="num">54s</td><td class="num nr">n/r</td><td class="num"><span class="tag ok">7/7</span></td><td class="num">80s</td><td class="num nr">n/r</td></tr>
+  </table>
+  <p class="foot reveal"><b>Veredicto TERRA</b>: 40/40 tests entre los 4, todos con FIXES.md — el modelo rinde en cualquier harness. El más eficiente: <b>commandcode</b> (mejor tiempo T1 y menos tokens en ambas). <b>Decisión aplicada</b>: el perfil de implementación del arnés (antes codex/gpt-5.6-luna) pasa a <b>cmdc + gpt-6.1-terra</b>.</p>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="sec-num">06</div>
+    <div>
       <h2>La configuración recomendada</h2>
       <p class="h2sub">Según los datos medidos, no por preferencia.</p>
     </div>
   </div>
   <div class="cards reveal">
     <div class="card" data-n="ROL/01"><p class="role">Orquestador</p><p class="who"><span class="hl-m">Claude Sonnet</span></p><p class="why">3.8K tokens por tarea y disciplina perfecta de instrucciones. Opus 5.5 nativo reservado para arquitectura crítica.</p></div>
-    <div class="card" data-n="ROL/02"><p class="role">Obrero principal</p><p class="who"><span class="hl-g">mcode</span></p><p class="why">Mejor calidad por token: 150K en dos tareas contra 571K de cmdc. Reporta casos extra que nadie pidió.</p></div>
+    <div class="card" data-n="ROL/02"><p class="role">Obrero principal</p><p class="who"><span class="hl-g">cmdc + gpt-6.1-terra</span></p><p class="why">Ganador TERRA: mejor tiempo T1 (28.5s) y menos tokens (125K/183K). El perfil de implementación del arnés ya usa esta ruta.</p></div>
     <div class="card" data-n="ROL/03"><p class="role">Exploración</p><p class="who"><span class="hl-b">cheap-explore</span></p><p class="why">1.3min por tarea. OpenCode v2 estable incluso en logs de 367 KB.</p></div>
     <div class="card" data-n="ROL/04"><p class="role">Análisis profundo</p><p class="who"><span class="hl-y">mimo / agy38</span></p><p class="why">1M de contexto para dictámenes — asumiendo costo alto y guards del proveedor.</p></div>
   </div>
