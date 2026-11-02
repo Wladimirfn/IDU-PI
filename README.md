@@ -1,4 +1,4 @@
-# IDU Cross-CLI Agent Router & Quality Harness (v2.2.0)
+# IDU Cross-CLI Agent Router & Quality Harness (v2.3.0)
 
 <a href="https://github.com/Gentleman-Programming/gentle-ai">
   <img width="220" src="https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/docs/assets/brand/built-with-gentle-ai.png" alt="Built with Gentle-AI" />
@@ -14,15 +14,25 @@ Todo bajo la **ONE ORCHESTRATOR RULE**: un worker nunca vuelve a delegar. Ver [S
 
 ---
 
-## 🎨 El agente de diseño y el stack creativo
+## 🎨 Diseño, iconografía y stack creativo
 
-El perfil **`designer`** (Command Code + DeepSeek V4.1 Flash, workspace) es el especialista
-visual del arnés. Decide la ruta por contenido y ejecuta con dos skills propias:
+El arnés tiene **dos roles dedicados a lo visual**, cada uno con alternativas en paralelo:
+
+| Rol | Perfiles | Qué produce |
+|---|---|---|
+| **Diseño** | `design-opencode` · `design-gentle` | Interfaces, HTML premium, motion y composición |
+| **Iconografía** | `iconographer` · `iconographer-mimo` | Sets de iconos SVG originales con la identidad del proyecto |
+
+Ambos roles escriben (`permissions: workspace`), pero acotados a su artefacto: el código
+central nunca se delega. El conocimiento vive en dos skills propias:
 
 | Ruta | Skill | Cuándo | Entrega |
 |---|---|---|---|
 | **A · Escena web** | `.agents/skills/kanagawa-html/` | UI, dashboards, benchmarks, reportes, texto/datos legibles | HTML premium con motion cinematográfico → PDF (print-to-pdf) o MP4 (HyperFrames) |
 | **B · Footage IA** | `.agents/skills/higgsfield-scene/` | Gente actuando, producto filmado, ambientes reales, emoción facial | Prompt de producción paste-ready (MCSLA + hook de 2s + sound layers) para Seedance/Higgsfield |
+
+La iconografía usa `.agents/skills/soul-icons/`: iconos dibujados desde la metáfora del
+producto, no pictogramas de librería.
 
 **Regla de decisión**: los modelos de video IA renderizan mal el texto y la UI — toda escena
 con datos legibles va por la ruta A (código, determinista, gratis); la ruta B es solo para
@@ -56,6 +66,26 @@ la arquitectura vigente.
 > un nombre histórico: renómbralo y actualiza la ruta absoluta que declara tu cliente MCP.
 
 </details>
+
+---
+
+## Novedades en v2.3.0: flota por roles y gobernanza de agentes
+
+1. **Flota de agentes por rol**: los perfiles se organizan en seis roles (exploración,
+   consultas, arquitectura, diseño, iconografía, auditoría) con alternativas de CLI/modelo
+   por rol, para trabajar en paralelo y sobrevivir a límites de cuota.
+2. **`replaceDefaults`**: `~/.idu/profiles.json` puede declararse como la lista completa de
+   perfiles con `"replaceDefaults": true`. Por defecto sigue mezclando sobre los presets.
+3. **cmdc `--yolo` siempre en workers**: el modo print de Command Code bloquea
+   `shell_command` sin ese flag y abortaba el run con `permission_denied` incluso en perfiles
+   de solo lectura. La restricción de lectura queda en el prompt del worker.
+4. **Protocolo v2.3.0**: skill reescrita tras una auditoría cruzada de cuatro modelos
+   (Opus 5.5, Gemini 4 Argon, DeepSeek V4.1 y MiMo 2.6 Pro) — fronteras de rol explícitas,
+   gobernanza inequívoca, parámetros opcionales documentados y orden real del arbitraje.
+5. **Instalación de la skill en Antigravity**: el instalador ahora cubre
+   `~/.gemini/antigravity-cli/skills`, la ruta que `agy` lee de verdad.
+6. **Perfiles curados**: la instalación de referencia queda en 20 perfiles exactos (los de la
+   matriz), sin los 16 heredados de benchmarks.
 
 ---
 
@@ -119,9 +149,33 @@ El servidor expone **14 herramientas de alto impacto** optimizadas para mínimo 
 
 ---
 
+## Flota de agentes por rol (v2.3.0)
+
+Los perfiles de una instalación curada se agrupan por **rol**, no por CLI. Cada rol ofrece
+2–5 alternativas para que el orquestador pueda lanzar agentes **en paralelo** (exploración
+simultánea, auditorías cruzadas) o cambiar de modelo según la tarea o la cuota disponible.
+
+| Rol | Perfiles (CLI · modelo) |
+| :--- | :--- |
+| **Exploración** (read-only) | `explore-deepseek` (mcode · DeepSeek V4 Flash) · `explore-glm` (cmdc · GLM 5.3 Flash) · `explore-mimo` (opencode · MiMo 2.6 Flash) |
+| **Consultas** (read-only) | `consult-openai` (cmdc · GPT-6.1 Terra high) · `consult-mimo` (cmdc · MiMo 2.6 Pro max) · `consult-claude` (claude · Opus 5.5 high) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
+| **Arquitectura** (read-only) | `arch-claude` (claude · Opus 5.5 high) · `arch-sol` (cmdc · GPT-6.1 Sol high) · `arch-gemini` (agy · Gemini 4 Argon high) · `arch-deepseek` (mcode · DeepSeek V4 Flash max) |
+| **Diseño** (workspace) | `design-opencode` (opencode · DeepSeek V4 Flash) · `design-gentle` (gentle-shell · DeepSeek V4 Flash) |
+| **Iconografía** (workspace) | `iconographer` (mcode · GLM 5.3 Flash) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max) |
+| **Auditoría** (read-only) | `audit-claude` (claude · Opus 5.5) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash max) · `audit-mimo` (cmdc · MiMo 2.6 Pro max) · `audit-minimax` (cmdc · MiniMax M3.1 Flash) |
+
+**Gobernanza de la flota:** modificar un perfil existente (modelo, proveedor, descripción) es
+libre; **crear** un rol o un perfil nuevo requiere aprobación explícita del usuario. El
+`effort` no es un campo del perfil: vive en la configuración de cada CLI.
+
+**Arbitraje:** `idu_arbitrate` elige entre alternativas ya formuladas (Kev local → Jev nube →
+fallback determinista) sin lanzar un CLI. No es un rol de perfiles.
+
+---
+
 ## Perfiles de Ejecución (`~/.idu/profiles.json`)
 
-Los perfiles no están-fixed en el repo: se cargan desde `~/.idu/profiles.json`, que **mergea
+Los perfiles no están fijados en el repo: se cargan desde `~/.idu/profiles.json`, que **mergea
 sobre** los presets del proyecto. Para ver los perfiles efectivos de tu máquina:
 
 ```bash
@@ -146,6 +200,11 @@ pnpm run cli capabilities
 **El nombre del modelo es un pass-through opaco.** El arnés no lo valida ni lo normaliza: lo
 reenvía al CLI subyacente, que acepta cualquier identificador que entienda. Para usar un
 modelo distinto, agregá un perfil a `~/.idu/profiles.json` — no hace falta tocar código.
+
+> **Flota curada: `replaceDefaults`.** Por defecto tu archivo se mezcla **sobre** los presets
+> del proyecto, así que los perfiles que no declares siguen apareciendo. Si querés que tu
+> archivo sea la lista completa, agregá `"replaceDefaults": true` al nivel raíz de
+> `~/.idu/profiles.json`; los presets internos dejan de inyectarse.
 
 > **Inactividad vs. streaming.** La columna "Inactividad" solo aplica a perfiles con
 > `streams: true`. En un perfil sin streaming, el único freno es el timeout total: el daemon no

@@ -498,7 +498,7 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 				},
 				serverInfo: {
 					name: "idu-cross-cli",
-					version: "2.2.0",
+					version: "2.3.0",
 				},
 			};
 

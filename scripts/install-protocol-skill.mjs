@@ -41,6 +41,7 @@ const targets = [
 	{ harness: "claude", dir: join(homedir(), ".claude", "skills") },
 	{ harness: "pi", dir: join(homedir(), ".pi", "agent", "skills") },
 	{ harness: "gemini", dir: join(homedir(), ".gemini", "skills") },
+	{ harness: "antigravity", dir: join(homedir(), ".gemini", "antigravity-cli", "skills") },
 	{ harness: "codex", dir: join(homedir(), ".codex", "skills") },
 ];
 

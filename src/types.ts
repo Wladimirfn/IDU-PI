@@ -49,6 +49,12 @@ export interface IduConfig {
 
 export interface ProfilesConfig {
 	profiles: Record<string, IduProfile>;
+	/**
+	 * When true, the user file at ~/.idu/profiles.json is the complete profile set
+	 * and DEFAULT_PROFILES are not merged in. Lets a curated fleet stay exactly as
+	 * written instead of being padded with built-in profiles.
+	 */
+	replaceDefaults?: boolean;
 }
 
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "timeout";
