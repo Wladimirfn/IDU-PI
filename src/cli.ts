@@ -389,7 +389,7 @@ async function main(): Promise<void> {
 		}
 
 		default: {
-			console.log("IDU Cross-CLI Agent Router v2.2.0");
+			console.log("IDU Cross-CLI Agent Router v2.3.0");
 			console.log("Usage:");
 			console.log("  idu-pi mcp                                 Run stdio MCP server");
 			console.log("  idu-pi status [runId]                      Display detected CLIs & profiles or status of run");

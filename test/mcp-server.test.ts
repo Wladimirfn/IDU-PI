@@ -113,7 +113,11 @@ test("MCP initialize returns valid 2024-11-05 protocol", async () => {
 	};
 	assert.equal(res.protocolVersion, "2024-11-05");
 	assert.equal(res.serverInfo.name, "idu-cross-cli");
-	assert.equal(res.serverInfo.version, "2.2.0");
+	// Read from package.json so a version bump never needs a test edit.
+	const { readFileSync } = await import("node:fs");
+	const { resolve } = await import("node:path");
+	const pkg = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version: string };
+	assert.equal(res.serverInfo.version, pkg.version);
 });
 
 test("MCP idu_status returns git and workspace health", async () => {
@@ -569,6 +573,69 @@ console.log(IDU_HOME);`,
 		assert.match(readFileSync(ledger, "utf8"), /isolated-probe/);
 	} finally {
 		try { rmSync(isolated, { recursive: true, force: true }); } catch {}
+	}
+});
+
+test("loadProfilesConfig treats the user file as authoritative when replaceDefaults is true", async () => {
+	const { spawnSync } = await import("node:child_process");
+	const { fileURLToPath, pathToFileURL } = await import("node:url");
+	const { dirname, join } = await import("node:path");
+	const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+
+	// Child process: IDU_HOME is frozen at import time, so the profile file has to
+	// exist before config.js loads.
+	const srcDir = join(dirname(dirname(fileURLToPath(import.meta.url))), "src");
+	const probe = () =>
+		spawnSync(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`import { loadProfilesConfig } from ${JSON.stringify(pathToFileURL(join(srcDir, "config.js")).href)};
+const keys = Object.keys(loadProfilesConfig().profiles).sort();
+console.log(JSON.stringify(keys));`,
+			],
+			{ env: { ...process.env, IDU_HOME: home }, encoding: "utf8" },
+		);
+
+	let home = mkdtempSync(join(tmpdir(), "idu-profiles-"));
+	try {
+		writeFileSync(
+			join(home, "profiles.json"),
+			JSON.stringify({
+				profiles: { "only-mine": { harness: "claude", model: "opus", permissions: "read-only" } },
+			}),
+			"utf8",
+		);
+		const merged = probe();
+		assert.equal(merged.status, 0, merged.stderr);
+		const mergedKeys: string[] = JSON.parse(merged.stdout.trim());
+		assert.ok(mergedKeys.includes("only-mine"), "the user profile must load");
+		assert.ok(mergedKeys.includes("fast"), "without the flag, built-in defaults are merged in");
+	} finally {
+		try { rmSync(home, { recursive: true, force: true }); } catch {}
+	}
+
+	home = mkdtempSync(join(tmpdir(), "idu-profiles-"));
+	try {
+		writeFileSync(
+			join(home, "profiles.json"),
+			JSON.stringify({
+				replaceDefaults: true,
+				profiles: { "only-mine": { harness: "claude", model: "opus", permissions: "read-only" } },
+			}),
+			"utf8",
+		);
+		const replaced = probe();
+		assert.equal(replaced.status, 0, replaced.stderr);
+		assert.deepEqual(
+			JSON.parse(replaced.stdout.trim()),
+			["only-mine"],
+			"replaceDefaults:true must keep exactly the profiles the user wrote",
+		);
+	} finally {
+		try { rmSync(home, { recursive: true, force: true }); } catch {}
 	}
 });
 

@@ -323,9 +323,11 @@ export function buildWorkerArgs(
 				args.push("-m", profile.model);
 			}
 			args.push("--output-format", "json");
-			if (hasWorkspacePermissions(profile)) {
-				args.push("--yolo");
-			}
+			// cmdc in print mode blocks shell_command unless --yolo is passed, and a
+			// blocked tool aborts the whole run (stopReason "permission_denied"). Read-only
+			// workers still need shell for inspection (wc, git, grep), so --yolo is always
+			// required here; the read-only guarantee is enforced by the worker's prompt.
+			args.push("--yolo");
 			args.push("--skip-onboarding");
 
 			// Command Code Session Handling:

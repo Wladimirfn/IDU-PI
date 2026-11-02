@@ -256,6 +256,9 @@ export function loadProfilesConfig(): ProfilesConfig {
 	try {
 		const raw = readFileSync(IDU_PROFILES_PATH, "utf8");
 		const parsed = JSON.parse(raw) as ProfilesConfig;
+		if (parsed.replaceDefaults === true) {
+			return { profiles: parsed.profiles ?? {}, replaceDefaults: true };
+		}
 		return {
 			profiles: {
 				...DEFAULT_PROFILES.profiles,
