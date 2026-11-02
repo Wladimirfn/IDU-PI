@@ -82,11 +82,16 @@ the effective list as authoritative — if a profile is not there, it is not del
 | Role | Profiles (CLI · model) |
 |---|---|
 | Exploración (read-only, parallel) | `explore-deepseek` (mcode · DeepSeek V4 Flash nan) · `explore-glm` (cmdc · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash nan) |
-| Consultas (read-only) | `consult-openai` (cmdc · GPT-6.1 Terra high) · `consult-mimo` (cmdc · MiMo 2.6 Pro max) · `consult-claude` (claude · Opus 5.5 high) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
-| Arquitectura (read-only) | `arch-claude` (claude · Opus 5.5 high) · `arch-sol` (cmdc · GPT-6.1 Sol high) · `arch-gemini` (agy · Gemini 4 Argon high) · `arch-deepseek` (mcode · DeepSeek V4 Flash max) |
+| Consultas (read-only) | `consult-openai` (opencode · GPT-6.1 Terra high) · `consult-mimo` (cmdc · MiMo 2.6 Pro max) · `consult-claude` (claude · Opus 5.5 high) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
+| Arquitectura (read-only) | `arch-claude` (claude · Opus 5.5 high) · `arch-sol` (opencode · GPT-6.1 Sol high) · `arch-gemini` (agy · Gemini 4 Argon high) · `arch-deepseek` (mcode · DeepSeek V4 Flash max) |
 | Diseño (workspace assets) | `design-opencode` (opencode · DeepSeek V4 Flash nan) · `design-gentle` (gentle-shell · DeepSeek V4 Flash nan) |
 | Iconografía (workspace assets, parallel) | `iconographer` (mcode · GLM 5.3 Flash nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max) |
 | Auditoría (read-only, cross) | `audit-claude` (claude · Opus 5.5 high) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash max) · `audit-mimo` (cmdc · MiMo 2.6 Pro max) · `audit-minimax` (cmdc · MiniMax M3.1 Flash high) |
+| **Trabajo / implementación** (workspace) | `work-glm` (gentle-shell · GLM 5.3 Flash high) · `work-deepseek` (gentle-shell · DeepSeek V4.1 Flash high) · `work-mimo` (gentle-shell · MiMo 2.6 Flash max) |
+
+The work role uses **NaN-hosted models only**. Effort lives in the model slug
+(`:high` / `:max`) for gentle-shell, never in a profile field. All three were verified to
+actually write files, not just answer.
 
 **Arbitration is a tool, not a role.** Call `idu_arbitrate` to choose among options you
 already formulated, without spawning a CLI:
@@ -102,6 +107,10 @@ Role boundaries:
 - **Diseño / Iconografía** produce bounded visual or SVG artifacts (workspace). These are
   the only roles allowed to write, and only inside their asset scope. Core code is never
   delegated.
+- **Trabajo** implements code in the workspace. It is the exception to the
+  orchestrator-owns-coding rule: use it when the user asks for parallel implementation, or
+  when a self-contained task is better isolated in a worker. The orchestrator still reviews
+  the diff and runs postflight.
 
 ### Usage rules
 
@@ -125,11 +134,14 @@ Role boundaries:
 - **opencode** has `nan/deepseek-v4-flash`, not `nan/deepseek-v4.1-flash`.
 - **cmdc** ignores `provider` (it only passes `-m <model>`); do not copy the
   `provider` + bare `model` pattern into opencode or mcode.
-- **GPT-6.1 Terra / Sol in cmdc** depend on the global `provider` in
-  `~/.commandcode/config.json`. With `provider: "command-code"` use the bare catalog ids
-  (`gpt-6.1-terra`) or the `commandcode/...` prefix. The `openai/...` route needs
-  `provider: "codex"`, and that switch breaks `xiaomi/...`, `deepseek/...` and `nan/...` in
-  the same session — never mix both routes at once.
+- **cmdc resolves models through its own global provider**, set in
+  `~/.commandcode/config.json`. The two routes are mutually exclusive:
+  - `provider: "command-code"` serves the gateway ids — `deepseek/...`, `xiaomi/...`,
+    `minimax/...`, `nan/...` — and rejects OpenAI ids with `403 MODEL_NOT_IN_PLAN`.
+  - `provider: "codex"` serves bare OpenAI ids (`gpt-6.1-terra`, `gpt-6.1-sol`) and `nan/...`,
+    but the gateway ids fail with `400 Provider not available`.
+  Because of that, **OpenAI models run on opencode** (`openai/<id>`) and cmdc keeps the
+  gateway models. Never put an `openai/...` id in a cmdc profile.
 - **cmdc read-only workers still get `--yolo`** (idu-pi always passes it), because print
   mode blocks `shell_command` otherwise and a blocked tool aborts the whole run. The
   read-only guarantee comes from the worker prompt, not the flag.
