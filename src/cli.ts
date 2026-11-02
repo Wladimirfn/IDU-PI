@@ -114,7 +114,8 @@ async function main(): Promise<void> {
 			}
 			console.log("\nProfiles:");
 			for (const [name, prof] of Object.entries(caps.profiles)) {
-				console.log(`  - ${name.padEnd(15)} -> Harness: ${prof.harness.padEnd(10)} Model: ${prof.model || "default"}`);
+				const provider = prof.provider ? ` Provider: ${prof.provider}` : "";
+				console.log(`  - ${name.padEnd(15)} -> Harness: ${prof.harness.padEnd(10)}${provider} Model: ${prof.model || "default"}`);
 			}
 			console.log("============================\n");
 			break;
