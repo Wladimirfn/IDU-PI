@@ -184,39 +184,68 @@ consumo de contexto:
 ## Perfiles de Ejecución
 
 Los perfiles viven en `~/.idu/profiles.json` y **mergean sobre** los presets del proyecto. Para
-ver los efectivos de tu máquina:
+ver los efectivos de tu máquina, con sus timeouts reales:
 
 ```bash
 pnpm run cli capabilities
 ```
 
-### Presets del proyecto
+Hay **dos capas** que conviene no confundir:
+
+| Capa | Qué es | Cuántos |
+| :--- | :--- | :--- |
+| **Presets del proyecto** | Los que trae el código en `DEFAULT_PROFILES` | 12 |
+| **Flota por rol** | Los que instala `scripts/install.mjs` en tu home | 25 |
+
+Con `"replaceDefaults": true` —lo que hace el instalador— los presets **dejan de inyectarse** y
+tu archivo es la lista completa. Sin ese flag, tu archivo se suma a los 12 presets.
+
+### Presets del proyecto (12)
+
+Son el fallback. Si no instalas nada, estos son los perfiles disponibles.
 
 | Perfil | CLI | Modelo | Trabajo | Inactividad | Techo máximo |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `architecture` | Claude Code | opus | 1 hora | 5 minutos | 4 horas |
-| `antigravity-advisory` | Antigravity (`agy`) | gemini-4-argon-high | 1 hora | 5 minutos | 4 horas |
-| `deep-refactor` | Claude Code | sonnet | 1 hora | 5 minutos | 4 horas |
-| `coding` | Codex CLI | gpt-5.6-luna | 1 hora | N/A | 4 horas |
-| `cheap-explore` | OpenCode | MiniMax-M3 | 30 minutos | 5 minutos | 2 horas |
-| `cheap-debug` | OpenCode | deepseek-v4-flash | 30 minutos | 5 minutos | 2 horas |
-| `commandcode` | Command Code (`cmdc`) | deepseek/deepseek-v4.1-flash | 30 minutos | 5 minutos | 2 horas |
-| `fast` | Pi CLI | MiniMax-M3 | 3 minutos | N/A | 3 minutos |
-| `mcode` | MiniMax Code (`mcode`) | minimax/MiniMax-M3.1-Flash-Preview | 30 minutos | 5 minutos | 2 horas |
-| `kimi` | Kimi | (default del CLI) | 30 minutos | N/A | 2 horas |
-| `qwen` | Qwen | (default del CLI) | 30 minutos | N/A | 2 horas |
-| `antigravity` | Antigravity (`agy`) | gemini-4-argon-high | 30 minutos | 5 minutos | 2 horas |
+| `architecture` | Claude Code | opus | 60 min | 5 min | 240 min |
+| `antigravity-advisory` | Antigravity (`agy`) | gemini-4-argon-high | 60 min | 5 min | 240 min |
+| `deep-refactor` | Claude Code | sonnet | 60 min | 5 min | 240 min |
+| `coding` | Codex CLI | gpt-5.6-luna | 60 min | — | 240 min |
+| `cheap-explore` | OpenCode | MiniMax-M3 | 30 min | 5 min | 120 min |
+| `cheap-debug` | OpenCode | deepseek-v4-flash | 30 min | 5 min | 120 min |
+| `commandcode` | Command Code (`cmdc`) | deepseek/deepseek-v4.1-flash | 30 min | 5 min | 120 min |
+| `mcode` | MiniMax Code (`mcode`) | minimax/MiniMax-M3.1-Flash-Preview | 30 min | 5 min | 120 min |
+| `antigravity` | Antigravity (`agy`) | gemini-4-argon-high | 30 min | 5 min | 120 min |
+| `kimi` | Kimi | (default del CLI) | 30 min | — | — |
+| `qwen` | Qwen | (default del CLI) | 30 min | — | — |
+| `fast` | Pi CLI | MiniMax-M3 | 3 min | — | — |
 
-> Los perfiles de la flota por rol (`explore-*`, `consult-*`, `audit-*`, `work-*`…) **no** son
-> presets: viven solo en `~/.idu/profiles.json` y se instalan con `node scripts/install.mjs`.
+`—` significa que el perfil no declara ese techo: el único freno es el timeout total.
 
-**`replaceDefaults`.** Por defecto tu archivo se mezcla sobre los presets: los perfiles que no
-declares siguen apareciendo. Si quieres que tu archivo sea la lista completa, añade
-`"replaceDefaults": true` en la raíz de `~/.idu/profiles.json`.
+### Flota por rol (25)
 
-**El nombre de modelo es un pass-through opaco.** El arnés no lo valida ni normaliza: lo reenvía
-al CLI, que acepta lo que entienda. Para usar otro modelo, agrega un perfil — no hace falta tocar
+Lo que instala `scripts/install.mjs`. Cada perfil declara su `harness` y, cuando aplica, el
+`provider` que lo enruta.
+
+| Rol | Perfiles (CLI · modelo) |
+| :--- | :--- |
+| **Exploración** (3) | `explore-deepseek` (mcode · DeepSeek V4 Flash) · `explore-glm` (cmdc · GLM 5.3 Flash) · `explore-mimo` (opencode · MiMo 2.6 Flash) |
+| **Consultas** (4) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · MiMo 2.6 Pro) · `consult-claude` (claude · Opus) · `consult-gemini38` (agy · Gemini 3.8 Flash) |
+| **Arquitectura** (4) | `arch-claude` (claude · Opus) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-gemini` (agy · Gemini 4 Argon) · `arch-deepseek` (mcode · DeepSeek V4 Flash) |
+| **Diseño** (2) | `design-opencode` (opencode · DeepSeek V4 Flash) · `design-gentle` (gentle-shell · DeepSeek V4 Flash) |
+| **Iconografía** (2) | `iconographer` (mcode · GLM 5.3 Flash) · `iconographer-mimo` (opencode · MiMo 2.6 Flash) |
+| **Voz** (1) | `voice-narrator` (cmdc · GLM 5.3 Flash) |
+| **Música** (1) | `music-composer` (cmdc · GLM 5.3 Flash) |
+| **Auditoría** (5) | `audit-claude` (claude · Opus) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash) · `audit-mimo` (cmdc · MiMo 2.6 Pro) · `audit-minimax` (cmdc · MiniMax M3.1 Flash) |
+| **Trabajo** (3) | `work-glm` (gentle-shell · GLM 5.3 Flash `:high`) · `work-deepseek` (gentle-shell · DeepSeek V4 Flash `:high`) · `work-mimo` (gentle-shell · MiMo 2.6 Flash `:max`) |
+
+**El identificador de modelo es un pass-through opaco.** El arnés no lo valida ni normaliza: lo
+reenvía al CLI, que acepta lo que entienda. Por eso conviven formas distintas
+(`nan/glm5.3-flash`, `custom_provider:nan/deepseek-v4-flash`, `xiaomi/mimo-v2.6-pro`) según cómo
+exponga cada proveedor su catálogo. Para usar otro modelo, agrega un perfil — no hace falta tocar
 código.
+
+**El esfuerzo vive en el slug, no en un campo.** `work-glm` usa `glm5.3-flash:high`;
+`work-mimo`, `mimo-v2.6-flash:max`. No hay un campo `effort` en el perfil.
 
 **Inactividad vs. streaming.** `idleTimeoutMs` solo aplica a perfiles con `streams: true`. En un
 perfil sin streaming el único freno es el timeout total: si delegas tareas largas, añade
