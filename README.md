@@ -1,188 +1,198 @@
-# IDU Cross-CLI Agent Router & Quality Harness (v2.3.0)
+# IDU Cross-CLI — Agent Router & Quality Harness
 
-<a href="https://github.com/Gentleman-Programming/gentle-ai">
-  <img width="220" src="https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/docs/assets/brand/built-with-gentle-ai.png" alt="Built with Gentle-AI" />
-</a>
+<p>
+  <a href="https://github.com/Gentleman-Programming/gentle-ai">
+    <img width="200" src="https://raw.githubusercontent.com/Gentleman-Programming/gentle-ai/main/docs/assets/brand/built-with-gentle-ai.png" alt="Built with Gentle-AI" />
+  </a>
+</p>
 
-**IDU Cross-CLI (`idu-pi`)** es un arnés de orquestación que hace tres cosas:
+**IDU Cross-CLI (`idu-pi`)** orquesta terminales de IA reales. No es otro chat: es el arnés que
+decide **qué CLI, con qué modelo, bajo qué proceso** resuelve cada tarea, y que se niega a dar
+por bueno un cambio sin evidencia.
 
-1. **Delega** tareas a terminales reales (Claude Code, OpenCode, Codex, Pi, Antigravity, Kimi, Qwen, minimax Code, Command Code) mediante perfiles de costo/modelo, con sesiones reanudables y locks de concurrencia.
-2. **Audita** cada cambio con gates de calidad: `preflight` antes de tocar código, `postflight` contra el blast radius esperado, y un ledger duradero de decisiones.
-3. **Arbitra** decisiones autónomas (`idu-pi arbitrate`) con un motor de tres capas: Kev local en GPU, TypeSafe Jev en la nube, o fallback determinista Risk-First a costo cero.
+Hace tres cosas:
 
-Todo bajo la **ONE ORCHESTRATOR RULE**: un worker nunca vuelve a delegar. Ver [SECURITY.md](SECURITY.md) para el alcance real de esa guarda.
+1. **Delega** a terminales reales — Claude Code, OpenCode, Codex, Pi, Antigravity, Kimi, Qwen,
+   MiniMax Code y Command Code — con perfiles por rol, sesiones reanudables y locks de
+   concurrencia.
+2. **Audita** cada cambio: `preflight` antes de tocar código, `postflight` contra el blast radius
+   esperado, y un ledger durable de decisiones.
+3. **Arbitra** decisiones autónomas (`idu_arbitrate`) con un motor de tres capas: Kev local en
+   GPU, TypeSafe Jev en la nube, o fallback determinista Risk-First a costo cero.
 
----
-
-## 🎨 Diseño, iconografía y stack creativo
-
-El arnés tiene **dos roles dedicados a lo visual**, cada uno con alternativas en paralelo:
-
-| Rol | Perfiles | Qué produce |
-|---|---|---|
-| **Diseño** | `design-opencode` · `design-gentle` | Interfaces, HTML premium, motion y composición |
-| **Iconografía** | `iconographer` · `iconographer-mimo` | Sets de iconos SVG originales con la identidad del proyecto |
-
-Ambos roles escriben (`permissions: workspace`), pero acotados a su artefacto: el código
-central nunca se delega. El conocimiento vive en dos skills propias:
-
-| Ruta | Skill | Cuándo | Entrega |
-|---|---|---|---|
-| **A · Escena web** | `.agents/skills/kanagawa-html/` | UI, dashboards, benchmarks, reportes, texto/datos legibles | HTML premium con motion cinematográfico → PDF (print-to-pdf) o MP4 (HyperFrames) |
-| **B · Footage IA** | `.agents/skills/higgsfield-scene/` | Gente actuando, producto filmado, ambientes reales, emoción facial | Prompt de producción paste-ready (MCSLA + hook de 2s + sound layers) para Seedance/Higgsfield |
-
-La iconografía usa `.agents/skills/soul-icons/`: iconos dibujados desde la metáfora del
-producto, no pictogramas de librería.
-
-**Regla de decisión**: los modelos de video IA renderizan mal el texto y la UI — toda escena
-con datos legibles va por la ruta A (código, determinista, gratis); la ruta B es solo para
-lo que un modelo generativo debe crear. Proyectos híbridos usan ambas.
-
-### Qué garantiza la ruta A (kanagawa-html)
-
-- **Design system Gentleman Kanagawa**: paleta dark con ambient blur, partículas, tipografía Source Serif + Space Grotesk.
-- **Motion craft de films**: springs de forma cerrada (`stepR`), ease por rol, "entra lento sale limpio", motion personality Premium.
-- **Dataviz validado por script**: la paleta de gráficos (`KANAGAWA-CHART`) pasa los 5 checks de colorblind-safety con `validate_palette.js` — el color se calcula, no se elige.
-- **Motor de scroll-cámara propio** (ver [docs/idupi-showcase.html](docs/idupi-showcase.html)): scroll virtual con lerp + planos que viajan con scale — sin three.js, sin GSAP, sin dependencias.
-- **Export garantizado**: receta exacta de PDF (headless Chrome + `@media print`) y de MP4 (HyperFrames con composición determinista seek(t)).
-
-### Demo
-
-- [docs/idupi-showcase.html](docs/idupi-showcase.html) — la super-web: cámara de scroll, video del benchmark scrubable con springs, y el veredicto. Resultado canónico de la ruta A.
-- [docs/benchmark-harness-2026-10-30.html](docs/benchmark-harness-2026-10-30.html) — informe completo del benchmark (9 configuraciones, 3 pruebas).
-
-<details>
-<summary><strong>Historia del proyecto (purgas v2.1.0)</strong></summary>
-
-Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas, AgentLab, Plan
-Maestro y cron loops) fue retirado en dos pasos: primero en el commit `92f8380` y después con
-la purga de vestigios que borró los 15 perfiles de `config/profiles/` y los 14 scripts del
-cron `supervisor-tick` y de un solo uso que quedaban colgados. Su código está en el tag
-`legacy-archive-pre-purge` y ya no ocupa el árbol de trabajo. Ver `docs/architecture.md` para
-la arquitectura vigente.
-
-> **Nombre de la carpeta.** El repositorio se llama `idu-cross-cli` (mismo `name` de
-> `package.json`). Si tu clon todavía vive en un directorio llamado `pi-telegram-bridge`, es
-> un nombre histórico: renómbralo y actualiza la ruta absoluta que declara tu cliente MCP.
-
-</details>
+Todo bajo la **ONE ORCHESTRATOR RULE**: un worker nunca vuelve a delegar. El alcance real de esa
+guarda —y sus límites— está en [SECURITY.md](SECURITY.md).
 
 ---
 
-## Novedades en v2.3.0: flota por roles y gobernanza de agentes
+## Índice
 
-1. **Flota de agentes por rol**: los perfiles se organizan en seis roles (exploración,
-   consultas, arquitectura, diseño, iconografía, auditoría) con alternativas de CLI/modelo
-   por rol, para trabajar en paralelo y sobrevivir a límites de cuota.
-2. **`replaceDefaults`**: `~/.idu/profiles.json` puede declararse como la lista completa de
-   perfiles con `"replaceDefaults": true`. Por defecto sigue mezclando sobre los presets.
-3. **cmdc `--yolo` siempre en workers**: el modo print de Command Code bloquea
-   `shell_command` sin ese flag y abortaba el run con `permission_denied` incluso en perfiles
-   de solo lectura. La restricción de lectura queda en el prompt del worker.
-4. **Protocolo v2.3.0**: skill reescrita tras una auditoría cruzada de cuatro modelos
-   (Opus 5.5, Gemini 4 Argon, DeepSeek V4.1 y MiMo 2.6 Pro) — fronteras de rol explícitas,
-   gobernanza inequívoca, parámetros opcionales documentados y orden real del arbitraje.
-5. **Instalación de la skill en Antigravity**: el instalador ahora cubre
-   `~/.gemini/antigravity-cli/skills`, la ruta que `agy` lee de verdad.
-6. **Perfiles curados**: la instalación de referencia queda en 20 perfiles exactos (los de la
-   matriz), sin los 16 heredados de benchmarks.
+- [Instalación rápida](#instalación-rápida)
+- [Por qué existe](#por-qué-existe)
+- [Flota de agentes por rol](#flota-de-agentes-por-rol)
+- [Herramientas MCP](#herramientas-mcp)
+- [Perfiles de ejecución](#perfiles-de-ejecución)
+- [Memoria compartida (Engram)](#memoria-compartida-engram)
+- [Stack creativo](#stack-creativo-diseño-iconos-voz-y-música)
+- [Configuración en clientes MCP](#configuración-en-clientes-mcp)
+- [Comandos CLI](#comandos-cli)
+- [Pruebas y construcción](#pruebas-y-construcción)
+- [Gobernanza](#gobernanza)
+- [Documentación](#documentación)
 
 ---
 
-## Novedades en v2.1.0: Watchdog Adaptativo, Tareas Largas y Resiliencia
+## Instalación rápida
 
-1. **Watchdog Adaptativo por Inactividad (Sliding Window)**:
-   - Supera el límite ciego de `setTimeout`. Monitorea en tiempo real el streaming de `stdout`/`stderr` (`idleTimeoutMs`, `lastActivityAt`, `bytesEmitted`).
-   - El worker **nunca se interrumpe** mientras siga razonando o emitiendo actividad.
-   - En caso de corte o interrupción, preserva la salida parcial (`partial: true`), el error exacto y el `resumeHint` con el identificador de sesión.
+### Requisitos
 
-2. **Techos Extendidos (Hasta 4 Horas o Ilimitado con Sentinel `0`)**:
-   - Soporta tareas de refactorización y análisis profundo de 30 a 60 minutos o más.
-   - Techos configurables por perfil (`hardCapMs`), con soporte para `hardCapMs = 0` (techo desactivado).
+| Requisito | Versión | Nota |
+| :--- | :--- | :--- |
+| **Node.js** | ≥ 24 | Campo `engines` del `package.json` |
+| **pnpm** | 11.x | Se activa con `corepack` |
+| **Al menos un CLI de IA** | — | El arnés detecta cuáles tienes; no exige ninguno |
 
-3. **Terminación Confiable de Procesos en Windows (`killProcessTree`)**:
-   - Ejecución de `taskkill /PID <pid> /T /F` en Windows (`win32`).
-   - Elimina en árbol los wrappers por lotes (`cmd.exe`), `node.exe` y los binarios hijos del CLI sin dejar procesos zombies o huérfanos.
+### Pasos
 
-4. **Nueva Herramienta MCP `idu_worker_wait`**:
-   - Permite a los clientes MCP esperar la finalización de workers asíncronos con tiempo de espera configurable.
-   - **Garantía no destructiva**: si el timeout del cliente expira, el worker continúa ejecutándose en el sistema operativo en segundo plano.
+```bash
+# 1. Clonar
+git clone https://github.com/Wladimirfn/IDU-PI.git
+cd IDU-PI
 
-5. **Tríada de Sesiones Cross-CLI (`Session Triad`) y Bloqueos Concurrenciales**:
-   - Soporte nativo para `--session-id`, `--resume` y `--fork` en Claude, OpenCode y Pi.
-- **Afinidad de harness al reanudar:** sin `--profile`, la sesión hereda el suyo en vez de caer al
-  default global. Con un `--profile` de otro harness, la operación se rechaza antes de arrancar;
-  `--force` la permite asumiendo que se pierde la continuidad nativa.
-- **Turnos transaccionales:** solo los runs completados incrementan `turnCount` y fijan
-  `nativeSessionId`. Un run fallido queda registrado en `runs` para auditoría, pero no cuenta como
-  turno.
-   - Bloqueo atómico contra ejecuciones concurrentes en la misma sesión (`acquireSessionLock`) con validación de PID y protección contra eliminación foránea.
+# 2. Activar pnpm y compilar
+corepack enable
+pnpm install
+pnpm build
 
-6. **Integración Corregida con Codex CLI**:
-   - Soporte directo de `codex exec` con los flags oficiales `--dangerously-bypass-approvals-and-sandbox` y `--json`.
+# 3. Instalar la configuración en tu home
+node scripts/install.mjs
 
-7. **Evaluación Multirepositorio (`idu_preflight` & `idu_postflight`)**:
-   - Soporte total para `working_dir` y `cwd`. Permite auditar repositorios y proyectos externos sin falsear la ruta hacia el directorio de IDU.
+# 4. Verificar qué detectó
+pnpm run cli status
+```
+
+`scripts/install.mjs` escribe `~/.idu/config.json` y `~/.idu/profiles.json`, y **detecta qué CLIs
+tienes instalados**. Los que no estén simplemente no aparecen: no hay que configurar nada a mano.
+
+### Conectar el servidor MCP
+
+El arnés expone sus herramientas por MCP. Cada cliente necesita la **ruta absoluta** a
+`dist/src/mcp-server.js` — un path relativo resuelve contra el cwd del cliente, que no es el del
+proyecto.
+
+```jsonc
+// ~/.config/opencode/opencode.jsonc  (equivalente en tu cliente)
+{
+  "mcp": {
+    "idu-pi": {
+      "type": "local",
+      "command": ["node", "/ruta/absoluta/a/IDU-PI/dist/src/mcp-server.js"],
+      "cwd": "/ruta/absoluta/a/IDU-PI",
+      "enabled": true,
+      "timeout": 1800
+    }
+  }
+}
+```
+
+> **OpenCode y tareas largas.** Añade `"experimental": { "mcp_timeout": 1800000 }` en
+> `~/.config/opencode/opencode.json`, o OpenCode cancelará las llamadas MCP que pasen de dos
+> minutos.
+
+Otros clientes: [docs/mcp-server.md](docs/mcp-server.md).
+
+### Verificar la instalación
+
+```bash
+pnpm run verify
+```
+
+Compila, corre la suite y comprueba que no haya deriva entre el protocolo documentado y el
+código. Si pasa, el arnés está sano.
 
 ---
 
-## Catálogo de Herramientas MCP (`dist/src/mcp-server.js`)
+## Por qué existe
 
-El servidor expone **14 herramientas de alto impacto** optimizadas para mínimo consumo de contexto:
+Cada CLI trae su propio **arnés** — reglas, memoria, permisos y contratos distintos — y eso
+cambia el resultado con el mismo modelo. En el benchmark interno, la misma tarea con el mismo
+modelo tardó **28,5 s en un arnés y 64,3 s en otro**, con los mismos 13/13 tests.
 
-| Herramienta | Descripción |
+| CLI | Arnés propio | Lo que aporta de verdad |
+| :--- | :--- | :--- |
+| **gentle-shell** | ODD + RDD (Judgment Day) | Especificación con requisitos numerados, tareas con evidencia RED/GREEN, **4 lentes de revisión** más refutador |
+| **cmdc** (Command Code) | Taste + mods + statusline | Aprende el estilo del proyecto; mods propios; MCP nativo |
+| **mcode** (MiniMax Code) | Herramientas propias + nativos | `mcode-tools`, binarios nativos, preview de imágenes |
+| **opencode** | Subagentes declarados en JSON | Agentes con contrato de idioma; CodeGraph obligatorio |
+| **claude** (Claude Code) | CLAUDE.md + hooks + subagentes | Persona estricta, CodeGraph primero, ~20 subagentes |
+| **agy** (Antigravity) | CLI nativo | Sin capa de arnés configurable |
+
+**La tesis:** ningún modelo gana en todo, y el arnés pesa más que el modelo. En vez de elegir
+uno, el sistema asigna cada tarea al arnés que la resuelve mejor y los hace trabajar sobre una
+memoria común.
+
+---
+
+## Flota de agentes por rol
+
+Los perfiles se agrupan por **rol**, no por CLI. Cada rol ofrece entre 2 y 5 alternativas para
+lanzar agentes en paralelo o cambiar de modelo según la tarea y la cuota.
+
+| Rol | Perfiles | Escribe |
+| :--- | :--- | :---: |
+| **Exploración** | `explore-deepseek` · `explore-glm` · `explore-mimo` | No |
+| **Consultas** | `consult-openai` · `consult-mimo` · `consult-claude` · `consult-gemini38` | No |
+| **Arquitectura** | `arch-claude` · `arch-sol` · `arch-gemini` · `arch-deepseek` | No |
+| **Diseño** | `design-opencode` · `design-gentle` | Sí (assets) |
+| **Iconografía** | `iconographer` · `iconographer-mimo` | Sí (assets) |
+| **Voz** | `voice-narrator` | Sí (assets) |
+| **Música** | `music-composer` | Sí (assets) |
+| **Auditoría** | `audit-claude` · `audit-gemini` · `audit-deepseek` · `audit-mimo` · `audit-minimax` | No |
+| **Trabajo** | `work-glm` · `work-deepseek` · `work-mimo` | Sí (código) |
+
+Los roles read-only no editan nada: su garantía está en el prompt del worker, no en un flag.
+
+**El esfuerzo vive en el slug del modelo**, no en un campo del perfil: `glm5.3-flash:high`,
+`mimo-v2.6-flash:max`.
+
+---
+
+## Herramientas MCP
+
+El servidor de `dist/src/mcp-server.js` expone **14 herramientas** optimizadas para mínimo
+consumo de contexto:
+
+| Herramienta | Qué hace |
 | :--- | :--- |
-| `idu_status` | Estado del workspace actual, rama Git, cambios en el árbol y salud del sistema. |
-| `idu_project_status` | Alias de compatibilidad para consultar el estado del proyecto. |
-| `idu_preflight` | Evaluación de riesgo, tree sucio e impacto antes de tocar código en `working_dir`. |
-| `idu_postflight` | Verificación post-edición: diffs reales vs esperados y blast radius en `working_dir`. |
-| `idu_decision_record` | Registra una decisión técnica, de arquitectura o de gobernanza en el ledger duradero. |
-| `idu_decision_list` | Consulta y filtra el historial de decisiones auditables. |
-| `idu_delegate` | Lanza un worker terminal real bajo un perfil configurado con `IDU_WORKER=true`. Un worker que vuelve a delegar por esta vía recibe un error. La guarda se apoya solo en la identidad de worker, y esa identidad la declara el propio worker: es una convención, no una frontera. Ver [SECURITY.md](SECURITY.md). |
-| `idu_delegate_parallel` | Lanza múltiples workers concurrentemente en paralelo. |
-| `idu_worker_status` | Monitorea en tiempo real estado, telemetría (`elapsedMs`, `health`, actividad) y logs. |
-| `idu_worker_wait` | Espera de forma síncrona/reactiva la finalización de un worker sin matarlo si expira. |
-| `idu_worker_result` | Recupera la salida completa estructurada, diffs y reporte del worker. |
-| `idu_session_list` | Lista las sesiones activas o históricas con su CLI, timestamp y bloqueo. |
-| `idu_capabilities` | Informa los perfiles disponibles en `~/.idu/profiles.json` y CLIs detectados. Con `include_quota: true` agrega además la cuota de cada cuenta, leyendo lo que el propio CLI reporta. |
-| `idu_arbitrate` | Arbitraje autónomo de decisiones: evalúa opciones candidatas vía Kev local (GPU), TypeSafe Jev (nube) o fallback determinista Risk-First, con confianza calibrada y escalado a humano por umbral. |
+| `idu_status` | Workspace, rama Git, árbol sucio y salud del sistema |
+| `idu_project_status` | Alias de compatibilidad de `idu_status` |
+| `idu_preflight` | Riesgo, tree sucio e impacto antes de tocar código |
+| `idu_postflight` | Diffs reales vs esperados y blast radius después de editar |
+| `idu_decision_record` | Registra una decisión en el ledger durable |
+| `idu_decision_list` | Consulta el historial de decisiones |
+| `idu_delegate` | Lanza un worker terminal bajo un perfil |
+| `idu_delegate_parallel` | Lanza varios workers concurrentemente |
+| `idu_worker_status` | Estado, telemetría y logs en tiempo real |
+| `idu_worker_wait` | Espera sin matar el worker si el timeout del cliente expira |
+| `idu_worker_result` | Salida completa, diffs y reporte |
+| `idu_session_list` | Sesiones con su CLI, timestamp y bloqueo |
+| `idu_capabilities` | Perfiles disponibles y CLIs detectados (+ cuota con `include_quota`) |
+| `idu_arbitrate` | Arbitraje autónomo: Kev GPU → Jev nube → fallback determinista |
 
 ---
 
-## Flota de agentes por rol (v2.3.0)
+## Perfiles de Ejecución
 
-Los perfiles de una instalación curada se agrupan por **rol**, no por CLI. Cada rol ofrece
-2–5 alternativas para que el orquestador pueda lanzar agentes **en paralelo** (exploración
-simultánea, auditorías cruzadas) o cambiar de modelo según la tarea o la cuota disponible.
-
-| Rol | Perfiles (CLI · modelo) |
-| :--- | :--- |
-| **Exploración** (read-only) | `explore-deepseek` (mcode · DeepSeek V4 Flash) · `explore-glm` (cmdc · GLM 5.3 Flash) · `explore-mimo` (opencode · MiMo 2.6 Flash) |
-| **Consultas** (read-only) | `consult-openai` (cmdc · GPT-6.1 Terra high) · `consult-mimo` (cmdc · MiMo 2.6 Pro max) · `consult-claude` (claude · Opus 5.5 high) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
-| **Arquitectura** (read-only) | `arch-claude` (claude · Opus 5.5 high) · `arch-sol` (cmdc · GPT-6.1 Sol high) · `arch-gemini` (agy · Gemini 4 Argon high) · `arch-deepseek` (mcode · DeepSeek V4 Flash max) |
-| **Diseño** (workspace) | `design-opencode` (opencode · DeepSeek V4 Flash) · `design-gentle` (gentle-shell · DeepSeek V4 Flash) |
-| **Iconografía** (workspace) | `iconographer` (mcode · GLM 5.3 Flash) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max) |
-| **Auditoría** (read-only) | `audit-claude` (claude · Opus 5.5) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash max) · `audit-mimo` (cmdc · MiMo 2.6 Pro max) · `audit-minimax` (cmdc · MiniMax M3.1 Flash) |
-
-**Gobernanza de la flota:** modificar un perfil existente (modelo, proveedor, descripción) es
-libre; **crear** un rol o un perfil nuevo requiere aprobación explícita del usuario. El
-`effort` no es un campo del perfil: vive en la configuración de cada CLI.
-
-**Arbitraje:** `idu_arbitrate` elige entre alternativas ya formuladas (Kev local → Jev nube →
-fallback determinista) sin lanzar un CLI. No es un rol de perfiles.
-
----
-
-## Perfiles de Ejecución (`~/.idu/profiles.json`)
-
-Los perfiles no están fijados en el repo: se cargan desde `~/.idu/profiles.json`, que **mergea
-sobre** los presets del proyecto. Para ver los perfiles efectivos de tu máquina:
+Los perfiles viven en `~/.idu/profiles.json` y **mergean sobre** los presets del proyecto. Para
+ver los efectivos de tu máquina:
 
 ```bash
 pnpm run cli capabilities
 ```
 
-| Perfil | CLI | Modelo | Timeout Trabajo | Inactividad (Idle) | Techo Máximo |
+### Presets del proyecto
+
+| Perfil | CLI | Modelo | Trabajo | Inactividad | Techo máximo |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `architecture` | Claude Code | opus | 1 hora | 5 minutos | 4 horas |
 | `antigravity-advisory` | Antigravity (`agy`) | gemini-4-argon-high | 1 hora | 5 minutos | 4 horas |
@@ -192,93 +202,138 @@ pnpm run cli capabilities
 | `cheap-debug` | OpenCode | deepseek-v4-flash | 30 minutos | 5 minutos | 2 horas |
 | `commandcode` | Command Code (`cmdc`) | deepseek/deepseek-v4.1-flash | 30 minutos | 5 minutos | 2 horas |
 | `fast` | Pi CLI | MiniMax-M3 | 3 minutos | N/A | 3 minutos |
-| `mcode` | minimax Code (`mcode`) | minimax/MiniMax-M3.1-Flash-Preview | 30 minutos | 5 minutos | 2 horas |
+| `mcode` | MiniMax Code (`mcode`) | minimax/MiniMax-M3.1-Flash-Preview | 30 minutos | 5 minutos | 2 horas |
 | `kimi` | Kimi | (default del CLI) | 30 minutos | N/A | 2 horas |
 | `qwen` | Qwen | (default del CLI) | 30 minutos | N/A | 2 horas |
 | `antigravity` | Antigravity (`agy`) | gemini-4-argon-high | 30 minutos | 5 minutos | 2 horas |
 
-**El nombre del modelo es un pass-through opaco.** El arnés no lo valida ni lo normaliza: lo
-reenvía al CLI subyacente, que acepta cualquier identificador que entienda. Para usar un
-modelo distinto, agregá un perfil a `~/.idu/profiles.json` — no hace falta tocar código.
+> Los perfiles de la flota por rol (`explore-*`, `consult-*`, `audit-*`, `work-*`…) **no** son
+> presets: viven solo en `~/.idu/profiles.json` y se instalan con `node scripts/install.mjs`.
 
-> **Flota curada: `replaceDefaults`.** Por defecto tu archivo se mezcla **sobre** los presets
-> del proyecto, así que los perfiles que no declares siguen apareciendo. Si querés que tu
-> archivo sea la lista completa, agregá `"replaceDefaults": true` al nivel raíz de
-> `~/.idu/profiles.json`; los presets internos dejan de inyectarse.
+**`replaceDefaults`.** Por defecto tu archivo se mezcla sobre los presets: los perfiles que no
+declares siguen apareciendo. Si quieres que tu archivo sea la lista completa, añade
+`"replaceDefaults": true` en la raíz de `~/.idu/profiles.json`.
 
-> **Inactividad vs. streaming.** La columna "Inactividad" solo aplica a perfiles con
-> `streams: true`. En un perfil sin streaming, el único freno es el timeout total: el daemon no
-> corta por silencio aunque se declare `idleTimeoutMs`. Si delegás tareas largas a un perfil
-> así, sumale `streams: true` al perfil.
+**El nombre de modelo es un pass-through opaco.** El arnés no lo valida ni normaliza: lo reenvía
+al CLI, que acepta lo que entienda. Para usar otro modelo, agrega un perfil — no hace falta tocar
+código.
 
----
+**Inactividad vs. streaming.** `idleTimeoutMs` solo aplica a perfiles con `streams: true`. En un
+perfil sin streaming el único freno es el timeout total: si delegas tareas largas, añade
+`streams: true`.
 
-## Configuración en Clientes MCP
-
-### OpenCode (`~/.config/opencode/opencode.json` y `opencode.jsonc`)
-
-Para evitar que OpenCode cancele llamadas de herramientas MCP en tareas largas que tarden más de 2 minutos, configura:
-
-En `~/.config/opencode/opencode.json`:
-```json
-{
-  "experimental": {
-    "mcp_timeout": 1800000
-  }
-}
-```
-
-En `~/.config/opencode/opencode.jsonc`:
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "idu-pi": {
-      "type": "local",
-      "command": [
-        "node",
-        "/ruta/absoluta/al/repo/dist/src/mcp-server.js"
-      ],
-      "cwd": "/ruta/absoluta/al/repo",
-      "enabled": true,
-      "timeout": 1800
-    }
-  }
-}
-```
-
-Usá la **ruta absoluta**: un path relativo resuelve contra el cwd del cliente MCP, que no es el
-del proyecto. Antes de conectar, compilá con `pnpm build` — `dist/` no está versionado.
-
-Otras clientes: `docs/mcp-server.md`.
+Techos por perfil: `timeoutMs` (trabajo), `idleTimeoutMs` (silencio), `hardCapMs` (techo duro;
+`0` lo desactiva).
 
 ---
 
-## Comandos CLI Directos
+## Memoria compartida (Engram)
 
-El arnés puede ejecutarse directamente desde terminal:
+[Engram](https://github.com/Gentleman-Programming/engram) es el pegamento de la flota: un
+binario Go con SQLite + FTS5 que da **una sola memoria a todos los agentes**, expuesta por MCP.
+
+- **Curado, no volcados.** Guarda resúmenes y decisiones, no salidas crudas de herramientas.
+- **Sobrevive a la compactación.** Antes de que el contexto se reinicie, el protocolo empuja un
+  resumen; la sesión siguiente lo recupera.
+- **Un cerebro, muchos agentes.** Pi, Claude Code, OpenCode, Codex, Antigravity, Cursor, Windsurf
+  y Command Code leen y escriben el mismo store.
 
 ```bash
-# Ver estado del sistema y CLIs instalados
-pnpm run cli status
+engram mcp --tools=agent    # herramientas por stdio
+engram tui                  # explorar sesiones, observaciones y proyectos
+```
 
-# Ver capacidades y perfiles en JSON
-pnpm run cli capabilities
+Añádelo junto a `idu-pi` en tu `mcp.json`:
 
-# Ejecutar preflight sobre una tarea en un repositorio específico
-pnpm run cli preflight "Refactorizar autenticación" --cwd "C:/ruta/al/proyecto"
+```json
+{
+  "mcpServers": {
+    "engram": { "transport": "stdio", "command": "engram", "args": ["mcp", "--tools=agent"] }
+  }
+}
+```
 
-# Delegar directamente a un worker desde la terminal
-pnpm run cli delegate "Auditar arquitectura del módulo IoT" --profile architecture
+**Por qué importa:** un worker de gentle-shell guarda una decisión y uno de cmdc la recupera sin
+que el orquestador tenga que repetirla en el prompt. La memoria no es del modelo: es del sistema.
 
-# Arbitrar una decisión autónoma (Kev local -> Jev cloud -> fallback determinista)
-pnpm run cli arbitrate --option "opt_a:Escanear deuda tecnica" --option "opt_b:Refactorizar modulo X" --state "Estado actual del sprint"
+---
 
-# Esperar en silencio a un worker lanzado con async
+## Stack creativo: diseño, iconos, voz y música
+
+Cuatro roles producen artefactos visuales y de audio. Todos escriben, pero acotados a su
+artefacto: **el código central nunca se delega**.
+
+| Rol | Skill | Qué produce |
+| :--- | :--- | :--- |
+| **Diseño** | `kanagawa-html` | UI, dashboards, benchmarks, reportes → PDF o MP4 |
+| **Iconografía** | `soul-icons` | Sets SVG dibujados desde la metáfora del producto |
+| **Voz** | `voice-narration` | Narración por escena con voicebox (Kokoro / Chatterbox) |
+| **Música** | `music-composition` | Banda sonora compuesta por IA (Lofi Live AI) |
+
+### Regla de decisión visual
+
+Los modelos de video generativo renderizan mal el texto y la UI. Por eso:
+
+- **Escena con datos legibles → código** (`kanagawa-html`): determinista, gratis, exportable.
+- **Gente, producto filmado, emoción facial → footage IA** (`higgsfield-scene`).
+- **Proyectos híbridos** usan ambas rutas.
+
+### Qué garantiza la ruta de código
+
+- **Design system Kanagawa**: paleta dark, ambient blur, partículas, serif + grotesk.
+- **Motion craft de films**: springs de forma cerrada, ease por rol, "entra lento sale limpio".
+- **Dataviz validado por script**: la paleta de gráficos pasa los 5 checks de colorblind-safety
+  con `validate_palette.js`. El color se calcula, no se elige.
+- **Export determinista**: receta de PDF (headless Chrome + `@media print`) y de MP4 (HyperFrames
+  con `seek(t)` puro, sin `Math.random` ni `requestAnimationFrame` como reloj).
+
+### Puerta de validación de audio
+
+Los videos con narración tienen un validador ejecutable que **se niega a aprobar** lo que no
+cumple:
+
+```bash
+python validar_video_audio.py --proyecto /ruta/al/video
+```
+
+Comprueba, por clip: duración declarada vs real, solapes entre voces, chasquidos de cierre y
+colas audibles. Y sobre la música: que cubra el film y que exista la partitura que prueba la
+autoría IA. **Código de salida 1 = no renderizar.**
+
+### Demo
+
+- [docs/idupi-showcase.html](docs/idupi-showcase.html) — la super-web: cámara de scroll, video del
+  benchmark scrubable, veredicto.
+- [docs/benchmark-harness-2026-10-30.html](docs/benchmark-harness-2026-10-30.html) — informe del
+  benchmark (9 configuraciones, 3 pruebas).
+
+---
+
+## Configuración en clientes MCP
+
+| Cliente | Archivo | Nota |
+| :--- | :--- | :--- |
+| OpenCode | `~/.config/opencode/opencode.jsonc` | Añadir `mcp_timeout` en `opencode.json` |
+| Claude Code | `~/.claude/settings.json` | — |
+| Command Code | `~/.commandcode/mcp.json` | — |
+| Codex | `~/.codex/config.toml` | — |
+| Antigravity | `~/.gemini/antigravity-cli/skills` | El instalador cubre esta ruta |
+
+Detalle completo: [docs/mcp-server.md](docs/mcp-server.md).
+
+---
+
+## Comandos CLI
+
+```bash
+pnpm run cli status                 # CLIs detectados y salud
+pnpm run cli capabilities           # perfiles en JSON
+pnpm run cli capabilities --quota   # añade la cuota de cada cuenta
+pnpm run cli preflight "tarea" --cwd "C:/ruta/proyecto"
+pnpm run cli delegate "auditar X" --profile audit-claude
+pnpm run cli arbitrate --option "a:desc" --option "b:desc" --state "contexto"
 node dist/src/cli.js wait <run_id> --timeout 540000
-
-# Iniciar el servidor MCP por stdio
-pnpm run mcp
+pnpm run mcp                        # servidor MCP por stdio
 ```
 
 `preflight` acepta `--cwd` (o `--working-dir`) y `--expected-files a,b`. Sin `--cwd` audita el
@@ -286,46 +341,108 @@ directorio actual.
 
 ---
 
-## Pruebas y Construcción
+## Pruebas y construcción
 
 ```bash
-# Compilar TypeScript
-pnpm run build
-
-# Ejecutar suite de pruebas unitarias
-pnpm test
-
-# Suite completa + guardas de deriva e higiene del repo
-pnpm run verify
+pnpm run build          # compilar TypeScript
+pnpm test               # suite unitaria aislada
+pnpm run verify         # suite + guardas de deriva e higiene
 ```
 
 | Script | Qué comprueba |
 | :--- | :--- |
-| `pnpm test` | 150 pruebas unitarias contra un `IDU_HOME` temporal: arnés cross-cli, ciclo de vida de procesos, locks, watchdog, motor de arbitraje, contrato de las 14 herramientas MCP y capa de cuota. |
-| `pnpm run test:guarded` | La misma suite envuelta en `scripts/run-tests-with-leak-guard.mjs`, que falla si los tests dejan archivos nuevos en el temp. |
-| `pnpm run test:protocol-drift` | Que el SKILL.md del protocolo documente exactamente las 14 herramientas canónicas, sin fantasmas. |
-| `pnpm run test:repo-hygiene` | Que las pruebas no filtren estado a la raíz del repo. |
-| `pnpm run test:unisolated` | La misma suite **sin** aislamiento, escribiendo en tu `~/.idu` real. Existe para reproducir un fallo en condiciones contaminated, no para uso normal. |
+| `pnpm test` | Suite completa contra un `IDU_HOME` temporal: arnés cross-cli, ciclo de vida, locks, watchdog, arbitraje, contrato de las 14 herramientas y capa de cuota |
+| `pnpm run test:guarded` | La misma suite, fallando si los tests dejan archivos en el temp |
+| `pnpm run test:protocol-drift` | Que el SKILL.md documente exactamente las 14 herramientas canónicas |
+| `pnpm run test:protocol-params` | Que los parámetros documentados existan en el código |
+| `pnpm run test:protocol-install` | Que el instalador de la skill esté correcto |
+| `pnpm run test:repo-hygiene` | Que las pruebas no filtren estado a la raíz del repo |
 
 ### `IDU_HOME`
 
-Todo el estado que idu-pi guarda —ledger de decisiones, caché de cuota, árbol de sesiones,
-locks y logs— vive bajo `~/.idu`. `IDU_HOME` permite apuntar esa raiz a otro lado:
+Todo el estado —ledger de decisiones, caché de cuota, árbol de sesiones, locks y logs— vive bajo
+`~/.idu`. `IDU_HOME` redirige esa raíz:
 
 ```bash
 IDU_HOME=/tmp/idu-sandbox pnpm run cli -- status
 ```
 
-`pnpm test` la usa siempre, contra un directorio temporal que se borra al terminar. Sin eso,
-una corrida de tests escribia en tu ledger real: se acumulaban entradas `test-proj` con la
-decision `"Use lean MCP server"`, una por corrida, y cada una consumia un id, asi que la
-numeracion nunca mostraba el hueco.
+`pnpm test` la usa siempre, contra un directorio temporal. Sin eso, cada corrida escribía en tu
+ledger real y la numeración de decisiones mostraba huecos.
 
-Ojo con el alcance: `IDU_HOME` cubre `~/.idu` y nada mas. Los auth stores de los CLIs
-(`~/.codex/auth.json`, `~/.commandcode/auth.json`) viven fuera y no se pueden redirigir, asi
-que aislar el home de idu-pi no evita que una sonda de cuota en vivo lea una credencial real.
-Para eso esta `include_quota`, que es opt-in y ademas pasa por la cache de 10 minutos.
+**Alcance:** `IDU_HOME` cubre `~/.idu` y nada más. Los auth stores de los CLIs
+(`~/.codex/auth.json`, `~/.commandcode/auth.json`) viven fuera y no se pueden redirigir. Por eso
+`include_quota` es opt-in y pasa por una caché de 10 minutos.
 
-La suite completa pasa al 100% y cubre el arnés cross-cli, el ciclo de vida de procesos, el
-aislamiento de locks, el watchdog de timeouts, el motor de arbitraje, el contrato de las 14
-herramientas MCP y la ausencia de drift entre este README y los perfiles reales del código.
+---
+
+## Gobernanza
+
+| Regla | Alcance |
+| :--- | :--- |
+| **Modificar un perfil existente** | Libre: modelo, proveedor, descripción |
+| **Crear un rol o perfil nuevo** | Requiere aprobación explícita del usuario |
+| **Escalar un rol** | Añadir otra alternativa CLI/modelo **dentro** del rol, nunca un rol nuevo |
+| **Un worker no delega** | Convención, no frontera: la identidad la declara el propio worker |
+| **Rama protegida** | Issue + rama `feat/` o `fix/` + PR con label + CI verde |
+
+El protocolo operativo completo está en
+[.agents/skills/idu-pi-parent-protocol/SKILL.md](.agents/skills/idu-pi-parent-protocol/SKILL.md).
+
+---
+
+## Documentación
+
+| Documento | Contenido |
+| :--- | :--- |
+| [AGENTS.md](AGENTS.md) | Puntero de entrada para cualquier orquestador |
+| [SECURITY.md](SECURITY.md) | Alcance real de la ONE ORCHESTRATOR RULE y sus límites |
+| [docs/architecture.md](docs/architecture.md) | Arquitectura vigente |
+| [docs/mcp-server.md](docs/mcp-server.md) | Configuración por cliente |
+| [openspec/](openspec/) | Intención canónica: propuestas, specs y criterios de aceptación |
+
+---
+
+<details>
+<summary><strong>Historia del proyecto</strong></summary>
+
+Todo el código heredado previo (bot de Telegram, 78 herramientas obsoletas, AgentLab, Plan
+Maestro y cron loops) fue retirado en dos pasos: el commit `92f8380` y la purga de vestigios que
+borró los 15 perfiles de `config/profiles/` y los 14 scripts del cron `supervisor-tick`. Su
+código vive en el tag `legacy-archive-pre-purge` y ya no ocupa el árbol de trabajo.
+
+> **Nombre de la carpeta.** El repositorio se llama `idu-cross-cli` (mismo `name` del
+> `package.json`). Si tu clon todavía vive en un directorio llamado `pi-telegram-bridge`, es un
+> nombre histórico: renómbralo y actualiza la ruta absoluta de tu cliente MCP.
+
+</details>
+
+<details>
+<summary><strong>Novedades v2.3.0</strong></summary>
+
+1. **Flota por roles**: perfiles agrupados en nueve roles con alternativas por rol.
+2. **`replaceDefaults`**: `~/.idu/profiles.json` puede declararse como la lista completa.
+3. **cmdc `--yolo` siempre**: en modo print, Command Code bloquea `shell_command` sin ese flag y
+   abortaba el run con `permission_denied` incluso en perfiles read-only.
+4. **Protocolo v2.3.0**: skill reescrita tras auditoría cruzada de cuatro modelos — fronteras de
+   rol explícitas, gobernanza inequívoca y orden real del arbitraje.
+5. **Instalación en Antigravity**: el instalador cubre `~/.gemini/antigravity-cli/skills`.
+6. **Perfiles curados**: instalación de referencia sin los 16 heredados de benchmarks.
+
+</details>
+
+<details>
+<summary><strong>Novedades v2.1.0</strong></summary>
+
+1. **Watchdog adaptativo por inactividad**: monitorea el streaming de `stdout`/`stderr`; el
+   worker nunca se corta mientras siga emitiendo actividad. Preserva salida parcial y `resumeHint`.
+2. **Techos extendidos**: hasta 4 horas por perfil, o ilimitado con `hardCapMs = 0`.
+3. **Terminación de procesos en Windows**: `taskkill /PID /T /F` elimina el árbol completo sin
+   dejar procesos huérfanos.
+4. **`idu_worker_wait`**: espera asíncrona no destructiva.
+5. **Tríada de sesiones**: `--session-id`, `--resume` y `--fork` con afinidad de harness y turnos
+   transaccionales.
+6. **Codex CLI**: `codex exec --dangerously-bypass-approvals-and-sandbox --json`.
+7. **Evaluación multirepositorio**: `working_dir`/`cwd` en preflight y postflight.
+
+</details>

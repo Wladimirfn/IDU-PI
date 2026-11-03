@@ -86,6 +86,8 @@ the effective list as authoritative — if a profile is not there, it is not del
 | Arquitectura (read-only) | `arch-claude` (claude · Opus 5.5 high) · `arch-sol` (opencode · GPT-6.1 Sol high) · `arch-gemini` (agy · Gemini 4 Argon high) · `arch-deepseek` (mcode · DeepSeek V4 Flash max) |
 | Diseño (workspace assets) | `design-opencode` (opencode · DeepSeek V4 Flash nan) · `design-gentle` (gentle-shell · DeepSeek V4 Flash nan) |
 | Iconografía (workspace assets, parallel) | `iconographer` (mcode · GLM 5.3 Flash nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max) |
+| Voz (workspace assets) | `voice-narrator` (commandcode · GLM 5.3 Flash nan) — narra guiones con voicebox |
+| Música (workspace assets) | `music-composer` (commandcode · GLM 5.3 Flash nan) — compone con Lofi Live AI |
 | Auditoría (read-only, cross) | `audit-claude` (claude · Opus 5.5 high) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash max) · `audit-mimo` (cmdc · MiMo 2.6 Pro max) · `audit-minimax` (cmdc · MiniMax M3.1 Flash high) |
 | **Trabajo / implementación** (workspace) | `work-glm` (gentle-shell · GLM 5.3 Flash high) · `work-deepseek` (gentle-shell · DeepSeek V4.1 Flash high) · `work-mimo` (gentle-shell · MiMo 2.6 Flash max) |
 
@@ -104,9 +106,11 @@ Role boundaries:
 - **Consultas** answers a specific technical question. No edits, no artifact.
 - **Arquitectura** reviews design, interfaces and blast radius. No edits.
 - **Auditoría** produces an adversarial review of existing work. No edits.
-- **Diseño / Iconografía** produce bounded visual or SVG artifacts (workspace). These are
-  the only roles allowed to write, and only inside their asset scope. Core code is never
-  delegated.
+- **Diseño / Iconografía / Voz / Música** produce bounded visual, SVG or audio artifacts
+  (workspace). These are the only roles allowed to write, and only inside their asset
+  scope. Core code is never delegated. Voz and Música drive local engines (voicebox on
+  `127.0.0.1:17493`, Lofi Live AI on `127.0.0.1:5180`); see the `voice-narration` and
+  `music-composition` skills for the exact calls.
 - **Trabajo** implements code in the workspace. It is the exception to the
   orchestrator-owns-coding rule: use it when the user asks for parallel implementation, or
   when a self-contained task is better isolated in a worker. The orchestrator still reviews
@@ -145,6 +149,26 @@ Role boundaries:
 - **cmdc read-only workers still get `--yolo`** (idu-pi always passes it), because print
   mode blocks `shell_command` otherwise and a blocked tool aborts the whole run. The
   read-only guarantee comes from the worker prompt, not the flag.
+
+## Shared memory — Engram
+
+Every harness in the fleet (Pi, OpenCode, Claude Code, Codex, Antigravity, cmdc) can
+read and write the same memory through Engram's MCP server. This is what lets a worker
+in one CLI hand a decision to a worker in another without the orchestrator repeating it
+in the prompt.
+
+- Binary: `~/.engram` (SQLite + FTS5). MCP: `engram mcp --tools=agent` (23 tools).
+- cmdc already registers it in `~/.commandcode/mcp.json` next to `idu-pi`.
+- Save **curated summaries and decisions**, never raw tool output: the value is in what
+  survives compaction.
+- `mem_context` first on resume; then `mem_search` scoped to the project;
+  `mem_get_observation` for the full record. Never infer active work from the newest
+  global memory.
+- Compaction survival: before a context reset, push the session summary so the next
+  session recovers it.
+
+Use it whenever a decision is made that a future session would otherwise re-derive:
+architecture choices, rejected approaches, and the reason a workaround exists.
 
 ## 5-Step Operational Protocol
 
