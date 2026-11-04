@@ -210,3 +210,79 @@ console.log(JSON.stringify(loadSessionTree()[key]));`,
 		try { rmSync(home, { recursive: true, force: true }); } catch {}
 	}
 });
+
+test("a log that grew from repeated upserts is folded back to one line per session", () => {
+	const home = freshHome();
+	try {
+		const res = inChild(
+			home,
+			`
+			const { __compactSessionTree } = await import(${JSON.stringify(PM)});
+			const { readFileSync } = await import("node:fs");
+			const { join } = await import("node:path");
+			const log = join(process.env.IDU_HOME, "sessions", "tree.jsonl");
+			// Three sessions, each upserted many times with a growing runs list:
+			// the shape every finished run produces.
+			for (let turn = 1; turn <= 60; turn++) {
+				for (const id of ["a", "b", "c"]) {
+					const entry = ${makeEntry.toString().replace(/^function makeEntry/, "function")}(id, turn);
+					entry.runs = Array.from({ length: turn }, (_, i) => "run-" + id + "-" + i);
+					upsertSessionTreeEntry("C:\\\\work::" + id, entry);
+				}
+			}
+			const before = loadSessionTree();
+			const linesBefore = readFileSync(log, "utf8").split("\\n").filter(Boolean).length;
+			__compactSessionTree(1);
+			const after = loadSessionTree();
+			const linesAfter = readFileSync(log, "utf8").split("\\n").filter(Boolean).length;
+			// A later upsert still lands after compaction.
+			upsertSessionTreeEntry("C:\\\\work::d", { ...after["C:\\\\work::a"], sessionId: "d" });
+			console.log(JSON.stringify({ linesBefore, linesAfter, same: JSON.stringify(before) === JSON.stringify(after), turnsA: after["C:\\\\work::a"].turnCount, runsA: after["C:\\\\work::a"].runs.length, keysAfterUpsert: Object.keys(loadSessionTree()).length }));
+			`,
+		);
+		assert.equal(res.status, 0, res.stderr);
+		const out = JSON.parse(res.stdout.trim());
+		assert.equal(out.linesBefore, 180);
+		assert.equal(out.linesAfter, 3, "one line per session after compaction");
+		assert.equal(out.same, true, "the tree a reader sees must be identical before and after");
+		assert.equal(out.turnsA, 60);
+		assert.equal(out.runsA, 60);
+		assert.equal(out.keysAfterUpsert, 4);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("past the size threshold, upserts compact the log on their own", () => {
+	const home = freshHome();
+	try {
+		const res = inChild(
+			home,
+			`
+			const { statSync } = await import("node:fs");
+			const { join } = await import("node:path");
+			const log = join(process.env.IDU_HOME, "sessions", "tree.jsonl");
+			let peak = 0;
+			// One long session: ~1500 turns, each line carrying every run so far.
+			for (let turn = 1; turn <= 1500; turn++) {
+				upsertSessionTreeEntry("C:\\\\work::long", {
+					sessionId: "long", profile: "coding", harness: "pi", workingDir: "C:\\\\work",
+					createdAt: "2026-09-01T00:00:00.000Z", lastActiveAt: "2026-09-01T00:10:00.000Z",
+					turnCount: turn, runs: Array.from({ length: turn }, (_, i) => "IDU-20260901000000-coding-" + i),
+				});
+				peak = Math.max(peak, statSync(log).size);
+			}
+			const tree = loadSessionTree();
+			console.log(JSON.stringify({ peak, final: statSync(log).size, turns: tree["C:\\\\work::long"].turnCount }));
+			`,
+		);
+		assert.equal(res.status, 0, res.stderr);
+		const out = JSON.parse(res.stdout.trim());
+		assert.equal(out.turns, 1500, "the latest entry must survive every compaction");
+		// Without compaction this log is ~50 MB. With it, it is folded every time it
+		// doubles past the 1 MB threshold, so it never passes about 2 MB.
+		assert.ok(out.peak < 3_000_000, `the log must not grow without bound, peaked at ${out.peak} bytes`);
+	} finally {
+		rmSync(home, { recursive: true, force: true });
+	}
+});

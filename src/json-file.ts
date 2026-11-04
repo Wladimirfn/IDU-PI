@@ -24,12 +24,17 @@ import { IDU_RUNTIME_DIR } from "./config.js";
  * both matter.
  */
 export function writeJsonAtomic(filePath: string, data: unknown): void {
+	writeTextAtomic(filePath, JSON.stringify(data, null, 2));
+}
+
+/** writeJsonAtomic for content that is already text. */
+export function writeTextAtomic(filePath: string, text: string): void {
 	const dir = dirname(filePath);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
 	const tmpPath = `${filePath}.${randomUUID()}.tmp`;
-	writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf8");
+	writeFileSync(tmpPath, text, "utf8");
 
 	let retries = 5;
 	while (retries > 0) {
@@ -43,7 +48,7 @@ export function writeJsonAtomic(filePath: string, data: unknown): void {
 				// the write entirely is worse than a torn read that a reader will
 				// see as a parse error and retry.
 				try {
-					writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+					writeFileSync(filePath, text, "utf8");
 					try {
 						unlinkSync(tmpPath);
 					} catch {

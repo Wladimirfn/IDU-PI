@@ -42,10 +42,12 @@ import type {
 
 const SESSION_TREE_PATH = join(IDU_SESSIONS_DIR, "tree.json");
 const SESSION_TREE_LOG_PATH = join(IDU_SESSIONS_DIR, "tree.jsonl");
+const SESSION_TREE_MUTEX_PATH = `${SESSION_TREE_LOG_PATH}.lock`;
+const SESSION_TREE_COMPACT_MARK_PATH = `${SESSION_TREE_LOG_PATH}.compacted-at`;
 
 // Imported for local use and re-exported so the existing import path keeps
 // working. The implementation moved out to break a cycle with the quota layer.
-import { FileMutexBusyError, withFileMutex, writeJsonAtomic } from "./json-file.js";
+import { FileMutexBusyError, withFileMutex, writeJsonAtomic, writeTextAtomic } from "./json-file.js";
 export { writeJsonAtomic } from "./json-file.js";
 
 export function isProcessAlive(pid: number): boolean {
@@ -222,7 +224,82 @@ export function loadSessionTree(): Record<string, SessionTreeEntry> {
 export function upsertSessionTreeEntry(key: string, entry: SessionTreeEntry): void {
 	ensureIduDirectories();
 	migrateSessionTreeJson();
-	appendFileSync(SESSION_TREE_LOG_PATH, `${JSON.stringify({ key, entry })}\n`, "utf8");
+	const line = `${JSON.stringify({ key, entry })}\n`;
+	// Appends take the same mutex as compaction, because a compaction replaces
+	// the file: an append landing between its read and its rename would go to
+	// the old file and be lost. If the mutex is busy past the timeout the line
+	// is appended anyway, and compaction is simply skipped this time.
+	try {
+		withFileMutex(SESSION_TREE_MUTEX_PATH, () => {
+			appendFileSync(SESSION_TREE_LOG_PATH, line, "utf8");
+			compactSessionTreeIfLarge();
+		});
+	} catch (err) {
+		if (err instanceof FileMutexBusyError) {
+			appendFileSync(SESSION_TREE_LOG_PATH, line, "utf8");
+			return;
+		}
+		throw err;
+	}
+}
+
+/**
+ * Size past which the log is folded back to one line per session.
+ *
+ * Every finished run appends the whole entry, and the entry carries the list
+ * of every run of that session, so a session's lines grow with its turn count
+ * and the log grows with the square of it. Nothing ever removed old lines.
+ */
+export const SESSION_TREE_COMPACT_BYTES = 1_000_000;
+
+/**
+ * Rewrites the log with only the latest line per key. Must run under the
+ * tree mutex. Lines that do not parse are dropped: loadSessionTree already
+ * ignores them, so the tree it returns is identical before and after.
+ */
+function compactSessionTreeIfLarge(thresholdBytes = SESSION_TREE_COMPACT_BYTES): void {
+	let size = 0;
+	try {
+		size = statSync(SESSION_TREE_LOG_PATH).size;
+	} catch {
+		return;
+	}
+	if (size < thresholdBytes) return;
+	// A log of many distinct sessions does not shrink, and reading it whole on
+	// every append would make each append O(n). Look again only once it has
+	// doubled since the last look.
+	const lastLooked = Number(readFileSyncSafe(SESSION_TREE_COMPACT_MARK_PATH).trim()) || 0;
+	if (lastLooked > 0 && size < lastLooked * 2) return;
+
+	const latest = new Map<string, string>();
+	for (const line of readFileSyncSafe(SESSION_TREE_LOG_PATH).split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		try {
+			const record = JSON.parse(trimmed) as { key?: unknown; entry?: unknown };
+			if (typeof record?.key !== "string" || !record.entry || typeof record.entry !== "object") continue;
+			latest.delete(record.key); // keep insertion order = order of last write
+			latest.set(record.key, trimmed);
+		} catch {
+			/* a torn line is already invisible to readers */
+		}
+	}
+	const compacted = [...latest.values()].join("\n") + (latest.size > 0 ? "\n" : "");
+	const compactedBytes = Buffer.byteLength(compacted);
+	if (compactedBytes <= size / 2) {
+		writeTextAtomic(SESSION_TREE_LOG_PATH, compacted);
+		size = compactedBytes;
+	}
+	try {
+		writeFileSync(SESSION_TREE_COMPACT_MARK_PATH, String(Math.max(size, thresholdBytes)), "utf8");
+	} catch {
+		// Without the mark the next append just looks again.
+	}
+}
+
+/** Test hook: compaction with a small threshold. Not part of the tool surface. */
+export function __compactSessionTree(thresholdBytes: number): void {
+	withFileMutex(SESSION_TREE_MUTEX_PATH, () => compactSessionTreeIfLarge(thresholdBytes));
 }
 
 /**
