@@ -856,9 +856,25 @@ export function runMcpServer(): void {
 			const line = buffer.slice(0, newlineIndex).trim();
 			buffer = buffer.slice(newlineIndex + 1);
 			if (line) {
+				// JSON-RPC 2.0 requires an answer to a line that does not parse
+				// (-32700) or is not a request (-32600), with id null. Dropping it
+				// silently left a client that sent a malformed request waiting
+				// until its own timeout, with nothing to say why.
+				let req: JsonRpcRequest | undefined;
 				try {
-					const req = JSON.parse(line) as JsonRpcRequest;
-					if (req.method) {
+					req = JSON.parse(line) as JsonRpcRequest;
+				} catch {
+					sendResponse({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+				}
+				const isObject = typeof req === "object" && req !== null && !Array.isArray(req);
+				// A client's reply to a request (result or error, no method) is not
+				// addressed to this dispatcher, and answering it would be noise.
+				const isClientResponse = isObject && !("method" in (req as object)) && ("result" in (req as object) || "error" in (req as object));
+				if (req !== undefined && !isClientResponse) {
+					if (!isObject || typeof req.method !== "string" || !req.method) {
+						const id = isObject && req.id !== undefined ? req.id : null;
+						sendResponse({ jsonrpc: "2.0", id, error: { code: -32600, message: "Invalid Request" } });
+					} else {
 						try {
 							const result = await handleMcpMethod(req.method, req.params);
 							if (req.id !== undefined) {
@@ -874,8 +890,6 @@ export function runMcpServer(): void {
 							}
 						}
 					}
-				} catch {
-					// Invalid JSON line
 				}
 			}
 			newlineIndex = buffer.indexOf("\n");

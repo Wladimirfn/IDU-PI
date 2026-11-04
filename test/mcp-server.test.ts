@@ -761,3 +761,41 @@ test("idu_delegate_parallel is an error only when every task was refused", async
 	const results = JSON.parse(res.content[0].text) as Array<Record<string, unknown>>;
 	assert.equal(results[0].status, "failed");
 });
+
+test("the stdio server answers a malformed line instead of dropping it", async () => {
+	const { spawn } = await import("node:child_process");
+	const server = spawn(process.execPath, [join(process.cwd(), "dist", "src", "mcp-server.js")], {
+		env: { ...process.env, IDU_WORKER: "" },
+		stdio: ["pipe", "pipe", "ignore"],
+	});
+	const replies: Array<Record<string, any>> = [];
+	let pending = "";
+	server.stdout.setEncoding("utf8");
+	server.stdout.on("data", (chunk: string) => {
+		pending += chunk;
+		let nl = pending.indexOf("\n");
+		while (nl !== -1) {
+			replies.push(JSON.parse(pending.slice(0, nl)));
+			pending = pending.slice(nl + 1);
+			nl = pending.indexOf("\n");
+		}
+	});
+	try {
+		server.stdin.write("{ this is not json\n");
+		server.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 7, params: {} }) + "\n");
+		server.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 99, result: {} }) + "\n"); // a client reply: no answer
+		server.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 8, method: "initialize", params: {} }) + "\n");
+
+		const deadline = Date.now() + 10_000;
+		while (replies.length < 3 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
+		await new Promise((r) => setTimeout(r, 200)); // room for an unwanted fourth reply
+
+		assert.equal(replies.length, 3, `expected exactly three replies, got ${JSON.stringify(replies)}`);
+		assert.deepEqual(replies[0], { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } });
+		assert.deepEqual(replies[1], { jsonrpc: "2.0", id: 7, error: { code: -32600, message: "Invalid Request" } });
+		assert.equal(replies[2].id, 8);
+		assert.ok(replies[2].result, "the server keeps serving after a bad line");
+	} finally {
+		server.kill();
+	}
+});
