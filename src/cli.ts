@@ -4,8 +4,14 @@ import { runMcpServer } from "./mcp-server.js";
 import { CrossCliProcessManager } from "./process-manager.js";
 import { runPreflight } from "./quality.js";
 import { IDU_HOME } from "./config.js";
+import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
-const args = process.argv.slice(2);
+// `node cli.js -- setup ...` (how scripts/install.mjs and the Pi extension call it)
+// passes the separator through; drop it so the subcommand is args[0].
+const rawArgs = process.argv.slice(2);
+const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 const command = args[0] || "mcp";
 
 async function waitRunCommand(
@@ -389,28 +395,62 @@ async function main(): Promise<void> {
 			break;
 		}
 
-		default: {
-			console.log("IDU Cross-CLI Agent Router v2.3.0");
-			console.log("Usage:");
-			console.log("  idu-pi mcp                                 Run stdio MCP server");
-			console.log("  idu-pi status [runId]                      Display detected CLIs & profiles or status of run");
-			console.log("  idu-pi result <runId> [--verbose]          Display final execution result of run");
-			console.log("  idu-pi wait <runId> [--follow]             Wait for background run (with optional live streaming)");
-			console.log("  idu-pi sessions                            Display session hierarchy tree");
-			console.log("  idu-pi capabilities                        Print JSON capabilities");
-			console.log("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)");
-			console.log("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
-			console.log("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");
-			console.log("  idu-pi arbitrate --option <id:desc> ...    Autonomous task decision via Kev/Jev");
-			console.log("  idu-pi delegate <task> --profile <p>       Directly delegate to a worker");
-			console.log("  idu-pi delegate <task> --session <id>      Resume an existing session");
-			console.log("  idu-pi delegate <task> --session <id> --fork Branch a child session");
-			console.log("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
-			console.log("  idu-pi delegate <task> --working-dir <dir> Set target working directory");
-			console.log("  idu-pi delegate <task> --timeout <ms>      Set timeout in milliseconds");
+		case "setup": {
+			const sub = args[1];
+			if (sub !== "mcp-init" && sub !== "mcp-print") {
+				console.error("Uso: idu-pi setup mcp-init [--force] [--dry-run] | idu-pi setup mcp-print");
+				process.exit(1);
+			}
+			const mcpServerPath = join(dirname(fileURLToPath(import.meta.url)), "mcp-server.js");
+			const result = installPiMcpConfig({
+				agentDir: resolvePiAgentDir(),
+				mcpServerPath,
+				force: args.includes("--force"),
+				dryRun: sub === "mcp-print" || args.includes("--dry-run"),
+			});
+			if (sub === "mcp-print") {
+				console.log(JSON.stringify(result.config, null, 2));
+			} else {
+				console.log(result.summary);
+			}
 			break;
 		}
+		case "help":
+		case "--help":
+		case "-h": {
+			printUsage();
+			break;
+		}
+		default: {
+			// An unknown command must fail: exiting 0 here is what let scripts/install.mjs
+			// report `setup mcp-init` as done for months after the command was removed.
+			console.error(`Comando desconocido: ${command}\n`);
+			printUsage(console.error);
+			process.exit(1);
+		}
 	}
+}
+
+function printUsage(out: (line: string) => void = console.log): void {
+	out("IDU Cross-CLI Agent Router v2.3.0");
+	out("Usage:");
+	out("  idu-pi mcp                                 Run stdio MCP server");
+	out("  idu-pi status [runId]                      Display detected CLIs & profiles or status of run");
+	out("  idu-pi result <runId> [--verbose]          Display final execution result of run");
+	out("  idu-pi wait <runId> [--follow]             Wait for background run (with optional live streaming)");
+	out("  idu-pi sessions                            Display session hierarchy tree");
+	out("  idu-pi capabilities                        Print JSON capabilities");
+	out("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)");
+	out("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
+	out("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");
+	out("  idu-pi arbitrate --option <id:desc> ...    Autonomous task decision via Kev/Jev");
+	out("  idu-pi setup mcp-init [--force] [--dry-run]  Write idu-pi into Pi's ~/.pi/agent/mcp.json");
+	out("  idu-pi delegate <task> --profile <p>       Directly delegate to a worker");
+	out("  idu-pi delegate <task> --session <id>      Resume an existing session");
+	out("  idu-pi delegate <task> --session <id> --fork Branch a child session");
+	out("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
+	out("  idu-pi delegate <task> --working-dir <dir> Set target working directory");
+	out("  idu-pi delegate <task> --timeout <ms>      Set timeout in milliseconds");
 }
 
 main().catch((err) => {

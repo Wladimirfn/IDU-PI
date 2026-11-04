@@ -64,14 +64,17 @@ corepack enable
 pnpm install
 pnpm build
 
-# 3. Instalar dependencias, compilar y crear el shim idu-pi
+# 3. Instalar: dependencias, build, MCP de Pi y shim idu-pi
 node scripts/install.mjs
 
 # 4. Verificar qué detectó
 pnpm run cli status
 ```
 
-`scripts/install.mjs` instala dependencias, compila y crea el shim `idu-pi`. **No escribe**
+`scripts/install.mjs` instala dependencias, compila, agrega `idu-pi` al MCP de Pi
+(`~/.pi/agent/mcp.json`, con backup y sin pisar otros servidores; `--no-mcp` lo omite) y crea el
+shim `idu-pi`. Para hacer solo el paso de Pi: `pnpm run cli setup mcp-init` (`--dry-run` para ver
+el resultado sin escribir, `--force` para reemplazar una entrada existente). **No escribe**
 `~/.idu/config.json` ni `~/.idu/profiles.json`: sin ellos el arnés usa los 12 presets del
 proyecto. La flota por rol se declara a mano en `~/.idu/profiles.json` (ver
 [Perfiles de ejecución](#perfiles-de-ejecución)). `pnpm run cli status` muestra qué CLIs

@@ -78,7 +78,7 @@ function formatHelp() {
 		"  --dry-run      muestra plan, archivos y comandos sin escribir",
 		"  --no-mcp       omite setup mcp-init",
 		"  --no-shim      omite shim local idu-pi",
-		"  --open-wizard  abre node dist/src/cli.js al final",
+		"  --open-wizard  al final muestra el estado (cli.js status): CLIs y perfiles detectados",
 		"  --add-path     agrega el shim al PATH de usuario si falta; con --yes no pregunta",
 		"  --help         muestra esta ayuda",
 	].join("\n");
@@ -178,21 +178,11 @@ function buildPlan(detection) {
 		},
 		{
 			name: "Configurar MCP Pi",
+			// Merges idu-pi into mcp.json with a backup; keeps an existing entry.
 			command: ["node", [cliPath, "--", "setup", "mcp-init"]],
-			touches: [
-				detection.mcpConfigPath,
-				join(detection.agentDir, "extensions", "idu-pi-commands.ts"),
-			],
+			touches: [detection.mcpConfigPath],
 			enabled: !args.noMcp,
 			skipReason: "MCP Pi: omitido por --no-mcp",
-		},
-		{
-			name: "Instalar comandos slash globales Pi",
-			command: ["node", [cliPath, "--", "setup", "mcp-init"]],
-			touches: [join(detection.agentDir, "extensions", "idu-pi-commands.ts")],
-			enabled: !args.noMcp,
-			skipReason: "Comandos slash: omitidos por --no-mcp",
-			combinedWithPrevious: true,
 		},
 		{
 			name: "Crear shim idu-pi local",
@@ -204,11 +194,13 @@ function buildPlan(detection) {
 			skipReason: "Shim idu-pi: omitido por --no-shim",
 		},
 		{
-			name: "Abrir wizard",
-			command: ["node", [cliPath]],
+			// cli.js with no arguments starts the stdio MCP server and waits on stdin,
+			// so this step runs `status` instead.
+			name: "Mostrar estado",
+			command: ["node", [cliPath, "status"]],
 			touches: [],
 			enabled: args.openWizard,
-			skipReason: "Wizard: omitido salvo --open-wizard",
+			skipReason: "Estado: omitido salvo --open-wizard",
 		},
 	];
 	return steps;
