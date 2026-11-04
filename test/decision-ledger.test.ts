@@ -220,3 +220,45 @@ console.log(JSON.stringify(listDecisions({ limit: 1000 }).map((x) => x.decision)
 		try { rmSync(home, { recursive: true, force: true }); } catch {}
 	}
 });
+
+test("concurrent writers never hand out the same id twice", async () => {
+	const home = freshHome();
+	try {
+		// Same shape as the test above: a fat log so the read takes long enough
+		// for writers to overlap, then many processes at once.
+		seedJsonl(home, 400);
+		const writers = 16;
+		const startAt = Date.now() + 1_000;
+
+		await Promise.all(
+			Array.from({ length: writers }, (_, i) =>
+				new Promise<void>((resolve, reject) => {
+					const child = spawn(
+						process.execPath,
+						[
+							"--input-type=module",
+							"-e",
+							`import { recordDecision } from ${JSON.stringify(LEDGER_MODULE)};
+while (Date.now() < ${startAt}) {}
+recordDecision({ projectId: "ids", decidedBy: "w${i}", decision: "id ${i}", targetKind: "module", targetId: "src/x.ts" });`,
+						],
+						{ env: { ...process.env, IDU_HOME: home }, stdio: "ignore" },
+					);
+					child.on("error", reject);
+					child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`writer ${i} exited ${code}`))));
+				}),
+			),
+		);
+
+		const res = inChild(home, `console.log(JSON.stringify(listDecisions({ limit: 1000 }).map((d) => d.id)));`);
+		assert.equal(res.status, 0, res.stderr);
+		const ids = JSON.parse(res.stdout.trim()) as number[];
+		assert.equal(ids.length, 400 + writers);
+		const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+		assert.deepEqual(dupes, [], "every decision must keep its own id");
+		assert.deepEqual([...ids].sort((a, b) => a - b), Array.from({ length: 400 + writers }, (_, i) => i + 1));
+		assert.equal(existsSync(join(home, "decisions.jsonl.lock")), false, "the mutex must be released");
+	} finally {
+		try { rmSync(home, { recursive: true, force: true }); } catch {}
+	}
+});

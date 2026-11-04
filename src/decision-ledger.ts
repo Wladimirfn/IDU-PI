@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ensureIduDirectories, getIduHome } from "./config.js";
+import { withFileMutex } from "./json-file.js";
 
 export interface DecisionRecord {
 	id?: number;
@@ -115,33 +116,58 @@ function appendEntries(path: string, entries: DecisionRecord[]): void {
 	appendFileSync(path, payload, "utf8");
 }
 
+/**
+ * The id is "highest so far plus one", which is a read followed by a write: two
+ * processes recording at the same moment read the same maximum and appended
+ * the same id. Both the read and the append now happen under a short file
+ * mutex, and so does the one-time legacy migration, which two first-callers
+ * could otherwise run twice and duplicate every entry.
+ *
+ * If the mutex cannot be had in time the decision is still appended: a
+ * duplicated id is recoverable, a lost decision is not.
+ */
 export function recordDecision(record: DecisionRecord): DecisionRecord {
 	const filePath = getLedgerPath();
-	migrateLegacyIfPresent(filePath);
+	const write = (): DecisionRecord => {
+		migrateLegacyIfPresent(filePath);
 
-	const previous = readEntries(filePath);
-	const nextId = previous.length > 0 ? Math.max(...previous.map((d) => d.id || 0)) + 1 : 1;
+		const previous = readEntries(filePath);
+		// reduce, not Math.max(...ids): spreading every id as an argument throws
+		// RangeError once the ledger holds more ids than the engine allows.
+		const highest = previous.reduce((max, d) => Math.max(max, d.id || 0), 0);
 
-	const entry: DecisionRecord = {
-		id: nextId,
-		projectId: record.projectId,
-		decidedAt: record.decidedAt || new Date().toISOString(),
-		decidedBy: record.decidedBy,
-		decision: record.decision,
-		targetKind: record.targetKind,
-		targetId: record.targetId,
-		rationale: record.rationale,
-		profileRef: record.profileRef,
+		const entry: DecisionRecord = {
+			id: highest + 1,
+			projectId: record.projectId,
+			decidedAt: record.decidedAt || new Date().toISOString(),
+			decidedBy: record.decidedBy,
+			decision: record.decision,
+			targetKind: record.targetKind,
+			targetId: record.targetId,
+			rationale: record.rationale,
+			profileRef: record.profileRef,
+		};
+
+		// One append, one line. Nothing read-modify-written, nothing truncated.
+		appendEntries(filePath, [entry]);
+		return entry;
 	};
-
-	// One append, one line. Nothing read-modify-written, nothing truncated.
-	appendEntries(filePath, [entry]);
-	return entry;
+	try {
+		return withFileMutex(`${filePath}.lock`, write, { timeoutMs: 5_000 });
+	} catch (err) {
+		if ((err as Error)?.name === "FileMutexBusyError") return write();
+		throw err;
+	}
 }
 
 export function listDecisions(options: ListDecisionsOptions = {}): DecisionRecord[] {
 	const filePath = getLedgerPath();
-	migrateLegacyIfPresent(filePath);
+	try {
+		withFileMutex(`${filePath}.lock`, () => migrateLegacyIfPresent(filePath));
+	} catch {
+		// Busy: whoever holds it is migrating or appending. Reading without the
+		// migration still returns every line already in the log.
+	}
 	const list = readEntries(filePath);
 	// Newest first, matching what the previous implementation returned.
 	const newestFirst = [...list].reverse();
