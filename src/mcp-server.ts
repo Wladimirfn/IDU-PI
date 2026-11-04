@@ -683,6 +683,9 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 						{
 							task: String(t.task || ""),
 							profile: String(t.profile || ""),
+							// profile is required per task, exactly as in idu_delegate,
+							// so the caller always named it: never inherit the session's.
+							profileExplicit: true,
 							workingDir: t.working_dir ? String(t.working_dir) : undefined,
 							parentOrchestrator: "orchestrator",
 							verbose: Boolean(t.verbose),
@@ -693,8 +696,26 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 						true,
 					),
 				);
-				const results = await Promise.all(promises);
+				// allSettled, not all. The workers are spawned one by one, so by the
+				// time task 3 is refused (session locked, unknown profile) tasks 1
+				// and 2 are already running. Promise.all turned that into a single
+				// error and dropped their runIds: the orchestrator could neither wait
+				// for those workers nor collect them, and they kept their session
+				// locks. Every task now reports in its own slot, in request order.
+				const settled = await Promise.allSettled(promises);
+				const results = settled.map((outcome, index) => {
+					if (outcome.status === "fulfilled") return outcome.value;
+					const reason = outcome.reason;
+					return {
+						index,
+						profile: String(tasks[index]?.profile || ""),
+						status: "failed" as const,
+						error: reason instanceof Error ? reason.message : String(reason),
+					};
+				});
+				const allFailed = settled.length > 0 && settled.every((o) => o.status === "rejected");
 				return {
+					...(allFailed ? { isError: true } : {}),
 					content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
 				};
 			}

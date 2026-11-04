@@ -686,3 +686,78 @@ test("MCP idu_arbitrate evaluates options deterministically offline", async () =
 	}
 });
 
+
+test("idu_delegate_parallel reports every task, so a refused one never hides the workers already spawned", async () => {
+	const { renameSync } = await import("node:fs");
+	const { getIduConfigPath, IDU_PROFILES_PATH } = await import("../src/config.js");
+	const { CrossCliProcessManager } = await import("../src/process-manager.js");
+
+	const configPath = getIduConfigPath();
+	const backups: Array<[string, string]> = [];
+	// Backed up by rename, as the other config tests do, so a crash mid-test
+	// never leaves a stub where the user's own config was.
+	for (const path of [configPath, IDU_PROFILES_PATH]) {
+		if (existsSync(path)) {
+			const backup = `${path}.test-backup-${process.pid}`;
+			renameSync(path, backup);
+			backups.push([path, backup]);
+		}
+	}
+	const wd = mkdtempSync(join(tmpdir(), "idu-parallel-"));
+
+	try {
+		// A harness that is just node: the "task" is a script that exits at once.
+		writeFileSync(
+			configPath,
+			JSON.stringify({ clis: { "idu-test-node": { command: process.execPath, argsTemplate: ["-e", "{task}"] } } }),
+			"utf8",
+		);
+		writeFileSync(
+			IDU_PROFILES_PATH,
+			JSON.stringify({ profiles: { "idu-test-node": { harness: "idu-test-node", streams: false, timeoutMs: 30_000 } } }),
+			"utf8",
+		);
+
+		const res = (await handleMcpMethod("tools/call", {
+			name: "idu_delegate_parallel",
+			arguments: {
+				tasks: [
+					{ task: "process.exit(0)", profile: "idu-test-node", working_dir: wd },
+					{ task: "nunca corre", profile: "profile-that-does-not-exist-parallel", working_dir: wd },
+				],
+			},
+		})) as { isError?: boolean; content: Array<{ text: string }> };
+
+		assert.notEqual(res.isError, true, "one refused task out of two is not a failed call");
+		const results = JSON.parse(res.content[0].text) as Array<Record<string, unknown>>;
+		assert.equal(results.length, 2, "every task must have its own slot");
+
+		const started = results[0];
+		assert.equal(typeof started.runId, "string", "the spawned worker's runId must reach the orchestrator");
+		assert.equal(started.status, "running");
+
+		assert.equal(results[1].status, "failed");
+		assert.equal(results[1].index, 1);
+		assert.equal(results[1].profile, "profile-that-does-not-exist-parallel");
+		assert.match(String(results[1].error), /not found/);
+
+		// The runId is real: the orchestrator can wait for that worker.
+		const done = await CrossCliProcessManager.getInstance().waitForCompletion(String(started.runId), 20_000);
+		assert.equal(done?.status, "completed");
+	} finally {
+		rmSync(wd, { recursive: true, force: true });
+		rmSync(configPath, { force: true });
+		rmSync(IDU_PROFILES_PATH, { force: true });
+		for (const [path, backup] of backups) renameSync(backup, path);
+	}
+});
+
+test("idu_delegate_parallel is an error only when every task was refused", async () => {
+	const res = (await handleMcpMethod("tools/call", {
+		name: "idu_delegate_parallel",
+		arguments: { tasks: [{ task: "x", profile: "profile-that-does-not-exist-parallel-2" }] },
+	})) as { isError?: boolean; content: Array<{ text: string }> };
+	assert.equal(res.isError, true);
+	const results = JSON.parse(res.content[0].text) as Array<Record<string, unknown>>;
+	assert.equal(results[0].status, "failed");
+});

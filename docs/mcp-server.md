@@ -17,7 +17,7 @@ para delegar trabajo y para pasar por los gates de calidad.
 | `idu_decision_record` | Añade una decisión a `~/.idu/decisions.jsonl`. |
 | `idu_decision_list` | Lee el ledger, con filtro `project_id` y `limit`. |
 | `idu_delegate` | Lanza un worker. Es el núcleo. |
-| `idu_delegate_parallel` | Lanza varios `tasks[]` en paralelo, todos en modo async. |
+| `idu_delegate_parallel` | Lanza varios `tasks[]` en paralelo, todos en modo async. Devuelve un resultado por tarea, en el mismo orden: si una tarea es rechazada (perfil inexistente, sesion bloqueada) su posicion trae `{ index, profile, status: "failed", error }` y las demas conservan su `runId`. Solo es `isError` si fallan todas. |
 | `idu_worker_status` | Telemetría en vivo: `elapsedMs`, `secondsSinceLastActivity`, `health`, `bytesEmitted`. |
 | `idu_worker_wait` | Espera el fin de un run. **No destructivo**: si expira, el worker sigue vivo. |
 | `idu_worker_result` | Resultado final, con `stdout`/`stderr` solo si `verbose`. |
