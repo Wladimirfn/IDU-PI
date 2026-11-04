@@ -109,6 +109,85 @@ export function unwrapCmdExecutable(cmdPath: string, args: string[]): ResolvedCo
 	return { command: cmdPath, args, isShell: true };
 }
 
+// The characters cmd.exe gives a meaning to, plus space and the quote. Same
+// set as cross-spawn, which has carried this escaping in production for years.
+const CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
+
+/** Escapes a command path for a `cmd.exe /d /s /c "..."` line. */
+export function escapeCmdCommand(command: string): string {
+	return command.replace(CMD_META_CHARS, "^$1");
+}
+
+/**
+ * Escapes one argument for a `cmd.exe /d /s /c "..."` line that runs a batch
+ * file.
+ *
+ * First the argument is quoted by the MSVCRT rules the eventual program will
+ * use to split its command line (backslashes before a quote doubled, the quote
+ * itself backslash-escaped). Then every cmd metacharacter, the quotes included,
+ * is caret-escaped twice: once for the `/c` line itself and once more because
+ * a batch shim forwards `%*`, and cmd parses that expansion a second time.
+ * Escaping only once is what lets `x" & calc & "` break out: after the first
+ * pass the quotes are real, cmd does not know backslash escapes, and the `&`
+ * ends up outside any quoted region on the second pass.
+ */
+export function escapeCmdArgument(arg: string): string {
+	let out = String(arg);
+	out = out.replace(/(\\*)"/g, '$1$1\\"');
+	out = out.replace(/(\\*)$/, "$1$1");
+	out = `"${out}"`;
+	out = out.replace(CMD_META_CHARS, "^$1");
+	out = out.replace(CMD_META_CHARS, "^$1");
+	return out;
+}
+
+export interface SpawnInvocation {
+	command: string;
+	args: string[];
+	/** Pass straight to spawn: the line is already quoted for cmd.exe. */
+	windowsVerbatimArguments: boolean;
+}
+
+/**
+ * Turns a command that `unwrapCmdExecutable` could only run through a shell
+ * into an explicit `cmd.exe` invocation with every argument escaped.
+ *
+ * Node's own `shell: true` joins the arguments with spaces and hands the line
+ * to cmd.exe untouched, so a task containing `&`, `|` or `>` ran as a command
+ * on the user's machine, and a task with spaces reached the CLI split into
+ * words. The task text is written by a model that may have read hostile
+ * content, so it is not trusted input.
+ *
+ * A line break cannot be carried through cmd.exe at all: it ends the command,
+ * and everything after it would be silently dropped or, worse, run. Rather
+ * than deliver half a task, this refuses, and says how to avoid the shell.
+ *
+ * Pure: the platform is a parameter, so it is directly unit-testable.
+ */
+export function resolveSpawnInvocation(
+	resolved: ResolvedCommand,
+	platform: NodeJS.Platform = process.platform,
+	comSpec: string = process.env.ComSpec || "cmd.exe",
+): SpawnInvocation {
+	if (!resolved.isShell || platform !== "win32") {
+		return { command: resolved.command, args: resolved.args, windowsVerbatimArguments: false };
+	}
+	if (resolved.args.some((a) => /[\r\n]/.test(a))) {
+		throw new Error(
+			`Cannot run "${resolved.command}" safely: it is a batch file idu-pi could not unwrap, so it would ` +
+				`have to go through cmd.exe, and the task contains line breaks that cmd.exe cannot carry. ` +
+				`Point the CLI's "command" in ~/.idu/config.json at its real executable or its .js entry ` +
+				`point instead of the .cmd/.bat shim.`,
+		);
+	}
+	const line = [escapeCmdCommand(resolved.command), ...resolved.args.map(escapeCmdArgument)].join(" ");
+	return {
+		command: comSpec,
+		args: ["/d", "/s", "/c", `"${line}"`],
+		windowsVerbatimArguments: true,
+	};
+}
+
 export interface BuiltCommandLine {
 	command: string;
 	args: string[];

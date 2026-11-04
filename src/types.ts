@@ -206,6 +206,8 @@ export interface RunnerSpec {
 	streams?: boolean;
 	verbose?: boolean;
 	shell?: boolean;
+	/** The args are a cmd.exe line already escaped by resolveSpawnInvocation. */
+	windowsVerbatimArguments?: boolean;
 }
 
 export interface SessionTreeEntry {

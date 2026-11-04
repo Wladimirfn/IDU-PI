@@ -103,10 +103,12 @@ async function runDaemon(): Promise<void> {
 		// best effort
 	}
 
+	// A spec written by this version always says shell: false, because the
+	// delegate already escaped a batch file into an explicit cmd.exe call. The
+	// fallback is for a spec left behind by an older version.
 	const isShell =
 		spec.shell ??
-		(process.platform === "win32" &&
-			(spec.command.endsWith(".cmd") || spec.command.endsWith(".bat")));
+		(process.platform === "win32" && /\.(?:cmd|bat)$/i.test(spec.command));
 
 	let child: ReturnType<typeof spawn>;
 	try {
@@ -118,6 +120,7 @@ async function runDaemon(): Promise<void> {
 			},
 			stdio: ["ignore", logFd, logFd],
 			shell: isShell,
+			windowsVerbatimArguments: spec.windowsVerbatimArguments === true,
 			windowsHide: true,
 		});
 	} catch (spawnErr: any) {

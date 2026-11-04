@@ -25,7 +25,7 @@ import {
 	loadIduConfig,
 	loadProfilesConfig,
 } from "./config.js";
-import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "./cmdline.js";
+import { buildWorkerArgs, checkCliAvailable, resolveSpawnInvocation, unwrapCmdExecutable } from "./cmdline.js";
 import { extractUsage } from "./usage.js";
 import { readQuotaSnapshots } from "./quota.js";
 import type {
@@ -847,7 +847,11 @@ export class CrossCliProcessManager {
 				fork: Boolean(request.fork),
 			},
 		);
-		const { command, args, isShell } = unwrapCmdExecutable(rawCommand, rawArgs);
+		// Resolved before the lock is taken: a task that cannot be delivered
+		// intact is refused here, with nothing spawned and nothing to release.
+		const { command, args, windowsVerbatimArguments } = resolveSpawnInvocation(
+			unwrapCmdExecutable(rawCommand, rawArgs),
+		);
 
 		const startedAt = new Date().toISOString();
 		const logPath = join(IDU_LOGS_DIR, `${runId}.log`);
@@ -918,7 +922,10 @@ export class CrossCliProcessManager {
 			startupGraceMs,
 			streams: profile.streams,
 			verbose: request.verbose,
-			shell: isShell,
+			// Never a shell: resolveSpawnInvocation already turned a batch file it
+			// could not unwrap into an escaped cmd.exe invocation.
+			shell: false,
+			windowsVerbatimArguments,
 		};
 
 		ensureIduDirectories();
