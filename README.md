@@ -329,7 +329,7 @@ Los videos con narración tienen un validador ejecutable que **se niega a aproba
 cumple:
 
 ```bash
-python validar_video_audio.py --proyecto /ruta/al/video
+python skills-bundle/voice-narration/validar_video_audio.py --proyecto /ruta/al/video   # requiere numpy
 ```
 
 Comprueba, por clip: duración declarada vs real, solapes entre voces, chasquidos de cierre y

@@ -109,7 +109,7 @@ Valid shortcuts, in order of preference:
 Before delivering, run the gate:
 
 ```bash
-python "$IDU_VOICE/validar_video_audio.py" --proyecto "/path/to/video-project"
+python skills-bundle/voice-narration/validar_video_audio.py --proyecto "/path/to/video-project"
 ```
 
 Exit code 1 means **do not render**. It fails when the music track is shorter

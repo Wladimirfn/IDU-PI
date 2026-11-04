@@ -6,8 +6,8 @@ Comprueba las cuatro cosas que se rompieron en el video de idu-pi:
   3. Ningun final de voz tiene chasquido ni cola ruidosa.
   4. La musica existe, dura lo suficiente y NO es una variacion procedural.
 
-Uso:
-    python validar_video_audio.py --proyecto "C:/ruta/al/proyecto"
+Uso (requiere numpy):
+    python validar_video_audio.py --proyecto "/ruta/al/proyecto"
 
 Salida: codigo 0 si todo pasa, 1 si algo falla. Nunca renderices con codigo 1.
 """
@@ -21,8 +21,10 @@ from pathlib import Path
 
 import numpy as np
 
-# A tail frame is a click when it exceeds its neighbours by this factor.
+# A tail frame is a click when it exceeds its neighbours by this factor...
 CLICK_RATIO = 5.0
+# ...and the burst rises and falls in less than this. A louder-than-usual final
+# syllable lasts longer; flagging it as a click is how real speech gets "cleaned".
 CLICK_MAX_MS = 40
 TAIL_AUDIBLE = 0.006
 
@@ -41,21 +43,6 @@ def read_audio(path):
 def duration(path):
     with wave.open(str(path), "rb") as f:
         return f.getnframes() / f.getframerate()
-
-
-def periodic(seg, sr):
-    if len(seg) < 400:
-        return 0.0
-    w = seg - seg.mean()
-    if np.sqrt(np.mean(w ** 2)) < 1e-6:
-        return 1.0
-    ac = np.correlate(w, w, mode="full")[len(w) - 1:]
-    if ac[0] <= 0:
-        return 0.0
-    lo, hi = int(sr / 400), min(int(sr / 70), len(ac) - 1)
-    if hi <= lo:
-        return 0.0
-    return float(np.max(ac[lo:hi]) / ac[0])
 
 
 def find_tail_click(a, sr):
@@ -80,7 +67,16 @@ def find_tail_click(a, sr):
         neigh = np.concatenate([left, right]) if len(left) + len(right) else np.array([1e-9])
         base = float(np.median(neigh)) or 1e-9
         if peak > base * CLICK_RATIO:
-            return True, tail_rms
+            # Temporal signature: how long the burst stays above half its peak
+            # (10 ms frames). Only a short one is a click.
+            half = peak / 2
+            lo = hi = i
+            while lo > 0 and seg[lo - 1] >= half:
+                lo -= 1
+            while hi < len(seg) - 1 and seg[hi + 1] >= half:
+                hi += 1
+            if (hi - lo + 1) * 10 < CLICK_MAX_MS:
+                return True, tail_rms
 
     return False, tail_rms
 
@@ -163,7 +159,8 @@ def check_music(project, errors, warnings):
         return
 
     real = duration(path)
-    if real < start_s + dur_s - 0.1:
+    # The file plays from data-start, so it only has to last data-duration.
+    if real < dur_s - 0.1:
         errors.append(
             f"music is {real:.2f}s but the track declares {dur_s:.2f}s — it will cut off"
         )
