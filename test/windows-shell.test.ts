@@ -172,3 +172,20 @@ test("resolveSpawnInvocation refuses a task cmd.exe would cut at a line break", 
 		/line breaks/,
 	);
 });
+
+test("checkCliAvailable never hands the command name to a shell", async () => {
+	const { checkCliAvailable } = await import("../src/cmdline.js");
+	const { existsSync, mkdtempSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = mkdtempSync(join(tmpdir(), "idu-which-"));
+	const marker = join(dir, "pwned");
+	try {
+		const hostile = process.platform === "win32" ? `node & type nul > "${marker}"` : `node; touch '${marker}'`;
+		assert.equal(checkCliAvailable(hostile), false, "a name with shell syntax in it is not an installed CLI");
+		assert.equal(existsSync(marker), false, "the text after the separator must never run");
+		assert.equal(checkCliAvailable("node"), true, "a real CLI on PATH is still found");
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

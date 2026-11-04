@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import type { IduConfig, IduProfile } from "./types.js";
@@ -21,13 +21,13 @@ function resolveWindowsShim(cmdPath: string): string | null {
 	try {
 		const bare = `${cmdPath}.cmd`;
 		const bat = `${cmdPath}.bat`;
-		const out = execSync(`where ${bare}`, { stdio: ["ignore", "pipe", "ignore"] })
+		const out = execFileSync("where", [bare], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true })
 			.toString()
 			.split(/\r?\n/)
 			.map((l) => l.trim())
 			.filter(Boolean);
 		if (out.length > 0 && existsSync(out[0])) return out[0];
-		const outBat = execSync(`where ${bat}`, { stdio: ["ignore", "pipe", "ignore"] })
+		const outBat = execFileSync("where", [bat], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true })
 			.toString()
 			.split(/\r?\n/)
 			.map((l) => l.trim())
@@ -481,8 +481,11 @@ export function checkCliAvailable(command: string): boolean {
 	if (!command) return false;
 	if (existsSync(command)) return true;
 	try {
+		// execFileSync, not a shell line: the name comes from config files that
+		// delegated workers can write, and `which ${command}` ran whatever
+		// followed a `;` or `&` in it.
 		const whichCmd = process.platform === "win32" ? "where" : "which";
-		execSync(`${whichCmd} ${command}`, { stdio: "ignore" });
+		execFileSync(whichCmd, [command], { stdio: "ignore", windowsHide: true });
 		return true;
 	} catch {
 		return false;
