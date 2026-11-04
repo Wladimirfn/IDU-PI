@@ -117,7 +117,19 @@ function generateRunId(profile: string): string {
 	const now = new Date();
 	const datePart = now.toISOString().replace(/[-:T]/g, "").slice(0, 14);
 	const rand = Math.random().toString(36).slice(2, 6);
-	return `IDU-${datePart}-${profile}-${rand}`;
+	// The run id becomes a file name under ~/.idu (log, record, pid, spec), and
+	// profile names are free-form keys in profiles.json.
+	const safeProfile = profile.replace(/[^A-Za-z0-9_-]/g, "_") || "profile";
+	return `IDU-${datePart}-${safeProfile}-${rand}`;
+}
+
+/**
+ * Whether a caller-supplied run id can name a file under ~/.idu. Every reader
+ * joins it into a path, and getStatus can write the record back, so
+ * `../../somewhere` must never reach them.
+ */
+export function isValidRunId(runId: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(runId) && !runId.includes("..");
 }
 
 export function isUuid(str: string): boolean {
@@ -797,7 +809,7 @@ export class CrossCliProcessManager {
 			const sddCheck = checkActiveSddAttempt(workingDir, request.task);
 			if (sddCheck.blocked) {
 				throw new Error(
-					`SDD WORK UNIT IMPLEMENTATION VIOLATION: ${sddCheck.reason} Delegating workspace mutation (profile: "${request.profile}") to an external CLI worker is blocked. Primary implementation must be performed locally by the active orchestrator or local SDD phase subagents (sdd-apply). Use read-only/advisory profiles (e.g. "architecture") for external review.`,
+					`SDD WORK UNIT IMPLEMENTATION VIOLATION: ${sddCheck.reason} Delegating workspace mutation (profile: "${profileName}") to an external CLI worker is blocked. Primary implementation must be performed locally by the active orchestrator or local SDD phase subagents (sdd-apply). Use read-only/advisory profiles (e.g. "architecture") for external review.`,
 				);
 			}
 		}
@@ -883,7 +895,7 @@ export class CrossCliProcessManager {
 		}
 
 		// 7. Build command line with session flags
-		const runId = generateRunId(request.profile);
+		const runId = generateRunId(profileName);
 		const { command: rawCommand, args: rawArgs } = buildWorkerArgs(
 			profile,
 			request.task,
@@ -1054,6 +1066,7 @@ export class CrossCliProcessManager {
 	}
 
 	public getStatus(runId: string): RunRecord | null {
+		if (!isValidRunId(runId)) return null;
 		const sessionPath = join(IDU_SESSIONS_DIR, `${runId}.json`);
 		if (!existsSync(sessionPath)) return null;
 

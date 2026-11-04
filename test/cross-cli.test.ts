@@ -1981,3 +1981,32 @@ test("delegate resolves a UUID-stored alias session before picking the profile",
 		rmSync(wd, { recursive: true, force: true });
 	}
 });
+
+test("a run id that is not a plain file name is never joined into a path", async () => {
+	const { isValidRunId } = await import("../src/process-manager.js");
+	const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join, relative } = await import("node:path");
+
+	assert.equal(isValidRunId("IDU-20261104111810-fast-ab12"), true);
+	assert.equal(isValidRunId("IDU-test-timeout-recovery-001"), true);
+	for (const bad of ["", "../x", "..", "a/b", "a\\b", "x..y", ".hidden", "C:\\x", "a b"]) {
+		assert.equal(isValidRunId(bad), false, `${JSON.stringify(bad)} must be refused`);
+	}
+
+	// A record planted outside the sessions dir, reachable by traversal, that
+	// getStatus would have rewritten (status running, no pids, past its cap).
+	const outside = mkdtempSync(join(tmpdir(), "idu-runid-"));
+	const planted = join(outside, "victim.json");
+	writeFileSync(planted, JSON.stringify({ runId: "x", status: "running", startedAt: "2000-01-01T00:00:00Z", logPath: "", request: {}, profile: { hardCapMs: 1 } }));
+	try {
+		const traversal = relative(IDU_SESSIONS_DIR, join(outside, "victim"));
+		const manager = CrossCliProcessManager.getInstance();
+		assert.equal(manager.getStatus(traversal), null);
+		assert.equal(manager.getResult(traversal), null);
+		assert.ok(existsSync(planted));
+		assert.match(readFileSync(planted, "utf8"), /"status":"running"/, "the file outside ~/.idu must be untouched");
+	} finally {
+		rmSync(outside, { recursive: true, force: true });
+	}
+});
