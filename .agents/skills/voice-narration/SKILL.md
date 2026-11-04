@@ -26,7 +26,7 @@ one person's absolute path into a committed file:
 
 | Variable | Points to |
 | -------- | --------- |
-| `$IDU_VOICE` | the folder with the narration helpers (`generar_guion.py`, `validar_video_audio.py`) |
+| `$IDU_VOICE` | the folder with the script helper `generar_guion.py` (not shipped in this repo) |
 | `$VOICEBOX_DATA` | the voicebox data dir passed as `--data-dir` |
 
 If a variable is unset, stop and ask for the path instead of guessing one.
@@ -125,25 +125,32 @@ is why a periodicity threshold deleted real voice.
 
 Do not hand-check. Run the gate:
 
+`validar_video_audio.py` ships next to this SKILL.md and needs `numpy`. From the
+repo root:
+
 ```bash
-python "$IDU_VOICE/validar_video_audio.py" --proyecto "/path/to/video-project"
+python skills-bundle/voice-narration/validar_video_audio.py --proyecto "/path/to/video-project"
 ```
 
-Exit code 1 means **do not render**. It checks, per clip: declared vs real
-duration, overlap with the next clip, closing clicks (temporal signature, not
-voicing), and tail audibility. It also verifies the music track covers the film
-and that a `partitura.json` proves the AI composed it.
+Exit code 1 means **do not render**. It reads the project's `index.html`: each
+narration clip as a tag with `id="voN"`, `src`, `data-start` and `data-duration`
+(in any order, among any other attributes, as HyperFrames writes them) and the
+music as `id="bgm"` with the same three attributes. It checks, per clip: declared vs real duration, overlap with the next
+clip, closing clicks (temporal signature, not voicing), and tail audibility. It
+also verifies the music lasts its `data-duration` and that a `partitura.json`
+beside it proves the AI composed it. Its tests:
+`cd skills-bundle/voice-narration && python -m unittest test_validar_video_audio`.
 
 Every clip must pass every check:
 
-| Check              | Pass criterion                                                          |
-| ------------------ | ----------------------------------------------------------------------- |
-| Duration preserved | `frames(processed) == frames(.orig.wav)`                                |
-| Speech preserved   | samples before click onset are identical to the backup                  |
-| Tail clean         | re-running the click detector returns 0 hits                            |
-| Tail RMS           | last 20 ms silent; no 5× outlier against its neighbours                 |
-| Declared ≤ real    | `data-duration ≤ frames / sample_rate` of the final file                |
-| No overlap         | `data-start + data-duration < next clip's data-start`                   |
+| Check              | Pass criterion                                                          | Checked by |
+| ------------------ | ----------------------------------------------------------------------- | ---------- |
+| Duration preserved | `frames(processed) == frames(.orig.wav)`                                | the cleaning step, against its backup |
+| Speech preserved   | samples before click onset are identical to the backup                  | the cleaning step, against its backup |
+| Tail clean         | a burst ≥ 5× its neighbours that rises from and falls back to 1/5 of its peak in < 40 ms: 0 hits. A final "s" fades slower and passes | the gate (error) |
+| Tail RMS           | last 20 ms silent                                                       | the gate (warning) |
+| Declared ≤ real    | `data-duration ≤ frames / sample_rate` of the final file                | the gate (error) |
+| No overlap         | `data-start + real duration < next clip's data-start`                   | the gate (error) |
 
 Measure the real duration from the final file, never from the script or from
 the generation response. A long-form script with no overlap check is how a

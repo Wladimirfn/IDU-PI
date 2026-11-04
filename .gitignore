@@ -111,3 +111,7 @@ outputMode/
 
 # Pi subagent session artifacts (local runtime, not source)
 .pi-subagents/
+
+# Python bytecode (skill helpers such as voice-narration/validar_video_audio.py)
+__pycache__/
+*.pyc
