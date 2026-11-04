@@ -47,12 +47,8 @@ config/project-*.backup-*.json
 # territory model (auditor-approved). See openspec/changes/2026-06-16-
 # idu-pi-self-hygiene/proposal.md (the Territory model section).
 
-# Pi/OpenSpec local runtime state, with source templates explicitly allowed
+# Pi/OpenSpec local runtime state, with the mirrored skills explicitly allowed
 .pi/*
-!.pi/extensions/
-!.pi/extensions/idu-pi-commands.ts
-.pi/extensions/*.backup-*.ts
-.pi/extensions/*.backup-*.bak
 !.pi/skills/
 !.pi/skills/**
 

@@ -6,11 +6,16 @@ idu-pi-owned skills are listed first (managed by idu-pi; refresh via `idu-pi idu
 | --- | --- |
 | bug-hunter | .pi/skills/bug-hunter/SKILL.md |
 | codebase-audit-pre-push | .pi/skills/codebase-audit-pre-push/SKILL.md |
+| higgsfield-scene | .pi/skills/higgsfield-scene/SKILL.md |
 | idu-pi-parent-protocol | .pi/skills/idu-pi-parent-protocol/SKILL.md |
 | jq | .pi/skills/jq/SKILL.md |
+| kanagawa-html | .pi/skills/kanagawa-html/SKILL.md |
 | mcp-work-discipline | .pi/skills/mcp-work-discipline/SKILL.md |
+| music-composition | .pi/skills/music-composition/SKILL.md |
 | performance-optimizer | .pi/skills/performance-optimizer/SKILL.md |
 | project-understanding | .pi/skills/project-understanding/SKILL.md |
 | skill-check | .pi/skills/skill-check/SKILL.md |
+| soul-icons | .pi/skills/soul-icons/SKILL.md |
 | technical-change-tracker | .pi/skills/technical-change-tracker/SKILL.md |
+| voice-narration | .pi/skills/voice-narration/SKILL.md |
 | user-pi-skill | .pi/skills/user-pi-skill |
