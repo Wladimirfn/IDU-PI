@@ -95,7 +95,11 @@ for (const { harness, dir } of targets) {
 			mkdirSync(join(dir, skillName), { recursive: true });
 			writeFileSync(dest, canonical, "utf8");
 		}
-		console.log(`${check ? "STALE" : "installed"}  ${harness} -> ${dest}`);
+		// In --check nothing is written, so say what was found, not what would
+		// have been done: an older copy and no copy at all need different fixes
+		// in the reader's head, even if the command that aligns them is the same.
+		const found = current ? "STALE" : "MISSING";
+		console.log(`${check ? found : "installed"}  ${harness} -> ${dest}`);
 	} catch (err) {
 		console.error(`  no se pudo instalar en ${harness}: ${err.message}`);
 	}
@@ -104,7 +108,11 @@ for (const { harness, dir } of targets) {
 console.log("");
 console.log(`fuente: skills-bundle/${skillName}/SKILL.md  sha256:${canonicalHash}`);
 console.log(`copias en el repo desalineadas: ${drift}`);
-console.log(`harnesses instalados o actualizados: ${installed} | ya al dia: ${alreadyCurrent} | omitidos: ${skipped}`);
+console.log(
+	check
+		? `harnesses desactualizados o sin la skill: ${installed} | ya al dia: ${alreadyCurrent} | omitidos: ${skipped}`
+		: `harnesses instalados o actualizados: ${installed} | ya al dia: ${alreadyCurrent} | omitidos: ${skipped}`,
+);
 
 if (check && (drift > 0 || installed > 0)) {
 	console.log("");

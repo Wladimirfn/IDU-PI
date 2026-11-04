@@ -43,6 +43,17 @@ if (files.length === 0) {
 	process.exit(1);
 }
 
+// package.json asks for Node >= 24 and pnpm does not enforce it. On 22 a few
+// arbitration tests are cancelled rather than failed ("Promise resolution is
+// still pending"), which reads like flakiness instead of a version problem.
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+if (nodeMajor < 24) {
+	console.error(
+		`WARNING: running on Node ${process.versions.node}; this project requires Node >= 24 (package.json "engines"). ` +
+			`Expect cancelled tests. Switch versions before reading anything into the results.`,
+	);
+}
+
 const isolatedHome = mkdtempSync(join(tmpdir(), "idu-test-home-"));
 
 try {
