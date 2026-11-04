@@ -102,8 +102,11 @@ test("several processes reclaiming the same dead lock at once: exactly one wins"
 	const lockPath = lockPathFor(sessionId, cwd);
 	const contenders = 6;
 	const pmUrl = new URL("../src/process-manager.js", import.meta.url).href;
-	// Each contender waits for the same instant, tries once, and if it won keeps
-	// the lock (by staying alive) long enough for every other attempt to see it.
+	// Each contender waits for the same instant, tries once and reports on one
+	// line. A winner then keeps the lock (by staying alive) until this test
+	// closes its stdin, which only happens once every contender has reported.
+	// A fixed hold time would let a contender that started late under load find
+	// the winner already gone and win too, failing the test for the wrong reason.
 	const script = `
 		const { acquireSessionLock } = await import(${JSON.stringify(pmUrl)});
 		const startAt = Number(process.argv[1]);
@@ -111,7 +114,8 @@ test("several processes reclaiming the same dead lock at once: exactly one wins"
 		try {
 			acquireSessionLock(${JSON.stringify(sessionId)}, ${JSON.stringify(cwd)}, process.pid);
 			console.log("won");
-			await new Promise((r) => setTimeout(r, 4000));
+			process.stdin.resume();
+			await new Promise((r) => process.stdin.on("end", r));
 		} catch (err) {
 			console.log("lost: " + err.message.split("\\n")[0]);
 		}
@@ -121,20 +125,29 @@ test("several processes reclaiming the same dead lock at once: exactly one wins"
 		writeFileSync(lockPath, JSON.stringify({ pid: deadPid() }), "utf8");
 
 		const startAt = Date.now() + 1_500;
-		const outputs = await Promise.all(
-			Array.from({ length: contenders }, () => {
-				return new Promise<string>((resolveOut) => {
-					const child = spawn(process.execPath, ["--input-type=module", "-e", script, String(startAt)], {
-						env: process.env,
-						stdio: ["ignore", "pipe", "pipe"],
-					});
-					let out = "";
-					child.stdout.on("data", (d) => (out += d));
-					child.stderr.on("data", (d) => (out += d));
-					child.on("close", () => resolveOut(out.trim()));
-				});
+		const children = Array.from({ length: contenders }, () =>
+			spawn(process.execPath, ["--input-type=module", "-e", script, String(startAt)], {
+				env: process.env,
+				stdio: ["pipe", "pipe", "pipe"],
 			}),
 		);
+		const firstLines = children.map(
+			(child) =>
+				new Promise<string>((resolveLine) => {
+					let out = "";
+					const done = () => resolveLine(out.split("\n")[0].trim());
+					child.stdout.on("data", (d) => {
+						out += d;
+						if (out.includes("\n")) done();
+					});
+					child.stderr.on("data", (d) => (out += d));
+					child.on("close", done);
+				}),
+		);
+		const outputs = await Promise.all(firstLines);
+		const closed = children.map((child) => new Promise((r) => (child.exitCode !== null ? r(null) : child.on("close", r))));
+		for (const child of children) child.stdin.end();
+		await Promise.all(closed);
 
 		const winners = outputs.filter((o) => o === "won");
 		assert.equal(winners.length, 1, `exactly one contender may hold the lock, got:\n${outputs.join("\n")}`);

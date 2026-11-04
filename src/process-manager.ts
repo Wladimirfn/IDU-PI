@@ -531,7 +531,17 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 					// already gone
 				}
 				if (!tryCreate()) {
-					throw new Error(`Failed to acquire reclaimed session lock for "${sessionId}".`);
+					// Between our unlink and our create, an acquirer on the fast path
+					// (which needs no mutex, its create is exclusive) took the free
+					// lock. It won fairly; report it as the holder.
+					let holder: number | string = "unknown";
+					try {
+						const pid = JSON.parse(readFileSync(lockPath, "utf8"))?.pid;
+						if (typeof pid === "number") holder = pid;
+					} catch {
+						// unreadable: keep "unknown"
+					}
+					throw sessionBusyError(sessionId, holder);
 				}
 			});
 		} catch (err) {
