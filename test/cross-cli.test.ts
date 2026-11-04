@@ -13,6 +13,9 @@ import {
 	checkSessionHarnessAffinity,
 	shouldCountTurn,
 	resolveHardCapMs,
+	findSessionEntry,
+	getSessionKey,
+	upsertSessionTreeEntry,
 } from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -1902,3 +1905,79 @@ test("checkActiveSddAttempt detects heuristic markers and permits non-SDD tasks"
 });
 
 
+
+// ---------------------------------------------------------------------------
+// Session aliases stored under their UUID.
+//
+// A harness that only accepts UUIDs as session ids gets "review-1" mapped
+// to aliasToUuid("review-1"), and the runner records the session under that
+// UUID. The owner lookup used the raw alias, so it never found the entry:
+// `--session review-1` without `--profile` went to the default profile as a
+// fresh session, and an explicit other-harness profile was not refused either.
+// ---------------------------------------------------------------------------
+
+function sessionEntry(sessionId: string, profile: string, harness: string, workingDir: string) {
+	return {
+		sessionId,
+		profile,
+		harness,
+		workingDir,
+		createdAt: new Date().toISOString(),
+		lastActiveAt: new Date().toISOString(),
+		turnCount: 1,
+		runs: [],
+	};
+}
+
+test("findSessionEntry finds an alias stored under its UUID, preferring the id as given", () => {
+	const wd = "/work/repo";
+	const uuidEntry = sessionEntry(aliasToUuid("review-1"), "uuid-owner", "uuid-only-harness", wd);
+	const verbatimEntry = sessionEntry("review-1", "mcode", "mcode", wd);
+
+	const onlyUuid = { [getSessionKey(wd, aliasToUuid("review-1"))]: uuidEntry };
+	assert.equal(findSessionEntry(onlyUuid, wd, "review-1"), uuidEntry);
+	assert.equal(findSessionEntry(onlyUuid, wd, "  review-1  "), uuidEntry, "the id is trimmed like everywhere else");
+	assert.equal(findSessionEntry(onlyUuid, wd, aliasToUuid("review-1")), uuidEntry);
+
+	const both = { ...onlyUuid, [getSessionKey(wd, "review-1")]: verbatimEntry };
+	assert.equal(findSessionEntry(both, wd, "review-1"), verbatimEntry, "a verbatim entry wins over the mapped one");
+
+	assert.equal(findSessionEntry(onlyUuid, "/other/repo", "review-1"), undefined, "sessions are scoped to their working dir");
+	assert.equal(findSessionEntry(onlyUuid, wd, "review-2"), undefined);
+	assert.equal(findSessionEntry(onlyUuid, wd, undefined), undefined);
+	assert.equal(findSessionEntry(onlyUuid, wd, "   "), undefined);
+});
+
+test("delegate resolves a UUID-stored alias session before picking the profile", async () => {
+	const { mkdtempSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const manager = CrossCliProcessManager.getInstance();
+	const wd = mkdtempSync(join(tmpdir(), "idu-alias-session-"));
+	const alias = `alias-${process.pid}-${Date.now()}`;
+
+	try {
+		// The owner's profile does not exist on purpose: if the alias is
+		// resolved, delegate inherits it and stops at "not found" before
+		// anything is spawned. If it is not resolved, it moves on with "fast".
+		upsertSessionTreeEntry(
+			getSessionKey(wd, aliasToUuid(alias)),
+			sessionEntry(aliasToUuid(alias), "owner-profile-that-does-not-exist", "uuid-only-harness", wd),
+		);
+
+		await assert.rejects(
+			manager.delegate({ task: "seguir", profile: "fast", profileExplicit: false, sessionId: alias, workingDir: wd }),
+			/Profile "owner-profile-that-does-not-exist" not found/,
+			"a resume without --profile must inherit the owner's profile",
+		);
+
+		// Naming a profile on another harness is refused by the affinity guard,
+		// which runs before the lock and before any spawn.
+		await assert.rejects(
+			manager.delegate({ task: "seguir", profile: "fast", profileExplicit: true, sessionId: alias, workingDir: wd }),
+			/SESSION HARNESS MISMATCH/,
+		);
+	} finally {
+		rmSync(wd, { recursive: true, force: true });
+	}
+});

@@ -249,6 +249,35 @@ function readFileSyncSafe(path: string): string {
 }
 
 /**
+ * The tree entry a caller's session id refers to, whichever harness owns it.
+ *
+ * Some harnesses only accept a UUID as a session id, so an alias such as
+ * "review-1" is stored under its deterministic UUID (`aliasToUuid`). Nothing
+ * here depends on which harness that is. A lookup by
+ * the raw alias alone misses every such entry, and it has to happen before the
+ * profile is known, because the entry is what decides the profile: missing it
+ * sent `--session review-1` without `--profile` to the default harness, as a
+ * fresh session, and the affinity guard had nothing to compare against.
+ *
+ * The id exactly as given wins, so a harness that stores aliases verbatim
+ * keeps its own entry even if a UUID-mapped one also exists.
+ *
+ * Pure: no I/O, so it is directly unit-testable.
+ */
+export function findSessionEntry(
+	tree: Record<string, SessionTreeEntry>,
+	workingDir: string,
+	sessionId: string | undefined,
+): SessionTreeEntry | undefined {
+	const id = sessionId?.trim();
+	if (!id) return undefined;
+	const direct = tree[getSessionKey(workingDir, id)];
+	if (direct) return direct;
+	if (isUuid(id)) return undefined;
+	return tree[getSessionKey(workingDir, aliasToUuid(id))];
+}
+
+/**
  * Decide which profile a delegate request must actually use.
  *
  * A session is owned by the profile that created it. When the caller resumes
@@ -716,10 +745,7 @@ export class CrossCliProcessManager {
 		const workingDir = request.workingDir || process.cwd();
 		const tree = loadSessionTree();
 
-		const lookupKey = request.sessionId?.trim()
-			? getSessionKey(workingDir, request.sessionId.trim())
-			: "";
-		const ownerEntry = lookupKey ? tree[lookupKey] : undefined;
+		const ownerEntry = findSessionEntry(tree, workingDir, request.sessionId);
 
 		let profileName = request.profile;
 		const resolution = resolveSessionProfile(request.profile, ownerEntry, {
@@ -795,8 +821,9 @@ export class CrossCliProcessManager {
 		}
 
 		// 6. Resolve native CLI session IDs if present (e.g. OpenCode ses_... IDs)
-		const sessionKey = requestedSessionId ? getSessionKey(workingDir, requestedSessionId) : "";
-		const existingEntry = sessionKey ? tree[sessionKey] : undefined;
+		// Same lookup as the owner above, so an alias stored under its UUID is
+		// found here too and the affinity guard below can see who owns it.
+		const existingEntry = findSessionEntry(tree, workingDir, requestedSessionId);
 		const nativeSessionId = existingEntry?.nativeSessionId;
 
 		// 6b. Session affinity guard (Option A).
@@ -827,8 +854,7 @@ export class CrossCliProcessManager {
 
 		let parentNativeSessionId: string | undefined;
 		if (parentSessionId) {
-			const parentKey = getSessionKey(workingDir, parentSessionId);
-			parentNativeSessionId = tree[parentKey]?.nativeSessionId;
+			parentNativeSessionId = findSessionEntry(tree, workingDir, parentSessionId)?.nativeSessionId;
 		}
 
 		// 7. Build command line with session flags
