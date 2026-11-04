@@ -81,12 +81,38 @@ def find_tail_click(a, sr):
     return False, tail_rms
 
 
+TAG = re.compile(r"<[a-zA-Z][\w-]*\b([^>]*)>")
+ATTR = re.compile(r"""([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+NEEDED = ("src", "data-start", "data-duration")
+
+
+def tagged_clips(html, id_pattern, errors):
+    """Tags whose id matches id_pattern, as (src, start, duration), sorted by start.
+
+    Attributes are read by name, in any order and among any others: HyperFrames
+    writes <audio data-hf-id="..." id="vo1" class="clip" src="..." ...>.
+    """
+    found = []
+    for m in TAG.finditer(html):
+        attrs = {k: a if a or not b else b for k, a, b in ATTR.findall(m.group(1))}
+        if not re.fullmatch(id_pattern, attrs.get("id", "")):
+            continue
+        missing = [k for k in NEEDED if k not in attrs]
+        if missing:
+            errors.append(f'id="{attrs["id"]}" is missing {", ".join(missing)}')
+            continue
+        try:
+            start, dur = float(attrs["data-start"]), float(attrs["data-duration"])
+        except ValueError:
+            errors.append(f'id="{attrs["id"]}" has a non-numeric data-start or data-duration')
+            continue
+        found.append((attrs["src"], start, dur))
+    return sorted(found, key=lambda c: c[1])
+
+
 def check_voices(project, errors, warnings):
     html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
-    clips = re.findall(
-        r'id="vo\d+"\s+src="([^"]+)"\s+data-start="([\d.]+)"\s+data-duration="([\d.]+)"',
-        html,
-    )
+    clips = tagged_clips(html, r"vo\d+", errors)
     if not clips:
         errors.append("no narration clips found in index.html")
         return
@@ -96,8 +122,7 @@ def check_voices(project, errors, warnings):
 
     prev_end = 0.0
     prev_name = ""
-    for src, start_s, dur_s in clips:
-        start, declared = float(start_s), float(dur_s)
+    for src, start, declared in clips:
         path = project / src
         name = Path(src).name
 
@@ -142,15 +167,12 @@ def check_voices(project, errors, warnings):
 
 def check_music(project, errors, warnings):
     html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
-    m = re.search(
-        r'id="bgm"[^>]*src="([^"]+)"[^>]*data-start="([\d.]+)"[^>]*data-duration="([\d.]+)"',
-        html,
-    )
-    if not m:
+    tracks = tagged_clips(html, r"bgm", errors)
+    if not tracks:
         warnings.append("no bgm track found in index.html")
         return
 
-    src, start_s, dur_s = m.group(1), float(m.group(2)), float(m.group(3))
+    src, _start, dur_s = tracks[0]
     path = project / src
     print(f"\n  musica: {src}")
 

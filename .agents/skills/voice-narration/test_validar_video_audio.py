@@ -58,10 +58,11 @@ class Project:
         self.dir = Path(tmp)
         self.tags = []
 
-    def voice(self, n, samples, start, declared):
+    def voice(self, n, samples, start, declared, tag=None):
         write_wav(self.dir / f"vo{n}.wav", samples)
         self.tags.append(
-            f'<audio id="vo{n}" src="vo{n}.wav" data-start="{start}" data-duration="{declared}"></audio>'
+            (tag or '<audio id="vo{n}" src="vo{n}.wav" data-start="{start}" data-duration="{declared}"></audio>')
+            .format(n=n, start=start, declared=declared)
         )
 
     def music(self, seconds, start, declared, score=None):
@@ -166,6 +167,36 @@ class ValidarVideoAudio(unittest.TestCase):
         q.music(3, 0, 3, {"titulo": "Sin tempo"})
         errors, _ = q.run()
         self.assertTrue(any("tempo" in e for e in errors), errors)
+
+    def test_hyperframes_markup_with_attributes_in_between(self):
+        # Regression: the regex required id, src, data-start, data-duration back to
+        # back, so real HyperFrames output read as "no narration clips found".
+        p = self.project()
+        hf = ('<audio data-hf-id="hf-{n}" id="vo{n}" class="clip" src="vo{n}.wav" '
+              'data-track-index="0" data-start="{start}" data-volume="1" data-duration="{declared}"></audio>')
+        p.voice(1, speech(), 0, 1.9, tag=hf)
+        p.voice(2, speech(), 2.5, 1.9, tag="<audio data-duration='{declared}' src='vo{n}.wav' "
+                                          "data-start='{start}' class='clip' id='vo{n}'></audio>")
+        p.music(5, 0, 5, SCORE)
+        p.tags.append('<audio data-hf-id="m" id="bgm2" class="clip"></audio>')  # not bgm: ignored
+        errors, warnings = p.run()
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    def test_clips_are_checked_in_start_order(self):
+        p = self.project()
+        p.voice(2, speech(), 2.5, 1.9)
+        p.voice(1, speech(), 0, 1.9)
+        p.music(5, 0, 5, SCORE)
+        errors, _ = p.run()
+        self.assertEqual(errors, [])
+
+    def test_clip_missing_an_attribute_fails_by_name(self):
+        p = self.project()
+        p.voice(1, speech(), 0, 1.9, tag='<audio id="vo{n}" src="vo{n}.wav" data-start="{start}"></audio>')
+        p.music(3, 0, 3, SCORE)
+        errors, _ = p.run()
+        self.assertTrue(any('id="vo1" is missing data-duration' in e for e in errors), errors)
 
 
 if __name__ == "__main__":

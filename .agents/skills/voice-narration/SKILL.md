@@ -133,9 +133,9 @@ python skills-bundle/voice-narration/validar_video_audio.py --proyecto "/path/to
 ```
 
 Exit code 1 means **do not render**. It reads the project's `index.html`: each
-narration clip as `<audio id="voN" src="..." data-start="..." data-duration="...">`
-(attributes in that order) and the music as `id="bgm"` with the same three
-attributes. It checks, per clip: declared vs real duration, overlap with the next
+narration clip as a tag with `id="voN"`, `src`, `data-start` and `data-duration`
+(in any order, among any other attributes, as HyperFrames writes them) and the
+music as `id="bgm"` with the same three attributes. It checks, per clip: declared vs real duration, overlap with the next
 clip, closing clicks (temporal signature, not voicing), and tail audibility. It
 also verifies the music lasts its `data-duration` and that a `partitura.json`
 beside it proves the AI composed it. Its tests:
