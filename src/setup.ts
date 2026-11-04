@@ -8,9 +8,9 @@
  * contract: merge without clobbering other servers, back up before writing, keep an
  * existing idu-pi entry unless --force, and --dry-run writes nothing.
  *
- * The old command also installed `.pi/extensions/idu-pi-commands.ts`. That extension
- * only registers /idu and /idu-off, which call CLI commands removed with the
- * supervisor plan, so it is deliberately not installed here.
+ * The old command also installed a Pi extension (`.pi/extensions/idu-pi-commands.ts`)
+ * that only registered /idu and /idu-off, which called CLI commands removed with the
+ * supervisor plan. It was deleted from the repo; nothing replaces it.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
