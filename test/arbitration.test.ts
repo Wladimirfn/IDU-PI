@@ -11,6 +11,9 @@ import {
 	normalizeThreshold,
 	redactErrorDetail,
 	resolveTypeSafeApiKey,
+	resolveTypeSafeEndpointDetails,
+	selectCloudEndpoint,
+	DEFAULT_TYPESAFE_ENDPOINT,
 	type ArbitrationInput,
 } from "../src/arbitration.js";
 
@@ -524,3 +527,113 @@ test("arbitrateWithJev redacts credentials that leak through HTTP error bodies",
 	assert.ok(decision.reason.includes("[redacted]"));
 });
 
+
+// S6: an endpoint chosen by the project's own .env must not receive a key that
+// belongs to the user (environment, ~/.idu/.env, config, explicit argument).
+
+function withCleanTypeSafeEnv(fn: () => Promise<void> | void): () => Promise<void> {
+	return async () => {
+		const keys = ["TYPESAFE_API_KEY", "JEV_API_KEY", "TYPESAFE_ENDPOINT", "JEV_ENDPOINT"] as const;
+		const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+		for (const k of keys) delete process.env[k];
+		try {
+			await fn();
+		} finally {
+			for (const k of keys) {
+				if (prev[k] === undefined) delete process.env[k];
+				else process.env[k] = prev[k];
+			}
+		}
+	};
+}
+
+function recordingCloudFetch(sent: Array<{ url: string; auth: string }>) {
+	return (async (url: string | URL | Request, init?: RequestInit) => {
+		const urlStr = String(url);
+		if (urlStr.includes("127.0.0.1") || urlStr.includes("localhost")) {
+			throw new Error("Connection refused");
+		}
+		const headers = (init?.headers || {}) as Record<string, string>;
+		sent.push({ url: urlStr, auth: headers.Authorization || "" });
+		return {
+			ok: true,
+			status: 200,
+			json: async () => ({
+				answers: { next_action: { choice: "continuar_403", confidence: 0.9 } },
+			}),
+		} as Response;
+	}) as unknown as typeof fetch;
+}
+
+test("resolveTypeSafeEndpointDetails tags a project .env endpoint with its file", withCleanTypeSafeEnv(() => {
+	const repo = mkdtempSync(join(tmpdir(), "idu-env-endpoint-src-"));
+	try {
+		writeFileSync(join(repo, ".git"), "", "utf8");
+		writeFileSync(join(repo, ".env"), "TYPESAFE_ENDPOINT=https://project.example/v1/systemone\n", "utf8");
+		const details = resolveTypeSafeEndpointDetails(undefined, repo);
+		assert.equal(details.value, "https://project.example/v1/systemone");
+		assert.equal(details.source, "project-dotenv");
+		assert.equal(details.file, join(repo, ".env"));
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
+}));
+
+test("selectCloudEndpoint only trusts a project .env endpoint with a key from the same file", () => {
+	const projectEndpoint = { value: "https://project.example/v1", source: "project-dotenv" as const, file: "/r/.env" };
+	assert.equal(selectCloudEndpoint(projectEndpoint, { source: "env" }), DEFAULT_TYPESAFE_ENDPOINT);
+	assert.equal(selectCloudEndpoint(projectEndpoint, { source: "explicit" }), DEFAULT_TYPESAFE_ENDPOINT);
+	assert.equal(selectCloudEndpoint(projectEndpoint, { source: "idu-dotenv", file: "/home/u/.idu/.env" }), DEFAULT_TYPESAFE_ENDPOINT);
+	assert.equal(selectCloudEndpoint(projectEndpoint, { source: "config" }), DEFAULT_TYPESAFE_ENDPOINT);
+	assert.equal(
+		selectCloudEndpoint(projectEndpoint, { source: "project-dotenv", file: "/r/sub/.env" }),
+		DEFAULT_TYPESAFE_ENDPOINT,
+		"a key from a different project .env is still not the same owner",
+	);
+	assert.equal(selectCloudEndpoint(projectEndpoint, { source: "project-dotenv", file: "/r/.env" }), "https://project.example/v1");
+	// The pre-existing rules still hold for every source.
+	assert.equal(selectCloudEndpoint({ value: "http://plain.example/v1", source: "env" }, { source: "env" }), DEFAULT_TYPESAFE_ENDPOINT);
+	assert.equal(selectCloudEndpoint({ value: "http://127.0.0.1:8009/v1", source: "explicit" }, { source: "env" }), DEFAULT_TYPESAFE_ENDPOINT);
+	assert.equal(selectCloudEndpoint({ value: "https://mine.example/v1", source: "env" }, { source: "env" }), "https://mine.example/v1");
+});
+
+test("arbitrate never sends the user's key to an endpoint a cloned repo's .env chose (S6)", withCleanTypeSafeEnv(async () => {
+	const repo = mkdtempSync(join(tmpdir(), "idu-env-hostile-repo-"));
+	try {
+		writeFileSync(join(repo, ".git"), "", "utf8");
+		writeFileSync(join(repo, ".env"), "TYPESAFE_ENDPOINT=https://attacker.example/v1/systemone\n", "utf8");
+		process.env.TYPESAFE_API_KEY = "users-own-key";
+
+		const sent: Array<{ url: string; auth: string }> = [];
+		const decision = await arbitrate({ ...sampleInput, cwd: repo, fetchFn: recordingCloudFetch(sent) });
+
+		assert.equal(decision.source, "jev_cloud");
+		assert.ok(sent.length > 0, "the cloud tier must still be used");
+		assert.ok(
+			sent.every((r) => r.url === DEFAULT_TYPESAFE_ENDPOINT),
+			`the key must only go to the default endpoint, got ${sent.map((r) => r.url).join(", ")}`,
+		);
+		assert.ok(!sent.some((r) => r.url.includes("attacker.example")));
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
+}));
+
+test("arbitrate honours a project .env that supplies both its own endpoint and its own key", withCleanTypeSafeEnv(async () => {
+	const repo = mkdtempSync(join(tmpdir(), "idu-env-selfhosted-repo-"));
+	try {
+		writeFileSync(join(repo, ".git"), "", "utf8");
+		writeFileSync(
+			join(repo, ".env"),
+			"TYPESAFE_ENDPOINT=https://selfhosted.example/v1/systemone\nTYPESAFE_API_KEY=project-key\n",
+			"utf8",
+		);
+
+		const sent: Array<{ url: string; auth: string }> = [];
+		await arbitrate({ ...sampleInput, cwd: repo, fetchFn: recordingCloudFetch(sent) });
+
+		assert.deepEqual(sent, [{ url: "https://selfhosted.example/v1/systemone", auth: "Bearer project-key" }]);
+	} finally {
+		rmSync(repo, { recursive: true, force: true });
+	}
+}));

@@ -108,15 +108,40 @@ function parseDotEnvFile(filePath: string, targetKey: string): string | undefine
 }
 
 /**
+ * Where a TypeSafe setting was read from. The arbitration router needs this,
+ * not just the value: whether a bearer token may be sent to an endpoint
+ * depends on who wrote the endpoint.
+ */
+export type TypeSafeSettingSource =
+	| "explicit"
+	| "env"
+	| "project-dotenv"
+	| "idu-dotenv"
+	| "config"
+	| "default";
+
+export interface ResolvedTypeSafeSetting {
+	value: string;
+	source: TypeSafeSettingSource;
+	/** The .env file the value came from, for the two dotenv sources. */
+	file?: string;
+}
+
+/**
  * Searches for a key in .env files:
  * 1. Checks dir/.env directly.
  * 2. Climbs up parent directories up to git root or filesystem root.
  * 3. Falls back to global ~/.idu/.env.
+ *
+ * Steps 1 and 2 are "project-dotenv": files inside the repository being worked
+ * on, which whoever wrote that repository controls. Step 3 is "idu-dotenv",
+ * owned by the user of this machine.
  */
-function readValFromDotEnv(targetKey: string, dir: string = process.cwd()): string | undefined {
+function findInDotEnv(targetKey: string, dir: string = process.cwd()): ResolvedTypeSafeSetting | undefined {
 	let currentDir = resolve(dir);
-	const directVal = parseDotEnvFile(join(currentDir, ".env"), targetKey);
-	if (directVal) return directVal;
+	const directFile = join(currentDir, ".env");
+	const directVal = parseDotEnvFile(directFile, targetKey);
+	if (directVal) return { value: directVal, source: "project-dotenv", file: directFile };
 
 	const root = parse(currentDir).root;
 	while (true) {
@@ -126,13 +151,15 @@ function readValFromDotEnv(targetKey: string, dir: string = process.cwd()): stri
 		if (existsSync(join(currentDir, ".git")) || currentDir === root) break;
 		const parent = dirname(currentDir);
 		if (parent === currentDir) break;
-		const val = parseDotEnvFile(join(parent, ".env"), targetKey);
-		if (val) return val;
+		const parentFile = join(parent, ".env");
+		const val = parseDotEnvFile(parentFile, targetKey);
+		if (val) return { value: val, source: "project-dotenv", file: parentFile };
 		currentDir = parent;
 	}
 
-	const iduEnvVal = parseDotEnvFile(join(IDU_HOME, ".env"), targetKey);
-	if (iduEnvVal) return iduEnvVal;
+	const iduFile = join(IDU_HOME, ".env");
+	const iduEnvVal = parseDotEnvFile(iduFile, targetKey);
+	if (iduEnvVal) return { value: iduEnvVal, source: "idu-dotenv", file: iduFile };
 
 	return undefined;
 }
@@ -145,17 +172,17 @@ function readValFromDotEnv(targetKey: string, dir: string = process.cwd()): stri
  * 4. ~/.idu/config.json under typesafe.endpoint
  * 5. DEFAULT_TYPESAFE_ENDPOINT (https://api.typesafe.ai/v1/systemone)
  */
-export function resolveTypeSafeEndpoint(explicitEndpoint?: string, cwd?: string): string {
+export function resolveTypeSafeEndpointDetails(explicitEndpoint?: string, cwd?: string): ResolvedTypeSafeSetting {
 	if (explicitEndpoint && explicitEndpoint.trim()) {
-		return explicitEndpoint.trim();
+		return { value: explicitEndpoint.trim(), source: "explicit" };
 	}
 
 	const envEndpoint = process.env.TYPESAFE_ENDPOINT || process.env.JEV_ENDPOINT;
 	if (envEndpoint && envEndpoint.trim()) {
-		return envEndpoint.trim();
+		return { value: envEndpoint.trim(), source: "env" };
 	}
 
-	const dotEnvEndpoint = readValFromDotEnv("TYPESAFE_ENDPOINT", cwd) || readValFromDotEnv("JEV_ENDPOINT", cwd);
+	const dotEnvEndpoint = findInDotEnv("TYPESAFE_ENDPOINT", cwd) || findInDotEnv("JEV_ENDPOINT", cwd);
 	if (dotEnvEndpoint) {
 		return dotEnvEndpoint;
 	}
@@ -170,14 +197,18 @@ export function resolveTypeSafeEndpoint(explicitEndpoint?: string, cwd?: string)
 			// endpoint from it so the bearer token can never be steered to a local or
 			// plain-http host (S2).
 			if (typeof candidate === "string" && candidate.trim().startsWith("https://")) {
-				return candidate.trim();
+				return { value: candidate.trim(), source: "config" };
 			}
 		}
 	} catch {
 		// Ignore unreadable or corrupt config
 	}
 
-	return DEFAULT_TYPESAFE_ENDPOINT;
+	return { value: DEFAULT_TYPESAFE_ENDPOINT, source: "default" };
+}
+
+export function resolveTypeSafeEndpoint(explicitEndpoint?: string, cwd?: string): string {
+	return resolveTypeSafeEndpointDetails(explicitEndpoint, cwd).value;
 }
 
 /**
@@ -187,17 +218,17 @@ export function resolveTypeSafeEndpoint(explicitEndpoint?: string, cwd?: string)
  * 3. .env file in cwd, parent directory tree, or ~/.idu/.env
  * 4. ~/.idu/config.json under typesafe.apiKey or typesafeApiKey
  */
-export function resolveTypeSafeApiKey(explicitKey?: string, cwd?: string): string | undefined {
+export function resolveTypeSafeApiKeyDetails(explicitKey?: string, cwd?: string): ResolvedTypeSafeSetting | undefined {
 	if (explicitKey && explicitKey.trim()) {
-		return explicitKey.trim();
+		return { value: explicitKey.trim(), source: "explicit" };
 	}
 
 	const envKey = process.env.TYPESAFE_API_KEY || process.env.JEV_API_KEY;
 	if (envKey && envKey.trim()) {
-		return envKey.trim();
+		return { value: envKey.trim(), source: "env" };
 	}
 
-	const dotEnvKey = readValFromDotEnv("TYPESAFE_API_KEY", cwd) || readValFromDotEnv("JEV_API_KEY", cwd);
+	const dotEnvKey = findInDotEnv("TYPESAFE_API_KEY", cwd) || findInDotEnv("JEV_API_KEY", cwd);
 	if (dotEnvKey) {
 		return dotEnvKey;
 	}
@@ -208,10 +239,10 @@ export function resolveTypeSafeApiKey(explicitKey?: string, cwd?: string): strin
 			const raw = readFileSync(configPath, "utf8");
 			const parsed = JSON.parse(raw);
 			if (parsed?.typesafe?.apiKey && typeof parsed.typesafe.apiKey === "string") {
-				return parsed.typesafe.apiKey.trim();
+				return { value: parsed.typesafe.apiKey.trim(), source: "config" };
 			}
 			if (parsed?.typesafeApiKey && typeof parsed.typesafeApiKey === "string") {
-				return parsed.typesafeApiKey.trim();
+				return { value: parsed.typesafeApiKey.trim(), source: "config" };
 			}
 		}
 	} catch {
@@ -219,6 +250,36 @@ export function resolveTypeSafeApiKey(explicitKey?: string, cwd?: string): strin
 	}
 
 	return undefined;
+}
+
+export function resolveTypeSafeApiKey(explicitKey?: string, cwd?: string): string | undefined {
+	return resolveTypeSafeApiKeyDetails(explicitKey, cwd)?.value;
+}
+
+/**
+ * The endpoint the cloud bearer token may actually be sent to.
+ *
+ * A local or plain-http candidate never receives it (S1, S2). Neither does an
+ * endpoint read from a .env inside the project tree, unless the key came from
+ * that very same file (S6). The project tree belongs to whoever wrote the
+ * repository: a cloned repo that commits `TYPESAFE_ENDPOINT=https://elsewhere`
+ * would otherwise receive the key the user keeps in ~/.idu/.env or in their
+ * environment, together with the state summary. When the repository supplies
+ * both the endpoint and the key, nothing of the user's is at stake.
+ *
+ * Pure: no I/O, so it is directly unit-testable.
+ */
+export function selectCloudEndpoint(
+	endpoint: ResolvedTypeSafeSetting,
+	key: Pick<ResolvedTypeSafeSetting, "source" | "file">,
+): string {
+	if (isLocalEndpoint(endpoint.value)) return DEFAULT_TYPESAFE_ENDPOINT;
+	if (!endpoint.value.startsWith("https://")) return DEFAULT_TYPESAFE_ENDPOINT;
+	if (endpoint.source === "project-dotenv") {
+		const sameFile = key.source === "project-dotenv" && key.file !== undefined && key.file === endpoint.file;
+		if (!sameFile) return DEFAULT_TYPESAFE_ENDPOINT;
+	}
+	return endpoint.value;
 }
 
 /**
@@ -412,7 +473,8 @@ export async function arbitrate(input: ArbitrationInput): Promise<ArbitrationDec
 		return arbitrateDeterministically(input);
 	}
 	const fetchImpl = input.fetchFn || globalThis.fetch;
-	const resolvedEndpoint = resolveTypeSafeEndpoint(input.endpoint, input.cwd);
+	const endpointDetails = resolveTypeSafeEndpointDetails(input.endpoint, input.cwd);
+	const resolvedEndpoint = endpointDetails.value;
 	const isTargetingLocal = isLocalEndpoint(resolvedEndpoint);
 
 	// 1. If explicitly pointed to local Kev OR if default local Kev is active on port 8009:
@@ -450,15 +512,15 @@ export async function arbitrate(input: ArbitrationInput): Promise<ArbitrationDec
 	// 2. Cloud TypeSafe Jev API — always the cloud endpoint, even when the resolved
 	// endpoint was a local Kev URL that turned out to be offline (S1). A non-https
 	// cloud candidate never receives the bearer token: fall back to the default
-	// https endpoint instead (S2, same trust rule as ~/.idu/config.json).
-	const cloudKey = resolveTypeSafeApiKey(input.apiKey, input.cwd);
+	// https endpoint instead (S2, same trust rule as ~/.idu/config.json). An
+	// endpoint the project's own .env chose only receives a key from that same
+	// file (S6); see selectCloudEndpoint.
+	const cloudKey = resolveTypeSafeApiKeyDetails(input.apiKey, input.cwd);
 	if (cloudKey) {
-		const localTarget = isTargetingLocal || isLocalEndpoint(resolvedEndpoint);
-		const insecureTarget = !localTarget && !resolvedEndpoint.startsWith("https://");
-		const cloudEndpoint = localTarget || insecureTarget ? DEFAULT_TYPESAFE_ENDPOINT : resolvedEndpoint;
+		const cloudEndpoint = selectCloudEndpoint(endpointDetails, cloudKey);
 		const res = await arbitrateWithJev(
 			{ ...input, endpoint: cloudEndpoint },
-			cloudKey,
+			cloudKey.value,
 		);
 		return res.source === "deterministic_fallback" ? res : { ...res, source: "jev_cloud" };
 	}

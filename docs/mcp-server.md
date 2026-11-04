@@ -23,7 +23,7 @@ para delegar trabajo y para pasar por los gates de calidad.
 | `idu_worker_result` | Resultado final, con `stdout`/`stderr` solo si `verbose`. |
 | `idu_session_list` | Árbol de sesiones con padre, perfil, turnos y última actividad. |
 | `idu_capabilities` | Perfiles cargados, CLIs detectados y estado de la ONE ORCHESTRATOR RULE. |
-| `idu_arbitrate` | Decisión autónoma entre opciones: Kev local (GPU) -> Jev cloud -> fallback determinista. `options` (req), `state_summary`/`stateSummary`, `threshold`, `working_dir`/`cwd`. Devuelve `selectedOptionId`, `confidence`, `source` y `requiresHumanReview`. |
+| `idu_arbitrate` | Decisión autónoma entre opciones: Kev local (GPU) -> Jev cloud -> fallback determinista. `options` (req), `state_summary`/`stateSummary`, `threshold`, `working_dir`/`cwd`. Devuelve `selectedOptionId`, `confidence`, `source` y `requiresHumanReview`. La clave cloud nunca va a un endpoint local, `http://`, ni a uno elegido por el `.env` del proyecto salvo que la clave salga de ese mismo archivo. |
 
 ## `idu_delegate`
 
