@@ -17,5 +17,6 @@ idu-pi-owned skills are listed first (managed by idu-pi; refresh via `idu-pi idu
 | skill-check | .agents/skills/skill-check/SKILL.md |
 | soul-icons | .agents/skills/soul-icons/SKILL.md |
 | technical-change-tracker | .agents/skills/technical-change-tracker/SKILL.md |
+| video-production | .agents/skills/video-production/SKILL.md |
 | voice-narration | .agents/skills/voice-narration/SKILL.md |
 | user-custom-skill | .agents/skills/user-custom-skill |

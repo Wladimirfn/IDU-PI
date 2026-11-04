@@ -306,6 +306,12 @@ artefacto: **el código central nunca se delega**.
 | **Voz** | `voice-narration` | Narración por escena con voicebox (Kokoro / Chatterbox) |
 | **Música** | `music-composition` | Banda sonora compuesta por IA (Lofi Live AI) |
 
+**Para un video completo**, la skill `video-production` dirige a las cuatro: brief → investigación →
+guion → storyboard → voz → fotogramas clave → animación → borrador → música y efectos → entrega,
+con una revisión al final de cada fase. Elige o mezcla estilos de su biblioteca (`pizarra`,
+`bold-kinetic`, `editorial-datos`, `terminal-tech`, `explainer-ilustrado`) y no entrega sin su
+informe de revisión.
+
 ### Regla de decisión visual
 
 Los modelos de video generativo renderizan mal el texto y la UI. Por eso:

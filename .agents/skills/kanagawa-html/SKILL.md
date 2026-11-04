@@ -194,6 +194,12 @@ No se convierte automáticamente: ofrece PDF como entrega, o HyperFrames si pidi
 
 ## 7. Checklist de entrega
 
+Si lo que se pide es un video completo (con guion, voz y música), el proceso lo
+dirige `video-production`: esta skill aporta el sistema de diseño y el
+movimiento, y aquella decide la estructura, el estilo de cada escena y las
+revisiones.
+
+
 - [ ] Paleta de GRÁFICOS validada con script (`--surface "#06080f"`, orden exacto de KANAGAWA-CHART); texto con contraste ≥ 4.5:1 (3:1 solo texto grande)
 - [ ] Ambient blur + partículas presentes (u off si reduced-motion)
 - [ ] Barras/KPIs animados con springs (ω definido); contadores con easing cúbico
