@@ -2010,3 +2010,20 @@ test("a run id that is not a plain file name is never joined into a path", async
 		rmSync(outside, { recursive: true, force: true });
 	}
 });
+
+test("mostRecentRunIds takes the newest runs, not the oldest runs of the newest sessions", async () => {
+	const { mostRecentRunIds } = await import("../src/process-manager.js");
+	// What listSessions().flatMap(runs) produces: sessions newest first, each
+	// session's runs oldest first.
+	const flattened = [
+		"IDU-20261101090000-fast-aaaa", "IDU-20261104100000-fast-bbbb", "IDU-20261104110000-fast-cccc",
+		"IDU-20261102080000-coding-dddd", "IDU-20261103120000-coding-eeee",
+	];
+	assert.deepEqual(mostRecentRunIds(flattened, 2), ["IDU-20261104110000-fast-cccc", "IDU-20261104100000-fast-bbbb"]);
+	assert.deepEqual(mostRecentRunIds(flattened, 10).length, 5);
+	assert.deepEqual(mostRecentRunIds(["IDU-20261104110000-x-a", "legacy-run", "IDU-20261104110000-x-a"], 5), [
+		"IDU-20261104110000-x-a",
+		"legacy-run",
+	]);
+	assert.deepEqual(mostRecentRunIds(flattened, 0), []);
+});

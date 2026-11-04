@@ -760,6 +760,21 @@ export function checkActiveSddAttempt(workingDir: string, taskPrompt?: string): 
 	return { blocked: false };
 }
 
+/**
+ * The `limit` newest run ids, newest first.
+ *
+ * Sessions come sorted by activity but each one lists its runs oldest first,
+ * so slicing the flattened list took the oldest runs of the most recent
+ * sessions. Run ids carry their start time (IDU-YYYYMMDDhhmmss-...), which is
+ * what this sorts on; ids without one keep their relative order at the end.
+ *
+ * Pure, so it is directly unit-testable.
+ */
+export function mostRecentRunIds(runIds: string[], limit: number): string[] {
+	const stamp = (id: string) => /^IDU-(\d{14})-/.exec(id)?.[1] ?? "";
+	return [...new Set(runIds)].sort((a, b) => stamp(b).localeCompare(stamp(a))).slice(0, Math.max(0, limit));
+}
+
 export class CrossCliProcessManager {
 	private static instance: CrossCliProcessManager;
 
@@ -1386,9 +1401,7 @@ export class CrossCliProcessManager {
 			{ runs: number; inputTokens: number; outputTokens: number; reasoningTokens: number; unreported: number }
 		> = {};
 
-		const records = this.listSessions()
-			.flatMap((entry) => entry.runs)
-			.slice(0, limit)
+		const records = mostRecentRunIds(this.listSessions().flatMap((entry) => entry.runs), limit)
 			.map((runId) => this.getStatus(runId))
 			.filter((r): r is RunRecord => Boolean(r));
 
