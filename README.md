@@ -64,15 +64,18 @@ corepack enable
 pnpm install
 pnpm build
 
-# 3. Instalar la configuración en tu home
+# 3. Instalar dependencias, compilar y crear el shim idu-pi
 node scripts/install.mjs
 
 # 4. Verificar qué detectó
 pnpm run cli status
 ```
 
-`scripts/install.mjs` escribe `~/.idu/config.json` y `~/.idu/profiles.json`, y **detecta qué CLIs
-tienes instalados**. Los que no estén simplemente no aparecen: no hay que configurar nada a mano.
+`scripts/install.mjs` instala dependencias, compila y crea el shim `idu-pi`. **No escribe**
+`~/.idu/config.json` ni `~/.idu/profiles.json`: sin ellos el arnés usa los 12 presets del
+proyecto. La flota por rol se declara a mano en `~/.idu/profiles.json` (ver
+[Perfiles de ejecución](#perfiles-de-ejecución)). `pnpm run cli status` muestra qué CLIs
+detecta: los que no tengas simplemente no aparecen.
 
 ### Conectar el servidor MCP
 
@@ -195,9 +198,9 @@ Hay **dos capas** que conviene no confundir:
 | Capa | Qué es | Cuántos |
 | :--- | :--- | :--- |
 | **Presets del proyecto** | Los que trae el código en `DEFAULT_PROFILES` | 12 |
-| **Flota por rol** | Los que instala `scripts/install.mjs` en tu home | 25 |
+| **Flota por rol** | La que declaras en `~/.idu/profiles.json` (referencia abajo) | 25 |
 
-Con `"replaceDefaults": true` —lo que hace el instalador— los presets **dejan de inyectarse** y
+Con `"replaceDefaults": true` —así está declarada la flota de referencia— los presets **dejan de inyectarse** y
 tu archivo es la lista completa. Sin ese flag, tu archivo se suma a los 12 presets.
 
 ### Presets del proyecto (12)
@@ -223,8 +226,9 @@ Son el fallback. Si no instalas nada, estos son los perfiles disponibles.
 
 ### Flota por rol (25)
 
-Lo que instala `scripts/install.mjs`. Cada perfil declara su `harness` y, cuando aplica, el
-`provider` que lo enruta.
+La flota de referencia del autor. El instalador todavía no la escribe: copia a
+`~/.idu/profiles.json` los perfiles que quieras usar. Cada perfil declara su `harness` y, cuando
+aplica, el `provider` que lo enruta.
 
 | Rol | Perfiles (CLI · modelo) |
 | :--- | :--- |

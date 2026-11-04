@@ -31,7 +31,8 @@ by ear before any metric did.
 ## Prerequisites
 
 The engine's dev server must be up. `$LOFI_ENGINE` is the engine checkout
-(the folder with `src/main.ts` and the `__renderHeadless` bridge):
+(the folder with `src/main.ts` and the `__renderHeadless` bridge). Set it in your
+environment; if it is unset, stop and ask for the path instead of guessing one:
 
 ```bash
 cd "$LOFI_ENGINE"
@@ -53,7 +54,7 @@ await page.waitForTimeout(4000);
 
 // 1. Configure the AI. The key is read at runtime, never written into the script.
 const auth = JSON.parse(
-  fs.readFileSync(process.env.USERPROFILE + "/.commandcode/auth.json", "utf8"),
+  fs.readFileSync(require("os").homedir() + "/.commandcode/auth.json", "utf8"),
 );
 const apiKey = auth?.nan?.key;
 if (!apiKey) throw new Error("No NAN key in ~/.commandcode/auth.json");

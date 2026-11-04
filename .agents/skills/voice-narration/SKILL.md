@@ -21,9 +21,15 @@ Health check: `GET http://127.0.0.1:17493/health` → `{"status":"healthy", ...}
 
 If it answers `model_loaded: false`, that is normal: models load on first generation.
 
-Path convention used in this skill: `$IDU_VOICE` is the folder that holds the
-narration helpers (`generar_guion.py`, `validar_video_audio.py`). Set it in your
-environment; never hardcode one person's absolute path into a committed file.
+Path conventions used in this skill. Set them in your environment; never hardcode
+one person's absolute path into a committed file:
+
+| Variable | Points to |
+| -------- | --------- |
+| `$IDU_VOICE` | the folder with the narration helpers (`generar_guion.py`, `validar_video_audio.py`) |
+| `$VOICEBOX_DATA` | the voicebox data dir passed as `--data-dir` |
+
+If a variable is unset, stop and ask for the path instead of guessing one.
 
 ## Voices available in Spanish
 
@@ -90,8 +96,8 @@ A short sentence takes 5-45 s on CPU, ~10 s per scene on a GPU.
 
 ### 4. Collect the file
 
-The WAV lands at `<data-dir>/generations/<generation_id>.wav`
-(default `D:\ollama-models\voicebox-data\generations`).
+The WAV lands at `$VOICEBOX_DATA/generations/<generation_id>.wav` (the `--data-dir` you
+started the backend with).
 Copy it next to the video project, one file per scene.
 
 ### 5. Clean tail clicks (only this method)

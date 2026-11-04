@@ -167,6 +167,9 @@ Toda presentación hecha con esta skill debe exportarse sin re-trabajo.
 "C:\Program Files\Google\Chrome\Application\chrome.exe" --headless=new --no-pdf-header-footer --virtual-time-budget=5000 --print-to-pdf=out.pdf file:///ruta/index.html
 ```
 
+En Linux/macOS el binario es `chromium`, `google-chrome` o
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, con los mismos flags.
+
 `--virtual-time-budget=5000` da 5s para que corran las animaciones antes de
 imprimir; sin él, los contadores quedan a mitad de camino.
 

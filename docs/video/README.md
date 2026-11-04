@@ -6,11 +6,18 @@ creativo: las escenas con datos legibles se hacen con código, en un HTML determ
 
 El MP4 no se versiona porque pesa unos 64 MB. Se regenera con los pasos de abajo.
 
+> **Pendiente para cumplir las skills de audio.** Esta versión se hizo sin voicebox ni Lofi Live
+> AI, porque no estaban disponibles. La voz usa `kokoro-onnx`, que no es el paquete `kokoro` de
+> voicebox. La música es procedural y no tiene `partitura.json`, y `music-composition` no admite
+> eso como entrega final. Para la versión publicable, regenera la voz con `voice-narration`
+> (voicebox) y la música con `music-composition` (capa de IA). Después pasa
+> `validar_video_audio.py` antes de mezclar.
+
 | Archivo | Qué es |
 | :--- | :--- |
 | `script.py` | Guion en español, frase por frase, y las re-escrituras fonéticas para la voz |
-| `voice.py` | Narración con Kokoro (`em_alex`). Genera `voice.wav`, `timeline.json` y `subtitulos.srt` |
-| `music.py` | Banda sonora ambiental original, sintetizada sin samples |
+| `voice.py` | Narración con `kokoro-onnx` (voz `em_alex`). Genera `voice.wav`, `timeline.json` y `subtitulos.srt` |
+| `music.py` | Boceto de banda sonora: síntesis procedural, sin samples |
 | `film.html` | La película: 14 escenas en estética Kanagawa, animadas por las marcas de tiempo de cada frase |
 | `timeline.js`, `icons.js` | La línea de tiempo y los iconos `soul-icons` que consume `film.html` |
 | `render.js` | Render cuadro a cuadro con Playwright y ffmpeg. Corre en segmentos paralelos |
