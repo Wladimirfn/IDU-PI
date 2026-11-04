@@ -89,7 +89,7 @@ the effective list as authoritative — if a profile is not there, it is not del
 | Voz (workspace assets) | `voice-narrator` (commandcode · GLM 5.3 Flash nan) — narra guiones con voicebox |
 | Música (workspace assets) | `music-composer` (commandcode · GLM 5.3 Flash nan) — compone con Lofi Live AI |
 | Auditoría (read-only, cross) | `audit-claude` (claude · Opus 5.5 high) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash max) · `audit-mimo` (cmdc · MiMo 2.6 Pro max) · `audit-minimax` (cmdc · MiniMax M3.1 Flash high) |
-| **Trabajo / implementación** (workspace) | `work-glm` (gentle-shell · GLM 5.3 Flash high) · `work-deepseek` (gentle-shell · DeepSeek V4.1 Flash high) · `work-mimo` (gentle-shell · MiMo 2.6 Flash max) |
+| **Trabajo / implementación** (workspace) | `work-glm` (gentle-shell · GLM 5.3 Flash high) · `work-deepseek` (gentle-shell · DeepSeek V4 Flash high) · `work-mimo` (gentle-shell · MiMo 2.6 Flash max) |
 
 The work role uses **NaN-hosted models only**. Effort lives in the model slug
 (`:high` / `:max`) for gentle-shell, never in a profile field. All three were verified to
