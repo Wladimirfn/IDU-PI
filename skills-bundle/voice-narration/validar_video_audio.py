@@ -23,8 +23,8 @@ import numpy as np
 
 # A tail frame is a click when it exceeds its neighbours by this factor...
 CLICK_RATIO = 5.0
-# ...and the burst rises and falls in less than this. A louder-than-usual final
-# syllable lasts longer; flagging it as a click is how real speech gets "cleaned".
+# ...and the burst rises and falls in less than this. A final syllable or a
+# sibilant lasts longer; flagging it as a click is how real speech gets "cleaned".
 CLICK_MAX_MS = 40
 TAIL_AUDIBLE = 0.006
 
@@ -67,13 +67,15 @@ def find_tail_click(a, sr):
         neigh = np.concatenate([left, right]) if len(left) + len(right) else np.array([1e-9])
         base = float(np.median(neigh)) or 1e-9
         if peak > base * CLICK_RATIO:
-            # Temporal signature: how long the burst stays above half its peak
-            # (10 ms frames). Only a short one is a click.
-            half = peak / 2
+            # Temporal signature: how long the burst takes to rise from and fall
+            # back to 1/CLICK_RATIO of its peak (10 ms frames). A click is over in
+            # under CLICK_MAX_MS; a final Spanish "s"/"ts" peaks as sharply but
+            # fades over ~50 ms (idupi-pizarra p5.wav), so the tail decides.
+            floor = peak / CLICK_RATIO
             lo = hi = i
-            while lo > 0 and seg[lo - 1] >= half:
+            while lo > 0 and seg[lo - 1] >= floor:
                 lo -= 1
-            while hi < len(seg) - 1 and seg[hi + 1] >= half:
+            while hi < len(seg) - 1 and seg[hi + 1] >= floor:
                 hi += 1
             if (hi - lo + 1) * 10 < CLICK_MAX_MS:
                 return True, tail_rms

@@ -147,7 +147,7 @@ Every clip must pass every check:
 | ------------------ | ----------------------------------------------------------------------- | ---------- |
 | Duration preserved | `frames(processed) == frames(.orig.wav)`                                | the cleaning step, against its backup |
 | Speech preserved   | samples before click onset are identical to the backup                  | the cleaning step, against its backup |
-| Tail clean         | a burst ≥ 5× its neighbours that lasts < 40 ms at half its peak: 0 hits | the gate (error) |
+| Tail clean         | a burst ≥ 5× its neighbours that rises from and falls back to 1/5 of its peak in < 40 ms: 0 hits. A final "s" fades slower and passes | the gate (error) |
 | Tail RMS           | last 20 ms silent                                                       | the gate (warning) |
 | Declared ≤ real    | `data-duration ≤ frames / sample_rate` of the final file                | the gate (error) |
 | No overlap         | `data-start + real duration < next clip's data-start`                   | the gate (error) |

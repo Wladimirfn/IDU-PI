@@ -198,6 +198,23 @@ class ValidarVideoAudio(unittest.TestCase):
         errors, _ = p.run()
         self.assertTrue(any('id="vo1" is missing data-duration' in e for e in errors), errors)
 
+    def test_final_spanish_s_from_a_real_take_is_not_a_click(self):
+        # Regression from a real voicebox take: idupi-pizarra p5.wav ends in an
+        # "s"/"ts" that peaks in 10 ms but fades over ~50 ms. Listened to by the
+        # owner: natural speech, no click. Its last 400 ms, as 10 ms RMS frames:
+        p5_tail = [0.0063, 0.0054, 0.0067, 0.0090, 0.0297, 0.0830, 0.0731, 0.0349,
+                   0.0198, 0.0143, 0.0058, 0.0029, 0.0012, 0.0007, 0.0003, 0.0002,
+                   0.0002, 0.0001, 0.0001] + [0.0] * 21
+        rng = np.random.default_rng(5)
+        hop = int(0.010 * SR)
+        frames = [rng.standard_normal(hop) * rms for rms in p5_tail]
+        x = np.concatenate([speech(1.6)[: int(1.6 * SR)] * 0.02] + frames)
+        p = self.project()
+        p.voice(1, x, 0, len(x) / SR - 0.01)
+        p.music(3, 0, 3, SCORE)
+        errors, _ = p.run()
+        self.assertFalse(any("click" in e for e in errors), errors)
+
 
 if __name__ == "__main__":
     unittest.main()
