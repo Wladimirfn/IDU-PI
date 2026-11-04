@@ -1,5 +1,16 @@
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+	writeSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import { IDU_RUNTIME_DIR } from "./config.js";
 
@@ -61,6 +72,78 @@ export function readJsonFile<T>(filePath: string): T | null {
 		// quotes the surrounding raw text, and these files can sit next to
 		// credentials. See src/quota.ts for the same rule applied there.
 		return null;
+	}
+}
+
+/** Thrown when a file mutex stays held past the caller's timeout. */
+export class FileMutexBusyError extends Error {
+	constructor(mutexPath: string) {
+		super(`Timed out waiting for ${mutexPath}; another idu-pi process is holding it.`);
+		this.name = "FileMutexBusyError";
+	}
+}
+
+/** Blocks this thread for `ms` without spinning the CPU. */
+export function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Runs `fn` while holding an exclusive file mutex at `mutexPath`.
+ *
+ * For short read-then-write sections shared between processes (the session
+ * lock's reclaim, the decision ledger's id, the session tree's compaction),
+ * where an append or an exclusive create alone cannot hold the invariant.
+ *
+ * The mutex is a file created with O_EXCL. A holder that crashed leaves it
+ * behind, so one older than `staleMs` is broken. Holders only keep it for a
+ * few milliseconds, which is why a short `staleMs` is safe: a section that
+ * legitimately ran for seconds would be the bug.
+ */
+export function withFileMutex<T>(
+	mutexPath: string,
+	fn: () => T,
+	opts: { timeoutMs?: number; staleMs?: number } = {},
+): T {
+	const timeoutMs = opts.timeoutMs ?? 2_000;
+	const staleMs = opts.staleMs ?? 10_000;
+	const deadline = Date.now() + timeoutMs;
+	const dir = dirname(mutexPath);
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+	for (;;) {
+		try {
+			const fd = openSync(mutexPath, "wx");
+			try {
+				writeSync(fd, String(process.pid));
+			} finally {
+				closeSync(fd);
+			}
+			break;
+		} catch (err: unknown) {
+			if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
+		}
+		try {
+			if (Date.now() - statSync(mutexPath).mtimeMs > staleMs) {
+				unlinkSync(mutexPath);
+				continue;
+			}
+		} catch {
+			// Released between our create and our stat: just try again.
+			continue;
+		}
+		if (Date.now() > deadline) throw new FileMutexBusyError(mutexPath);
+		sleepSync(10);
+	}
+
+	try {
+		return fn();
+	} finally {
+		try {
+			unlinkSync(mutexPath);
+		} catch {
+			/* already gone; nothing to release */
+		}
 	}
 }
 

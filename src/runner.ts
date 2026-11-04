@@ -151,7 +151,9 @@ async function runDaemon(): Promise<void> {
 			try {
 				const lockContent = JSON.parse(readFileSync(spec.lockPath, "utf8"));
 				lockContent.workerPid = childPid;
-				writeFileSync(spec.lockPath, JSON.stringify(lockContent, null, 2), "utf8");
+				// Atomic replace: a lock read mid-write looks corrupt to a
+				// concurrent acquirer.
+				writeJsonAtomic(spec.lockPath, lockContent);
 			} catch {
 				// best effort
 			}

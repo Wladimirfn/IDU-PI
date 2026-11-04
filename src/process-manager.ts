@@ -12,6 +12,8 @@ import {
 	mkdirSync,
 	createWriteStream,
 	readdirSync,
+	linkSync,
+	statSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +45,7 @@ const SESSION_TREE_LOG_PATH = join(IDU_SESSIONS_DIR, "tree.jsonl");
 
 // Imported for local use and re-exported so the existing import path keeps
 // working. The implementation moved out to break a cycle with the quota layer.
-import { writeJsonAtomic } from "./json-file.js";
+import { FileMutexBusyError, withFileMutex, writeJsonAtomic } from "./json-file.js";
 export { writeJsonAtomic } from "./json-file.js";
 
 export function isProcessAlive(pid: number): boolean {
@@ -344,84 +346,110 @@ export interface SessionLockHandle {
 	release: () => void;
 }
 
+/**
+ * How old an unparseable lock must be before it is treated as debris. Every
+ * writer now replaces the file atomically, so a torn lock means a crash or a
+ * disk fault, never a write in progress; the grace is a second line for
+ * filesystems where the atomic path is not available.
+ */
+const CORRUPT_LOCK_GRACE_MS = 5_000;
+
+function sessionBusyError(sessionId: string, pid: number | string): Error {
+	return new Error(
+		`Session "${sessionId}" is currently in use by active process (PID ${pid}). Use fork=true to branch or wait for completion.`,
+	);
+}
+
 export function acquireSessionLock(sessionId: string, cwd: string, currentPid: number): SessionLockHandle {
 	ensureIduDirectories();
 	const cwdHash = createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 8);
 	const safeName = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
 	const lockPath = join(IDU_LOCKS_DIR, `sess_${cwdHash}_${safeName}.lock`);
 	const ownerPids = new Set<number>([currentPid]);
+	const lockBody = (pid: number) => JSON.stringify({ pid, cwd: resolve(cwd), time: new Date().toISOString() });
 
-	const writeLockFile = (): boolean => {
+	// Creates the lock with its content already in it. The old code opened the
+	// file with O_EXCL and wrote the body in a second step, and a reader that
+	// landed in between saw an empty file, called it corrupt, deleted a live
+	// lock and took the session. A hard link from a finished temp file appears
+	// complete or not at all. Where links are not supported (FAT, some network
+	// shares) it falls back to the exclusive create.
+	const tryCreate = (): boolean => {
+		const tmpPath = `${lockPath}.${randomUUID()}.tmp`;
+		writeFileSync(tmpPath, lockBody(currentPid), "utf8");
 		try {
-			const fd = openSync(lockPath, "wx");
-			writeFileSync(
-				fd,
-				JSON.stringify({ pid: currentPid, cwd: resolve(cwd), time: new Date().toISOString() }),
-				"utf8",
-			);
-			closeSync(fd);
+			linkSync(tmpPath, lockPath);
 			return true;
 		} catch (err: any) {
-			if (err.code === "EEXIST") {
-				return false;
+			if (err.code === "EEXIST") return false;
+			if (!["EPERM", "ENOTSUP", "ENOSYS", "EXDEV", "EINVAL"].includes(err.code)) throw err;
+		} finally {
+			try {
+				unlinkSync(tmpPath);
+			} catch {
+				// best effort
 			}
+		}
+		try {
+			const fd = openSync(lockPath, "wx");
+			try {
+				writeFileSync(fd, lockBody(currentPid), "utf8");
+			} finally {
+				closeSync(fd);
+			}
+			return true;
+		} catch (err: any) {
+			if (err.code === "EEXIST") return false;
 			throw err;
 		}
 	};
 
-	if (!writeLockFile()) {
-		// Existing lock found, check if process is alive
-		let lockData: { pid?: number; cwd?: string; time?: string } = {};
-		let isCorrupted = false;
-
+	if (!tryCreate()) {
+		// Somebody holds the file. Deciding it is stale and replacing it is a
+		// read-then-write, and two processes doing it at once both used to win:
+		// A removed the dead lock and created its own, then B, which had read the
+		// same dead pid, removed A's fresh lock and created its own. Reclaims are
+		// serialised now, and the state is read again inside the mutex, so the
+		// second reclaimer finds A's live lock and backs off.
 		try {
-			const raw = readFileSync(lockPath, "utf8");
-			lockData = JSON.parse(raw);
-			if (typeof lockData.pid !== "number") {
-				isCorrupted = true;
-			}
-		} catch {
-			isCorrupted = true;
-		}
+			withFileMutex(`${lockPath}.reclaim`, () => {
+				if (tryCreate()) return; // released while we waited
 
-		if (isCorrupted) {
-			// Remove corrupt or unparseable lock and retry acquisition
-			try {
-				unlinkSync(lockPath);
-			} catch {
-				// best effort
-			}
-			if (!writeLockFile()) {
-				throw new Error(`Failed to acquire lock after removing corrupted lock for "${sessionId}".`);
-			}
-		} else if (lockData.pid) {
-			try {
-				process.kill(lockData.pid, 0);
-				// Process is alive! Concurrency violation
-				throw new Error(
-					`Session "${sessionId}" is currently in use by active process (PID ${lockData.pid}). Use fork=true to branch or wait for completion.`,
-				);
-			} catch (err: any) {
-				if (err.code === "EPERM") {
-					// On Windows, EPERM means process is ALIVE with different permissions/elevation!
-					// DO NOT STEAL THE LOCK!
-					throw new Error(
-						`Session "${sessionId}" is currently in use by active process (PID ${lockData.pid}). Use fork=true to branch or wait for completion.`,
-					);
-				} else if (err.code === "ESRCH") {
-					// Process is dead: remove stale lock and retry acquisition
-					try {
-						unlinkSync(lockPath);
-					} catch {
-						// ignore
-					}
-					if (!writeLockFile()) {
-						throw new Error(`Failed to acquire reclaimed session lock for "${sessionId}".`);
-					}
-				} else {
-					throw err;
+				let lockData: { pid?: unknown } | null = null;
+				try {
+					lockData = JSON.parse(readFileSync(lockPath, "utf8"));
+				} catch {
+					lockData = null;
 				}
+
+				if (lockData && typeof lockData.pid === "number") {
+					// EPERM counts as alive (isProcessAlive): on Windows it means the
+					// process exists under another elevation. Never steal that lock.
+					if (isProcessAlive(lockData.pid)) throw sessionBusyError(sessionId, lockData.pid);
+				} else {
+					let ageMs = Infinity;
+					try {
+						ageMs = Date.now() - statSync(lockPath).mtimeMs;
+					} catch {
+						// vanished: the create below decides
+					}
+					if (ageMs < CORRUPT_LOCK_GRACE_MS) throw sessionBusyError(sessionId, "unknown, lock being written");
+				}
+
+				try {
+					unlinkSync(lockPath);
+				} catch {
+					// already gone
+				}
+				if (!tryCreate()) {
+					throw new Error(`Failed to acquire reclaimed session lock for "${sessionId}".`);
+				}
+			});
+		} catch (err) {
+			if (err instanceof FileMutexBusyError) {
+				throw new Error(`Session "${sessionId}" is being reclaimed by another idu-pi process. Retry in a moment.`);
 			}
+			throw err;
 		}
 	}
 
@@ -430,11 +458,8 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 		updatePid: (newPid: number) => {
 			ownerPids.add(newPid);
 			try {
-				writeFileSync(
-					lockPath,
-					JSON.stringify({ pid: newPid, cwd: resolve(cwd), time: new Date().toISOString() }),
-					"utf8",
-				);
+				// Atomic replace, so the lock is never observed half-written.
+				writeJsonAtomic(lockPath, { pid: newPid, cwd: resolve(cwd), time: new Date().toISOString() });
 			} catch {
 				// best effort
 			}
@@ -954,9 +979,17 @@ export class CrossCliProcessManager {
 			windowsVerbatimArguments,
 		};
 
-		ensureIduDirectories();
-		writeJsonAtomic(specPath, spec);
-		writeJsonAtomic(sessionPath, record);
+		// From here until the runner exists, the lock is ours alone to release:
+		// nobody else knows it was taken, and its pid is this long-lived process,
+		// so a throw left the session refused as "in use" until it restarted.
+		try {
+			ensureIduDirectories();
+			writeJsonAtomic(specPath, spec);
+			writeJsonAtomic(sessionPath, record);
+		} catch (err) {
+			sessionLock.release();
+			throw err;
+		}
 
 		// 11. Spawn detached runner daemon
 		const runnerScript = getRunnerScriptPath();
@@ -969,6 +1002,18 @@ export class CrossCliProcessManager {
 				windowsHide: true,
 			});
 			runnerProcess.unref();
+			// spawn reports most failures (EAGAIN, ENOMEM, a missing node) as an
+			// event, not a throw. Without this the lock stayed held by this
+			// process and the record claimed a runner that never started.
+			runnerProcess.on("error", (err) => {
+				sessionLock.release();
+				try {
+					const failed: RunRecord = { ...record, status: "failed", error: err.message, completedAt: new Date().toISOString() };
+					writeJsonAtomic(sessionPath, failed);
+				} catch {
+					// best effort
+				}
+			});
 		} catch (spawnErr: any) {
 			sessionLock.release();
 			record.status = "failed";
