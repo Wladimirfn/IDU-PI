@@ -1,0 +1,220 @@
+1
+00:00:02,200 --> 00:00:03,612
+Esto es IDU-PI.
+
+2
+00:00:03,782 --> 00:00:06,560
+No es otro chat de inteligencia artificial.
+
+3
+00:00:06,730 --> 00:00:09,739
+Es el arnés que orquesta terminales de IA reales.
+
+4
+00:00:11,189 --> 00:00:14,201
+Hoy trabajamos con muchos agentes de terminal:
+
+5
+00:00:14,371 --> 00:00:18,663
+Claude Code, OpenCode, Codex, Antigravity, Kimi, Qwen, Command Code...
+
+6
+00:00:18,833 --> 00:00:23,012
+Cada uno trae su propio arnés: sus reglas, su memoria, sus permisos.
+
+7
+00:00:23,182 --> 00:00:29,437
+Y saltar entre ellos a mano significa repetir contexto, perder el hilo, y aceptar cambios sin pruebas.
+
+8
+00:00:30,887 --> 00:00:33,812
+Y hay algo más: el arnés cambia el resultado.
+
+9
+00:00:33,982 --> 00:00:37,379
+En nuestro benchmark, la misma tarea, con el mismo modelo,
+
+10
+00:00:37,549 --> 00:00:40,455
+tardó veintiocho segundos y medio en un arnés,
+
+11
+00:00:40,625 --> 00:00:42,510
+y sesenta y cuatro en otro.
+
+12
+00:00:42,680 --> 00:00:45,664
+Con los mismos trece de trece tests aprobados.
+
+13
+00:00:47,114 --> 00:00:49,226
+De ahí nace la tesis de IDU-PI:
+
+14
+00:00:49,396 --> 00:00:53,091
+ningún modelo gana en todo, y el arnés pesa más que el modelo.
+
+15
+00:00:53,261 --> 00:00:58,727
+Así que, en vez de elegir uno, el sistema asigna cada tarea al arnés que mejor la resuelve.
+
+16
+00:01:00,178 --> 00:01:01,971
+IDU-PI hace tres cosas.
+
+17
+00:01:02,141 --> 00:01:02,946
+Delega.
+
+18
+00:01:03,116 --> 00:01:04,020
+Audita.
+
+19
+00:01:04,190 --> 00:01:05,201
+Y arbitra.
+
+20
+00:01:06,650 --> 00:01:10,579
+Delega a terminales reales, organizadas en una flota por roles:
+
+21
+00:01:10,749 --> 00:01:16,683
+exploración, consultas, arquitectura, auditoría, trabajo, diseño, iconografía, voz y música.
+
+22
+00:01:16,853 --> 00:01:19,354
+Nueve roles y veinticinco perfiles,
+
+23
+00:01:19,524 --> 00:01:25,523
+con sesiones reanudables, bloqueos de concurrencia, y un watchdog adaptativo que vigila a cada worker.
+
+24
+00:01:26,973 --> 00:01:28,602
+Audita cada cambio.
+
+25
+00:01:28,772 --> 00:01:33,321
+Antes de tocar código, el preflight mide el riesgo y el radio de impacto.
+
+26
+00:01:33,491 --> 00:01:37,698
+Después, el postflight compara los cambios reales contra los esperados.
+
+27
+00:01:37,868 --> 00:01:41,199
+Y cada decisión queda registrada en un ledger durable.
+
+28
+00:01:41,369 --> 00:01:44,723
+IDU-PI se niega a dar por bueno un cambio sin evidencia.
+
+29
+00:01:46,172 --> 00:01:49,755
+Y arbitra decisiones autónomas con un motor de tres capas:
+
+30
+00:01:49,925 --> 00:01:52,069
+Kev, un modelo local en GPU;
+
+31
+00:01:52,239 --> 00:01:53,464
+Jev, en la nube;
+
+32
+00:01:53,634 --> 00:01:58,161
+y si ninguno responde, un respaldo determinista Risk-First, a costo cero.
+
+33
+00:01:59,611 --> 00:02:02,239
+Todo bajo una regla: un solo orquestador.
+
+34
+00:02:02,409 --> 00:02:06,893
+Los workers exploran, consultan y auditan, pero nunca vuelven a delegar.
+
+35
+00:02:07,063 --> 00:02:12,508
+Así no hay bucles que quemen tokens, y el código central siempre lo implementa el orquestador.
+
+36
+00:02:13,958 --> 00:02:16,843
+Y todos comparten una sola memoria, con Engram.
+
+37
+00:02:17,013 --> 00:02:22,027
+Un worker guarda una decisión, y otro la recupera sin que nadie tenga que repetirla.
+
+38
+00:02:22,197 --> 00:02:24,954
+La memoria no es del modelo: es del sistema.
+
+39
+00:02:26,403 --> 00:02:28,519
+Los resultados están medidos.
+
+40
+00:02:28,689 --> 00:02:35,584
+Nueve configuraciones, tres pruebas con tests ocultos, ciento veintisiete de ciento treinta y tres tests superados,
+
+41
+00:02:35,754 --> 00:02:39,063
+y cero cortes de comunicación en unos setenta runs.
+
+42
+00:02:39,233 --> 00:02:46,811
+Y las diferencias de costo son enormes: para los mismos bugs, un arnés gastó ciento dos mil tokens, y otro, quinientos ochenta mil.
+
+43
+00:02:48,261 --> 00:02:49,485
+¿Por qué IDU-PI?
+
+44
+00:02:49,655 --> 00:02:52,474
+Porque usas el mejor arnés para cada tarea.
+
+45
+00:02:52,644 --> 00:02:54,696
+Porque ahorras tokens y tiempo.
+
+46
+00:02:54,866 --> 00:02:57,344
+Porque cada cambio llega con evidencia.
+
+47
+00:02:57,514 --> 00:03:00,203
+Porque no te casas con un solo proveedor.
+
+48
+00:03:00,374 --> 00:03:05,648
+Y porque se conecta por MCP, con catorce herramientas, a cualquier cliente compatible.
+
+49
+00:03:07,098 --> 00:03:08,551
+Empezar es simple:
+
+50
+00:03:08,721 --> 00:03:12,309
+clona el repositorio, instala con pnpm y compila,
+
+51
+00:03:12,479 --> 00:03:14,208
+ejecuta el instalador,
+
+52
+00:03:14,378 --> 00:03:17,305
+y el arnés detecta solo qué terminales tienes.
+
+53
+00:03:18,755 --> 00:03:19,642
+IDU-PI.
+
+54
+00:03:19,812 --> 00:03:23,785
+Muchos agentes, un solo orquestador, y cero cambios sin evidencia.
+
+55
+00:03:23,955 --> 00:03:27,053
+El enlace al repositorio está en la descripción.
+
