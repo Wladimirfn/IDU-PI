@@ -14,6 +14,7 @@ idu-pi-owned skills are listed first (managed by idu-pi; refresh via `idu-pi idu
 | music-composition | .pi/skills/music-composition/SKILL.md |
 | performance-optimizer | .pi/skills/performance-optimizer/SKILL.md |
 | project-understanding | .pi/skills/project-understanding/SKILL.md |
+| security-audit-practice | .pi/skills/security-audit-practice/SKILL.md |
 | skill-check | .pi/skills/skill-check/SKILL.md |
 | soul-icons | .pi/skills/soul-icons/SKILL.md |
 | technical-change-tracker | .pi/skills/technical-change-tracker/SKILL.md |
