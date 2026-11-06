@@ -21,6 +21,10 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 24    # antes: 22 — alinear con el runtime real y @types/node@24
+          # v5 turns package-manager caching on by default and probes for pnpm
+          # before Corepack has been enabled, which fails the job. This repo
+          # never used setup-node caching, so keep it off as v4 did.
+          package-manager-cache: false
 
       - name: Enable Corepack
         run: corepack enable
