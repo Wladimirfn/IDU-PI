@@ -19,29 +19,26 @@ export interface ResolvedCommand {
  * npm installs. Returns null when nothing is found, so callers can fall back
  * to their previous behaviour. Never throws.
  */
-function resolveWindowsShim(cmdPath: string): string | null {
+export function resolveWindowsShim(cmdPath: string): string | null {
 	if (process.platform !== "win32" || cmdPath.includes("/") || cmdPath.includes("\\")) {
 		return null;
 	}
-	try {
-		const bare = `${cmdPath}.cmd`;
-		const bat = `${cmdPath}.bat`;
-		const out = execFileSync("where", [bare], { stdio: ["ignore", "pipe", "ignore"] })
-			.toString()
-			.split(/\r?\n/)
-			.map((l) => l.trim())
-			.filter(Boolean);
-		if (out.length > 0 && existsSync(out[0])) return out[0];
-		const outBat = execFileSync("where", [bat], { stdio: ["ignore", "pipe", "ignore"] })
-			.toString()
-			.split(/\r?\n/)
-			.map((l) => l.trim())
-			.filter(Boolean);
-		if (outBat.length > 0 && existsSync(outBat[0])) return outBat[0];
-	} catch {
-		// not on PATH as a shim; caller decides what to do
-	}
-	return null;
+	// Each lookup has to tolerate "not found" on its own. `where` exits non-zero
+	// for a missing name, and letting that propagate skipped the .bat fallback
+	// entirely, so a .bat-only install was never resolved.
+	const lookup = (fileName: string): string | null => {
+		try {
+			const out = execFileSync("where", [fileName], { stdio: ["ignore", "pipe", "ignore"] })
+				.toString()
+				.split(/\r?\n/)
+				.map((line) => line.trim())
+				.filter(Boolean);
+			return out.length > 0 && existsSync(out[0]) ? out[0] : null;
+		} catch {
+			return null;
+		}
+	};
+	return lookup(`${cmdPath}.cmd`) ?? lookup(`${cmdPath}.bat`);
 }
 
 export function unwrapCmdExecutable(cmdPath: string, args: string[]): ResolvedCommand {
