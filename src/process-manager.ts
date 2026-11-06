@@ -333,6 +333,7 @@ export function shouldCountTurn(exitCode: number | null, status: string): boolea
 
 export interface SessionLockHandle {
 	lockPath: string;
+	token: string;
 	updatePid?: (newPid: number) => void;
 	release: () => void;
 }
@@ -436,6 +437,7 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 
 	return {
 		lockPath,
+		token: lockToken,
 		updatePid: (newPid: number) => {
 			ownerPids.add(newPid);
 			try {
@@ -896,7 +898,7 @@ export class CrossCliProcessManager {
 				fork: Boolean(request.fork),
 			},
 		);
-		const { command, args, isShell } = unwrapCmdExecutable(rawCommand, rawArgs);
+		const { command, args } = unwrapCmdExecutable(rawCommand, rawArgs);
 
 		const startedAt = new Date().toISOString();
 		const logPath = join(IDU_LOGS_DIR, `${runId}.log`);
@@ -960,6 +962,7 @@ export class CrossCliProcessManager {
 			runnerPidPath,
 			specPath,
 			lockPath: sessionLock.lockPath,
+			lockToken: sessionLock.token,
 			startedAt,
 			timeoutMs: effectiveTimeoutMs,
 			idleTimeoutMs: effectiveIdleTimeoutMs,
@@ -967,7 +970,6 @@ export class CrossCliProcessManager {
 			startupGraceMs,
 			streams: profile.streams,
 			verbose: request.verbose,
-			shell: isShell,
 		};
 
 		ensureIduDirectories();
