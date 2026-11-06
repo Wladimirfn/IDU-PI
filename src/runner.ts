@@ -14,10 +14,10 @@ import { pathToFileURL } from "node:url";
 import type { RunnerSpec, RunRecord, SessionTreeEntry } from "./types.js";
 import {
 	writeJsonAtomic,
-	killProcessTree,
 	loadSessionTree,
 	upsertSessionTreeEntry,
 } from "./process-manager.js";
+import { killProcessTree } from "./process-utils.js";
 import { shouldCountTurn } from "./session-policy.js";
 import { getSessionKey } from "./session-ids.js";
 import { extractCleanSummary } from "./summary.js";
