@@ -163,6 +163,28 @@ export function getSessionKey(cwd: string, sessionId: string): string {
 }
 
 /**
+ * Find the tree entry that owns a session id, accepting either spelling.
+ *
+ * A Claude session given as an alias is persisted under its deterministic UUID
+ * (`aliasToUuid`), so a lookup with the raw alias follows a key that was never
+ * written. That miss dropped profile inheritance on resume and fell back to a
+ * default profile belonging to a different harness. Try the raw key first, then
+ * the mapped one.
+ */
+export function findOwnerSessionEntry(
+	tree: Record<string, SessionTreeEntry>,
+	workingDir: string,
+	sessionId: string | undefined,
+): SessionTreeEntry | undefined {
+	const raw = sessionId?.trim();
+	if (!raw) return undefined;
+	const rawKey = getSessionKey(workingDir, raw);
+	if (tree[rawKey]) return tree[rawKey];
+	const mappedKey = getSessionKey(workingDir, aliasToUuid(raw));
+	return mappedKey === rawKey ? undefined : tree[mappedKey];
+}
+
+/**
  * The session tree is a log of upserts, not a document.
  *
  * It used to be one JSON object rewritten in full by every finished run. Two
@@ -311,8 +333,32 @@ export function shouldCountTurn(exitCode: number | null, status: string): boolea
 
 export interface SessionLockHandle {
 	lockPath: string;
+	token: string;
 	updatePid?: (newPid: number) => void;
 	release: () => void;
+}
+
+/**
+ * Remove a stale session lock without racing another reclaimer.
+ *
+ * Deleting the file directly is check-then-act: two processes can both decide
+ * the lock is stale, and the second deletes the fresh lock the first just
+ * wrote. rename() is atomic on the same volume, so only one process can move
+ * the file and the loser gets ENOENT instead of stealing.
+ */
+export function reclaimStaleLock(lockPath: string): boolean {
+	const quarantine = `${lockPath}.stale-${process.pid}-${randomUUID().slice(0, 8)}`;
+	try {
+		renameSync(lockPath, quarantine);
+	} catch {
+		return false;
+	}
+	try {
+		unlinkSync(quarantine);
+	} catch {
+		// best effort: a leftover quarantine file is inert
+	}
+	return true;
 }
 
 export function acquireSessionLock(sessionId: string, cwd: string, currentPid: number): SessionLockHandle {
@@ -322,14 +368,14 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 	const lockPath = join(IDU_LOCKS_DIR, `sess_${cwdHash}_${safeName}.lock`);
 	const ownerPids = new Set<number>([currentPid]);
 
+	const lockToken = randomUUID();
+	const lockBody = (pid: number): string =>
+		JSON.stringify({ pid, cwd: resolve(cwd), time: new Date().toISOString(), token: lockToken });
+
 	const writeLockFile = (): boolean => {
 		try {
 			const fd = openSync(lockPath, "wx");
-			writeFileSync(
-				fd,
-				JSON.stringify({ pid: currentPid, cwd: resolve(cwd), time: new Date().toISOString() }),
-				"utf8",
-			);
+			writeFileSync(fd, lockBody(currentPid), "utf8");
 			closeSync(fd);
 			return true;
 		} catch (err: any) {
@@ -356,13 +402,10 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 		}
 
 		if (isCorrupted) {
-			// Remove corrupt or unparseable lock and retry acquisition
-			try {
-				unlinkSync(lockPath);
-			} catch {
-				// best effort
-			}
-			if (!writeLockFile()) {
+			// Claim the corrupt lock atomically. A direct unlink lets two
+			// processes both decide it is stale, and the later one deletes the
+			// fresh lock the earlier one just wrote.
+			if (!reclaimStaleLock(lockPath) || !writeLockFile()) {
 				throw new Error(`Failed to acquire lock after removing corrupted lock for "${sessionId}".`);
 			}
 		} else if (lockData.pid) {
@@ -380,13 +423,9 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 						`Session "${sessionId}" is currently in use by active process (PID ${lockData.pid}). Use fork=true to branch or wait for completion.`,
 					);
 				} else if (err.code === "ESRCH") {
-					// Process is dead: remove stale lock and retry acquisition
-					try {
-						unlinkSync(lockPath);
-					} catch {
-						// ignore
-					}
-					if (!writeLockFile()) {
+					// Process is dead: claim the stale lock atomically, then retry.
+					// The loser of the claim must not delete the winner's fresh lock.
+					if (!reclaimStaleLock(lockPath) || !writeLockFile()) {
 						throw new Error(`Failed to acquire reclaimed session lock for "${sessionId}".`);
 					}
 				} else {
@@ -398,27 +437,39 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 
 	return {
 		lockPath,
+		token: lockToken,
 		updatePid: (newPid: number) => {
 			ownerPids.add(newPid);
 			try {
-				writeFileSync(
-					lockPath,
-					JSON.stringify({ pid: newPid, cwd: resolve(cwd), time: new Date().toISOString() }),
-					"utf8",
-				);
+				// Replace by rename instead of truncate-then-write: a concurrent
+				// reader must never see a half-written lock and call it corrupt.
+				const tmpPath = `${lockPath}.tmp-${process.pid}-${randomUUID().slice(0, 8)}`;
+				writeFileSync(tmpPath, lockBody(newPid), "utf8");
+				renameSync(tmpPath, lockPath);
 			} catch {
 				// best effort
 			}
 		},
 		release: () => {
+			// Move the lock aside, then decide. Reading before deleting let a
+			// reclaimer replace the file between the check and the unlink, so a
+			// process could delete a lock it does not own.
+			const quarantine = `${lockPath}.release-${process.pid}-${randomUUID().slice(0, 8)}`;
 			try {
-				if (existsSync(lockPath)) {
-					const raw = readFileSync(lockPath, "utf8");
-					const data = JSON.parse(raw);
-					if (data.pid && ownerPids.has(data.pid)) {
-						unlinkSync(lockPath);
-					}
-				}
+				renameSync(lockPath, quarantine);
+			} catch {
+				return; // nothing to release
+			}
+			let ours = false;
+			try {
+				const data = JSON.parse(readFileSync(quarantine, "utf8"));
+				ours = data.token === lockToken || (typeof data.pid === "number" && ownerPids.has(data.pid));
+			} catch {
+				ours = false;
+			}
+			try {
+				if (ours) unlinkSync(quarantine);
+				else renameSync(quarantine, lockPath); // not ours: put it back untouched
 			} catch {
 				// best effort
 			}
@@ -716,10 +767,10 @@ export class CrossCliProcessManager {
 		const workingDir = request.workingDir || process.cwd();
 		const tree = loadSessionTree();
 
-		const lookupKey = request.sessionId?.trim()
-			? getSessionKey(workingDir, request.sessionId.trim())
-			: "";
-		const ownerEntry = lookupKey ? tree[lookupKey] : undefined;
+		// A Claude alias is persisted under its deterministic UUID, so looking up
+		// the raw alias alone silently misses the session and drops profile
+		// inheritance. Accept both spellings.
+		const ownerEntry = findOwnerSessionEntry(tree, workingDir, request.sessionId);
 
 		let profileName = request.profile;
 		const resolution = resolveSessionProfile(request.profile, ownerEntry, {
@@ -847,7 +898,7 @@ export class CrossCliProcessManager {
 				fork: Boolean(request.fork),
 			},
 		);
-		const { command, args, isShell } = unwrapCmdExecutable(rawCommand, rawArgs);
+		const { command, args } = unwrapCmdExecutable(rawCommand, rawArgs);
 
 		const startedAt = new Date().toISOString();
 		const logPath = join(IDU_LOGS_DIR, `${runId}.log`);
@@ -911,6 +962,7 @@ export class CrossCliProcessManager {
 			runnerPidPath,
 			specPath,
 			lockPath: sessionLock.lockPath,
+			lockToken: sessionLock.token,
 			startedAt,
 			timeoutMs: effectiveTimeoutMs,
 			idleTimeoutMs: effectiveIdleTimeoutMs,
@@ -918,7 +970,6 @@ export class CrossCliProcessManager {
 			startupGraceMs,
 			streams: profile.streams,
 			verbose: request.verbose,
-			shell: isShell,
 		};
 
 		ensureIduDirectories();

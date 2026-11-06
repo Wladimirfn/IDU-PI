@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildWorkerArgs, unwrapCmdExecutable } from "../src/cmdline.js";
+import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "../src/cmdline.js";
 import {
 	CrossCliProcessManager,
 	extractCleanSummary,
@@ -13,6 +13,8 @@ import {
 	checkSessionHarnessAffinity,
 	shouldCountTurn,
 	resolveHardCapMs,
+	findOwnerSessionEntry,
+	getSessionKey,
 } from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -602,6 +604,58 @@ test("unwrapCmdExecutable unwraps Windows npm cmd wrappers to direct executables
 	}
 });
 
+test("checkCliAvailable never lets a config-supplied command reach a shell", async () => {
+	const { mkdtempSync, existsSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const tempDir = mkdtempSync(join(tmpdir(), "idu-cli-available-test-"));
+	const marker = join(tempDir, "injected.txt");
+	try {
+		// `command` comes from ~/.idu/config.json, which SECURITY.md says workers can
+		// write. Under a shell this runs `echo injected > marker` and reports the CLI
+		// as available, which is exactly the injection primitive being closed here.
+		const payload = `definitely-not-a-real-cli&echo injected>"${marker}"`;
+
+		assert.equal(checkCliAvailable(payload), false);
+		assert.equal(existsSync(marker), false, "the command string was interpreted by a shell");
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+});
+
+test("unwrapCmdExecutable never returns a shell fallback for a missing .cmd", async () => {
+	if (process.platform !== "win32") return;
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const missing = join(tmpdir(), "idu-definitely-missing-shim.cmd");
+	const res = unwrapCmdExecutable(missing, ["task & whoami"]);
+
+	assert.equal(res.command, missing);
+	assert.deepEqual(res.args, ["task & whoami"]);
+	assert.equal(res.isShell, false, "a missing shim must not be handed to a shell");
+});
+
+test("unwrapCmdExecutable refuses an unparsable .cmd shim instead of spawning a shell", async () => {
+	if (process.platform !== "win32") return;
+	const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const tempDir = mkdtempSync(join(tmpdir(), "idu-unparsable-shim-"));
+	try {
+		// No quoted .exe and no quoted .js/.mjs: the shim's target cannot be
+		// resolved, so running it through cmd.exe would expose the task text.
+		const shim = join(tempDir, "mystery-tool.cmd");
+		writeFileSync(shim, "@ECHO off\r\npowershell -NoProfile %*\r\n");
+
+		assert.throws(() => unwrapCmdExecutable(shim, ["task & whoami"]), /could not be resolved/);
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+});
+
 test("extractCleanSummary extracts full assistant report from NDJSON without truncation", () => {
 	const sampleNdjson = [
 		JSON.stringify({ type: "step_start", timestamp: 123 }),
@@ -1065,6 +1119,31 @@ test("acquireSessionLock protects against foreign lock deletion (HOLE-C) and han
 
 	// Clean up
 	unlinkSync(lock1.lockPath);
+});
+
+test("findOwnerSessionEntry resolves a Claude alias to the UUID the tree stored", () => {
+	const cwd = process.cwd();
+	const alias = "resume-by-alias";
+	const uuid = aliasToUuid(alias);
+	const entry = {
+		sessionId: uuid,
+		profile: "coding",
+		harness: "claude",
+		workingDir: cwd,
+		createdAt: new Date().toISOString(),
+		lastActiveAt: new Date().toISOString(),
+		turnCount: 1,
+		runs: [],
+	};
+	const tree = { [getSessionKey(cwd, uuid)]: entry };
+
+	// The raw-alias key is what delegate() used to look up, and it is never written.
+	assert.equal(tree[getSessionKey(cwd, alias)], undefined);
+
+	assert.equal(findOwnerSessionEntry(tree, cwd, alias), entry, "an alias must find the stored UUID entry");
+	assert.equal(findOwnerSessionEntry(tree, cwd, uuid), entry, "a UUID still resolves to itself");
+	assert.equal(findOwnerSessionEntry(tree, cwd, "some-other-session"), undefined);
+	assert.equal(findOwnerSessionEntry(tree, cwd, undefined), undefined);
 });
 
 test("killProcessTree handles dead/missing process gracefully without unhandled exceptions", () => {

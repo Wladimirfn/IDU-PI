@@ -198,6 +198,8 @@ export interface RunnerSpec {
 	runnerPidPath?: string;
 	specPath?: string;
 	lockPath?: string;
+	/** Token of the session lock this run owns; release happens only when it matches. */
+	lockToken?: string;
 	startedAt?: string;
 	timeoutMs?: number;
 	idleTimeoutMs?: number;
@@ -205,7 +207,6 @@ export interface RunnerSpec {
 	startupGraceMs?: number;
 	streams?: boolean;
 	verbose?: boolean;
-	shell?: boolean;
 }
 
 export interface SessionTreeEntry {

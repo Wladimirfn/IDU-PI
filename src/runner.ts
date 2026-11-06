@@ -10,6 +10,7 @@ import {
 	existsSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import type { RunnerSpec, RunRecord, SessionTreeEntry } from "./types.js";
 import {
 	writeJsonAtomic,
@@ -103,10 +104,9 @@ async function runDaemon(): Promise<void> {
 		// best effort
 	}
 
-	const isShell =
-		spec.shell ??
-		(process.platform === "win32" &&
-			(spec.command.endsWith(".cmd") || spec.command.endsWith(".bat")));
+	// Never route worker args through a shell: task text and config values are
+	// not shell-escaped, and unwrapCmdExecutable has already resolved any
+	// .cmd/.bat shim to a real executable (or refused it) before this point.
 
 	let child: ReturnType<typeof spawn>;
 	try {
@@ -117,7 +117,7 @@ async function runDaemon(): Promise<void> {
 				...spec.env,
 			},
 			stdio: ["ignore", logFd, logFd],
-			shell: isShell,
+			shell: false,
 			windowsHide: true,
 		});
 	} catch (spawnErr: any) {
@@ -144,15 +144,9 @@ async function runDaemon(): Promise<void> {
 			// best effort
 		}
 
-		if (spec.lockPath && existsSync(spec.lockPath)) {
-			try {
-				const lockContent = JSON.parse(readFileSync(spec.lockPath, "utf8"));
-				lockContent.workerPid = childPid;
-				writeFileSync(spec.lockPath, JSON.stringify(lockContent, null, 2), "utf8");
-			} catch {
-				// best effort
-			}
-		}
+		// The lock is not rewritten here. `workerPid` was written but never read,
+		// and a truncate-then-write let a concurrent reader see a half-written
+		// lock and mistake a live one for corrupt.
 	}
 
 	const startMs = Date.now();
@@ -386,11 +380,20 @@ function createInitialRecord(spec: RunnerSpec, runnerPid: number): RunRecord {
 	};
 }
 
-function cleanupFiles(spec: RunnerSpec): void {
+export function cleanupFiles(spec: RunnerSpec): void {
 	if (spec.lockPath && existsSync(spec.lockPath)) {
 		try {
-			unlinkSync(spec.lockPath);
-		} catch {}
+			// Only release the lock this run still owns. A stale reclaimer may have
+			// replaced it, and deleting that one would free a session another
+			// process is actively running.
+			const data = JSON.parse(readFileSync(spec.lockPath, "utf8"));
+			const owns = spec.lockToken
+				? data.token === spec.lockToken
+				: typeof data.pid === "number" && data.pid === process.pid;
+			if (owns) unlinkSync(spec.lockPath);
+		} catch {
+			// unparseable or already gone: leave it to the reclaimer
+		}
 	}
 	if (spec.pidPath && existsSync(spec.pidPath)) {
 		try {
@@ -409,7 +412,12 @@ function cleanupFiles(spec: RunnerSpec): void {
 	}
 }
 
-runDaemon().catch((err) => {
+// Only start the daemon when this file is the process entry point. Importing it
+// (for example from a test that exercises cleanupFiles) must not spawn a run.
+const isMainModule =
+	Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) void runDaemon().catch((err) => {
 	console.error("Fatal runner daemon error:", err);
 	try {
 		const specPath = parseArgs();

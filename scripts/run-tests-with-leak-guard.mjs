@@ -41,6 +41,7 @@
 //     1. Suite — node --test spawns each file in its own process, in parallel.
 //     2. $TMPDIR leak — set-difference of tmpdir entries before/after.
 //     3. Repo-root untracked-leak — scripts/check-repo-root-untracked.mjs.
+//     4. IDU_HOME leak — proves the suite never wrote to the operator's ~/.idu.
 //
 //   The repo-root guard runs AFTER `node --test` has returned AND AFTER the
 //   $TMPDIR snapshot/compare, REGARDLESS of either outcome. The two leak
@@ -52,8 +53,8 @@
 //   $TMPDIR threshold breach, repo-root status), so a single failing guard
 //   cannot mask another.
 
-import { readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,19 +96,53 @@ function snapshotTmpdir() {
 	return set;
 }
 
+// Snapshot every relative path under `root`, bounded in depth and size. Used to
+// prove the suite did not write into the operator's real IDU_HOME.
+function snapshotDir(root) {
+	const set = new Set();
+	const walk = (dir, prefix, depth) => {
+		let entries;
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+			set.add(rel);
+			if (set.size > 20000) return;
+			if (entry.isDirectory() && depth < 4) walk(join(dir, entry.name), rel, depth + 1);
+		}
+	};
+	walk(root, "", 0);
+	return set;
+}
+
 const THRESHOLD = parseInt(process.env.LEAK_GUARD_THRESHOLD ?? "0", 10);
 const TEST_GLOB =
 	process.env.LEAK_GUARD_TEST_GLOB ??
 	"dist/test/*.test.js dist/test/**/*.test.js";
 
+// The suite must never write to the operator's real IDU_HOME. Give the child
+// its own directory and then prove the real one did not change.
+const operatorIduHome = process.env.IDU_HOME || join(homedir(), ".idu");
+const isolatedHome = mkdtempSync(join(tmpdir(), "idu-leak-guard-home-"));
+const iduBefore = snapshotDir(operatorIduHome);
+
 const before = snapshotTmpdir();
 console.log(`[leak-guard] entries in ${tmpdir()} before suite: ${before.size}`);
+console.log(`[leak-guard] isolated IDU_HOME for the suite: ${isolatedHome}`);
 
-const result = spawnSync(
-	process.execPath,
-	["--test", ...TEST_GLOB.split(" ")],
-	{ stdio: "inherit" },
-);
+let result;
+try {
+	result = spawnSync(
+		process.execPath,
+		["--test", ...TEST_GLOB.split(" ")],
+		{ stdio: "inherit", env: { ...process.env, IDU_HOME: isolatedHome } },
+	);
+} finally {
+	rmSync(isolatedHome, { recursive: true, force: true });
+}
 const suiteFailed = result.status !== 0;
 const suiteExitCode = result.status ?? 1;
 
@@ -119,6 +154,20 @@ const removedEntries = [...before].filter((e) => !after.has(e));
 // older runs, so `removed` is always 0; a net-delta formula would silently
 // cancel new leaks against unrelated cleanup and produce false negatives.
 const delta = newEntries.length;
+
+const iduAfter = snapshotDir(operatorIduHome);
+const iduLeaks = [...iduAfter].filter((e) => !iduBefore.has(e));
+let iduHomeExitCode = 0;
+if (iduLeaks.length > 0) {
+	console.error(
+		`[leak-guard] IDU_HOME LEAK: the suite wrote ${iduLeaks.length} new path(s) under ${operatorIduHome}.`,
+	);
+	for (const e of iduLeaks.slice(0, 20)) console.error(`  ${e}`);
+	console.error(`[leak-guard] Tests must honour IDU_HOME; this run isolated it to ${isolatedHome}.`);
+	iduHomeExitCode = 1;
+} else {
+	console.log(`[leak-guard] IDU_HOME clean: no new paths under ${operatorIduHome}`);
+}
 
 console.log(
 	`[leak-guard] entries after suite: ${after.size} (new ${newEntries.length}, removed ${removedEntries.length})`,
@@ -184,6 +233,7 @@ if (repoRootExitCode !== 0) {
 const exitCode = Math.max(
 	suiteFailed ? suiteExitCode : 0,
 	tmpdirExitCode,
+	iduHomeExitCode,
 	repoRootExitCode,
 );
 
