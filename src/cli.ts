@@ -288,7 +288,7 @@ async function main(): Promise<void> {
 		}
 
 		case "arbitrate": {
-			const { arbitrate, looksLikeHighRiskMitigation, normalizeThreshold } = await import("./arbitration.js");
+			const { looksLikeHighRiskMitigation, normalizeThreshold } = await import("./arbitration.js");
 			const stateIndex = args.indexOf("--state");
 			let state = "Current workspace state and backlog triage";
 			if (stateIndex !== -1 && args[stateIndex + 1]) {
@@ -371,7 +371,10 @@ async function main(): Promise<void> {
 				process.exit(1);
 			}
 
-			const decision = await arbitrate({
+			const { arbitrateAndRecord } = await import("./arbitration-run.js");
+			const decision = await arbitrateAndRecord({
+				label: "idu-pi arbitrate",
+				decidedByPrefix: "cli-arbitrate",
 				stateSummary: state,
 				options: optionsList,
 				confidenceThreshold: threshold,
@@ -379,16 +382,6 @@ async function main(): Promise<void> {
 				apiKey: explicitApiKey,
 				endpoint: explicitEndpoint,
 				offline,
-			});
-
-			// Same auditable trace as the MCP path (J asymmetry fix).
-			const { recordDecision } = await import("./decision-ledger.js");
-			recordDecision({
-				projectId: "arbitration",
-				decision: `idu-pi arbitrate selected '${decision.selectedOptionId}' (source: ${decision.source}, confidence: ${decision.confidence}, humanReview: ${decision.requiresHumanReview}). Options: ${optionsList.map((o) => o.id).join(", ")}. State: ${state.slice(0, 200)}`,
-				decidedBy: `cli-arbitrate/${decision.source}`,
-				targetKind: "arbitration-decision",
-				targetId: decision.selectedOptionId,
 			});
 
 			console.log(JSON.stringify(decision, null, 2));
