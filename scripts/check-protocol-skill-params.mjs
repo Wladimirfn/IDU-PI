@@ -40,6 +40,18 @@ for (const row of rows) {
 	}
 }
 
+// Zero parsed rows is not success. A reformatted table, a renamed skill
+// directory, or an empty file would otherwise report "0 problemas" for having
+// compared nothing. check-protocol-tool-drift.mjs already fails closed this
+// way; this gate must not be the softer one.
+if (checked === 0) {
+	console.error(
+		"ERROR: no se parseó ninguna fila de tool desde skills-bundle/idu-pi-parent-protocol/SKILL.md.",
+	);
+	console.error("El chequeo no verificó nada. Se esperaban filas con el formato '| `idu_<tool>` |'.");
+	process.exit(1);
+}
+
 console.log("");
 console.log(`filas revisadas: ${checked} | con problema: ${bad}`);
 console.log(bad === 0 ? "OK: la tabla de la skill coincide con el schema real." : "HAY QUE CORREGIR");
