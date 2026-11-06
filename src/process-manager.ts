@@ -7,8 +7,7 @@ import {
 	createWriteStream,
 	readdirSync,
 } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import {
 	IDU_LOGS_DIR,
 	IDU_RUNTIME_DIR,
@@ -18,6 +17,7 @@ import {
 	loadIduConfig,
 	loadProfilesConfig,
 } from "./config.js";
+import { getRunnerScriptPath, isProcessAlive, killProcessTree } from "./process-utils.js";
 import { acquireSessionLock } from "./session-lock.js";
 import { loadSessionTree, upsertSessionTreeEntry } from "./session-tree.js";
 export { loadSessionTree, upsertSessionTreeEntry } from "./session-tree.js";
@@ -41,71 +41,6 @@ import type {
 // working. The implementation moved out to break a cycle with the quota layer.
 import { writeJsonAtomic } from "./json-file.js";
 export { writeJsonAtomic } from "./json-file.js";
-
-export function isProcessAlive(pid: number): boolean {
-	if (!pid || pid <= 0) return false;
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (err: any) {
-		if (err.code === "EPERM") return true;
-		if (err.code === "ESRCH") return false;
-		return false;
-	}
-}
-
-export function getRunnerScriptPath(): string {
-	const jsPath = fileURLToPath(new URL("./runner.js", import.meta.url));
-	if (existsSync(jsPath)) return jsPath;
-	const distJsPath = resolve(process.cwd(), "dist/src/runner.js");
-	if (existsSync(distJsPath)) return distJsPath;
-	return jsPath;
-}
-
-export function killProcessTree(child: ChildProcess | number, reason = "termination"): void {
-	const pid = typeof child === "number" ? child : child.pid;
-	if (!pid) return;
-
-	if (process.platform === "win32") {
-		// Reliable process tree termination on Windows (cmd.exe wrapper + child processes)
-		try {
-			execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-		} catch {
-			if (typeof child !== "number") {
-				try {
-					child.kill("SIGKILL");
-				} catch {
-					// best effort
-				}
-			}
-		}
-		return;
-	}
-
-	// POSIX: process group kill with escalation
-	try {
-		process.kill(-pid, "SIGTERM");
-	} catch {
-		try {
-			process.kill(pid, "SIGTERM");
-		} catch {
-			// best effort
-		}
-	}
-
-	const escalationTimer = setTimeout(() => {
-		try {
-			process.kill(-pid, "SIGKILL");
-		} catch {
-			try {
-				process.kill(pid, "SIGKILL");
-			} catch {
-				// best effort
-			}
-		}
-	}, 5_000);
-	escalationTimer.unref();
-}
 
 function generateRunId(profile: string): string {
 	const now = new Date();

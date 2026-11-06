@@ -3,10 +3,9 @@ import assert from "node:assert/strict";
 import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "../src/cmdline.js";
 import {
 	CrossCliProcessManager,
-	killProcessTree,
 	writeJsonAtomic,
-	isProcessAlive,
 } from "../src/process-manager.js";
+import { killProcessTree, isProcessAlive } from "../src/process-utils.js";
 import { acquireSessionLock } from "../src/session-lock.js";
 import { resolveSessionProfile, checkSessionHarnessAffinity, shouldCountTurn, resolveHardCapMs } from "../src/session-policy.js";
 import { aliasToUuid, findOwnerSessionEntry, getSessionKey } from "../src/session-ids.js";
