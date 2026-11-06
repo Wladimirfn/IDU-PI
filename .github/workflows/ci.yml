@@ -11,8 +11,23 @@ permissions:
 
 jobs:
   build:
-    name: Build and diff check
-    runs-on: windows-latest
+    name: ${{ matrix.name }}
+    strategy:
+      # One OS failing must not cancel the other: a Linux-only break is exactly
+      # the signal this matrix exists to surface.
+      fail-fast: false
+      matrix:
+        # Branch protection on main requires the literal context "Build and diff
+        # check". Renaming the Windows leg would leave every PR permanently
+        # pending and enforce_admins would stop even an admin from merging, so
+        # that context name is preserved verbatim rather than rebuilt from
+        # matrix.os.
+        include:
+          - os: windows-latest
+            name: Build and diff check
+          - os: ubuntu-latest
+            name: Build and verify (Linux)
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5

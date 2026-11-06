@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -79,7 +79,7 @@ function formatHelp() {
 		"  --no-mcp       omite setup mcp-init",
 		"  --no-shim      omite shim local idu-pi",
 		"  --open-wizard  al final muestra el estado (cli.js status): CLIs y perfiles detectados",
-		"  --add-path     agrega el shim al PATH de usuario si falta; con --yes no pregunta",
+		"  --add-path     configura el PATH de usuario si falta el shim (sólo Windows); en POSIX imprime la línea a agregar",
 		"  --help         muestra esta ayuda",
 	].join("\n");
 }
@@ -92,8 +92,7 @@ function detectInstallState() {
 		env.PI_CODING_AGENT_DIR?.trim() || join(userHome, ".pi", "agent"),
 	);
 	const shimDir = resolve(
-		env.IDU_PI_INSTALL_SHIM_DIR?.trim() ||
-			join(userHome, "AppData", "Local", "idu-pi", "bin"),
+		env.IDU_PI_INSTALL_SHIM_DIR?.trim() || defaultShimDir(userHome),
 	);
 	const pathEntries = (env.PATH ?? env.Path ?? "")
 		.split(delimiter)
@@ -157,6 +156,34 @@ function detectIduGlobal(mocks) {
 	}
 }
 
+/**
+ * Where the local `idu-pi` launcher goes when IDU_PI_INSTALL_SHIM_DIR is unset.
+ *
+ * The Windows default predates Linux support and used to be applied on every
+ * platform, so a Linux install dropped a Windows-shaped tree
+ * (`$HOME/AppData/Local/...`) into the user's home. POSIX uses ~/.local/bin,
+ * which Ubuntu's default ~/.profile already adds to PATH when it exists.
+ */
+function defaultShimDir(userHome) {
+	if (process.platform === "win32") {
+		return join(userHome, "AppData", "Local", "idu-pi", "bin");
+	}
+	return join(userHome, ".local", "bin");
+}
+
+/** Files the shim step writes on this platform. Mirrors installShim(). */
+function shimPaths(shimDir) {
+	if (process.platform === "win32") {
+		return [join(shimDir, "idu-pi.cmd"), join(shimDir, "idu-pi.ps1")];
+	}
+	return [join(shimDir, "idu-pi")];
+}
+
+/** Single-quote for POSIX sh, so a path with spaces or quotes stays one word. */
+function shQuote(value) {
+	return `'${String(value).replace(/'/gu, `'\\''`)}'`;
+}
+
 function buildPlan(detection) {
 	const cliPath = join("dist", "src", "cli.js");
 	const steps = [
@@ -186,10 +213,7 @@ function buildPlan(detection) {
 		},
 		{
 			name: "Crear shim idu-pi local",
-			touches: [
-				join(detection.shimDir, "idu-pi.cmd"),
-				join(detection.shimDir, "idu-pi.ps1"),
-			],
+			touches: shimPaths(detection.shimDir),
 			enabled: !args.noShim,
 			skipReason: "Shim idu-pi: omitido por --no-shim",
 		},
@@ -350,7 +374,14 @@ async function runInstaller(plan) {
 		return;
 	}
 	if (await askAddPath(state.shimDir)) {
-		addShimToUserPath(state.shimDir);
+		if (!addShimToUserPath(state.shimDir)) {
+			// POSIX: never edit the user's shell rc automatically.
+			console.log("No modifico tu shell rc automáticamente.");
+			console.log("Agregá esta línea a tu ~/.profile, ~/.bashrc o config de zsh/fish:");
+			console.log(`  export PATH="$PATH:${state.shimDir}"`);
+			console.log("Luego abrí una terminal nueva y ejecutá: idu-pi");
+			return;
+		}
 		console.log("PATH de usuario actualizado.");
 		console.log("Cerrá y abrí una terminal nueva, luego ejecutá: idu-pi");
 		return;
@@ -368,12 +399,15 @@ function addShimToUserPath(shimDir) {
 		const current = process.env.IDU_PI_INSTALL_TEST_USER_PATH ?? "";
 		const next = appendPathEntry(current, shimDir);
 		writeFileSync(markerFile, next, "utf8");
-		return;
+		return true;
 	}
 	if (process.platform !== "win32") {
-		throw new Error(
-			"La actualización automática de PATH sólo está implementada para Windows.",
-		);
+		// Editing a shell rc file is not reversible from here: the installer does
+		// not know whether the user runs bash, zsh or fish, and cannot undo the
+		// line on uninstall. Report the unsupported case instead of throwing, so a
+		// Linux install with --add-path finishes with instructions rather than a
+		// stack trace.
+		return false;
 	}
 	const current = execFileSync(
 		"powershell",
@@ -385,7 +419,7 @@ function addShimToUserPath(shimDir) {
 		{ encoding: "utf8" },
 	).trim();
 	const next = appendPathEntry(current, shimDir);
-	if (next === current) return;
+	if (next === current) return true;
 	execFileSync(
 		"powershell",
 		[
@@ -398,6 +432,7 @@ function addShimToUserPath(shimDir) {
 			stdio: ["ignore", "ignore", "pipe"],
 		},
 	);
+	return true;
 }
 
 function appendPathEntry(current, entry) {
@@ -436,11 +471,26 @@ function runCommand(commandTuple) {
 function installShim() {
 	const state = detectInstallState();
 	const cliPath = join(packageRoot, "dist", "src", "cli.js");
+	mkdirSync(state.shimDir, { recursive: true });
+
+	if (process.platform !== "win32") {
+		// POSIX has no .cmd/.ps1 equivalent: without this branch the installer wrote
+		// two files the shell cannot execute, so `idu-pi` never resolved on Linux
+		// even though the CLI itself already ran there.
+		const shimPath = join(state.shimDir, "idu-pi");
+		const content = `#!/bin/sh\nexec node ${shQuote(cliPath)} "$@"\n`;
+		writeIfChangedWithBackup(shimPath, content, "");
+		// writeFileSync does not carry the exec bit; 0o755 is what makes the shim
+		// runnable without an explicit `sh` prefix.
+		chmodSync(shimPath, 0o755);
+		console.log(`Shim idu-pi instalado/verificado en: ${state.shimDir}`);
+		return;
+	}
+
 	const cmdPath = join(state.shimDir, "idu-pi.cmd");
 	const ps1Path = join(state.shimDir, "idu-pi.ps1");
 	const cmdContent = `@echo off\r\nnode "${cliPath}" %*\r\n`;
 	const ps1Content = `& node "${cliPath}" @args\n`;
-	mkdirSync(state.shimDir, { recursive: true });
 	writeIfChangedWithBackup(cmdPath, cmdContent, ".cmd");
 	writeIfChangedWithBackup(ps1Path, ps1Content, ".ps1");
 	console.log(`Shim idu-pi instalado/verificado en: ${state.shimDir}`);
