@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acquireSessionLock, reclaimStaleLock } from "../src/process-manager.js";
+import { acquireSessionLock, reclaimStaleLock } from "../src/session-lock.js";
 import { cleanupFiles } from "../src/runner.js";
 import type { RunnerSpec } from "../src/types.js";
 
