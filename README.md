@@ -73,7 +73,10 @@ pnpm run cli status
 
 `scripts/install.mjs` instala dependencias, compila, agrega `idu-pi` al MCP de Pi
 (`~/.pi/agent/mcp.json`, con backup y sin pisar otros servidores; `--no-mcp` lo omite) y crea el
-shim `idu-pi`. Para hacer solo el paso de Pi: `pnpm run cli setup mcp-init` (`--dry-run` para ver
+shim `idu-pi`. En Windows el shim son `idu-pi.cmd` e `idu-pi.ps1` en
+`%LOCALAPPDATA%\idu-pi\bin`; en Linux y macOS es un script `idu-pi` con permiso de ejecución en
+`~/.local/bin`. En POSIX el instalador **no** edita tu shell rc: si esa carpeta no está en `PATH`,
+imprime la línea exacta que tenés que agregar. Para hacer solo el paso de Pi: `pnpm run cli setup mcp-init` (`--dry-run` para ver
 el resultado sin escribir, `--force` para reemplazar una entrada existente). **No escribe**
 `~/.idu/config.json` ni `~/.idu/profiles.json`: sin ellos el arnés usa los 12 presets del
 proyecto. La flota por rol se declara a mano en `~/.idu/profiles.json` (ver
