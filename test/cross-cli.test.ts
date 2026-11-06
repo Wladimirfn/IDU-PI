@@ -4,7 +4,6 @@ import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "../src/
 import {
 	CrossCliProcessManager,
 	acquireSessionLock,
-	aliasToUuid,
 	killProcessTree,
 	writeJsonAtomic,
 	isProcessAlive,
@@ -12,9 +11,8 @@ import {
 	checkSessionHarnessAffinity,
 	shouldCountTurn,
 	resolveHardCapMs,
-	findOwnerSessionEntry,
-	getSessionKey,
 } from "../src/process-manager.js";
+import { aliasToUuid, findOwnerSessionEntry, getSessionKey } from "../src/session-ids.js";
 import { extractCleanSummary } from "../src/summary.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
