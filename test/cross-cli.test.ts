@@ -1962,7 +1962,7 @@ test("SDD Implementation Guard blocks delegating SDD Work Unit implementation to
 });
 
 test("checkActiveSddAttempt detects heuristic markers and permits non-SDD tasks", async () => {
-	const { checkActiveSddAttempt } = await import("../src/process-manager.js");
+	const { checkActiveSddAttempt } = await import("../src/sdd-guard.js");
 
 	// 1. SDD Work Unit task triggers blocked: true
 	const res1 = checkActiveSddAttempt(process.cwd(), "Implement WU3: fix telemetry parser");
