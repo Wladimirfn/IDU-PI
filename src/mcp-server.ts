@@ -1,14 +1,7 @@
 #!/usr/bin/env node
-import { execSync } from "node:child_process";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
-import { CrossCliProcessManager } from "./process-manager.js";
-import { IDU_HOME } from "./config.js";
-import { runPreflight, runPostflight, type ChangeMode } from "./quality.js";
-import { recordDecision, listDecisions } from "./decision-ledger.js";
-import { arbitrateAndRecord } from "./arbitration-run.js";
-import { looksLikeHighRiskMitigation, normalizeThreshold } from "./arbitration.js";
-import { DEFAULT_DELEGATE_TIMEOUT_MS } from "./timeouts.js";
+import { TOOL_HANDLERS } from "./mcp-handlers.js";
 
 interface JsonRpcRequest {
 	jsonrpc: "2.0";
@@ -27,8 +20,6 @@ interface JsonRpcResponse {
 		data?: unknown;
 	};
 }
-
-const manager = CrossCliProcessManager.getInstance();
 
 /**
  * A worker must not see idu-pi at all.
@@ -548,267 +539,16 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 				};
 			}
 
-			if (name === "idu_status" || name === "idu_project_status") {
-				const cwd = String(args.project_path || args.projectPath || process.cwd());
-				let branch = "unknown";
-				let dirtyFiles: string[] = [];
-				try {
-					branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd, encoding: "utf8" }).trim();
-					const statusOut = execSync("git status --porcelain", { cwd, encoding: "utf8" }).trim();
-					dirtyFiles = statusOut ? statusOut.split("\n").map((l) => l.trim()) : [];
-				} catch {
-					// Git unavailable or not initialized
-				}
+			const handler = TOOL_HANDLERS[name];
+			if (!handler) {
+				// Registered in TOOLS but not dispatched: a server defect, not a
+				// client mistake, so it must not read like one.
 				return {
-					content: [
-						{
-							type: "text",
-							text: JSON.stringify(
-								{
-									ok: true,
-									cwd,
-									branch,
-									isClean: dirtyFiles.length === 0,
-									dirtyFileCount: dirtyFiles.length,
-									dirtyFiles: dirtyFiles.slice(0, 20),
-									iduHome: IDU_HOME,
-								},
-								null,
-								2,
-							),
-						},
-					],
+					isError: true,
+					content: [{ type: "text", text: `Tool '${name}' is registered but has no handler (server defect).` }],
 				};
 			}
-
-			if (name === "idu_preflight") {
-				const request = String(args.request || "");
-				const expectedFiles = Array.isArray(args.expected_files) ? args.expected_files.map(String) : [];
-				const changeMode = (args.change_mode as ChangeMode) || "modification";
-				const cwd = args.working_dir ? String(args.working_dir) : args.cwd ? String(args.cwd) : undefined;
-				const result = runPreflight({ request, expectedFiles, changeMode, cwd });
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-				};
-			}
-
-			if (name === "idu_postflight") {
-				const taskId = String(args.task_id || "unspecified");
-				const expectedFiles = Array.isArray(args.expected_files) ? args.expected_files.map(String) : [];
-				const cwd = args.working_dir ? String(args.working_dir) : args.cwd ? String(args.cwd) : undefined;
-				const result = runPostflight({ taskId, expectedFiles, cwd });
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-				};
-			}
-
-			if (name === "idu_decision_record") {
-				const recorded = recordDecision({
-					projectId: String(args.project_id || "default"),
-					decidedBy: String(args.decided_by || "agent"),
-					decision: String(args.decision || ""),
-					targetKind: String(args.target_kind || "general"),
-					targetId: String(args.target_id || "default"),
-					rationale: args.rationale ? String(args.rationale) : undefined,
-					profileRef: args.profile_ref ? String(args.profile_ref) : undefined,
-				});
-				return {
-					content: [{ type: "text", text: JSON.stringify({ ok: true, recorded }, null, 2) }],
-				};
-			}
-
-			if (name === "idu_decision_list") {
-				const projectId = args.project_id ? String(args.project_id) : undefined;
-				const limit = typeof args.limit === "number" ? args.limit : 20;
-				const list = listDecisions({ projectId, limit });
-				return {
-					content: [{ type: "text", text: JSON.stringify(list, null, 2) }],
-				};
-			}
-
-			if (name === "idu_capabilities") {
-				// only_quota implies the quota read: asking for "just the quota" and
-				// getting a payload without it would be a worse lie than a big one.
-				const onlyQuota = args.only_quota === true;
-				const caps = await manager.getCapabilities({
-					includeQuota: onlyQuota || args.include_quota === true,
-					freshQuota: args.fresh_quota === true,
-				});
-				const payload = onlyQuota ? { quota: caps.quota ?? [] } : caps;
-				return {
-					content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
-				};
-			}
-
-			if (name === "idu_delegate") {
-				const task = String(args.task || "");
-				const profile = String(args.profile || "");
-				const workingDir = args.working_dir ? String(args.working_dir) : (args.cwd ? String(args.cwd) : undefined);
-				const asyncExec = Boolean(args.async);
-				const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : undefined;
-				const contextFiles = Array.isArray(args.context_files) ? args.context_files.map(String) : [];
-				const verbose = Boolean(args.verbose);
-				const sessionId = args.session_id ? String(args.session_id) : undefined;
-				const parentSessionId = args.parent_session_id ? String(args.parent_session_id) : undefined;
-				const fork = Boolean(args.fork);
-				const force = Boolean(args.force);
-
-				const result = await manager.delegate(
-					{
-						task,
-						profile,
-						// profile is a required arg here, so the caller always
-						// named it: never inherit the session's profile.
-						profileExplicit: true,
-						force,
-						workingDir,
-						parentOrchestrator: "orchestrator",
-						timeoutMs,
-						contextFiles,
-						verbose,
-						sessionId,
-						parentSessionId,
-						fork,
-					},
-					asyncExec,
-				);
-
-				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-				};
-			}
-
-			if (name === "idu_delegate_parallel") {
-				const tasks = Array.isArray(args.tasks) ? (args.tasks as Array<Record<string, unknown>>) : [];
-				const promises = tasks.map((t) =>
-					manager.delegate(
-						{
-							task: String(t.task || ""),
-							profile: String(t.profile || ""),
-							workingDir: t.working_dir ? String(t.working_dir) : undefined,
-							parentOrchestrator: "orchestrator",
-							verbose: Boolean(t.verbose),
-							sessionId: t.session_id ? String(t.session_id) : undefined,
-							parentSessionId: t.parent_session_id ? String(t.parent_session_id) : undefined,
-							fork: Boolean(t.fork),
-						},
-						true,
-					),
-				);
-				const results = await Promise.all(promises);
-				return {
-					content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
-				};
-			}
-
-			if (name === "idu_worker_status") {
-				const runId = String(args.run_id || "");
-				const status = manager.getStatus(runId);
-				if (!status) {
-					return {
-						isError: true,
-						content: [{ type: "text", text: `Run ID "${runId}" not found in ~/.idu/sessions.` }],
-					};
-				}
-				return {
-					content: [{ type: "text", text: JSON.stringify(status, null, 2) }],
-				};
-			}
-
-			if (name === "idu_worker_result") {
-				const runId = String(args.run_id || "");
-				const verbose = Boolean(args.verbose);
-				const res = manager.getResult(runId, verbose);
-				if (!res) {
-					return {
-						isError: true,
-						content: [{ type: "text", text: `Run ID "${runId}" not found in ~/.idu/sessions.` }],
-					};
-				}
-				return {
-					content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
-				};
-			}
-
-			if (name === "idu_worker_wait") {
-				const runId = String(args.run_id || "");
-				const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : DEFAULT_DELEGATE_TIMEOUT_MS;
-				const verbose = Boolean(args.verbose);
-				const res = await manager.waitForCompletion(runId, timeoutMs, verbose);
-				if (!res) {
-					return {
-						isError: true,
-						content: [{ type: "text", text: `Run ID "${runId}" not found in ~/.idu/sessions.` }],
-					};
-				}
-				return {
-					content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
-				};
-			}
-
-			if (name === "idu_session_list") {
-				const sessions = manager.listSessions();
-				return {
-					content: [{ type: "text", text: JSON.stringify(sessions, null, 2) }],
-				};
-			}
-
-			if (name === "idu_arbitrate") {
-				const rawOptions = Array.isArray(args.options) ? args.options : [];
-				const optionsList: Array<{ id: string; description: string; isHighRiskMitigation?: boolean }> = [];
-				for (let idx = 0; idx < rawOptions.length; idx++) {
-					const opt = rawOptions[idx];
-					if (typeof opt === "string") {
-						const sep = opt.indexOf(":");
-						if (sep !== -1) {
-							optionsList.push({
-								id: opt.slice(0, sep).trim(),
-								description: opt.slice(sep + 1).trim(),
-								isHighRiskMitigation: looksLikeHighRiskMitigation(opt),
-							});
-						} else {
-							optionsList.push({ id: opt, description: opt });
-						}
-					} else if (typeof opt === "object" && opt !== null) {
-						const obj = opt as Record<string, unknown>;
-						optionsList.push({
-							id: String(obj.id || `opt_${idx + 1}`),
-							description: String(obj.description || obj.id || `Option ${idx + 1}`),
-							isHighRiskMitigation: obj.isHighRiskMitigation === true,
-						});
-					}
-				}
-
-				if (optionsList.length === 0) {
-					return {
-						isError: true,
-						content: [{ type: "text", text: "At least one option is required for idu_arbitrate." }],
-					};
-				}
-
-				const stateSummary = String(args.state_summary || args.stateSummary || "Workspace arbitration");
-				const threshold = normalizeThreshold(args.threshold);
-				const cwd = args.working_dir ? String(args.working_dir) : args.cwd ? String(args.cwd) : undefined;
-
-				const decision = await arbitrateAndRecord({
-					label: "idu_arbitrate",
-					decidedByPrefix: "idu_arbitrate",
-					stateSummary,
-					options: optionsList,
-					confidenceThreshold: threshold,
-					cwd,
-					offline: args.offline === true,
-				});
-
-				return {
-					content: [{ type: "text", text: JSON.stringify(decision, null, 2) }],
-				};
-			}
-
-			return {
-				isError: true,
-				content: [{ type: "text", text: `Unknown tool: ${name}` }],
-			};
+			return handler(args);
 		}
 
 		default:
