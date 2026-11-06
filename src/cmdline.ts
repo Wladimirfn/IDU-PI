@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import type { IduConfig, IduProfile } from "./types.js";
@@ -6,7 +6,12 @@ import type { IduConfig, IduProfile } from "./types.js";
 export interface ResolvedCommand {
 	command: string;
 	args: string[];
-	isShell: boolean;
+	/**
+	 * Always false. A shell would interpret task text and config-supplied values,
+	 * which are never escaped. A .cmd/.bat shim is resolved to a real executable
+	 * or refused instead of being handed to a shell.
+	 */
+	isShell: false;
 }
 
 /**
@@ -21,13 +26,13 @@ function resolveWindowsShim(cmdPath: string): string | null {
 	try {
 		const bare = `${cmdPath}.cmd`;
 		const bat = `${cmdPath}.bat`;
-		const out = execSync(`where ${bare}`, { stdio: ["ignore", "pipe", "ignore"] })
+		const out = execFileSync("where", [bare], { stdio: ["ignore", "pipe", "ignore"] })
 			.toString()
 			.split(/\r?\n/)
 			.map((l) => l.trim())
 			.filter(Boolean);
 		if (out.length > 0 && existsSync(out[0])) return out[0];
-		const outBat = execSync(`where ${bat}`, { stdio: ["ignore", "pipe", "ignore"] })
+		const outBat = execFileSync("where", [bat], { stdio: ["ignore", "pipe", "ignore"] })
 			.toString()
 			.split(/\r?\n/)
 			.map((l) => l.trim())
@@ -64,7 +69,9 @@ export function unwrapCmdExecutable(cmdPath: string, args: string[]): ResolvedCo
 	}
 
 	if (!existsSync(cmdPath)) {
-		return { command: cmdPath, args, isShell: true };
+		// Nothing to execute. Let the spawn fail with ENOENT instead of handing
+		// the missing name and its arguments to a shell.
+		return { command: cmdPath, args, isShell: false };
 	}
 
 	try {
@@ -106,7 +113,11 @@ export function unwrapCmdExecutable(cmdPath: string, args: string[]): ResolvedCo
 		// Fallback to spawning via shell
 	}
 
-	return { command: cmdPath, args, isShell: true };
+	throw new Error(
+		`Cannot safely execute "${cmdPath}": it is a .cmd/.bat shim whose target could not be resolved. ` +
+			`Running it through a shell would let task text and config values be interpreted as commands. ` +
+			`Point the CLI entry in ~/.idu/config.json at a real executable, or at a script it can run directly.`,
+	);
 }
 
 export interface BuiltCommandLine {
@@ -403,7 +414,7 @@ export function checkCliAvailable(command: string): boolean {
 	if (existsSync(command)) return true;
 	try {
 		const whichCmd = process.platform === "win32" ? "where" : "which";
-		execSync(`${whichCmd} ${command}`, { stdio: "ignore" });
+		execFileSync(whichCmd, [command], { stdio: "ignore" });
 		return true;
 	} catch {
 		return false;

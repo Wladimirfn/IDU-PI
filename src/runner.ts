@@ -103,10 +103,10 @@ async function runDaemon(): Promise<void> {
 		// best effort
 	}
 
-	const isShell =
-		spec.shell ??
-		(process.platform === "win32" &&
-			(spec.command.endsWith(".cmd") || spec.command.endsWith(".bat")));
+	// Never route worker args through a shell: task text and config values are
+	// not shell-escaped, and unwrapCmdExecutable has already resolved any
+	// .cmd/.bat shim to a real executable (or refused it) before this point.
+	const isShell = false;
 
 	let child: ReturnType<typeof spawn>;
 	try {

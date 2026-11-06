@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildWorkerArgs, unwrapCmdExecutable } from "../src/cmdline.js";
+import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "../src/cmdline.js";
 import {
 	CrossCliProcessManager,
 	extractCleanSummary,
@@ -597,6 +597,58 @@ test("unwrapCmdExecutable unwraps Windows npm cmd wrappers to direct executables
 		assert.equal(resMjs.command, process.execPath);
 		assert.equal(resMjs.isShell, false);
 		assert.deepEqual(resMjs.args, [scriptMjs, "-p", "two words"]);
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+});
+
+test("checkCliAvailable never lets a config-supplied command reach a shell", async () => {
+	const { mkdtempSync, existsSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const tempDir = mkdtempSync(join(tmpdir(), "idu-cli-available-test-"));
+	const marker = join(tempDir, "injected.txt");
+	try {
+		// `command` comes from ~/.idu/config.json, which SECURITY.md says workers can
+		// write. Under a shell this runs `echo injected > marker` and reports the CLI
+		// as available, which is exactly the injection primitive being closed here.
+		const payload = `definitely-not-a-real-cli&echo injected>"${marker}"`;
+
+		assert.equal(checkCliAvailable(payload), false);
+		assert.equal(existsSync(marker), false, "the command string was interpreted by a shell");
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
+});
+
+test("unwrapCmdExecutable never returns a shell fallback for a missing .cmd", async () => {
+	if (process.platform !== "win32") return;
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const missing = join(tmpdir(), "idu-definitely-missing-shim.cmd");
+	const res = unwrapCmdExecutable(missing, ["task & whoami"]);
+
+	assert.equal(res.command, missing);
+	assert.deepEqual(res.args, ["task & whoami"]);
+	assert.equal(res.isShell, false, "a missing shim must not be handed to a shell");
+});
+
+test("unwrapCmdExecutable refuses an unparsable .cmd shim instead of spawning a shell", async () => {
+	if (process.platform !== "win32") return;
+	const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+
+	const tempDir = mkdtempSync(join(tmpdir(), "idu-unparsable-shim-"));
+	try {
+		// No quoted .exe and no quoted .js/.mjs: the shim's target cannot be
+		// resolved, so running it through cmd.exe would expose the task text.
+		const shim = join(tempDir, "mystery-tool.cmd");
+		writeFileSync(shim, "@ECHO off\r\npowershell -NoProfile %*\r\n");
+
+		assert.throws(() => unwrapCmdExecutable(shim, ["task & whoami"]), /could not be resolved/);
 	} finally {
 		rmSync(tempDir, { recursive: true, force: true });
 	}
