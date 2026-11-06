@@ -1,76 +1,89 @@
 #!/usr/bin/env node
 // scripts/check-tool-handlers.mjs
 //
-// Every tool the MCP server registers must also have a dispatch branch.
+// Every tool the MCP server registers must also be callable.
 //
 // Why this exists:
-//   check-protocol-tool-drift.mjs compares the registry against the protocol
-//   skill. It never looks at the dispatcher. A tool added to TOOLS without an
-//   `if (name === ...)` branch is therefore listed to every client and answers
+//   The dispatcher used to be a chain of `if (name === ...)` blocks. A tool
+//   added to TOOLS without a branch was listed to every client and answered
 //   "Unknown tool" at runtime, which reads like a client mistake rather than a
-//   server defect. Measured on a synthetic entry: it appears in tools/list and
-//   the call returns isError with an unquoted "Unknown tool" message.
+//   server defect. Nothing in CI caught it.
 //
 // What it checks:
-//   registered (TOOLS `name:` entries) must equal handled (dispatch branches).
-//   Both directions fail: a registered tool with no branch is dead on arrival,
-//   and a branch for an unregistered tool is unreachable code.
+//   TOOLS (what clients can see) against Object.keys(TOOL_HANDLERS) (what can
+//   actually run), in both directions: a registered tool with no handler is
+//   dead on arrival, and a handler for an unregistered name is unreachable.
 //
-// Testability:
-//   TOOL_HANDLER_CHECK_SERVER overrides the source path, so the negative case
-//   can be exercised against a temporary copy without touching the repo.
+// Why it imports the build:
+//   Comparing the real exported values cannot drift from the source shape the
+//   way a regex can. `corepack pnpm build` must run first; verify does.
+//
+// Why IDU_HOME is isolated:
+//   Importing the modules creates the process-manager singleton, which calls
+//   ensureIduDirectories(). Without isolation this gate would write into the
+//   operator's real ~/.idu, the same leak class the test runner had.
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
-const SERVER = process.env.TOOL_HANDLER_CHECK_SERVER ?? "src/mcp-server.ts";
-const source = readFileSync(SERVER, "utf8");
+const isolatedHome = mkdtempSync(join(tmpdir(), "idu-tool-handler-check-"));
+const previousHome = process.env.IDU_HOME;
+process.env.IDU_HOME = isolatedHome;
 
-// Same registration shape the drift check parses: the `name:` key of a tool
-// definition object. The idu_ prefix keeps it away from serverInfo.name.
-const REGISTRATION = /^[ \t]*name:[ \t]*["'`](idu_[a-z0-9_]+)["'`]/gm;
-const registered = [...new Set([...source.matchAll(REGISTRATION)].map((match) => match[1]))].sort();
-
-// A branch may carry aliases on one line, e.g.
-//   if (name === "idu_status" || name === "idu_project_status") {
-// so every idu_ literal on a dispatch line counts as handled.
-const handled = new Set();
-for (const line of source.split(/\r?\n/)) {
-	if (!/^[ \t]*if \(name ===/.test(line)) continue;
-	for (const match of line.matchAll(/"(idu_[a-z0-9_]+)"/g)) handled.add(match[1]);
+let server;
+let handlers;
+try {
+	server = await import(pathToFileURL(resolve("dist/src/mcp-server.js")).href);
+	handlers = await import(pathToFileURL(resolve("dist/src/mcp-handlers.js")).href);
+} catch (error) {
+	console.error(`[tool-handlers] could not import the build: ${error?.message ?? error}`);
+	console.error("[tool-handlers] run `corepack pnpm build` first.");
+	if (previousHome === undefined) delete process.env.IDU_HOME;
+	else process.env.IDU_HOME = previousHome;
+	rmSync(isolatedHome, { recursive: true, force: true });
+	process.exit(2);
+} finally {
+	if (previousHome === undefined) delete process.env.IDU_HOME;
+	else process.env.IDU_HOME = previousHome;
+	rmSync(isolatedHome, { recursive: true, force: true });
 }
-const handledNames = [...handled].sort();
 
-if (registered.length === 0 || handledNames.length === 0) {
+const registered = server.TOOLS.map((tool) => tool.name).sort();
+const handled = Object.keys(handlers.TOOL_HANDLERS).sort();
+
+if (registered.length === 0 || handled.length === 0) {
 	console.error(
-		`[tool-handlers] parsed 0 ${registered.length === 0 ? "registrations" : "dispatch branches"} from ${SERVER}. ` +
-			`The source shape likely changed — fix this script rather than trusting a vacuous pass.`,
+		`[tool-handlers] parsed 0 ${registered.length === 0 ? "registrations" : "handlers"}. ` +
+			`That is a broken export, not a clean pass.`,
 	);
 	process.exit(2);
 }
 
-const unhandled = registered.filter((name) => !handled.has(name));
-const orphanBranches = handledNames.filter((name) => !registered.includes(name));
+const unhandled = registered.filter((name) => !handled.includes(name));
+const orphanHandlers = handled.filter((name) => !registered.includes(name));
 
 console.log(
-	`[tool-handlers] registered: ${registered.length} | handled: ${handledNames.length} | ` +
-		`unhandled: ${unhandled.length} | orphan-branches: ${orphanBranches.length}`,
+	`[tool-handlers] registered: ${registered.length} | handlers: ${handled.length} | ` +
+		`unhandled: ${unhandled.length} | orphan-handlers: ${orphanHandlers.length}`,
 );
 
 let failed = false;
 
 if (unhandled.length > 0) {
 	console.error(
-		`\n[tool-handlers] FAIL: ${unhandled.length} registered tool(s) have no dispatch branch.\n` +
-			`They are listed to clients and answer "Unknown tool" at runtime:\n  ${unhandled.join("\n  ")}\n` +
-			`Add the branch, or remove the tool from TOOLS.`,
+		`\n[tool-handlers] FAIL: ${unhandled.length} registered tool(s) have no handler.\n` +
+			`They are listed to clients and fail at runtime:\n  ${unhandled.join("\n  ")}\n` +
+			`Add the handler to TOOL_HANDLERS, or remove the tool from TOOLS.`,
 	);
 	failed = true;
 }
 
-if (orphanBranches.length > 0) {
+if (orphanHandlers.length > 0) {
 	console.error(
-		`\n[tool-handlers] FAIL: ${orphanBranches.length} dispatch branch(es) name a tool that is not registered.\n` +
-			`That code is unreachable:\n  ${orphanBranches.join("\n  ")}`,
+		`\n[tool-handlers] FAIL: ${orphanHandlers.length} handler(s) name a tool that is not registered.\n` +
+			`That code is unreachable:\n  ${orphanHandlers.join("\n  ")}`,
 	);
 	failed = true;
 }
