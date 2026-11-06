@@ -15,12 +15,12 @@ import type { RunnerSpec, RunRecord, SessionTreeEntry } from "./types.js";
 import {
 	writeJsonAtomic,
 	killProcessTree,
-	extractCleanSummary,
 	loadSessionTree,
 	upsertSessionTreeEntry,
 	getSessionKey,
 	shouldCountTurn,
 } from "./process-manager.js";
+import { extractCleanSummary } from "./summary.js";
 import { extractUsage } from "./usage.js";
 
 function parseArgs(): string {

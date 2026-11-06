@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "../src/cmdline.js";
 import {
 	CrossCliProcessManager,
-	extractCleanSummary,
 	acquireSessionLock,
 	aliasToUuid,
 	killProcessTree,
@@ -16,6 +15,7 @@ import {
 	findOwnerSessionEntry,
 	getSessionKey,
 } from "../src/process-manager.js";
+import { extractCleanSummary } from "../src/summary.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
 
