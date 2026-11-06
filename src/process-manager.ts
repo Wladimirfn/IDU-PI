@@ -40,6 +40,8 @@ import type {
 // Imported for local use and re-exported so the existing import path keeps
 // working. The implementation moved out to break a cycle with the quota layer.
 import { writeJsonAtomic } from "./json-file.js";
+import { DEFAULT_DELEGATE_TIMEOUT_MS, STARTUP_GRACE_MS } from "./timeouts.js";
+import { errorMessage } from "./errors.js";
 export { writeJsonAtomic } from "./json-file.js";
 
 function generateRunId(profile: string): string {
@@ -325,7 +327,7 @@ export class CrossCliProcessManager {
 			profileHardCapMs: profile.hardCapMs,
 			profileTimeoutMs: effectiveTimeoutMs,
 		});
-		const startupGraceMs = profile.startupGraceMs ?? Math.max(effectiveIdleTimeoutMs, 120_000);
+		const startupGraceMs = profile.startupGraceMs ?? Math.max(effectiveIdleTimeoutMs, STARTUP_GRACE_MS);
 
 		// 10. Build runner spec
 		const spec: RunnerSpec = {
@@ -368,10 +370,10 @@ export class CrossCliProcessManager {
 				windowsHide: true,
 			});
 			runnerProcess.unref();
-		} catch (spawnErr: any) {
+		} catch (spawnErr) {
 			sessionLock.release();
 			record.status = "failed";
-			record.error = spawnErr.message;
+			record.error = errorMessage(spawnErr);
 			record.completedAt = new Date().toISOString();
 			writeJsonAtomic(sessionPath, record);
 			throw spawnErr;
@@ -402,7 +404,7 @@ export class CrossCliProcessManager {
 			};
 		}
 
-		const waitTimeout = (effectiveHardCapMs > 0 ? effectiveHardCapMs : effectiveTimeoutMs) || 900_000;
+		const waitTimeout = (effectiveHardCapMs > 0 ? effectiveHardCapMs : effectiveTimeoutMs) || DEFAULT_DELEGATE_TIMEOUT_MS;
 		const result = await this.waitForCompletion(runId, waitTimeout, request.verbose);
 		return result || this.buildResult(record, "", "", Boolean(request.verbose));
 	}
@@ -564,7 +566,7 @@ export class CrossCliProcessManager {
 
 	public async waitForCompletion(
 		runId: string,
-		timeoutMs = 900_000,
+		timeoutMs = DEFAULT_DELEGATE_TIMEOUT_MS,
 		verbose = false,
 	): Promise<DelegateResult | null> {
 		const start = Date.now();

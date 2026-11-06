@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { SDD_PROBE_TIMEOUT_MS } from "./timeouts.js";
 
 export interface SddGuardCheckResult {
 	blocked: boolean;
@@ -46,7 +47,7 @@ export function checkActiveSddAttempt(workingDir: string, taskPrompt?: string): 
 			try {
 				const stdout = execFileSync("gentle-ai", ["sdd-attempt", "status", "--cwd", workingDir, "--change", change], {
 					encoding: "utf8",
-					timeout: 2000,
+					timeout: SDD_PROBE_TIMEOUT_MS,
 					stdio: ["ignore", "pipe", "ignore"],
 				});
 				const status = JSON.parse(stdout);

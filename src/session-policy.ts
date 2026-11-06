@@ -1,4 +1,5 @@
 import type { SessionTreeEntry } from "./types.js";
+import { HARD_CAP_FLOOR_MS } from "./timeouts.js";
 
 /**
  * The cap the runner actually enforces, resolved exactly the way the runner
@@ -27,7 +28,7 @@ export function resolveHardCapMs(input: {
 	// The runner substitutes config.defaultTimeoutMs here. Omitting it does not
 	// change the result, because the floor below is larger than that default
 	// and than any timeout a profile is shipped with.
-	return Math.max(input.requestTimeoutMs ?? input.profileTimeoutMs ?? 0, 14_400_000);
+	return Math.max(input.requestTimeoutMs ?? input.profileTimeoutMs ?? 0, HARD_CAP_FLOOR_MS);
 }
 
 /**

@@ -22,6 +22,8 @@ import { shouldCountTurn } from "./session-policy.js";
 import { getSessionKey } from "./session-ids.js";
 import { extractCleanSummary } from "./summary.js";
 import { extractUsage } from "./usage.js";
+import { errorMessage } from "./errors.js";
+import { DISK_SYNC_INTERVAL_MS, STARTUP_GRACE_MS } from "./timeouts.js";
 
 function parseArgs(): string {
 	const args = process.argv.slice(2);
@@ -43,8 +45,8 @@ async function runDaemon(): Promise<void> {
 	let spec: RunnerSpec;
 	try {
 		spec = JSON.parse(readFileSync(specPath, "utf8"));
-	} catch (err: any) {
-		console.error(`Error: Failed to parse spec file: ${err.message}`);
+	} catch (err) {
+		console.error(`Error: Failed to parse spec file: ${errorMessage(err)}`);
 		process.exit(1);
 	}
 
@@ -75,9 +77,9 @@ async function runDaemon(): Promise<void> {
 	let logFd: number;
 	try {
 		logFd = openSync(spec.logPath, "a");
-	} catch (err: any) {
+	} catch (err) {
 		record.status = "failed";
-		record.error = `Failed to open log file: ${err.message}`;
+		record.error = `Failed to open log file: ${errorMessage(err)}`;
 		record.completedAt = new Date().toISOString();
 		writeJsonAtomic(spec.sessionPath, record);
 		process.exit(1);
@@ -120,9 +122,9 @@ async function runDaemon(): Promise<void> {
 			shell: false,
 			windowsHide: true,
 		});
-	} catch (spawnErr: any) {
+	} catch (spawnErr) {
 		record.status = "failed";
-		record.error = spawnErr.message;
+		record.error = errorMessage(spawnErr);
 		record.completedAt = new Date().toISOString();
 		writeJsonAtomic(spec.sessionPath, record);
 		cleanupFiles(spec);
@@ -290,7 +292,7 @@ async function runDaemon(): Promise<void> {
 
 		fallbackTimer = setTimeout(() => {
 			finalize(null, "timeout", `Execution timed out: ${reason}`);
-		}, 10_000);
+		}, DISK_SYNC_INTERVAL_MS);
 		fallbackTimer.unref();
 	};
 
@@ -315,7 +317,7 @@ async function runDaemon(): Promise<void> {
 			// best effort
 		}
 
-		if (now - lastDiskSync > 10_000) {
+		if (now - lastDiskSync > DISK_SYNC_INTERVAL_MS) {
 			lastDiskSync = now;
 			writeJsonAtomic(spec.sessionPath, record);
 		}
@@ -330,7 +332,7 @@ async function runDaemon(): Promise<void> {
 		if (spec.streams && spec.idleTimeoutMs && spec.idleTimeoutMs > 0) {
 			const allowedSilence = firstByteReceived
 				? spec.idleTimeoutMs
-				: spec.startupGraceMs || 120_000;
+				: spec.startupGraceMs || STARTUP_GRACE_MS;
 			const silentDuration = now - lastActivityTime;
 			if (silentDuration > allowedSilence) {
 				triggerTimeout(
