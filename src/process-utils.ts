@@ -2,15 +2,17 @@ import { execFileSync, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { errorCode } from "./errors.js";
+import { KILL_ESCALATION_MS } from "./timeouts.js";
 
 export function isProcessAlive(pid: number): boolean {
 	if (!pid || pid <= 0) return false;
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch (err: any) {
-		if (err.code === "EPERM") return true;
-		if (err.code === "ESRCH") return false;
+	} catch (err) {
+		if (errorCode(err) === "EPERM") return true;
+		if (errorCode(err) === "ESRCH") return false;
 		return false;
 	}
 }
@@ -64,6 +66,6 @@ export function killProcessTree(child: ChildProcess | number, reason = "terminat
 				// best effort
 			}
 		}
-	}, 5_000);
+	}, KILL_ESCALATION_MS);
 	escalationTimer.unref();
 }

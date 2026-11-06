@@ -8,6 +8,7 @@ import { runPreflight, runPostflight, type ChangeMode } from "./quality.js";
 import { recordDecision, listDecisions } from "./decision-ledger.js";
 import { arbitrateAndRecord } from "./arbitration-run.js";
 import { looksLikeHighRiskMitigation, normalizeThreshold } from "./arbitration.js";
+import { DEFAULT_DELEGATE_TIMEOUT_MS } from "./timeouts.js";
 
 interface JsonRpcRequest {
 	jsonrpc: "2.0";
@@ -731,7 +732,7 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 
 			if (name === "idu_worker_wait") {
 				const runId = String(args.run_id || "");
-				const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : 900_000;
+				const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : DEFAULT_DELEGATE_TIMEOUT_MS;
 				const verbose = Boolean(args.verbose);
 				const res = await manager.waitForCompletion(runId, timeoutMs, verbose);
 				if (!res) {

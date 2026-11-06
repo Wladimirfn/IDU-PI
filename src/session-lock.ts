@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { ensureIduDirectories, IDU_LOCKS_DIR } from "./config.js";
+import { errorCode } from "./errors.js";
 
 export interface SessionLockHandle {
 	lockPath: string;
@@ -57,8 +58,8 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 			writeFileSync(fd, lockBody(currentPid), "utf8");
 			closeSync(fd);
 			return true;
-		} catch (err: any) {
-			if (err.code === "EEXIST") {
+		} catch (err) {
+			if (errorCode(err) === "EEXIST") {
 				return false;
 			}
 			throw err;
@@ -94,14 +95,14 @@ export function acquireSessionLock(sessionId: string, cwd: string, currentPid: n
 				throw new Error(
 					`Session "${sessionId}" is currently in use by active process (PID ${lockData.pid}). Use fork=true to branch or wait for completion.`,
 				);
-			} catch (err: any) {
-				if (err.code === "EPERM") {
+			} catch (err) {
+				if (errorCode(err) === "EPERM") {
 					// On Windows, EPERM means process is ALIVE with different permissions/elevation!
 					// DO NOT STEAL THE LOCK!
 					throw new Error(
 						`Session "${sessionId}" is currently in use by active process (PID ${lockData.pid}). Use fork=true to branch or wait for completion.`,
 					);
-				} else if (err.code === "ESRCH") {
+				} else if (errorCode(err) === "ESRCH") {
 					// Process is dead: claim the stale lock atomically, then retry.
 					// The loser of the claim must not delete the winner's fresh lock.
 					if (!reclaimStaleLock(lockPath) || !writeLockFile()) {
