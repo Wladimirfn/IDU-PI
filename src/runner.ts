@@ -17,9 +17,9 @@ import {
 	killProcessTree,
 	loadSessionTree,
 	upsertSessionTreeEntry,
-	getSessionKey,
 	shouldCountTurn,
 } from "./process-manager.js";
+import { getSessionKey } from "./session-ids.js";
 import { extractCleanSummary } from "./summary.js";
 import { extractUsage } from "./usage.js";
 
