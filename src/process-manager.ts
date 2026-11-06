@@ -163,6 +163,28 @@ export function getSessionKey(cwd: string, sessionId: string): string {
 }
 
 /**
+ * Find the tree entry that owns a session id, accepting either spelling.
+ *
+ * A Claude session given as an alias is persisted under its deterministic UUID
+ * (`aliasToUuid`), so a lookup with the raw alias follows a key that was never
+ * written. That miss dropped profile inheritance on resume and fell back to a
+ * default profile belonging to a different harness. Try the raw key first, then
+ * the mapped one.
+ */
+export function findOwnerSessionEntry(
+	tree: Record<string, SessionTreeEntry>,
+	workingDir: string,
+	sessionId: string | undefined,
+): SessionTreeEntry | undefined {
+	const raw = sessionId?.trim();
+	if (!raw) return undefined;
+	const rawKey = getSessionKey(workingDir, raw);
+	if (tree[rawKey]) return tree[rawKey];
+	const mappedKey = getSessionKey(workingDir, aliasToUuid(raw));
+	return mappedKey === rawKey ? undefined : tree[mappedKey];
+}
+
+/**
  * The session tree is a log of upserts, not a document.
  *
  * It used to be one JSON object rewritten in full by every finished run. Two
@@ -743,10 +765,10 @@ export class CrossCliProcessManager {
 		const workingDir = request.workingDir || process.cwd();
 		const tree = loadSessionTree();
 
-		const lookupKey = request.sessionId?.trim()
-			? getSessionKey(workingDir, request.sessionId.trim())
-			: "";
-		const ownerEntry = lookupKey ? tree[lookupKey] : undefined;
+		// A Claude alias is persisted under its deterministic UUID, so looking up
+		// the raw alias alone silently misses the session and drops profile
+		// inheritance. Accept both spellings.
+		const ownerEntry = findOwnerSessionEntry(tree, workingDir, request.sessionId);
 
 		let profileName = request.profile;
 		const resolution = resolveSessionProfile(request.profile, ownerEntry, {

@@ -13,6 +13,8 @@ import {
 	checkSessionHarnessAffinity,
 	shouldCountTurn,
 	resolveHardCapMs,
+	findOwnerSessionEntry,
+	getSessionKey,
 } from "../src/process-manager.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -1117,6 +1119,31 @@ test("acquireSessionLock protects against foreign lock deletion (HOLE-C) and han
 
 	// Clean up
 	unlinkSync(lock1.lockPath);
+});
+
+test("findOwnerSessionEntry resolves a Claude alias to the UUID the tree stored", () => {
+	const cwd = process.cwd();
+	const alias = "resume-by-alias";
+	const uuid = aliasToUuid(alias);
+	const entry = {
+		sessionId: uuid,
+		profile: "coding",
+		harness: "claude",
+		workingDir: cwd,
+		createdAt: new Date().toISOString(),
+		lastActiveAt: new Date().toISOString(),
+		turnCount: 1,
+		runs: [],
+	};
+	const tree = { [getSessionKey(cwd, uuid)]: entry };
+
+	// The raw-alias key is what delegate() used to look up, and it is never written.
+	assert.equal(tree[getSessionKey(cwd, alias)], undefined);
+
+	assert.equal(findOwnerSessionEntry(tree, cwd, alias), entry, "an alias must find the stored UUID entry");
+	assert.equal(findOwnerSessionEntry(tree, cwd, uuid), entry, "a UUID still resolves to itself");
+	assert.equal(findOwnerSessionEntry(tree, cwd, "some-other-session"), undefined);
+	assert.equal(findOwnerSessionEntry(tree, cwd, undefined), undefined);
 });
 
 test("killProcessTree handles dead/missing process gracefully without unhandled exceptions", () => {
