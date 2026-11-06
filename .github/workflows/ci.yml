@@ -32,6 +32,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # Our suite spawns processes and writes throwaway trees constantly, which
+      # is what Defender scans. The same tests take ~1s on Linux and ~25s here,
+      # so the gap is the scanner, not the code. Both exclusions are scoped to
+      # trees the run owns and die with the ephemeral runner.
+      #
+      # Best-effort on purpose: a hardened image can refuse Add-MpPreference, and
+      # a CI lane must not go red because an optimisation was unavailable.
+      - name: Exclude runner work and temp trees from Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE -ErrorAction SilentlyContinue
+          Add-MpPreference -ExclusionPath $env:RUNNER_TEMP -ErrorAction SilentlyContinue
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
