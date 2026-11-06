@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { resolveWindowsShim } from "../src/cmdline.js";
@@ -17,6 +17,13 @@ function withPathEntry<T>(dir: string, run: () => T): T {
 	}
 }
 
+// `where` can answer with an 8.3 short path (RUNNER~1) while mkdtemp returns the
+// long one, so compare canonical paths instead of raw strings.
+function assertSamePath(actual: string | null, expected: string): void {
+	assert.ok(actual, "expected a shim to be resolved");
+	assert.equal(realpathSync.native(actual), realpathSync.native(expected));
+}
+
 test("resolveWindowsShim finds the .cmd shim a bare CLI name resolves to", async () => {
 	if (process.platform !== "win32") return;
 	const dir = mkdtempSync(join(tmpdir(), "idu-shim-cmd-"));
@@ -24,7 +31,7 @@ test("resolveWindowsShim finds the .cmd shim a bare CLI name resolves to", async
 		const shim = join(dir, "fake-cli.cmd");
 		writeFileSync(shim, "@ECHO off\r\n", "utf8");
 		withPathEntry(dir, () => {
-			assert.equal(resolveWindowsShim("fake-cli"), shim);
+			assertSamePath(resolveWindowsShim("fake-cli"), shim);
 		});
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -38,7 +45,7 @@ test("resolveWindowsShim falls back to a .bat shim", async () => {
 		const shim = join(dir, "legacy-cli.bat");
 		writeFileSync(shim, "@ECHO off\r\n", "utf8");
 		withPathEntry(dir, () => {
-			assert.equal(resolveWindowsShim("legacy-cli"), shim);
+			assertSamePath(resolveWindowsShim("legacy-cli"), shim);
 		});
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
