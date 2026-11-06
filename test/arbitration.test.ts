@@ -13,6 +13,8 @@ import {
 	resolveTypeSafeApiKey,
 	type ArbitrationInput,
 } from "../src/arbitration.js";
+import { arbitrateAndRecord } from "../src/arbitration-run.js";
+import { listDecisions } from "../src/decision-ledger.js";
 
 const sampleInput: ArbitrationInput = {
 	stateSummary: "Se completaron 4 PRs. Queda 403.css listo y soporte.css con deuda de dark mode.",
@@ -522,5 +524,28 @@ test("arbitrateWithJev redacts credentials that leak through HTTP error bodies",
 	assert.equal(decision.source, "deterministic_fallback");
 	assert.ok(!decision.reason.includes("sk-live-SECRETKEY123456"), "the remote key must never reach decision.reason");
 	assert.ok(decision.reason.includes("[redacted]"));
+});
+
+test("arbitrateAndRecord records one shared ledger trace for either entry point", async () => {
+	const marker = `trace-${Date.now().toString(36)}`;
+	const decision = await arbitrateAndRecord({
+		label: marker,
+		decidedByPrefix: `${marker}-cli`,
+		stateSummary: "shared trace state",
+		options: [
+			{ id: "plain", description: "safe option" },
+			{ id: "rollback", description: "rollback as mitigation for a high risk change", isHighRiskMitigation: true },
+		],
+		confidenceThreshold: 0.8,
+		offline: true,
+	});
+
+	const entry = listDecisions({ projectId: "arbitration", limit: 200 }).find((record) =>
+		record.decidedBy.startsWith(`${marker}-cli/`),
+	);
+	assert.ok(entry, "the arbitration decision must be recorded");
+	assert.equal(entry.targetId, decision.selectedOptionId);
+	assert.match(entry.decision, new RegExp(`^${marker} selected '`));
+	assert.equal(entry.targetKind, "arbitration-decision");
 });
 

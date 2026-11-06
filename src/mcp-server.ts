@@ -6,7 +6,8 @@ import { CrossCliProcessManager } from "./process-manager.js";
 import { IDU_HOME } from "./config.js";
 import { runPreflight, runPostflight, type ChangeMode } from "./quality.js";
 import { recordDecision, listDecisions } from "./decision-ledger.js";
-import { arbitrate, looksLikeHighRiskMitigation, normalizeThreshold } from "./arbitration.js";
+import { arbitrateAndRecord } from "./arbitration-run.js";
+import { looksLikeHighRiskMitigation, normalizeThreshold } from "./arbitration.js";
 
 interface JsonRpcRequest {
 	jsonrpc: "2.0";
@@ -788,21 +789,14 @@ export async function handleMcpMethod(method: string, params: Record<string, unk
 				const threshold = normalizeThreshold(args.threshold);
 				const cwd = args.working_dir ? String(args.working_dir) : args.cwd ? String(args.cwd) : undefined;
 
-				const decision = await arbitrate({
+				const decision = await arbitrateAndRecord({
+					label: "idu_arbitrate",
+					decidedByPrefix: "idu_arbitrate",
 					stateSummary,
 					options: optionsList,
 					confidenceThreshold: threshold,
 					cwd,
 					offline: args.offline === true,
-				});
-
-				// An autonomous decision must leave an auditable trace (J).
-				recordDecision({
-					projectId: "arbitration",
-					decision: `idu_arbitrate selected '${decision.selectedOptionId}' (source: ${decision.source}, confidence: ${decision.confidence}, humanReview: ${decision.requiresHumanReview}). Options: ${optionsList.map((o) => o.id).join(", ")}. State: ${stateSummary.slice(0, 200)}`,
-					decidedBy: `idu_arbitrate/${decision.source}`,
-					targetKind: "arbitration-decision",
-					targetId: decision.selectedOptionId,
 				});
 
 				return {
