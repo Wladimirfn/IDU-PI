@@ -7,11 +7,8 @@ import {
 	killProcessTree,
 	writeJsonAtomic,
 	isProcessAlive,
-	resolveSessionProfile,
-	checkSessionHarnessAffinity,
-	shouldCountTurn,
-	resolveHardCapMs,
 } from "../src/process-manager.js";
+import { resolveSessionProfile, checkSessionHarnessAffinity, shouldCountTurn, resolveHardCapMs } from "../src/session-policy.js";
 import { aliasToUuid, findOwnerSessionEntry, getSessionKey } from "../src/session-ids.js";
 import { extractCleanSummary } from "../src/summary.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
