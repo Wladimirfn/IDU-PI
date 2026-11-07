@@ -7,6 +7,7 @@ import { IDU_HOME } from "./config.js";
 import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 // `node cli.js -- setup ...` (how scripts/install.mjs and the Pi extension call it)
 // passes the separator through; drop it so the subcommand is args[0].
@@ -388,6 +389,47 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "video": {
+			/* iduframe: el Studio siempre arriba, y render SOLO si lo piden.
+			   El flujo normal es editar y ver el cambio en vivo; un MP4 es una
+			   accion explicita, no el estado por defecto. */
+			const sub = args[1] || "studio";
+			const flag = (name: string) => {
+				const i = args.indexOf(`--${name}`);
+				return i >= 0 ? args[i + 1] : undefined;
+			};
+			if (sub !== "studio" && sub !== "render" && sub !== "status" && sub !== "measure") {
+				console.error(
+					"Uso: idu-pi video studio [--project <dir>] [--port <n>]\n" +
+						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
+						"     idu-pi video render [--project <dir>]   # unico camino que produce MP4",
+				);
+				process.exit(1);
+			}
+			const project = flag("project") ?? process.cwd();
+			const iduframeArgs = [sub === "studio" ? "preview" : sub, "--project", project];
+			if (flag("port")) iduframeArgs.push("--port", flag("port") as string);
+			if (flag("url")) iduframeArgs.push("--url", flag("url") as string);
+			if (sub === "render") {
+				// Diferencia explicita: render usa el CLI de HyperFrames, no el de preview.
+				iduframeArgs.splice(0, 1, "render");
+			}
+			const env = { ...process.env };
+			const local = env.IDUFRAME_CLI;
+			const cmd = local ? process.execPath : process.platform === "win32" ? "iduframe.cmd" : "iduframe";
+			const argv = local ? [local, ...iduframeArgs] : iduframeArgs;
+			const run = spawnSync(cmd, argv, { stdio: "inherit", env, cwd: project });
+			if (run.error) {
+				console.error(
+					"No encontré `iduframe`. Instalalo con `npm i -g iduframe` " +
+						"o apuntá IDUFRAME_CLI a su cli.mjs.",
+				);
+				process.exit(1);
+			}
+			process.exit(run.status ?? 1);
+			break;
+		}
+
 		case "setup": {
 			const sub = args[1];
 			if (sub !== "mcp-init" && sub !== "mcp-print") {
@@ -444,6 +486,9 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
 	out("  idu-pi delegate <task> --working-dir <dir> Set target working directory");
 	out("  idu-pi delegate <task> --timeout <ms>      Set timeout in milliseconds");
+	out("  idu-pi video studio [--project <dir>]      Open the hyperframes Studio (never renders)");
+	out("  idu-pi video status|measure                Lint state / Spanish coverage");
+	out("  idu-pi video render [--project <dir>]      The only path that produces an MP4");
 }
 
 main().catch((err) => {
