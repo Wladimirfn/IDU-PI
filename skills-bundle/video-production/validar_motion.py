@@ -297,6 +297,44 @@ def check_frozen_and_black(frames, errors, warnings):
     )
 
 
+def check_encoding(video, errors, warnings):
+    """El bitrate es el defecto que mas se disfraza de problema de animacion.
+
+    idupi-explainer-v2 salio a 372 kbps para 1080p30. El render era perfecto
+    -dos capturas de la pagina, cero pixeles de diferencia- y el MP4 igual
+    parpadeaba, porque a ese bitrate el encoder re-cuantiza los bordes del
+    texto cada pocos frames. Medir el parpadeo sobre el MP4 mide el codec.
+    """
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=codec_name,width,height,bit_rate",
+         "-of", "default=nw=1", str(video)],
+        capture_output=True, text=True, check=False,
+    ).stdout
+    info = dict(
+        line.split("=", 1) for line in probe.strip().splitlines() if "=" in line
+    )
+    try:
+        width, height = int(info["width"]), int(info["height"])
+        kbps = int(info.get("bit_rate", 0)) / 1000
+    except (KeyError, ValueError):
+        warnings.append("no pude leer bitrate del video")
+        return
+
+    print(f"\n  encode: {info.get('codec_name', '?')} {width}x{height} · {kbps:.0f} kbps")
+    # Referencia: 1080p30 con texto necesita ~5000-8000 kbps. 1500 es el piso
+    # donde los bordes del texto ya no se re-cuantizan de forma visible.
+    floor = 1500 if width * height <= 1920 * 1080 else 3000
+    if kbps < floor:
+        errors.append(
+            f"bitrate {kbps:.0f} kbps por debajo de {floor} kbps para "
+            f"{width}x{height}: los bordes del texto van a parpadear en el "
+            "reproductor aunque el render sea perfecto"
+        )
+    elif kbps < floor * 2:
+        warnings.append(f"bitrate {kbps:.0f} kbps es bajo para {width}x{height}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--proyecto", required=True)
@@ -337,6 +375,7 @@ def main():
 
     check_scenes(project, frames, timeline, video, errors, warnings)
     check_frozen_and_black(frames, errors, warnings)
+    check_encoding(video, errors, warnings)
 
     print("\n" + "=" * 68)
     if warnings:
