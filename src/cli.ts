@@ -392,21 +392,55 @@ async function main(): Promise<void> {
 		case "video": {
 			/* iduframe: el Studio siempre arriba, y render SOLO si lo piden.
 			   El flujo normal es editar y ver el cambio en vivo; un MP4 es una
-			   accion explicita, no el estado por defecto. */
+			   accion explicita, no el estado por defecto. `render` usa el CLI de
+			   HyperFrames; la via de entrega es render_frames.mjs + `video
+			   validate` (ver skill video-production). */
 			const sub = args[1] || "studio";
 			const flag = (name: string) => {
 				const i = args.indexOf(`--${name}`);
 				return i >= 0 ? args[i + 1] : undefined;
 			};
-			if (sub !== "studio" && sub !== "render" && sub !== "status" && sub !== "measure") {
+			if (sub !== "studio" && sub !== "render" && sub !== "status" && sub !== "measure" && sub !== "validate") {
 				console.error(
 					"Uso: idu-pi video studio [--project <dir>] [--port <n>]\n" +
 						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
-						"     idu-pi video render [--project <dir>]   # unico camino que produce MP4",
+						"     idu-pi video validate [--project <dir>] [--video <file>] [--debug [dir]]\n" +
+						"     idu-pi video render [--project <dir>]   # HyperFrames; validar antes de publicar",
 				);
 				process.exit(1);
 			}
 			const project = flag("project") ?? process.cwd();
+
+			/* Gate de motion: valida un MP4 ya renderizado. No renderiza nada;
+			   devuelve el veredicto para que el pipeline no publique un video que
+			   parpadea o termina fuera del keyframe aprobado. */
+			if (sub === "validate") {
+				const script = resolveMotionValidator();
+				if (!script) {
+					console.error(
+						"No encontré skills-bundle/video-production/validar_motion.py en el paquete.",
+					);
+					process.exit(1);
+				}
+				const python = resolvePython();
+				if (!python) {
+					console.error(
+						"No encontré Python. Instalalo y agregá numpy + Pillow: pip install numpy pillow",
+					);
+					process.exit(1);
+				}
+				const validateArgs = [script, "--proyecto", project];
+				const video = flag("video");
+				if (video) validateArgs.push("--video", video);
+				if (args.includes("--debug")) {
+					validateArgs.push("--debug");
+					const debugDir = flag("debug");
+					if (debugDir && !debugDir.startsWith("--")) validateArgs.push(debugDir);
+				}
+				const run = spawnSync(python, validateArgs, { stdio: "inherit", cwd: project });
+				process.exit(run.status ?? 1);
+			}
+
 			const iduframeArgs = [sub === "studio" ? "preview" : sub, "--project", project];
 			if (flag("port")) iduframeArgs.push("--port", flag("port") as string);
 			if (flag("url")) iduframeArgs.push("--url", flag("url") as string);
@@ -485,6 +519,24 @@ function resolveIduframeEntry(explicit?: string): string | null {
 	].filter(Boolean);
 	for (const candidate of candidates) {
 		if (existsSync(candidate)) return candidate;
+	}
+	return null;
+}
+
+/* El validador de motion vive en el bundle de skills del paquete, no en el
+   proyecto: el proyecto solo aporta timeline.json y keyframes/. */
+function resolveMotionValidator(): string | null {
+	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const candidate = join(root, "skills-bundle", "video-production", "validar_motion.py");
+	return existsSync(candidate) ? candidate : null;
+}
+
+/* Python cambia de nombre segun plataforma e instalacion. */
+function resolvePython(): string | null {
+	const candidates = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
+	for (const cmd of candidates) {
+		const probe = spawnSync(cmd, ["--version"], { stdio: "ignore" });
+		if (!probe.error && probe.status === 0) return cmd;
 	}
 	return null;
 }

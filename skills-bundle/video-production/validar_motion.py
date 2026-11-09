@@ -50,7 +50,9 @@ MIN_EDGE_CORR = 0.55    # correlacion de bordes en el mejor alineamiento
 MAX_RESIDUAL = 26.0     # diferencia media de pixeles tras alinear (0-255)
 MAX_FLICKER = 6.0       # p99 del diff por pixel a resolucion nativa (0-255)
 MAX_FLICKER_PX = 3000   # pixeles que cambian en la ventana que deberia estar quieta
-MIN_FROZEN_S = 1.5      # tramo congelado dentro de una escena
+# Calibrado contra el HQ aprobado: tiene un tramo quieto de 5,8 s con narracion
+# encima, que es intencional. Un tramo congelado de mas de 8 s si es sospechoso.
+MIN_FROZEN_S = 8.0      # tramo congelado dentro de una escena
 MAX_BLACK_S = 0.4       # tramo negro permitido (fundidos finales suelen durar mas)
 
 ANALYSIS_FPS = 10
