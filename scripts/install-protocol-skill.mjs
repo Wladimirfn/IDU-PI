@@ -40,6 +40,10 @@ const skills = [
 		name: "security-audit-practice",
 		files: ["SKILL.md", "fragments/hunter.md", "fragments/verifier.md"],
 	},
+	{
+		name: "video-production",
+		files: ["SKILL.md", "validar_motion.py", "render_frames.mjs"],
+	},
 ];
 
 /** In-repo mirrors that must stay byte-identical to the bundle. */
