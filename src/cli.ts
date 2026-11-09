@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, statSync, openSync, readSync, closeSync } from "node:fs";
+import { existsSync, statSync, openSync, readSync, closeSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { runMcpServer } from "./mcp-server.js";
 import { CrossCliProcessManager } from "./process-manager.js";
 import { runPreflight } from "./quality.js";
 import { IDU_HOME } from "./config.js";
 import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 // `node cli.js -- setup ...` (how scripts/install.mjs and the Pi extension call it)
@@ -392,9 +392,9 @@ async function main(): Promise<void> {
 		case "video": {
 			/* iduframe: el Studio siempre arriba, y render SOLO si lo piden.
 			   El flujo normal es editar y ver el cambio en vivo; un MP4 es una
-			   accion explicita, no el estado por defecto. `render` usa el CLI de
-			   HyperFrames; la via de entrega es render_frames.mjs + `video
-			   validate` (ver skill video-production). */
+			   accion explicita, no el estado por defecto. `render` produce el
+			   video de entrega con render_frames.mjs y corre el gate de motion;
+			   `studio`/`status`/`measure` siguen usando iduframe. */
 			const sub = args[1] || "studio";
 			const flag = (name: string) => {
 				const i = args.indexOf(`--${name}`);
@@ -405,49 +405,89 @@ async function main(): Promise<void> {
 					"Uso: idu-pi video studio [--project <dir>] [--port <n>]\n" +
 						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
 						"     idu-pi video validate [--project <dir>] [--video <file>] [--debug [dir]]\n" +
-						"     idu-pi video render [--project <dir>]   # HyperFrames; validar antes de publicar",
+						"     idu-pi video render [--project <dir>] [--out <mp4>] [--audio <file>] [--end <s>] [--no-validate]",
 				);
 				process.exit(1);
 			}
-			const project = flag("project") ?? process.cwd();
+			const projectRoot = resolve(flag("project") ?? process.cwd());
 
 			/* Gate de motion: valida un MP4 ya renderizado. No renderiza nada;
 			   devuelve el veredicto para que el pipeline no publique un video que
 			   parpadea o termina fuera del keyframe aprobado. */
 			if (sub === "validate") {
-				const script = resolveMotionValidator();
-				if (!script) {
-					console.error(
-						"No encontré skills-bundle/video-production/validar_motion.py en el paquete.",
-					);
-					process.exit(1);
-				}
-				const python = resolvePython();
-				if (!python) {
-					console.error(
-						"No encontré Python. Instalalo y agregá numpy + Pillow: pip install numpy pillow",
-					);
-					process.exit(1);
-				}
-				const validateArgs = [script, "--proyecto", project];
-				const video = flag("video");
-				if (video) validateArgs.push("--video", video);
-				if (args.includes("--debug")) {
-					validateArgs.push("--debug");
-					const debugDir = flag("debug");
-					if (debugDir && !debugDir.startsWith("--")) validateArgs.push(debugDir);
-				}
-				const run = spawnSync(python, validateArgs, { stdio: "inherit", cwd: project });
-				process.exit(run.status ?? 1);
+				const debugIndex = args.indexOf("--debug");
+				const debugValue = debugIndex >= 0 ? args[debugIndex + 1] : undefined;
+				const debug =
+					debugIndex >= 0
+						? debugValue && !debugValue.startsWith("--")
+							? debugValue
+							: ""
+						: undefined;
+				process.exit(runMotionValidator(projectRoot, flag("video"), debug));
 			}
 
-			const iduframeArgs = [sub === "studio" ? "preview" : sub, "--project", project];
+			/* Render de entrega: un solo camino. Resuelve duracion, audio y
+			   Playwright; despues corre el mismo gate que `video validate`. */
+			if (sub === "render") {
+				const renderer = resolveFrameRenderer();
+				if (!renderer) {
+					console.error(
+						"No encontré skills-bundle/video-production/render_frames.mjs en el paquete.",
+					);
+					process.exit(1);
+				}
+				const duration = readCompositionDuration(projectRoot);
+				const endFlag = flag("end");
+				const end = endFlag !== undefined ? Number(endFlag) : duration;
+				if (end === null || !Number.isFinite(end) || end <= 0) {
+					console.error("No pude determinar la duración. Pasá --end <segundos>.");
+					process.exit(1);
+				}
+				const outFlag = flag("out");
+				const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+				const out = outFlag
+					? resolve(projectRoot, outFlag)
+					: join(projectRoot, "renders", `${basename(projectRoot)}_${stamp}.mp4`);
+				mkdirSync(dirname(out), { recursive: true });
+				const audioFlag = flag("audio");
+				const audio = audioFlag ? resolve(projectRoot, audioFlag) : findApprovedAudio(projectRoot, out);
+				const playwright = resolvePlaywrightEntry(projectRoot);
+				const renderArgs = [
+					renderer,
+					"--url",
+					pathToFileURL(join(projectRoot, "index.html")).href,
+					"--end",
+					String(end),
+					"--out",
+					out,
+				];
+				if (audio) renderArgs.push("--audio", audio);
+				if (playwright) renderArgs.push("--playwright", playwright);
+				console.log(`render: ${projectRoot} -> ${out} (${end}s)`);
+				if (audio) console.log(`audio: ${audio}`);
+				else console.log("sin audio aprobado: el render sale mudo (pasá --audio)");
+				const render = spawnSync(process.execPath, renderArgs, {
+					stdio: "inherit",
+					env: { ...process.env },
+					cwd: projectRoot,
+				});
+				if (render.status !== 0) process.exit(render.status ?? 1);
+				console.log(`render listo: ${out}`);
+				const partial = endFlag !== undefined && duration !== null && end < duration - 0.01;
+				if (partial || args.includes("--no-validate")) {
+					console.log(partial ? "render parcial: gate omitido" : "gate omitido");
+					process.exit(0);
+				}
+				const gate = runMotionValidator(projectRoot, out);
+				if (gate !== 0) {
+					console.error("El render terminó, pero el gate de motion falló: no publicar.");
+				}
+				process.exit(gate);
+			}
+
+			const iduframeArgs = [sub === "studio" ? "preview" : sub, "--project", projectRoot];
 			if (flag("port")) iduframeArgs.push("--port", flag("port") as string);
 			if (flag("url")) iduframeArgs.push("--url", flag("url") as string);
-			if (sub === "render") {
-				// Diferencia explicita: render usa el CLI de HyperFrames, no el de preview.
-				iduframeArgs.splice(0, 1, "render");
-			}
 			/* En Windows spawnear `iduframe.cmd` sin shell falla: CreateProcess no
 			   ejecuta un .cmd. Se resuelve el entry .mjs real y se corre con node,
 			   que ademas evita cualquier quoting de shell sobre rutas de proyecto. */
@@ -463,7 +503,7 @@ async function main(): Promise<void> {
 			const run = spawnSync(process.execPath, [entry, ...iduframeArgs], {
 				stdio: "inherit",
 				env,
-				cwd: project,
+				cwd: projectRoot,
 			});
 			process.exit(run.status ?? 1);
 			break;
@@ -539,6 +579,109 @@ function resolvePython(): string | null {
 		if (!probe.error && probe.status === 0) return cmd;
 	}
 	return null;
+}
+
+/* Renderer de entrega: frames deterministas, no la ruta de chunks de
+   HyperFrames. Ver skills-bundle/video-production/SKILL.md. */
+function resolveFrameRenderer(): string | null {
+	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const candidate = join(root, "skills-bundle", "video-production", "render_frames.mjs");
+	return existsSync(candidate) ? candidate : null;
+}
+
+/* Duracion declarada por la composicion; timeline.total es el fallback. */
+function readCompositionDuration(project: string): number | null {
+	const index = join(project, "index.html");
+	if (existsSync(index)) {
+		const html = readFileSync(index, "utf8");
+		/* La composicion y cada <audio> declaran data-duration; el total es el
+		   mayor, no el primero del documento. */
+		let max = 0;
+		for (const match of html.matchAll(/data-duration="([0-9.]+)"/g)) {
+			const value = Number(match[1]);
+			if (Number.isFinite(value)) max = Math.max(max, value);
+		}
+		if (max > 0) return max;
+	}
+	const timeline = join(project, "timeline.json");
+	if (!existsSync(timeline)) return null;
+	try {
+		const data = JSON.parse(readFileSync(timeline, "utf8")) as {
+			total?: number;
+			scenes?: Array<{ fin_voz?: number; end?: number; frases?: Array<{ end?: number }> }>;
+		};
+		if (typeof data.total === "number" && data.total > 0) return data.total;
+		let max = 0;
+		for (const scene of data.scenes ?? []) {
+			max = Math.max(max, scene.fin_voz ?? 0, scene.end ?? 0);
+			for (const frase of scene.frases ?? []) max = Math.max(max, frase.end ?? 0);
+		}
+		return max > 0 ? max : null;
+	} catch {
+		return null;
+	}
+}
+
+/* Audio aprobado: el MP4 -hq con audio, o el primer MP4 que no sea video-only.
+   El render de frames no reproduce las etiquetas <audio>; la pista se muxea. */
+function findApprovedAudio(project: string, out: string): string | null {
+	let entries: string[];
+	try {
+		entries = readdirSync(project);
+	} catch {
+		return null;
+	}
+	const videos = entries
+		.filter((name) => name.toLowerCase().endsWith(".mp4"))
+		.map((name) => join(project, name))
+		.filter((path) => resolve(path) !== resolve(out));
+	const hq = videos.filter((path) => /-hq\.mp4$/i.test(path));
+	if (hq.length > 0) return hq.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+	const candidates = videos.filter((path) => !/(^|[-_])video\.mp4$/i.test(path));
+	return candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null;
+}
+
+/* Playwright puede estar instalado en el proyecto, global o en el cache de npx. */
+function resolvePlaywrightEntry(project: string): string | null {
+	const explicit = process.env.PLAYWRIGHT_PATH;
+	if (explicit && existsSync(explicit)) return explicit;
+	const local = join(project, "node_modules", "playwright", "index.mjs");
+	if (existsSync(local)) return local;
+	const npx = process.env.LOCALAPPDATA
+		? join(process.env.LOCALAPPDATA, "npm-cache", "_npx")
+		: join(process.env.HOME ?? "", ".npm", "_npx");
+	if (existsSync(npx)) {
+		for (const dir of readdirSync(npx)) {
+			const candidate = join(npx, dir, "node_modules", "playwright", "index.mjs");
+			if (existsSync(candidate)) return candidate;
+		}
+	}
+	const globalNpm = process.env.APPDATA
+		? join(process.env.APPDATA, "npm", "node_modules", "playwright", "index.mjs")
+		: "";
+	if (globalNpm && existsSync(globalNpm)) return globalNpm;
+	return null;
+}
+
+function runMotionValidator(project: string, video?: string, debug?: string): number {
+	const script = resolveMotionValidator();
+	if (!script) {
+		console.error("No encontré skills-bundle/video-production/validar_motion.py en el paquete.");
+		return 1;
+	}
+	const python = resolvePython();
+	if (!python) {
+		console.error("No encontré Python. Instalalo y agregá numpy + Pillow: pip install numpy pillow");
+		return 1;
+	}
+	const args = [script, "--proyecto", project];
+	if (video) args.push("--video", video);
+	if (debug !== undefined) {
+		args.push("--debug");
+		if (debug) args.push(debug);
+	}
+	const run = spawnSync(python, args, { stdio: "inherit", cwd: project });
+	return run.status ?? 1;
 }
 
 function printUsage(out: (line: string) => void = console.log): void {

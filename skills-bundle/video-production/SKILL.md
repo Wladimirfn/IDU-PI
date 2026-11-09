@@ -28,10 +28,14 @@ the live editing surface and a deterministic frame renderer for delivery.
    `keyframes/eNN.png` is the final, still state of each scene. It is the
    contract the motion gate compares against.
 4. **Render the delivery video.**
-   `node skills-bundle/video-production/render_frames.mjs --url file:///<project>/index.html --end <duration> --out <video.mp4> [--audio <approved.mp4>]`
-   Video-only by default; `--audio` muxes the approved audio track.
+   `idu-pi video render --project <project>`
+   Resolves the duration from `data-duration`/`timeline.json`, picks the
+   approved `*-hq.mp4` audio, finds Playwright, renders with
+   `render_frames.mjs`, and runs the motion gate. Options: `--out <mp4>`,
+   `--audio <file>`, `--end <s>`, `--no-validate`.
 5. **Motion gate.**
-   `idu-pi video validate --project <project> --video <video.mp4>`
+   Runs automatically after a full render. To validate an existing MP4:
+   `idu-pi video validate --project <project> --video <mp4>`
 6. **Publish only if both gates exit 0.**
 
 ## Commands
@@ -41,8 +45,11 @@ the live editing surface and a deterministic frame renderer for delivery.
 | Studio | `idu-pi video studio --project <dir>` |
 | Status | `idu-pi video status` |
 | HyperFrames status | `idu-pi video measure --project <dir>` |
-| Delivery render | `node skills-bundle/video-production/render_frames.mjs --url <file-url> --end <s> --out <mp4>` |
-| Render + audio | add `--audio <approved.mp4>` |
+| **Delivery render** | `idu-pi video render --project <dir>` |
+| Partial render | add `--end <s>` (gate skipped) |
+| Render + custom audio | add `--audio <file>` (default: newest `*-hq.mp4`) |
+| Render to a path | add `--out <mp4>` |
+| Lower-level renderer | `node skills-bundle/video-production/render_frames.mjs ...` |
 | Motion gate | `idu-pi video validate --project <dir> --video <mp4>` |
 | Motion gate + diffs | add `--debug <dir>` |
 | Audio gate | `python skills-bundle/voice-narration/validar_video_audio.py --proyecto <dir>` |
@@ -58,6 +65,10 @@ Measured on `idupi-explainer-v2` with the same gate and the same composition:
 | HyperFrames 0.9.25, 10 s clip | 0 | — | yes |
 | `render_frames.mjs` (approved HQ) | 16 | 0 | video only; mux with `--audio` |
 
+`idu-pi video render` uses `render_frames.mjs`; it never calls
+`hyperframes render`. The HyperFrames renderer remains available only as a
+lower-level tool for Studio/preview experiments.
+
 The full HyperFrames render introduces a periodic text flicker in windows that
 should be static. The diff image shows clean letter outlines, max per-pixel
 differences of 116-143, and a period of about 0.3 s. It is not codec noise and
@@ -69,6 +80,9 @@ run a full render and the gate.
 
 ## `render_frames.mjs`
 
+`idu-pi video render` uses this script. Call it directly only for CI or a
+custom range; the CLI resolves duration, audio, and Playwright.
+
 Requires the composition to expose `window.seek(t)`: a function that moves the
 global timeline to time `t` and returns when the DOM is ready to capture. A
 composition served through the Studio URL does not expose `window.seek` on the
@@ -77,6 +91,10 @@ top window; load the composition directly as `file://.../index.html`.
 Prerequisites: Playwright (`npm i playwright`, or `--playwright <path>`), a
 Chrome/Chromium binary (`--chrome <path>`, or Playwright's bundled Chromium),
 and `ffmpeg` in `PATH`.
+
+The CLI auto-picks the newest `*-hq.mp4` in the project as the audio source;
+`--audio` overrides it. The renderer itself is video-only unless `--audio` is
+passed.
 
 The script captures one PNG per frame with Playwright, pipes it to ffmpeg
 (`libx264`, `-preset medium`, `-crf 16`, `yuv420p`), and optionally muxes audio.
