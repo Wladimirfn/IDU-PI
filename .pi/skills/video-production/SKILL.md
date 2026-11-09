@@ -1,12 +1,19 @@
 ---
 name: video-production
-description: Produce code-rendered explainer videos with HyperFrames Studio, a deterministic frame renderer, and motion/audio gates. Trigger: video explainer, render MP4, Studio preview, keyframes, motion gate, HyperFrames.
+description: "Trigger: video production, style brief, e00, render MP4, keyframes, motion gate, HyperFrames. Style-first production: infer a lane, approve an e00 styleboard, render with HyperFrames, and pass motion/audio gates."
+metadata:
+  author: Wladimirfn / cross-cli skills-bundle
+  tags: [video, hyperframes, style-brief, e00, render, motion-gate, lanes]
+  version: 1.1.0
+  updated: 2026-11-09
+  sources: local pipeline (idupi-explainer-v2), artokun/comfyui-mcp lane notes, remotion-dev/skills lane notes
 ---
 
 # Video production
 
-Pipeline for explainers built as a single HTML composition, with the Studio as
-the live editing surface and a deterministic frame renderer for delivery.
+Pipeline for code-rendered videos built as a single HTML composition, with the
+Studio as the live editing surface and a deterministic frame renderer for
+delivery. The lane router and style brief keep the pipeline style-agnostic.
 
 ## Golden rules
 
@@ -19,6 +26,45 @@ the live editing surface and a deterministic frame renderer for delivery.
   an optional review.
 - One variable at a time: if a scene fails, first look at the diff image, then
   change a threshold. Never "fix" a gate by raising the bitrate.
+- No full render before the style brief and `keyframes/e00-styleboard.png` are
+  approved. One primary engine per project.
+
+## Style-first routing
+
+Video requests are style-driven, not template-driven. Before loading a visual
+skill, read `references/video-lanes.json` and pick the closest lane from the
+request, its references, or approved prior work.
+
+- If the request names a style, reference, or aspect ratio, use it.
+- If style is missing or ambiguous, follow `references/style-brief.md` and ask
+  one grouped three-axis question. Never default to the previous project's look.
+- If no lane fits, use `custom` and define it in the style brief; never force a
+  lane that changes the request's intent.
+- Start with the minimum useful set: one preproduction, one or two visual, one
+  audio, and the render/QA skill. Add another skill only when the task requires
+  it; `video-lanes.json` holds the lane-to-skill map.
+- One primary engine per project. HyperFrames owns HTML/2D and 3D scenes;
+  Remotion owns React motion graphics; ComfyUI supplies raster or video assets.
+  Do not run two composition timelines in one piece. This skill owns the
+  HyperFrames engine only: for a Remotion-primary lane load `remotion-engine`,
+  and for ComfyUI assets load `comfyui-8gb`.
+- Do not promise a lane whose primary engine is `planned`. Load only `available`
+  companion skills; omit `planned` ones and note them as follow-ups.
+
+## Style Brief & e00 gate
+
+Read `references/style-brief.md` before the first edit. The short version:
+
+1. Infer the lane; ask one grouped question only if style is missing. Axes:
+   lane/format, aesthetic/rhythm, audio.
+2. Write `style-brief.md` in the project.
+3. Render `keyframes/e00-styleboard.png`: a real hero frame with the palette,
+   typography, and a motion cue; include a 5-second audio preview when relevant.
+4. Stop for approval. No full render before `e00` is approved.
+5. After approval, load the lane's minimum skill set and build.
+
+`e00` is a gate artifact, not a scene: it does not belong in `timeline.json` and
+the motion gate ignores it.
 
 ## Scene design audits
 
@@ -33,31 +79,35 @@ When auditing or redesigning a scene, the brief MUST include:
 - the current motion description: what moves at each beat.
 
 Never audit a scene from the keyframe alone. An element that looks redundant may
-be required by the narration. In E06 the risk indicator is the preflight beat and
-the three locks are the `PERFIL / SESIÓN / LOCK` guards; an audit without the
-script cut narrated content. If a proposal removes an element the script names,
-keep the element and adapt its form instead.
+be required by the narration. Example: if the script names three security guards
+on screen, an audit from the keyframe alone might delete them as visual clutter.
+If a proposal removes an element the script names, keep the element and adapt its
+form instead.
 
 ## Pipeline
 
-1. **Audio gate (before rendering).**
+1. **Style brief and e00 approval.**
+   Read `references/style-brief.md`, infer the lane, write `style-brief.md`, render
+   `keyframes/e00-styleboard.png`, and stop for approval. No full render before
+   this gate.
+2. **Audio gate (when voice or music is in the style brief).**
    `python skills-bundle/voice-narration/validar_video_audio.py --proyecto <project>`
    Checks clip durations, overlaps, clicks, and music length/score.
-2. **Edit in the Studio.**
+3. **Edit in the Studio.**
    `idu-pi video studio --project <project>` serves the live preview.
-3. **Approve keyframes.**
+4. **Approve keyframes.**
    `keyframes/eNN.png` is the final, still state of each scene. It is the
    contract the motion gate compares against.
-4. **Render the delivery video.**
+5. **Render the delivery video.**
    `idu-pi video render --project <project>`
    Resolves the duration from `data-duration`/`timeline.json`, picks the
    approved `*-hq.mp4` audio, finds Playwright, renders with
    `render_frames.mjs`, and runs the motion gate. Options: `--out <mp4>`,
    `--audio <file>`, `--end <s>`, `--no-validate`.
-5. **Motion gate.**
+6. **Motion gate.**
    Runs automatically after a full render. To validate an existing MP4:
    `idu-pi video validate --project <project> --video <mp4>`
-6. **Publish only if both gates exit 0.**
+7. **Publish only if both gates exit 0.**
 
 ## Commands
 
@@ -155,3 +205,10 @@ which is the evidence to inspect before changing any threshold.
 HyperFrames is pinned and reviewed, never `npm update`-ed blindly. The Studio
 and `measure` use the pinned version; delivery uses `render_frames.mjs`. Every
 pin bump requires a full render and both gates before it is accepted.
+
+## References
+
+- `references/video-lanes.json` — lane-to-engine-to-skill map, skill status, and
+  the style brief contract.
+- `references/style-brief.md` — three-axis style question, `style-brief.md`
+  template, and the `e00` approval gate.
