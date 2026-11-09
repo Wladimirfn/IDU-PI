@@ -17,6 +17,21 @@ the live editing surface and a deterministic frame renderer for delivery.
 - One variable at a time: if a scene fails, first look at the diff image, then
   change a threshold. Never "fix" a gate by raising the bitrate.
 
+## Scene design audits
+
+When auditing or redesigning a scene, the brief MUST include:
+
+- the scene's narration lines from `guion.md`, verbatim;
+- the beat timings from `timeline.json`;
+- the current keyframe `keyframes/eNN.png`;
+- the current motion description: what moves at each beat.
+
+Never audit a scene from the keyframe alone. An element that looks redundant may
+be required by the narration. In E06 the risk indicator is the preflight beat and
+the three locks are the `PERFIL / SESIÓN / LOCK` guards; an audit without the
+script cut narrated content. If a proposal removes an element the script names,
+keep the element and adapt its form instead.
+
 ## Pipeline
 
 1. **Audio gate (before rendering).**
