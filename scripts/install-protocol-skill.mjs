@@ -42,7 +42,32 @@ const skills = [
 	},
 	{
 		name: "video-production",
-		files: ["SKILL.md", "validar_motion.py", "render_frames.mjs"],
+		files: [
+			"SKILL.md",
+			"validar_motion.py",
+			"render_frames.mjs",
+			"references/video-lanes.json",
+			"references/style-brief.md",
+		],
+	},
+	{
+		name: "story-continuity",
+		files: [
+			"SKILL.md",
+			"references/artifact-chain.md",
+			"references/continuity-locks.md",
+			"references/review-checklist.md",
+			"references/attribution.md",
+		],
+	},
+	{
+		name: "shader-fx",
+		files: [
+			"SKILL.md",
+			"references/glsl-patterns.md",
+			"references/hyperframes-integration.md",
+			"references/attribution.md",
+		],
 	},
 ];
 

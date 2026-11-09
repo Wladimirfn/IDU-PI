@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "updated": "2026-11-09",
+  "purpose": "Style-first router for video requests. Infer a lane, confirm a style brief, approve an e00 styleboard, then load only the minimum skills for that lane.",
+  "rules": {
+    "onePrimaryEnginePerProject": true,
+    "startingSkillSet": "Start with the minimum useful set: one preproduction, one or two visual, one audio, one render/QA. Add another skill only when the task requires it; never load the whole catalog.",
+    "companionSelection": "Lane skills are candidate companions. Load only available skills; omit planned ones and note them as follow-ups. Expand the set when the request needs it.",
+    "loadOrder": ["preproduction", "visual", "motion-or-render", "audio", "qa"],
+    "neverLoadWholeCatalog": true,
+    "styleBriefRequiredWhenStyleIsMissing": true,
+    "e00ApprovalRequiredBeforeFullRender": true
+  },
+  "skills": {
+    "video-production": { "status": "available", "capability": "render", "source": "bundled" },
+    "kanagawa-html": { "status": "available", "capability": "visual", "source": "bundled" },
+    "soul-icons": { "status": "available", "capability": "visual", "source": "bundled" },
+    "higgsfield-scene": { "status": "available", "capability": "visual", "source": "bundled" },
+    "voice-narration": { "status": "available", "capability": "audio", "source": "bundled" },
+    "music-composition": { "status": "available", "capability": "audio", "source": "bundled" },
+    "director-craft": { "status": "planned", "capability": "preproduction", "source": "wuwangzhang1216/DirectorSKILL", "license": "MIT" },
+    "story-continuity": { "status": "available", "capability": "preproduction", "source": "bundled" },
+    "shader-fx": { "status": "available", "capability": "visual", "source": "bundled" },
+    "pixelfx": { "status": "planned", "capability": "visual", "source": "patch-gg/pixelfx", "license": "MIT" },
+    "webgpu-claude-skill": { "status": "planned", "capability": "visual", "source": "dgreenheck/webgpu-claude-skill", "license": "verify" },
+    "remotion-engine": { "status": "planned", "capability": "motion-or-render", "source": "remotion-dev/skills", "license": "verify" },
+    "comfyui-8gb": { "status": "planned", "capability": "visual", "source": "artokun/comfyui-mcp", "license": "MIT", "vramTargetGb": 8 },
+    "elevenlabs-sfx-voice": { "status": "planned", "capability": "audio", "source": "elevenlabs/skills", "license": "MIT" },
+    "music-mastering": { "status": "planned", "capability": "audio", "source": "bitwize-music-studio/claude-ai-music-skills", "license": "CC0" },
+    "qa-visual": { "status": "planned", "capability": "qa", "source": "mromidev/claude-animated-shorts + bundled validar_motion.py", "license": "MIT" }
+  },
+  "engines": {
+    "hyperframes": {
+      "skill": "video-production",
+      "renderer": "render_frames.mjs",
+      "deterministic": true,
+      "output": "mp4"
+    },
+    "remotion": {
+      "skill": "remotion-engine",
+      "renderer": "remotion render",
+      "deterministic": true,
+      "status": "planned"
+    },
+    "comfyui": {
+      "skill": "comfyui-8gb",
+      "renderer": "curated ComfyUI workflows + ffmpeg",
+      "deterministic": false,
+      "status": "planned",
+      "vramTargetGb": 8
+    }
+  },
+  "lanes": {
+    "vector-explainer": {
+      "tags": ["2d", "vector", "explainer", "corporate", "infographic"],
+      "primaryEngine": "hyperframes",
+      "skills": ["director-craft", "kanagawa-html", "soul-icons", "shader-fx"],
+      "defaults": { "aspect": "16:9", "motion": "calm", "voice": "local", "palette": "from style brief" },
+      "avoid": ["full-screen shader art", "AI raster for legible text", "9:16 unless requested"]
+    },
+    "whiteboard": {
+      "tags": ["whiteboard", "hand-drawn", "education", "infographic"],
+      "primaryEngine": "hyperframes",
+      "skills": ["director-craft", "soul-icons", "kanagawa-html", "shader-fx"],
+      "defaults": { "aspect": "16:9", "motion": "progressive-draw", "background": "paper", "voice": "local" },
+      "avoid": ["photo-real textures", "heavy shaders", "dense text"]
+    },
+    "3d-cinematic": {
+      "tags": ["3d", "cinematic", "product", "environment", "camera"],
+      "primaryEngine": "hyperframes",
+      "layers": ["three", "webgpu", "shader-fx"],
+      "skills": ["higgsfield-scene", "webgpu-claude-skill", "shader-fx", "story-continuity"],
+      "defaults": { "aspect": "16:9", "motion": "camera-led", "fps": 60 },
+      "avoid": ["text inside 3D", "raymarching over 64 steps", "WebGPU in headless unless proven deterministic"]
+    },
+    "pixel-retro": {
+      "tags": ["pixel", "retro", "game", "8bit", "16bit"],
+      "primaryEngine": "hyperframes",
+      "skills": ["story-continuity", "pixelfx", "shader-fx", "comfyui-8gb"],
+      "defaults": { "aspect": "16:9", "motion": "stepped", "palette": "limited", "scaling": "nearest-neighbor" },
+      "avoid": ["anti-aliased pixel art", "smooth gradients", "high-resolution photos"]
+    },
+    "horror-2d": {
+      "tags": ["horror", "dark", "ink", "analog", "vhs", "terror"],
+      "primaryEngine": "hyperframes",
+      "skills": ["higgsfield-scene", "story-continuity", "shader-fx", "comfyui-8gb", "elevenlabs-sfx-voice"],
+      "defaults": { "aspect": "16:9", "motion": "slow", "grain": "on", "palette": "desaturated" },
+      "avoid": ["clean corporate palette", "bright flat vector", "text over heavy grain"]
+    },
+    "anime-short-drama": {
+      "tags": ["anime", "manga", "short-drama", "motion-comic", "narrative"],
+      "primaryEngine": "hyperframes",
+      "assetEngines": ["comfyui"],
+      "skills": ["story-continuity", "higgsfield-scene", "comfyui-8gb", "elevenlabs-sfx-voice"],
+      "defaults": { "aspect": "16:9", "motion": "i2v", "voice": "local-or-elevenlabs" },
+      "avoid": ["drama hooks and cliffhangers unless requested", "unlicensed model outputs", "AI text"]
+    },
+    "motion-graphics": {
+      "tags": ["motion-graphics", "kinetic-type", "data", "infographic", "title"],
+      "primaryEngine": "remotion",
+      "skills": ["director-craft", "remotion-engine", "shader-fx", "soul-icons"],
+      "defaults": { "aspect": "16:9", "motion": "beat-driven", "fps": 60 },
+      "avoid": ["mixing HyperFrames and Remotion timelines", "heavy shader behind text"]
+    },
+    "documentary": {
+      "tags": ["documentary", "realistic", "interview", "b-roll", "stock"],
+      "primaryEngine": "hyperframes",
+      "skills": ["director-craft", "higgsfield-scene", "comfyui-8gb", "voice-narration", "music-mastering"],
+      "defaults": { "aspect": "16:9", "motion": "observed", "voice": "local" },
+      "avoid": ["AI footage presented as real", "unlicensed stock", "text over faces"]
+    },
+    "hybrid-ui-broll": {
+      "tags": ["hybrid", "ui", "product", "b-roll", "presenter"],
+      "primaryEngine": "hyperframes",
+      "skills": ["director-craft", "kanagawa-html", "higgsfield-scene", "story-continuity"],
+      "defaults": { "aspect": "16:9", "motion": "mixed" },
+      "avoid": ["AI-generated UI or text", "fake screenshots", "inconsistent product state"]
+    },
+    "custom": {
+      "tags": ["custom", "unspecified", "experimental"],
+      "primaryEngine": "hyperframes",
+      "skills": ["director-craft", "kanagawa-html", "shader-fx"],
+      "defaults": { "aspect": "from style brief", "motion": "from style brief" },
+      "avoid": ["forcing a lane when the brief does not match any listed lane"]
+    }
+  },
+  "styleBrief": {
+    "artifact": "keyframes/e00-styleboard.png",
+    "record": "style-brief.md",
+    "gate": "approval-required-before-full-render",
+    "questionMode": "one grouped question by default; ask again only if the answer would change the outcome",
+    "axes": [
+      {
+        "id": "lane",
+        "question": "Which visual lane and format?",
+        "default": "inferred from the request",
+        "options": ["vector-explainer", "whiteboard", "3d-cinematic", "pixel-retro", "horror-2d", "anime-short-drama", "motion-graphics", "documentary", "hybrid-ui-broll", "custom"]
+      },
+      {
+        "id": "aesthetic",
+        "question": "Palette, typography, and motion rhythm?",
+        "default": "lane defaults plus one reference"
+      },
+      {
+        "id": "audio",
+        "question": "Voice, music, and SFX?",
+        "default": "local voice + local music, no paid service without approval"
+      }
+    ],
+    "rules": [
+      "Infer a candidate lane first; ask only what changes the outcome.",
+      "Offer a recommended default and one or two alternatives, not an open questionnaire.",
+      "Accept 'surprise me' and state the chosen lane with a one-line rationale.",
+      "Generate e00 with the real hero shot, palette, typography in scene, and a 5-second audio preview.",
+      "Do not render the full sequence before e00 approval.",
+      "After a change, update only the affected decisions and regenerate e00."
+    ]
+  }
+}
