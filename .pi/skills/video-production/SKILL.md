@@ -14,10 +14,16 @@ the live editing surface and a deterministic frame renderer for delivery.
 - A delivery MP4 is produced by `render_frames.mjs`, not by `hyperframes render`.
 - Never publish a video when the motion or audio gate exits 1.
 - `keyframes/eNN.png` are the approved oracle. The renderer never regenerates them.
+- Every new scene or presentation is audited at creation with its `guion.md`
+  lines, timeline beats, keyframe, and motion. The audit is part of creation, not
+  an optional review.
 - One variable at a time: if a scene fails, first look at the diff image, then
   change a threshold. Never "fix" a gate by raising the bitrate.
 
 ## Scene design audits
+
+Every new scene or presentation must pass this audit before it is accepted; an
+audit is part of creation, not an optional review.
 
 When auditing or redesigning a scene, the brief MUST include:
 
