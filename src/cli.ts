@@ -414,18 +414,23 @@ async function main(): Promise<void> {
 				// Diferencia explicita: render usa el CLI de HyperFrames, no el de preview.
 				iduframeArgs.splice(0, 1, "render");
 			}
+			/* En Windows spawnear `iduframe.cmd` sin shell falla: CreateProcess no
+			   ejecuta un .cmd. Se resuelve el entry .mjs real y se corre con node,
+			   que ademas evita cualquier quoting de shell sobre rutas de proyecto. */
 			const env = { ...process.env };
-			const local = env.IDUFRAME_CLI;
-			const cmd = local ? process.execPath : process.platform === "win32" ? "iduframe.cmd" : "iduframe";
-			const argv = local ? [local, ...iduframeArgs] : iduframeArgs;
-			const run = spawnSync(cmd, argv, { stdio: "inherit", env, cwd: project });
-			if (run.error) {
+			const entry = resolveIduframeEntry(env.IDUFRAME_CLI);
+			if (!entry) {
 				console.error(
-					"No encontré `iduframe`. Instalalo con `npm i -g iduframe` " +
+					"No encontré `iduframe`. Instalalo con `npm i -g @wladimirfn/iduframe` " +
 						"o apuntá IDUFRAME_CLI a su cli.mjs.",
 				);
 				process.exit(1);
 			}
+			const run = spawnSync(process.execPath, [entry, ...iduframeArgs], {
+				stdio: "inherit",
+				env,
+				cwd: project,
+			});
 			process.exit(run.status ?? 1);
 			break;
 		}
@@ -464,6 +469,24 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 	}
+}
+
+/* Resuelve el entry real de iduframe. En Windows un .cmd no es ejecutable por
+   CreateProcess sin shell, asi que se apunta al .mjs y se corre con node: cero
+   quoting de shell sobre rutas de proyecto con espacios. */
+function resolveIduframeEntry(explicit?: string): string | null {
+	if (explicit && existsSync(explicit)) return explicit;
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+	const candidates = [
+		process.env.APPDATA ? join(process.env.APPDATA, "npm", "node_modules", "@wladimirfn", "iduframe", "src", "cli.mjs") : "",
+		"/usr/local/lib/node_modules/@wladimirfn/iduframe/src/cli.mjs",
+		"/usr/lib/node_modules/@wladimirfn/iduframe/src/cli.mjs",
+		home ? join(home, ".npm-global", "lib", "node_modules", "@wladimirfn", "iduframe", "src", "cli.mjs") : "",
+	].filter(Boolean);
+	for (const candidate of candidates) {
+		if (existsSync(candidate)) return candidate;
+	}
+	return null;
 }
 
 function printUsage(out: (line: string) => void = console.log): void {
