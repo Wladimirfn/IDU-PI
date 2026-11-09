@@ -1,26 +1,49 @@
 ---
 name: kanagawa-html
 description: >-
-  Use when generating or revising any HTML page, report, dashboard, presentation,
-  slide deck, or animated composition for this project: landing pages, benchmark
-  reports, data visualizations, product launches, "hazme una página bonita",
-  presentaciones descargables, video-like web scenes, or anything that should
-  look premium and cinematic. Provides the Gentleman Kanagawa design system
-  (validated palette, ambient blur, particle field), Claude-grade motion craft
-  (springs, camera, beat-sync), a dataviz procedure with runnable palette
-  validation, and export paths to PDF and MP4 (HyperFrames). NOT for footage an
-  AI video model must generate (actors, filmed products, real environments) —
-  that is higgsfield-scene's job. Both deliver PDF/Presentations or MP4.
+  Use when the project's art direction selects the Gentleman Kanagawa aesthetic
+  or explicitly asks for a Kanagawa-styled page, dashboard, presentation, or
+  composition; or when another declared HTML style needs the style-neutral craft
+  in this skill (deterministic seek(t), spring motion, camera, dataviz palette
+  validation, PDF/MP4 export). The Kanagawa tokens, serif typography, ambient
+  blur, particle field and chart palette are a named preset and apply only when
+  that aesthetic is selected. NOT for footage an AI video model must generate
+  (actors, filmed products, real environments) — that is higgsfield-scene's job.
+  Do not load this skill as the default visual answer for every page or video.
 ---
 
-# Kanagawa HTML — diseño premium con motion cinematográfico
+# Kanagawa HTML — un preset, no la respuesta por defecto
 
-Una página hecha con esta skill debe leerse como un producto caro (Linear, Apple,
-Arc) y moverse como un film: algo pasa en cada beat, nada se siente generado.
-El método es diseño-sistema-agnóstico: estos tokens son la instancia por defecto;
-sustitúyelos por los de otra marca y no toques nada más.
+Esta skill tiene dos capas separables. Confundirlas es lo que convierte cualquier
+pedido en el mismo dashboard oscuro con acento dorado.
 
-## 1. Design tokens (Gentleman Kanagawa)
+| Capa | Qué incluye | Cuándo aplica |
+| --- | --- | --- |
+| **Preset Gentleman Kanagawa** | tokens, fuentes serif, ambient blur, partículas, paleta de gráficos | solo si el brief declara esta estética |
+| **Craft** | springs deterministas, cámara, `seek(t)`, dataviz, export PDF/MP4 | con cualquier estética declarada |
+
+## 0. Contrato de estilo (leer antes de escribir CSS)
+
+1. El proyecto declara su lenguaje visual en `art-direction.md`
+   (`video-production/references/art-direction.md`) o en su equivalente para una
+   página. Si no existe, escribilo antes de elegir colores.
+2. Si la estética declarada **no** es Gentleman Kanagawa, esta skill corre en
+   **craft-only**: aplican las secciones de craft; NO se aplican los tokens, las
+   fuentes, el ambient blur, las partículas ni la paleta de gráficos.
+3. Cambiar los tokens no cambia el estilo. Pasar de azul a rosa no convierte un
+   dashboard en cartoon. Si el brief pide cartoon, pixel art, 3D o hand-drawn,
+   las formas, la composición, la textura y el movimiento los define el contrato,
+   no este archivo.
+4. Esta skill no decide composición, tipos de plano ni ritmo narrativo. Para
+   video, eso vive en el contrato de dirección artística.
+
+Una página hecha con el **preset** debe leerse como un producto caro (Linear,
+Apple, Arc) y moverse como un film: algo pasa en cada beat, nada se siente
+generado. Esa frase describe el preset, no una obligación universal.
+
+## 1. Preset Gentleman Kanagawa (opt-in)
+
+Aplicar solo cuando el brief elige esta estética.
 
 ```css
 :root {
@@ -36,7 +59,10 @@ Tipografía: `Source Serif 4` (títulos, serif) + `Space Grotesk` (cuerpo) vía
 Google Fonts. Títulos grandes con la serif; nada de Arial/system-ui como cara
 visible.
 
-## 2. Las tres capas de fondo (en orden z: 0 → 1 → contenido)
+## 2. Fondo del preset (solo modo preset, z: 0 → 1 → contenido)
+
+Estas capas son la firma del preset. No son un requisito de ninguna otra
+estética: en pixel art, cartoon, 3D o hand-drawn el fondo lo define el contrato.
 
 1. **Ambient blur**: dos blobs (magenta y azul) de 40vw con `filter: blur(130px)`,
    `opacity: .16`, deriva lenta `26s alternate`. Es el sello del tema; sin esto
@@ -47,7 +73,9 @@ visible.
 
 Respeta `prefers-reduced-motion: reduce` — sin canvas ni animaciones de entrada.
 
-## 3. Motion craft (reglas, no gustos)
+## 3. Craft: motion (reglas, no gustos)
+
+Aplica a cualquier estética que tenga movimiento; no impone el look Kanagawa.
 
 Medido de films reales; un defecto aquí se lee como "generado":
 
@@ -73,14 +101,18 @@ function stepR(tau, { w, z }) {           // respuesta escalonada amortiguada 0-
 
 - **Opacidad y color nunca rebotan**; posición y tamaño pueden hacerlo.
 - **Determinismo para render**: si la composición va a exportarse a MP4, nada
-  de `Math.random()` sin semilla ni timers — todo `seek(t)` puro (ver sección 6).
+  de `Math.random()` sin semilla ni timers — todo `seek(t)` puro (ver
+  Craft: export).
 - **Un movimiento = un tween.** Movimiento rápido 0.3-0.6s; blur de motion
   horizontal-only si el movimiento es horizontal.
 - **Reveal on scroll** con `IntersectionObserver`: tablas/gráficos aparecen con
   fade+translate; las barras crecen de 0 escalonadas (120ms + idx*90ms);
   contadores KPI con easing cubic (`1 - (1-p)^3`).
 
-## 4. Dataviz: el color se calcula, no se elige
+## 4. Craft: dataviz — el color se calcula, no se elige
+
+El procedimiento es neutral. La paleta `KANAGAWA-CHART` es el default del preset;
+con otra estética, derivá la paleta del contrato y validala igual.
 
 **Dos paletas, dos trabajos:**
 
@@ -125,7 +157,7 @@ Reglas duras:
 - Toda barra lleva su valor impreso (`tabular-nums`); el título nombra la serie,
   no una leyenda redundante.
 
-## 5. Motion de nivel film (hero, launches, presentaciones)
+## 5. Craft: motion de nivel film (hero, launches, presentaciones)
 
 Para un hero o presentación que deba "parecer video" sin renderizar:
 
@@ -140,7 +172,7 @@ Para un hero o presentación que deba "parecer video" sin renderizar:
 - **Un takeaway por escena**; tiempo asentado suficiente para leer; el beat vivo
   por micro-interacciones (hover, ripple, settle de número), no por ruido.
 
-## 6. Presentaciones y video: recetas exactas
+## 6. Craft: export (PDF, MP4, PPTX)
 
 Toda presentación hecha con esta skill debe exportarse sin re-trabajo.
 
@@ -194,13 +226,26 @@ No se convierte automáticamente: ofrece PDF como entrega, o HyperFrames si pidi
 
 ## 7. Checklist de entrega
 
-- [ ] Paleta de GRÁFICOS validada con script (`--surface "#06080f"`, orden exacto de KANAGAWA-CHART); texto con contraste ≥ 4.5:1 (3:1 solo texto grande)
-- [ ] Ambient blur + partículas presentes (u off si reduced-motion)
+### Craft (siempre)
+
+- [ ] El lenguaje visual está declarado y cada eje (forma, profundidad, textura,
+      color, tipografía, movimiento) se evidencia en la página, no sólo en el brief
+- [ ] Paleta de GRÁFICOS validada con `validate_palette.js` contra la superficie
+      real; texto con contraste ≥ 4.5:1 (3:1 solo texto grande)
 - [ ] Barras/KPIs animados con springs (ω definido); contadores con easing cúbico
-- [ ] Si va a render: seek(t) puro — sin random sin semilla, sin rAF como reloj
+- [ ] Si va a render: `seek(t)` puro — sin random sin semilla, sin rAF como reloj
 - [ ] Todo dato tiene su valor impreso; sin leyenda redundante
 - [ ] Escala funcional sin red (fallback del CDN de fuentes OK)
-- [ ] Si es presentación: PDF verificado con el @media print de la sección 6
-- [ ] Si es video: subcomandos de hyperframes verificados con --help antes de render
+- [ ] Si es presentación: PDF verificado con el `@media print` de Craft: export
+- [ ] Si es video: subcomandos de hyperframes verificados con `--help` antes de render
 - [ ] Decisión registrada: si el pedido incluía footage IA (gente/producto filmado),
       esa parte fue delegada a higgsfield-scene — no intentes generarlo con código
+
+### Preset Gentleman Kanagawa (solo si la estética fue elegida)
+
+- [ ] Tokens Kanagawa aplicados; ninguna familia tipográfica ni color de UI fuera
+      de los declarados
+- [ ] Ambient blur + partículas presentes (u off si reduced-motion)
+- [ ] Títulos en Source Serif 4, cuerpo en Space Grotesk
+- [ ] `KANAGAWA-CHART` en el orden validado para gráficos, no la paleta pastel
+- [ ] La página usa las tres capas del preset y su tipografía, no sólo la paleta

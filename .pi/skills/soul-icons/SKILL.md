@@ -24,6 +24,12 @@ Feather/Material sin transformarlos, cliparts.
 y comparte **ADN visual** con su familia (ver sección 3). Antes de dibujar,
 responde: ¿qué ES este proyecto? ¿qué imagen se queda en la retina?
 
+**El estilo manda.** Este procedimiento define coherencia de familia, no una
+estética fija. Si el lenguaje visual declarado es pixel art, cartoon, 3D o
+hand-drawn, el trazo de 1.5px no es la respuesta: se conservan la metáfora, el
+ADN y la legibilidad, y cambian la geometría, el grosor y la textura para
+pertenecer a ese estilo.
+
 ## 1. Extraer el alma (3 preguntas, respuesta escrita antes de dibujar)
 
 1. **¿Qué hace el producto en una frase de acción?**
