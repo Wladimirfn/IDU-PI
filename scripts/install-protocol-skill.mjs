@@ -48,6 +48,8 @@ const skills = [
 			"render_frames.mjs",
 			"references/video-lanes.json",
 			"references/style-brief.md",
+			"references/art-direction.md",
+			"references/visual-qa.md",
 		],
 	},
 	{
@@ -56,6 +58,7 @@ const skills = [
 			"SKILL.md",
 			"references/artifact-chain.md",
 			"references/continuity-locks.md",
+			"references/character-continuity.md",
 			"references/review-checklist.md",
 			"references/attribution.md",
 		],

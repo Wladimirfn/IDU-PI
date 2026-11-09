@@ -28,6 +28,21 @@ decide, what to do, and what to return.
   Do not invent a license the repository does not have.
 - `metadata` can carry `author`, `version`, `updated`, `sources`, and tags.
 
+## Style-bearing vs style-neutral skills
+
+- A skill that carries an aesthetic must say so in the description and separate
+  its **craft** from its **named look**. Craft is reusable under any declared
+  style; the look is a preset.
+- A named preset is opt-in. Never make a skill's palette, typography, signature
+  background, or effects the default answer for an unrelated request.
+- The selected visual language comes from the project's art direction, not from
+  the skill that happens to render it. A skill that cannot run without imposing
+  its look must provide a craft-only mode or state that it cannot be used.
+- A lane or router names a production capability, never an aesthetic. "Vector
+  explainer" is a way of producing images, not a palette.
+- Artistic quality is audited separately from technical correctness. A skill must
+  not treat a passing technical gate as proof that the result reads.
+
 ## Body
 
 - Write imperative runtime instructions: load X, check Y, return Z.
