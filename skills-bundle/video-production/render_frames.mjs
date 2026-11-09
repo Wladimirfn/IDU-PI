@@ -190,6 +190,12 @@ await new Promise((resolve, reject) => {
 
 if (audio) {
 	console.log("muxeando audio…");
+	/* Si el audio aprobado ya es AAC, se copia sin generación extra. */
+	const audioExt = audio.split(".").pop()?.toLowerCase() ?? "";
+	const audioCodec =
+		audioExt === "mp4" || audioExt === "m4a" || audioExt === "aac"
+			? ["-c:a", "copy"]
+			: ["-c:a", "aac", "-b:a", "192k"];
 	await runFfmpeg(
 		[
 			"-y",
@@ -205,10 +211,7 @@ if (audio) {
 			"1:a:0",
 			"-c:v",
 			"copy",
-			"-c:a",
-			"aac",
-			"-b:a",
-			"192k",
+			...audioCodec,
 			"-shortest",
 			"-movflags",
 			"+faststart",
