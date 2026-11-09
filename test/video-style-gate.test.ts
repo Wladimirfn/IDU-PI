@@ -78,3 +78,16 @@ test("video render refuses a missing art-direction contract", () => {
 		/falta art-direction\.md/,
 	);
 });
+
+test("video render reads a markdown-formatted brief", () => {
+	// "- **Lane:** ..." and "- **Approved e00:** yes" must parse; the refusal
+	// has to be the missing contract, not a formatting false negative.
+	assertRefused(
+		project({
+			"style-brief.md":
+				"# Style Brief\n- **Lane:** vector-explainer with a 2.5D finish.\n- **Approved e00:** yes (2026-11-09).\n",
+			"keyframes/e00-styleboard.png": "not inspected: the art-direction check fails first",
+		}),
+		/falta art-direction\.md/,
+	);
+});
