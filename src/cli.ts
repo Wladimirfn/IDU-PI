@@ -609,18 +609,12 @@ function resolveFrameRenderer(): string | null {
 function readStyleBrief(project: string): { lane: string | null; approvedE00: boolean } | null {
 	const file = join(project, "style-brief.md");
 	if (!existsSync(file)) return null;
-	const text = readFileSync(file, "utf8");
-	const laneMatch = text.match(/^\s*-\s*(?:\*\*)?Lane(?:\*\*)?:\s*(.+)$/im);
-	const lane = laneMatch
-		? laneMatch[1]
-				.replace(/\*\*/g, "")
-				.trim()
-				.split(/\s+/)[0]
-				.toLowerCase()
-		: null;
-	const approvedE00 = /^\s*-\s*(?:\*\*)?Approved e00(?:\*\*)?:\s*(yes|sí|si|true|approved)\b/im.test(
-		text,
-	);
+	/* El brief puede usar markdown (`- **Lane:** ...`); se normaliza antes de
+	   parsear para que el formato del documento no cambie el veredicto. */
+	const text = readFileSync(file, "utf8").replace(/\*\*/g, "");
+	const laneMatch = text.match(/^\s*-\s*Lane:\s*(.+)$/im);
+	const lane = laneMatch ? laneMatch[1].trim().split(/\s+/)[0].toLowerCase() : null;
+	const approvedE00 = /^\s*-\s*Approved e00:\s*(yes|sí|si|true|approved)\b/im.test(text);
 	return { lane, approvedE00 };
 }
 
