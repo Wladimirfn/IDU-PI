@@ -606,19 +606,31 @@ function resolveFrameRenderer(): string | null {
 /* Gate de estilo para un render completo. El brief y el e00 existían como
    prosa; sin este chequeo un render de entrega podía salir sin lane válida,
    sin contrato de dirección artística y sin aprobación. */
-function readStyleBrief(project: string): { lane: string | null; approvedE00: boolean } | null {
+function readStyleBrief(
+	project: string,
+): { intent: string | null; lane: string | null; approvedE00: boolean } | null {
 	const file = join(project, "style-brief.md");
 	if (!existsSync(file)) return null;
 	/* El brief puede usar markdown (`- **Lane:** ...`); se normaliza antes de
 	   parsear para que el formato del documento no cambie el veredicto. */
 	const text = readFileSync(file, "utf8").replace(/\*\*/g, "");
+	/* El intent es una sola palabra; lo que siga en la línea es la razón. */
+	const intentMatch = text.match(/^\s*-\s*Intent:\s*([a-z-]+)/im);
+	const intent = intentMatch ? intentMatch[1].toLowerCase() : null;
 	const laneMatch = text.match(/^\s*-\s*Lane:\s*(.+)$/im);
 	const lane = laneMatch ? laneMatch[1].trim().split(/\s+/)[0].toLowerCase() : null;
 	const approvedE00 = /^\s*-\s*Approved e00:\s*(yes|sí|si|true|approved)\b/im.test(text);
-	return { lane, approvedE00 };
+	return { intent, lane, approvedE00 };
 }
 
-function resolveVideoLanes(): { lanes?: Record<string, unknown> } | null {
+/* Qué tipo de pieza es. La lane nombra una técnica; sin el intent toda pieza se
+   produce y se juzga como un explainer narrado. video-lanes.json es la fuente;
+   esta lista cubre un bundle anterior al bloque `intents`. */
+const DEFAULT_VIDEO_INTENTS = ["presentation", "story", "experience"];
+
+type VideoLanes = { lanes?: Record<string, unknown>; intents?: Record<string, unknown> };
+
+function resolveVideoLanes(): VideoLanes | null {
 	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 	const candidate = join(
 		root,
@@ -629,7 +641,7 @@ function resolveVideoLanes(): { lanes?: Record<string, unknown> } | null {
 	);
 	if (!existsSync(candidate)) return null;
 	try {
-		return JSON.parse(readFileSync(candidate, "utf8")) as { lanes?: Record<string, unknown> };
+		return JSON.parse(readFileSync(candidate, "utf8")) as VideoLanes;
 	} catch {
 		return null;
 	}
@@ -649,11 +661,25 @@ function checkStyleGate(project: string, skip: boolean): number {
 		);
 		return 1;
 	}
+	const lanes = resolveVideoLanes();
+	const declaredIntents = lanes?.intents ? Object.keys(lanes.intents) : [];
+	const intentIds = declaredIntents.length > 0 ? declaredIntents : DEFAULT_VIDEO_INTENTS;
+	if (!brief.intent) {
+		console.error(
+			`style gate: style-brief.md no declara \`Intent:\`. Decidí qué tipo de pieza es antes de elegir la lane: ${intentIds.join(", ")}.`,
+		);
+		return 1;
+	}
+	if (!intentIds.includes(brief.intent)) {
+		console.error(
+			`style gate: intent desconocido "${brief.intent}". Valores válidos: ${intentIds.join(", ")}.`,
+		);
+		return 1;
+	}
 	if (!brief.lane) {
 		console.error("style gate: style-brief.md no declara `Lane:`.");
 		return 1;
 	}
-	const lanes = resolveVideoLanes();
 	const laneIds = lanes?.lanes ? Object.keys(lanes.lanes) : [];
 	if (laneIds.length > 0 && !laneIds.includes(brief.lane)) {
 		console.error(
@@ -677,7 +703,7 @@ function checkStyleGate(project: string, skip: boolean): number {
 		);
 		return 1;
 	}
-	console.log("style gate: ok (lane, art direction, e00)");
+	console.log(`style gate: ok (intent ${brief.intent}, lane, art direction, e00)`);
 	return 0;
 }
 
@@ -800,7 +826,7 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi video status|measure                Lint state / Spanish coverage");
 	out("  idu-pi video render [--project <dir>]      The only path that produces an MP4");
 	out("                                  Full renders enforce the style gate:");
-	out("                                  lane, art-direction.md and approved e00");
+	out("                                  intent, lane, art-direction.md and approved e00");
 	out("                                  --width/--height/--gpu for the render profile");
 }
 

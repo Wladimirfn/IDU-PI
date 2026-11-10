@@ -47,10 +47,36 @@ test("video render refuses a full render with no style-brief.md", () => {
 	assertRefused(project({}), /falta style-brief\.md/);
 });
 
+test("video render refuses a brief that never declares the intent", () => {
+	// The lane names a technique. Without the intent every piece is produced and
+	// judged as a narrated explainer, so a complete brief minus `Intent:` fails.
+	assertRefused(
+		project({
+			"style-brief.md": "# Style Brief\n- Lane: vector-explainer\n- Approved e00: yes\n",
+			"art-direction.md": "# Art Direction\n- Approved: yes\n",
+			"keyframes/e00-styleboard.png": "not inspected: the intent check fails first",
+		}),
+		/no declara `Intent:`/,
+	);
+});
+
+test("video render refuses an intent that is not in video-lanes.json", () => {
+	assertRefused(
+		project({
+			"style-brief.md":
+				"# Style Brief\n- Intent: explainer\n- Lane: vector-explainer\n- Approved e00: yes\n",
+			"art-direction.md": "# Art Direction\n- Approved: yes\n",
+			"keyframes/e00-styleboard.png": "not inspected: the intent check fails first",
+		}),
+		/intent desconocido "explainer".*presentation, story, experience/,
+	);
+});
+
 test("video render refuses a lane that is not in video-lanes.json", () => {
 	assertRefused(
 		project({
-			"style-brief.md": "# Style Brief\n- Lane: not-a-lane\n- Approved e00: yes\n",
+			"style-brief.md":
+				"# Style Brief\n- Intent: presentation\n- Lane: not-a-lane\n- Approved e00: yes\n",
 			"art-direction.md": "# Art Direction\n- Approved: yes\n",
 			"keyframes/e00-styleboard.png": "not inspected: the lane check fails first",
 		}),
@@ -61,7 +87,8 @@ test("video render refuses a lane that is not in video-lanes.json", () => {
 test("video render refuses an unapproved e00", () => {
 	assertRefused(
 		project({
-			"style-brief.md": "# Style Brief\n- Lane: vector-explainer\n- Approved e00: no\n",
+			"style-brief.md":
+				"# Style Brief\n- Intent: story\n- Lane: vector-explainer\n- Approved e00: no\n",
 			"art-direction.md": "# Art Direction\n- Approved: yes\n",
 			"keyframes/e00-styleboard.png": "not inspected: the approval check fails first",
 		}),
@@ -72,7 +99,8 @@ test("video render refuses an unapproved e00", () => {
 test("video render refuses a missing art-direction contract", () => {
 	assertRefused(
 		project({
-			"style-brief.md": "# Style Brief\n- Lane: vector-explainer\n- Approved e00: yes\n",
+			"style-brief.md":
+				"# Style Brief\n- Intent: experience\n- Lane: vector-explainer\n- Approved e00: yes\n",
 			"keyframes/e00-styleboard.png": "not inspected: the art-direction check fails first",
 		}),
 		/falta art-direction\.md/,
@@ -80,12 +108,13 @@ test("video render refuses a missing art-direction contract", () => {
 });
 
 test("video render reads a markdown-formatted brief", () => {
-	// "- **Lane:** ..." and "- **Approved e00:** yes" must parse; the refusal
-	// has to be the missing contract, not a formatting false negative.
+	// "- **Intent:** ...", "- **Lane:** ..." and "- **Approved e00:** yes" must
+	// parse; the refusal has to be the missing contract, not a formatting false
+	// negative.
 	assertRefused(
 		project({
 			"style-brief.md":
-				"# Style Brief\n- **Lane:** vector-explainer with a 2.5D finish.\n- **Approved e00:** yes (2026-11-09).\n",
+				"# Style Brief\n- **Intent:** Presentation: the viewer must be able to restate it.\n- **Lane:** vector-explainer with a 2.5D finish.\n- **Approved e00:** yes (2026-11-09).\n",
 			"keyframes/e00-styleboard.png": "not inspected: the art-direction check fails first",
 		}),
 		/falta art-direction\.md/,

@@ -1,8 +1,11 @@
 {
-  "version": 2,
-  "updated": "2026-11-09",
-  "purpose": "Capability-first router for video requests. Determine the production capability the piece needs, probe that the harness can produce it, record the visual language in an art-direction contract, approve an e00 styleboard, then load only the minimum skills for that capability set.",
+  "version": 3,
+  "updated": "2026-11-10",
+  "purpose": "Intent-first, capability-first router for video requests. Decide what kind of piece it is, determine the production capability it needs, probe that the harness can produce it, record the visual language in an art-direction contract, approve an e00 styleboard, then load only the minimum skills for that capability set.",
   "rules": {
+    "intentFirst": true,
+    "intentMeaning": "The intent names what kind of piece it is and what drives its time. It is decided before the lane; the lane only names the technique that carries it. Any lane can serve any intent.",
+    "intentEnforcedBy": "idu-pi video render",
     "capabilityFirst": true,
     "capabilityProbeRequired": true,
     "capabilityGapPolicy": "A missing capability is a blocker or an explicitly approved downgrade. Never silently replace the shot with cards and text.",
@@ -25,6 +28,41 @@
     },
     "effectBudget": "No effect layer by default. Add shader, pixel or 3D effects only when art-direction.md names them and they survive legibility and the delivery renderer.",
     "organizingPrinciple": "No two consecutive shots share the same layout skeleton unless art-direction.md names the repetition as a deliberate motif."
+  },
+  "intents": {
+    "presentation": {
+      "goal": "The viewer understands something and can restate it.",
+      "timeDriver": "voice",
+      "narration": "expected",
+      "onScreenText": "expected",
+      "beatUnit": "one claim",
+      "beatReads": "A viewer who only sees the frame can state the claim.",
+      "proof": "A beat that asserts the behaviour of a real, existing artifact shows that artifact working. Diagrams are for what is abstract or invisible.",
+      "e00MustProve": "one real claim shown the way the piece will show claims, with the type system in scene",
+      "failsAs": "a narrated slide deck: the same headline-and-cards skeleton under a voice-over"
+    },
+    "story": {
+      "goal": "The viewer follows someone who wants something through a change.",
+      "timeDriver": "performance",
+      "narration": "optional",
+      "onScreenText": "optional",
+      "beatUnit": "one change in the protagonist's situation",
+      "beatReads": "A viewer who only sees the frame can say who wants what and what just changed.",
+      "proof": "Events are acted on screen, not reported by a narrator or a caption.",
+      "e00MustProve": "the protagonist in its world, in a pose that acts, at the piece's real level of finish",
+      "failsAs": "an explainer with a mascot: the character decorates claims instead of wanting something"
+    },
+    "experience": {
+      "goal": "The viewer feels a mood, a rhythm or a sense of scale.",
+      "timeDriver": "music",
+      "narration": "none unless requested",
+      "onScreenText": "none unless requested",
+      "beatUnit": "one shift of energy, density or mood",
+      "beatReads": "The frame carries the declared mood without a caption.",
+      "proof": "Nothing is explained. Progression comes from image, motion and sound.",
+      "e00MustProve": "texture, light and a motion cue at full quality, with the audio preview that drives the cut",
+      "failsAs": "an explainer without words, or a loop with no progression"
+    }
   },
   "productionCapabilities": {
     "code-2d": "HTML/CSS/SVG/canvas composition rendered deterministically by HyperFrames or the frame renderer.",
@@ -242,6 +280,12 @@
     "questionMode": "one grouped question by default; ask again only if the answer would change the outcome",
     "axes": [
       {
+        "id": "intent",
+        "question": "What kind of piece: a presentation, a story, or an experience?",
+        "default": "inferred from the request; asked when two intents would produce different pieces",
+        "options": ["presentation", "story", "experience"]
+      },
+      {
         "id": "lane",
         "question": "Which visual lane and format?",
         "default": "inferred from the request",
@@ -255,11 +299,12 @@
       {
         "id": "audio",
         "question": "Voice, music, and SFX?",
-        "default": "local voice + local music, no paid service without approval"
+        "default": "from the intent: voice and music for a presentation, music and SFX for an experience, what the performance needs for a story; local engines, no paid service without approval"
       }
     ],
     "rules": [
-      "Infer a candidate lane and its capabilities first; ask only what changes the outcome.",
+      "Decide the intent first; it sets what drives the time, whether there is a narrator, and what a beat is.",
+      "Infer a candidate lane and its capabilities next; ask only what changes the outcome.",
       "Probe every required capability before promising the lane.",
       "Offer a recommended default and one or two alternatives, not an open questionnaire.",
       "Accept 'surprise me' and state the chosen lane with a one-line rationale.",
