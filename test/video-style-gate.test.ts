@@ -193,6 +193,38 @@ test("video audit refuses a brief that does not name its author", () => {
 	}
 });
 
+test("video audit refuses an unknown intent before spending a model call", () => {
+	const dir = project({
+		...STYLE_OK,
+		"style-brief.md":
+			"# Style Brief\n- Intent: explainer\n- Author: claude-code/fable\n- Lane: vector-explainer\n- Approved e00: yes\n",
+	});
+	try {
+		const res = spawnSync(process.execPath, [CLI, "video", "audit", "--project", dir], { encoding: "utf8" });
+		assert.notEqual(res.status, 0);
+		assert.match(`${res.stdout ?? ""}${res.stderr ?? ""}`, /video audit: intent desconocido "explainer"/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("video audit refuses a profile on the author's own harness", () => {
+	// audit-claude is a built-in profile on the claude harness; the author in
+	// STYLE_OK is claude-code. The refusal happens before any worker starts.
+	const dir = project(STYLE_OK);
+	try {
+		const res = spawnSync(
+			process.execPath,
+			[CLI, "video", "audit", "--project", dir, "--profile", "audit-claude"],
+			{ encoding: "utf8" },
+		);
+		assert.notEqual(res.status, 0);
+		assert.match(`${res.stdout ?? ""}${res.stderr ?? ""}`, /mismo harness que el autor|no existe en/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("video render reads a markdown-formatted brief", () => {
 	// "- **Intent:** ...", "- **Lane:** ..." and "- **Approved e00:** yes" must
 	// parse; the refusal has to be the missing contract, not a formatting false

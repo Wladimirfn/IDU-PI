@@ -9,10 +9,10 @@ import { join } from "node:path";
    recibe el auditor, el parseo de su respuesta, y la evaluación del archivo
    `audit/visual-qa.json` que hace el gate de render.
 
-   El archivo queda atado a los bytes auditados (SHA-256 de cada keyframe y del
-   contrato de dirección artística). Un keyframe que cambia después de la
-   auditoría la invalida. El gate protege contra saltearse la auditoría, no
-   contra falsificar el archivo a mano. */
+   El archivo queda atado a lo que se auditó: el SHA-256 de cada keyframe y del
+   contrato de dirección artística, y el intent y el autor que declaraba el
+   brief. Si algo de eso cambia después, la auditoría vence. El gate protege
+   contra saltearse la auditoría, no contra falsificar el archivo a mano. */
 
 export const AUDIT_DIR = "audit";
 export const AUDIT_FILE = "visual-qa.json";
@@ -55,19 +55,29 @@ export interface AuditFile extends AuditReply {
 	inputs: AuditInputs;
 }
 
+type ParseResult = { ok: true; reply: AuditReply } | { ok: false; error: string };
+
 export function auditFilePath(project: string): string {
 	return join(project, AUDIT_DIR, AUDIT_FILE);
 }
 
 /* Una escena es un keyframe aprobado `keyframes/eNN.png`. `e00-styleboard.png`
-   es el artefacto del gate de estilo, no una escena. */
-export function listSceneKeyframes(project: string): string[] {
+   es el artefacto del gate de estilo, no una escena. El id va en minúsculas; el
+   nombre real del archivo se conserva porque en un disco que distingue
+   mayúsculas `E01.PNG` no se abre como `e01.png`. */
+function sceneKeyframeFiles(project: string): Map<string, string> {
 	const dir = join(project, "keyframes");
-	if (!existsSync(dir)) return [];
-	return readdirSync(dir)
-		.map((name) => /^(e\d{2,})\.png$/i.exec(name)?.[1].toLowerCase())
-		.filter((id): id is string => Boolean(id) && id !== "e00")
-		.sort();
+	const files = new Map<string, string>();
+	if (!existsSync(dir)) return files;
+	for (const name of readdirSync(dir).sort()) {
+		const id = /^(e\d{2,})\.png$/i.exec(name)?.[1].toLowerCase();
+		if (id && id !== "e00" && !files.has(id)) files.set(id, name);
+	}
+	return files;
+}
+
+export function listSceneKeyframes(project: string): string[] {
+	return [...sceneKeyframeFiles(project).keys()].sort();
 }
 
 export function hashFile(path: string): string {
@@ -75,26 +85,50 @@ export function hashFile(path: string): string {
 }
 
 export function collectAuditInputs(project: string, sceneIds: string[]): AuditInputs {
+	const files = sceneKeyframeFiles(project);
 	const keyframes: Record<string, string> = {};
-	for (const id of sceneIds) keyframes[id] = hashFile(join(project, "keyframes", `${id}.png`));
+	for (const id of sceneIds) {
+		keyframes[id] = hashFile(join(project, "keyframes", files.get(id) ?? `${id}.png`));
+	}
 	const contract = join(project, "art-direction.md");
 	return { keyframes, artDirection: existsSync(contract) ? hashFile(contract) : null };
 }
 
-const HARNESS_ALIASES: Record<string, string> = {
+const HARNESSES: Record<string, string> = {
+	claude: "claude",
 	"claude-code": "claude",
+	antigravity: "antigravity",
 	agy: "antigravity",
-	cmdc: "commandcode",
+	commandcode: "commandcode",
 	"command-code": "commandcode",
+	cmdc: "commandcode",
+	"gentle-shell": "gentle-shell",
 	gshell: "gentle-shell",
+	opencode: "opencode",
+	codex: "codex",
+	mcode: "mcode",
+	pi: "pi",
+	kimi: "kimi",
+	qwen: "qwen",
 };
 
-/* El mismo harness aparece con varios nombres según quién lo escriba. Dos
-   nombres del mismo harness no son dos auditores. */
+/* El mismo harness aparece con varios nombres según quién lo escriba
+   (`claude-code/fable`, `Command Code`, `opencode (nota)`). Dos nombres del
+   mismo harness no son dos auditores: se busca el prefijo de palabras más largo
+   que sea un harness conocido y, si no hay, se toma la primera palabra. */
 export function normalizeHarness(name: string): string {
-	/* `claude-code/fable (nota)` y `claude-code` nombran el mismo harness. */
-	const key = name.trim().toLowerCase().split(/[\s/]+/)[0];
-	return HARNESS_ALIASES[key] ?? key;
+	const words = name
+		.toLowerCase()
+		.split("/")[0]
+		.replace(/\(.*?\)/g, " ")
+		.trim()
+		.split(/\s+/)
+		.filter(Boolean);
+	for (let count = words.length; count > 0; count--) {
+		const known = HARNESSES[words.slice(0, count).join("-")] ?? HARNESSES[words.slice(0, count).join("")];
+		if (known) return known;
+	}
+	return words[0] ?? "";
 }
 
 /* Lee `- Field: value` del brief, con o sin negrita. El valor sale de la misma
@@ -104,6 +138,12 @@ export function readBriefField(text: string, field: string): string | null {
 	const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	const match = clean.match(new RegExp(`^[ \\t]*-[ \\t]*${escaped}:[ \\t]*(\\S.*)$`, "im"));
 	return match ? match[1].trim() : null;
+}
+
+/* El intent es la primera palabra de su línea; el resto es la razón. */
+export function readBriefIntent(text: string): string | null {
+	const value = readBriefField(text, "Intent");
+	return value ? value.split(/[\s;:,.]+/)[0].toLowerCase() || null : null;
 }
 
 export function buildAuditPrompt(options: {
@@ -139,6 +179,7 @@ export function buildAuditPrompt(options: {
 		"- Three or more scenes that share one layout skeleton fail check 4 on every scene that repeats it, unless the art direction names the repetition as a motif.",
 		"- A beat that asserts the behaviour of a real command, test run, UI or file fails check 10 if the frame shows a labelled box or an invented stand-in instead of the artifact or its real output.",
 		"- `block` is for a scene that misreads its beat, breaks the declared language, or duplicates a neighbour. Taste is never a reason.",
+		"- A scene with any failed check is `revise` or `block`, never `pass`.",
 		"",
 		"Reply with your reasoning in at most ten lines, then end with exactly one fenced JSON block in this shape and nothing after it:",
 		"",
@@ -157,7 +198,7 @@ export function buildAuditPrompt(options: {
 		"}",
 		"```",
 		"",
-		`Include one entry per scene, with these exact ids: ${sceneIds.join(", ")}. \`failed\` holds check numbers from the contract and is empty on \`pass\`.`,
+		`Include exactly one entry per scene, with these exact ids: ${sceneIds.join(", ")}. \`failed\` holds check numbers from the contract and is empty on \`pass\`.`,
 	].join("\n");
 }
 
@@ -165,26 +206,8 @@ function asText(value: unknown): string {
 	return typeof value === "string" ? value.trim() : "";
 }
 
-/* El auditor razona en prosa y cierra con un bloque JSON. Se toma el último
-   bloque cercado; si no hay, el último objeto que parsee. */
-export function parseAuditReply(
-	text: string,
-	sceneIds: string[],
-): { ok: true; reply: AuditReply } | { ok: false; error: string } {
-	const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((m) => m[1].trim());
-	const candidates = fenced.length > 0 ? fenced.reverse() : [text.slice(text.indexOf("{"))];
-	let raw: unknown;
-	for (const candidate of candidates) {
-		try {
-			raw = JSON.parse(candidate);
-			break;
-		} catch {
-			/* se prueba el anterior */
-		}
-	}
-	if (!raw || typeof raw !== "object") {
-		return { ok: false, error: "la respuesta no trae un bloque JSON con el veredicto" };
-	}
+function validateVerdict(raw: unknown, sceneIds: string[]): ParseResult {
+	if (!raw || typeof raw !== "object") return { ok: false, error: "el bloque no es un objeto" };
 	const data = raw as { piece?: Record<string, unknown>; scenes?: unknown };
 	const piece = data.piece;
 	if (!piece || typeof piece !== "object") return { ok: false, error: "falta `piece` en el veredicto" };
@@ -204,26 +227,33 @@ export function parseAuditReply(
 			return { ok: false, error: "`scenes` trae una entrada que no es una escena" };
 		}
 		const id = asText(entry.id).toLowerCase();
-		const verdict = asText(entry?.verdict).toLowerCase();
+		const verdict = asText(entry.verdict).toLowerCase();
 		if (verdict !== "pass" && verdict !== "revise" && verdict !== "block") {
-			return { ok: false, error: `veredicto inválido en ${id || "una escena sin id"}: "${asText(entry?.verdict)}"` };
+			return { ok: false, error: `veredicto inválido en ${id || "una escena sin id"}: "${asText(entry.verdict)}"` };
 		}
 		const failed = Array.isArray(entry.failed)
 			? entry.failed.map(Number).filter((n) => Number.isInteger(n) && n > 0)
 			: [];
 		scenes.push({ id, verdict, failed, evidence: asText(entry.evidence), fix: asText(entry.fix) });
 	}
+
+	/* Dos veredictos para una escena dejan al lector elegir cuál vale; un
+	   `block` seguido de un `pass` no puede resolverse como `pass`. */
+	const repeated = [...new Set(scenes.map((s) => s.id).filter((id, i, all) => all.indexOf(id) !== i))];
+	if (repeated.length > 0) {
+		return { ok: false, error: `más de un veredicto: ${repeated.join(", ")}` };
+	}
 	const seen = new Set(scenes.map((scene) => scene.id));
 	const missing = sceneIds.filter((id) => !seen.has(id));
-	if (missing.length > 0) {
-		return { ok: false, error: `el veredicto no cubre: ${missing.join(", ")}` };
+	if (missing.length > 0) return { ok: false, error: `el veredicto no cubre: ${missing.join(", ")}` };
+
+	const contradictory = scenes.filter((scene) => scene.verdict === "pass" && scene.failed.length > 0);
+	if (contradictory.length > 0) {
+		return { ok: false, error: `pass con checks fallidos: ${contradictory.map((s) => s.id).join(", ")}` };
 	}
 	const unsupported = scenes.filter((scene) => scene.verdict !== "pass" && !scene.evidence);
 	if (unsupported.length > 0) {
-		return {
-			ok: false,
-			error: `veredicto sin evidencia en: ${unsupported.map((scene) => scene.id).join(", ")}`,
-		};
+		return { ok: false, error: `veredicto sin evidencia en: ${unsupported.map((s) => s.id).join(", ")}` };
 	}
 	return {
 		ok: true,
@@ -242,6 +272,31 @@ export function parseAuditReply(
 	};
 }
 
+/* El auditor razona en prosa y cierra con un bloque JSON. Se prueban los
+   bloques cercados del último al primero y, si ninguno sirve, cada objeto que
+   empiece en una llave del texto. Vale el primero que parsea y valida: un
+   ejemplo suelto o una llave en la prosa no tapan el veredicto. */
+export function parseAuditReply(text: string, sceneIds: string[]): ParseResult {
+	const candidates = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((m) => m[1].trim()).reverse();
+	const lastBrace = text.lastIndexOf("}");
+	for (let start = text.indexOf("{"); start !== -1 && start < lastBrace; start = text.indexOf("{", start + 1)) {
+		candidates.push(text.slice(start, lastBrace + 1));
+	}
+	let firstError: string | null = null;
+	for (const candidate of candidates) {
+		let raw: unknown;
+		try {
+			raw = JSON.parse(candidate);
+		} catch {
+			continue;
+		}
+		const result = validateVerdict(raw, sceneIds);
+		if (result.ok) return result;
+		firstError ??= result.error;
+	}
+	return { ok: false, error: firstError ?? "la respuesta no trae un bloque JSON con el veredicto" };
+}
+
 /* Veredicto del gate sobre el archivo de auditoría. Errores bloquean el render
    completo; avisos no. */
 export function evaluateAudit(project: string): { errors: string[]; warnings: string[] } {
@@ -258,7 +313,13 @@ export function evaluateAudit(project: string): { errors: string[]; warnings: st
 	} catch {
 		return { errors: [`${AUDIT_DIR}/${AUDIT_FILE} no es JSON válido. ${rerun}`], warnings };
 	}
-	if (audit.version !== AUDIT_VERSION || !audit.piece || !Array.isArray(audit.scenes) || !audit.inputs) {
+	if (
+		!audit ||
+		audit.version !== AUDIT_VERSION ||
+		!audit.piece ||
+		!Array.isArray(audit.scenes) ||
+		!audit.inputs
+	) {
 		return { errors: [`${AUDIT_DIR}/${AUDIT_FILE} tiene un formato que este gate no reconoce. ${rerun}`], warnings };
 	}
 
@@ -267,48 +328,74 @@ export function evaluateAudit(project: string): { errors: string[]; warnings: st
 		return { errors: ["no hay keyframes/eNN.png: no hay escenas que auditar."], warnings };
 	}
 	const current = collectAuditInputs(project, sceneIds);
-	const stale = sceneIds.filter((id) => audit.inputs.keyframes?.[id] !== current.keyframes[id]);
+	const audited = audit.inputs.keyframes ?? {};
+	/* Vence por una escena que cambió, una nueva, o una que se auditó y ya no
+	   está: en los tres casos la pieza que se entrega no es la que se miró. */
+	const stale = [
+		...sceneIds.filter((id) => audited[id] !== current.keyframes[id]),
+		...Object.keys(audited).filter((id) => !sceneIds.includes(id)),
+	];
 	if (stale.length > 0) {
-		errors.push(`auditoría vencida: ${stale.join(", ")} cambió o no fue auditada. ${rerun}`);
+		errors.push(`auditoría vencida: ${stale.join(", ")} cambió, se agregó o se quitó después de auditar. ${rerun}`);
 	}
 	if (audit.inputs.artDirection !== current.artDirection) {
 		errors.push(`auditoría vencida: art-direction.md cambió después de auditar. ${rerun}`);
 	}
 
-	const author = asText(audit.author);
+	/* El brief manda sobre lo que quedó anotado: si hoy declara otro intent, la
+	   pieza se juzgó como otra cosa; si hoy nombra otro autor, la independencia
+	   se mide contra ese. */
+	const briefPath = join(project, "style-brief.md");
+	const briefText = existsSync(briefPath) ? readFileSync(briefPath, "utf8") : "";
+	const briefIntent = readBriefIntent(briefText);
+	if (briefIntent && briefIntent !== asText(audit.intent).toLowerCase()) {
+		errors.push(
+			`auditoría vencida: el brief declara intent \`${briefIntent}\` y la pieza se auditó como \`${asText(audit.intent)}\`. ${rerun}`,
+		);
+	}
+	const author = readBriefField(briefText, "Author") ?? asText(audit.author);
 	const auditorHarness = asText(audit.auditor?.harness);
 	if (!author || !auditorHarness) {
 		errors.push("la auditoría no registra autor y auditor: no se puede comprobar que sean distintos.");
 	} else if (normalizeHarness(author) === normalizeHarness(auditorHarness)) {
 		errors.push(
-			`auditoría no independiente: el autor (${author}) y el auditor (${audit.auditor.profile}) usan el mismo harness. Auditá con otro perfil.`,
+			`auditoría no independiente: el autor (${author}) y el auditor (${asText(audit.auditor?.profile) || auditorHarness}) usan el mismo harness. Auditá con otro perfil.`,
 		);
 	}
 
 	if (errors.length > 0) return { errors, warnings };
 
-	if (audit.piece.intent !== "delivered") {
+	if (asText(audit.piece.intent).toLowerCase() !== "delivered") {
 		errors.push(
 			`el auditor dice que la pieza no cumple su intent \`${audit.intent}\`${audit.piece.became ? `: quedó como ${audit.piece.became}` : ""}.`,
 		);
 	}
-	const byId = new Map(
-		audit.scenes.filter((scene) => scene && typeof scene === "object").map((scene) => [scene.id, scene]),
-	);
+	/* El archivo pudo escribirse con otra versión del comando: un campo ausente
+	   o con otra caja no debe tirar el gate ni abrirlo. */
+	const byId = new Map<string, AuditScene>();
+	for (const scene of audit.scenes) {
+		if (!scene || typeof scene !== "object") continue;
+		const id = asText(scene.id).toLowerCase();
+		const previous = byId.get(id);
+		/* Ante dos entradas para una escena gana la más severa. */
+		if (!previous || asText(scene.verdict).toLowerCase() === "block") byId.set(id, scene);
+	}
 	for (const id of sceneIds) {
 		const scene = byId.get(id);
 		if (!scene) {
 			errors.push(`la auditoría no trae veredicto para ${id}. ${rerun}`);
 			continue;
 		}
-		/* El archivo pudo escribirse con otra versión del comando: un campo
-		   ausente no debe tirar el gate, solo dejar de imprimirse. */
+		const verdict = asText(scene.verdict).toLowerCase();
 		const failed = Array.isArray(scene.failed) ? scene.failed : [];
 		const checks = failed.length > 0 ? ` (checks ${failed.join(", ")})` : "";
 		const line = `${id}${checks}: ${asText(scene.evidence)}${scene.fix ? ` -> ${scene.fix}` : ""}`;
-		if (scene.verdict === "block") errors.push(`escena bloqueada ${line}`);
-		else if (scene.verdict === "revise") warnings.push(`a revisar ${line}`);
+		if (verdict === "block") errors.push(`escena bloqueada ${line}`);
+		else if (verdict === "revise") warnings.push(`a revisar ${line}`);
+		else if (verdict !== "pass") errors.push(`veredicto desconocido "${asText(scene.verdict)}" en ${id}. ${rerun}`);
 	}
-	if (audit.piece.variety === "revise") warnings.push(`variedad a revisar: ${audit.piece.rhythm}`);
+	if (asText(audit.piece.variety).toLowerCase() === "revise") {
+		warnings.push(`variedad a revisar: ${asText(audit.piece.rhythm)}`);
+	}
 	return { errors, warnings };
 }

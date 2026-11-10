@@ -706,6 +706,11 @@ function resolveVideoLanes(): VideoLanes | null {
 	}
 }
 
+function validIntentIds(lanes: VideoLanes | null): string[] {
+	const declared = lanes?.intents ? Object.keys(lanes.intents) : [];
+	return declared.length > 0 ? declared : DEFAULT_VIDEO_INTENTS;
+}
+
 function checkStyleGate(project: string, skip: boolean): number {
 	if (skip) {
 		console.warn(
@@ -721,8 +726,7 @@ function checkStyleGate(project: string, skip: boolean): number {
 		return 1;
 	}
 	const lanes = resolveVideoLanes();
-	const declaredIntents = lanes?.intents ? Object.keys(lanes.intents) : [];
-	const intentIds = declaredIntents.length > 0 ? declaredIntents : DEFAULT_VIDEO_INTENTS;
+	const intentIds = validIntentIds(lanes);
 	if (!brief.intent) {
 		console.error(
 			`style gate: style-brief.md no declara \`Intent:\`. Decidí qué tipo de pieza es antes de elegir la lane: ${intentIds.join(", ")}.`,
@@ -796,6 +800,15 @@ async function runVideoAudit(
 	const brief = readStyleBrief(project);
 	if (!brief?.intent) {
 		console.error("video audit: style-brief.md no existe o no declara `Intent:`. La pieza se audita contra su intent.");
+		return 1;
+	}
+	/* Un intent que el gate de estilo va a rechazar no merece gastar la
+	   llamada de modelo del auditor. */
+	const intentIds = validIntentIds(resolveVideoLanes());
+	if (!intentIds.includes(brief.intent)) {
+		console.error(
+			`video audit: intent desconocido "${brief.intent}". Valores válidos: ${intentIds.join(", ")}.`,
+		);
 		return 1;
 	}
 	const author = readBriefField(readFileSync(join(project, "style-brief.md"), "utf8"), "Author");
