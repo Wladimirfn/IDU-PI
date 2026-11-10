@@ -17,16 +17,8 @@ import { IDU_HOME, loadProfilesConfig } from "./config.js";
 import {
 	AUDIT_DIR,
 	AUDIT_FILE,
-	AUDIT_VERSION,
-	type AuditFile,
-	auditFilePath,
-	buildAuditPrompt,
-	collectAuditInputs,
 	evaluateAudit,
-	listSceneKeyframes,
-	normalizeHarness,
-	parseAuditReply,
-	readBriefField,
+	runVideoAuditCore,
 } from "./video-audit.js";
 import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -797,132 +789,16 @@ async function runVideoAudit(
 	profileFlag: string | undefined,
 	timeoutFlag: string | undefined,
 ): Promise<number> {
-	const brief = readStyleBrief(project);
-	if (!brief?.intent) {
-		console.error("video audit: style-brief.md no existe o no declara `Intent:`. La pieza se audita contra su intent.");
-		return 1;
-	}
-	/* Un intent que el gate de estilo va a rechazar no merece gastar la
-	   llamada de modelo del auditor. */
-	const intentIds = validIntentIds(resolveVideoLanes());
-	if (!intentIds.includes(brief.intent)) {
-		console.error(
-			`video audit: intent desconocido "${brief.intent}". Valores válidos: ${intentIds.join(", ")}.`,
-		);
-		return 1;
-	}
-	const author = readBriefField(readFileSync(join(project, "style-brief.md"), "utf8"), "Author");
-	if (!author) {
-		console.error(
-			"video audit: style-brief.md no declara `Author:`. Agregá `- Author: <harness>/<modelo>` de quien armó la composición; sin eso no se puede elegir un auditor distinto.",
-		);
-		return 1;
-	}
-	if (!existsSync(join(project, "art-direction.md"))) {
-		console.error("video audit: falta art-direction.md; no hay contrato contra el cual auditar.");
-		return 1;
-	}
-	const sceneIds = listSceneKeyframes(project);
-	if (sceneIds.length === 0) {
-		console.error("video audit: no hay keyframes/eNN.png; no hay escenas que auditar.");
-		return 1;
-	}
-	const contractPath = resolveVisualQaContract();
-	if (!contractPath) {
-		console.error("video audit: no encontré references/visual-qa.md en el paquete.");
-		return 1;
-	}
-
-	/* El auditor no puede ser el autor. Con --profile se respeta la elección y
-	   se rechaza si coincide el harness; sin él se toma el primer perfil
-	   declarado en video-lanes.json que exista y sea de otro harness. */
+	const lanes = resolveVideoLanes();
 	const { profiles } = loadProfilesConfig();
-	const authorHarness = normalizeHarness(author);
-	const candidates = profileFlag ? [profileFlag] : (resolveVideoLanes()?.audit?.profiles ?? []);
-	const profileName = candidates.find(
-		(name) => profiles[name] && normalizeHarness(profiles[name].harness) !== authorHarness,
-	);
-	if (!profileName) {
-		console.error(
-			profileFlag
-				? profiles[profileFlag]
-					? `video audit: el perfil "${profileFlag}" usa el mismo harness que el autor (${author}). Elegí otro.`
-					: `video audit: el perfil "${profileFlag}" no existe en ~/.idu/profiles.json.`
-				: `video audit: ningún perfil de auditoría disponible es de un harness distinto del autor (${author}). Probados: ${candidates.join(", ") || "ninguno"}. Pasá --profile <perfil>.`,
-		);
-		return 1;
-	}
-
-	const parsedTimeout = timeoutFlag !== undefined ? Number(timeoutFlag) : NaN;
-	const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 900_000;
-	const inputs = collectAuditInputs(project, sceneIds);
-	console.log(
-		`video audit: ${sceneIds.length} escena(s), intent ${brief.intent}, auditor ${profileName} (autor: ${author})...`,
-	);
-	let result: Awaited<ReturnType<CrossCliProcessManager["delegate"]>>;
-	try {
-		result = await CrossCliProcessManager.getInstance().delegate({
-			task: buildAuditPrompt({
-				intent: brief.intent,
-				sceneIds,
-				hasScript: existsSync(join(project, "guion.md")),
-				hasTimeline: existsSync(join(project, "timeline.json")),
-				contractPath,
-			}),
-			profile: profileName,
-			profileExplicit: true,
-			parentOrchestrator: "cli",
-			workingDir: project,
-			timeoutMs,
-		});
-	} catch (err) {
-		/* Un worker no puede auditar a otro: la regla de un solo orquestador
-		   rechaza la delegación, y eso se informa en vez de reventar. */
-		console.error(`video audit: no se pudo despachar el auditor: ${err instanceof Error ? err.message : String(err)}`);
-		return 1;
-	}
-	if (result.status !== "completed") {
-		console.error(`video audit: el auditor terminó en "${result.status}". Log: ${result.logPath}`);
-		return 1;
-	}
-
-	const auditDir = join(project, AUDIT_DIR);
-	mkdirSync(auditDir, { recursive: true });
-	const parsed = parseAuditReply(result.summary ?? "", sceneIds);
-	if (!parsed.ok) {
-		/* La respuesta se guarda para poder leer por qué no sirvió; no se
-		   escribe un veredicto a medias. */
-		const rawPath = join(auditDir, "visual-qa.raw.txt");
-		writeFileSync(rawPath, result.summary ?? "", "utf8");
-		console.error(`video audit: ${parsed.error}. Respuesta guardada en ${rawPath}. Log: ${result.logPath}`);
-		return 1;
-	}
-
-	const audit: AuditFile = {
-		version: AUDIT_VERSION,
-		createdAt: new Date().toISOString(),
-		intent: brief.intent,
-		author,
-		auditor: {
-			profile: profileName,
-			harness: result.harness,
-			model: result.model ?? "",
-			runId: result.runId,
-		},
-		inputs,
-		...parsed.reply,
-	};
-	writeFileSync(auditFilePath(project), `${JSON.stringify(audit, null, 2)}\n`, "utf8");
-
-	for (const scene of audit.scenes) {
-		const checks = scene.failed.length > 0 ? ` (checks ${scene.failed.join(", ")})` : "";
-		console.log(`  ${scene.id}  ${scene.verdict}${checks}${scene.fix ? `  -> ${scene.fix}` : ""}`);
-	}
-	console.log(
-		`  pieza: intent ${audit.piece.intent}${audit.piece.became ? ` (${audit.piece.became})` : ""}, variedad ${audit.piece.variety}`,
-	);
-	console.log(`video audit: veredicto en ${auditFilePath(project)}`);
-	return checkAuditGate(project);
+	return runVideoAuditCore(project, profileFlag, timeoutFlag, {
+		validIntentIds: validIntentIds(lanes),
+		auditProfiles: lanes?.audit?.profiles ?? [],
+		profiles,
+		resolveContractPath: resolveVisualQaContract,
+		delegate: (request) => CrossCliProcessManager.getInstance().delegate(request),
+		checkAuditGate: (p) => checkAuditGate(p),
+	});
 }
 
 /* Duracion declarada por la composicion; timeline.total es el fallback. */

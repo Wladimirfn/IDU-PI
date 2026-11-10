@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /* Auditoría artística independiente de un proyecto de video.
@@ -407,4 +407,171 @@ export function evaluateAudit(project: string): { errors: string[]; warnings: st
 		errors.push(`variedad: ${asText(audit.piece.rhythm)}. Una pieza que repite su esqueleto bloquea el render`);
 	}
 	return { errors, warnings };
+}
+
+/* Runner de la auditoría, separado del CLI para poder probar el despacho con
+   un delegado doble. El CLI inyecta el manager real y el gate; el test inyecta
+   un worker que falla o devuelve una respuesta ilegible. */
+export interface AuditDelegateRequest {
+	task: string;
+	profile: string;
+	profileExplicit: boolean;
+	parentOrchestrator: string;
+	workingDir: string;
+	timeoutMs: number;
+}
+
+export interface AuditDelegateResult {
+	status: string;
+	summary?: string;
+	logPath: string;
+	harness: string;
+	model?: string;
+	runId: string;
+}
+
+export interface VideoAuditOptions {
+	validIntentIds: string[];
+	auditProfiles: string[];
+	profiles: Record<string, { harness?: string }>;
+	resolveContractPath: () => string | null;
+	delegate: (request: AuditDelegateRequest) => Promise<AuditDelegateResult>;
+	checkAuditGate: (project: string) => number;
+	log?: (message: string) => void;
+	error?: (message: string) => void;
+}
+
+export async function runVideoAuditCore(
+	project: string,
+	profileFlag: string | undefined,
+	timeoutFlag: string | undefined,
+	options: VideoAuditOptions,
+): Promise<number> {
+	const log = options.log ?? ((message: string) => console.log(message));
+	const error = options.error ?? ((message: string) => console.error(message));
+
+	const briefPath = join(project, "style-brief.md");
+	if (!existsSync(briefPath)) {
+		error("video audit: style-brief.md no existe o no declara `Intent:`. La pieza se audita contra su intent.");
+		return 1;
+	}
+	const briefText = readFileSync(briefPath, "utf8");
+	const intent = readBriefIntent(briefText);
+	if (!intent) {
+		error("video audit: style-brief.md no existe o no declara `Intent:`. La pieza se audita contra su intent.");
+		return 1;
+	}
+	if (!options.validIntentIds.includes(intent)) {
+		error(
+			`video audit: intent desconocido "${intent}". Valores válidos: ${options.validIntentIds.join(", ")}.`,
+		);
+		return 1;
+	}
+	const author = readBriefField(briefText, "Author");
+	if (!author) {
+		error(
+			"video audit: style-brief.md no declara `Author:`. Agregá `- Author: <harness>/<modelo>` de quien armó la composición; sin eso no se puede elegir un auditor distinto.",
+		);
+		return 1;
+	}
+	if (!existsSync(join(project, "art-direction.md"))) {
+		error("video audit: falta art-direction.md; no hay contrato contra el cual auditar.");
+		return 1;
+	}
+	const sceneIds = listSceneKeyframes(project);
+	if (sceneIds.length === 0) {
+		error("video audit: no hay keyframes/eNN.png; no hay escenas que auditar.");
+		return 1;
+	}
+	const contractPath = options.resolveContractPath();
+	if (!contractPath) {
+		error("video audit: no encontré references/visual-qa.md en el paquete.");
+		return 1;
+	}
+
+	const authorHarness = normalizeHarness(author);
+	const candidates = profileFlag ? [profileFlag] : options.auditProfiles;
+	const profileName = candidates.find((name) => {
+		const profile = options.profiles[name];
+		return Boolean(profile?.harness) && normalizeHarness(profile?.harness ?? "") !== authorHarness;
+	});
+	if (!profileName) {
+		error(
+			profileFlag
+				? options.profiles[profileFlag]
+					? `video audit: el perfil "${profileFlag}" usa el mismo harness que el autor (${author}). Elegí otro.`
+					: `video audit: el perfil "${profileFlag}" no existe en ~/.idu/profiles.json.`
+				: `video audit: ningún perfil de auditoría disponible es de un harness distinto del autor (${author}). Probados: ${candidates.join(", ") || "ninguno"}. Pasá --profile <perfil>.`,
+		);
+		return 1;
+	}
+
+	const parsedTimeout = timeoutFlag !== undefined ? Number(timeoutFlag) : NaN;
+	const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 900_000;
+	const inputs = collectAuditInputs(project, sceneIds);
+	log(
+		`video audit: ${sceneIds.length} escena(s), intent ${intent}, auditor ${profileName} (autor: ${author})...`,
+	);
+	let result: AuditDelegateResult;
+	try {
+		result = await options.delegate({
+			task: buildAuditPrompt({
+				intent,
+				sceneIds,
+				hasScript: existsSync(join(project, "guion.md")),
+				hasTimeline: existsSync(join(project, "timeline.json")),
+				contractPath,
+			}),
+			profile: profileName,
+			profileExplicit: true,
+			parentOrchestrator: "cli",
+			workingDir: project,
+			timeoutMs,
+		});
+	} catch (err) {
+		error(
+			`video audit: no se pudo despachar el auditor: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return 1;
+	}
+	if (result.status !== "completed") {
+		error(`video audit: el auditor terminó en "${result.status}". Log: ${result.logPath}`);
+		return 1;
+	}
+
+	const auditDir = join(project, AUDIT_DIR);
+	mkdirSync(auditDir, { recursive: true });
+	const parsed = parseAuditReply(result.summary ?? "", sceneIds);
+	if (!parsed.ok) {
+		const rawPath = join(auditDir, "visual-qa.raw.txt");
+		writeFileSync(rawPath, result.summary ?? "", "utf8");
+		error(`video audit: ${parsed.error}. Respuesta guardada en ${rawPath}. Log: ${result.logPath}`);
+		return 1;
+	}
+
+	const audit: AuditFile = {
+		version: AUDIT_VERSION,
+		createdAt: new Date().toISOString(),
+		intent,
+		author,
+		auditor: {
+			profile: profileName,
+			harness: result.harness,
+			model: result.model ?? "",
+			runId: result.runId,
+		},
+		inputs,
+		...parsed.reply,
+	};
+	writeFileSync(auditFilePath(project), `${JSON.stringify(audit, null, 2)}\n`, "utf8");
+
+	for (const scene of audit.scenes) {
+		const checks = scene.failed.length > 0 ? ` (checks ${scene.failed.join(", ")})` : "";
+		log(`  ${scene.id}  ${scene.verdict}${checks}${scene.fix ? `  -> ${scene.fix}` : ""}`);
+	}
+	log(
+		`  pieza: intent ${audit.piece.intent}${audit.piece.became ? ` (${audit.piece.became})` : ""}, variedad ${audit.piece.variety}`,
+	);
+	log(`video audit: veredicto en ${auditFilePath(project)}`);
+	return options.checkAuditGate(project);
 }
