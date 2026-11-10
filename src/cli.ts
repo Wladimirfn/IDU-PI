@@ -1,9 +1,33 @@
 #!/usr/bin/env node
-import { existsSync, statSync, openSync, readSync, closeSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import {
+	existsSync,
+	statSync,
+	openSync,
+	readSync,
+	closeSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { runMcpServer } from "./mcp-server.js";
 import { CrossCliProcessManager } from "./process-manager.js";
 import { runPreflight } from "./quality.js";
-import { IDU_HOME } from "./config.js";
+import { IDU_HOME, loadProfilesConfig } from "./config.js";
+import {
+	AUDIT_DIR,
+	AUDIT_FILE,
+	AUDIT_VERSION,
+	type AuditFile,
+	auditFilePath,
+	buildAuditPrompt,
+	collectAuditInputs,
+	evaluateAudit,
+	listSceneKeyframes,
+	normalizeHarness,
+	parseAuditReply,
+	readBriefField,
+} from "./video-audit.js";
 import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
@@ -400,10 +424,18 @@ async function main(): Promise<void> {
 				const i = args.indexOf(`--${name}`);
 				return i >= 0 ? args[i + 1] : undefined;
 			};
-			if (sub !== "studio" && sub !== "render" && sub !== "status" && sub !== "measure" && sub !== "validate") {
+			if (
+				sub !== "studio" &&
+				sub !== "render" &&
+				sub !== "status" &&
+				sub !== "measure" &&
+				sub !== "validate" &&
+				sub !== "audit"
+			) {
 				console.error(
 					"Uso: idu-pi video studio [--project <dir>] [--port <n>]\n" +
 						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
+						"     idu-pi video audit [--project <dir>] [--profile <perfil>] [--timeout <ms>]\n" +
 						"     idu-pi video validate [--project <dir>] [--video <file>] [--debug [dir]]\n" +
 						"     idu-pi video render [--project <dir>] [--out <mp4>] [--audio <file>] [--end <s>] [--no-validate]\n" +
 						"                        [--width <px>] [--height <px>] [--gpu] [--angle <backend>] [--skip-style-gate]",
@@ -411,6 +443,14 @@ async function main(): Promise<void> {
 				process.exit(1);
 			}
 			const projectRoot = resolve(flag("project") ?? process.cwd());
+
+			/* Auditoría artística independiente: un worker de otro harness mira
+			   los keyframes y deja su veredicto en audit/visual-qa.json. Gasta
+			   una llamada de modelo, por eso es un comando y no un efecto de
+			   `render`. */
+			if (sub === "audit") {
+				process.exit(await runVideoAudit(projectRoot, flag("profile"), flag("timeout")));
+			}
 
 			/* Gate de motion: valida un MP4 ya renderizado. No renderiza nada;
 			   devuelve el veredicto para que el pipeline no publique un video que
@@ -444,12 +484,18 @@ async function main(): Promise<void> {
 					console.error("No pude determinar la duración. Pasá --end <segundos>.");
 					process.exit(1);
 				}
-				/* Un render completo es una entrega: exige lane válida,
-				   contrato de dirección artística y e00 aprobado. Un render
-				   parcial es revisión y puede correr antes de la aprobación. */
+				/* Un render completo es una entrega: exige intent y lane válidos,
+				   contrato de dirección artística, e00 aprobado y el veredicto
+				   de un auditor que no sea el autor. Un render parcial es
+				   revisión y puede correr antes de la aprobación. */
 				if (endFlag === undefined) {
-					const gate = checkStyleGate(projectRoot, args.includes("--skip-style-gate"));
+					const skipGates = args.includes("--skip-style-gate");
+					const gate = checkStyleGate(projectRoot, skipGates);
 					if (gate !== 0) process.exit(gate);
+					if (!skipGates) {
+						const audit = checkAuditGate(projectRoot);
+						if (audit !== 0) process.exit(audit);
+					}
 				}
 				const outFlag = flag("out");
 				const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -637,7 +683,11 @@ function readStyleBrief(
    esta lista cubre un bundle anterior al bloque `intents`. */
 const DEFAULT_VIDEO_INTENTS = ["presentation", "story", "experience"];
 
-type VideoLanes = { lanes?: Record<string, unknown>; intents?: Record<string, unknown> };
+type VideoLanes = {
+	lanes?: Record<string, unknown>;
+	intents?: Record<string, unknown>;
+	audit?: { profiles?: string[] };
+};
 
 function resolveVideoLanes(): VideoLanes | null {
 	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -659,7 +709,7 @@ function resolveVideoLanes(): VideoLanes | null {
 function checkStyleGate(project: string, skip: boolean): number {
 	if (skip) {
 		console.warn(
-			"style gate omitido por --skip-style-gate: NO PUBLICAR sin brief, dirección artística y e00 aprobados.",
+			"style gate y audit gate omitidos por --skip-style-gate: NO PUBLICAR sin brief, dirección artística, e00 aprobado y auditoría independiente.",
 		);
 		return 0;
 	}
@@ -714,6 +764,144 @@ function checkStyleGate(project: string, skip: boolean): number {
 	}
 	console.log(`style gate: ok (intent ${brief.intent}, lane, art direction, e00)`);
 	return 0;
+}
+
+/* Gate de auditoría para un render completo. El gate de estilo comprueba que
+   las decisiones existan; este comprueba que alguien distinto del autor miró
+   el resultado, sobre los mismos keyframes que se van a entregar. */
+function checkAuditGate(project: string): number {
+	const { errors, warnings } = evaluateAudit(project);
+	for (const warning of warnings) console.warn(`audit gate (aviso): ${warning}`);
+	if (errors.length > 0) {
+		for (const error of errors) console.error(`audit gate: ${error}`);
+		return 1;
+	}
+	console.log(`audit gate: ok (${AUDIT_DIR}/${AUDIT_FILE}, ${warnings.length} aviso(s))`);
+	return 0;
+}
+
+function resolveVisualQaContract(): string | null {
+	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const candidate = join(root, "skills-bundle", "video-production", "references", "visual-qa.md");
+	return existsSync(candidate) ? candidate : null;
+}
+
+/* Despacha la auditoría a un worker de otro harness y guarda su veredicto.
+   Devuelve 0 cuando la pieza queda en condiciones de pasar el gate. */
+async function runVideoAudit(
+	project: string,
+	profileFlag: string | undefined,
+	timeoutFlag: string | undefined,
+): Promise<number> {
+	const brief = readStyleBrief(project);
+	if (!brief?.intent) {
+		console.error("video audit: style-brief.md no existe o no declara `Intent:`. La pieza se audita contra su intent.");
+		return 1;
+	}
+	const author = readBriefField(readFileSync(join(project, "style-brief.md"), "utf8"), "Author");
+	if (!author) {
+		console.error(
+			"video audit: style-brief.md no declara `Author:`. Agregá `- Author: <harness>/<modelo>` de quien armó la composición; sin eso no se puede elegir un auditor distinto.",
+		);
+		return 1;
+	}
+	if (!existsSync(join(project, "art-direction.md"))) {
+		console.error("video audit: falta art-direction.md; no hay contrato contra el cual auditar.");
+		return 1;
+	}
+	const sceneIds = listSceneKeyframes(project);
+	if (sceneIds.length === 0) {
+		console.error("video audit: no hay keyframes/eNN.png; no hay escenas que auditar.");
+		return 1;
+	}
+	const contractPath = resolveVisualQaContract();
+	if (!contractPath) {
+		console.error("video audit: no encontré references/visual-qa.md en el paquete.");
+		return 1;
+	}
+
+	/* El auditor no puede ser el autor. Con --profile se respeta la elección y
+	   se rechaza si coincide el harness; sin él se toma el primer perfil
+	   declarado en video-lanes.json que exista y sea de otro harness. */
+	const { profiles } = loadProfilesConfig();
+	const authorHarness = normalizeHarness(author);
+	const candidates = profileFlag ? [profileFlag] : (resolveVideoLanes()?.audit?.profiles ?? []);
+	const profileName = candidates.find(
+		(name) => profiles[name] && normalizeHarness(profiles[name].harness) !== authorHarness,
+	);
+	if (!profileName) {
+		console.error(
+			profileFlag
+				? profiles[profileFlag]
+					? `video audit: el perfil "${profileFlag}" usa el mismo harness que el autor (${author}). Elegí otro.`
+					: `video audit: el perfil "${profileFlag}" no existe en ~/.idu/profiles.json.`
+				: `video audit: ningún perfil de auditoría disponible es de un harness distinto del autor (${author}). Probados: ${candidates.join(", ") || "ninguno"}. Pasá --profile <perfil>.`,
+		);
+		return 1;
+	}
+
+	const parsedTimeout = timeoutFlag !== undefined ? Number(timeoutFlag) : NaN;
+	const timeoutMs = Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? parsedTimeout : 900_000;
+	const inputs = collectAuditInputs(project, sceneIds);
+	console.log(
+		`video audit: ${sceneIds.length} escena(s), intent ${brief.intent}, auditor ${profileName} (autor: ${author})...`,
+	);
+	const result = await CrossCliProcessManager.getInstance().delegate({
+		task: buildAuditPrompt({
+			intent: brief.intent,
+			sceneIds,
+			hasScript: existsSync(join(project, "guion.md")),
+			hasTimeline: existsSync(join(project, "timeline.json")),
+			contractPath,
+		}),
+		profile: profileName,
+		profileExplicit: true,
+		parentOrchestrator: "cli",
+		workingDir: project,
+		timeoutMs,
+	});
+	if (result.status !== "completed") {
+		console.error(`video audit: el auditor terminó en "${result.status}". Log: ${result.logPath}`);
+		return 1;
+	}
+
+	const auditDir = join(project, AUDIT_DIR);
+	mkdirSync(auditDir, { recursive: true });
+	const parsed = parseAuditReply(result.summary ?? "", sceneIds);
+	if (!parsed.ok) {
+		/* La respuesta se guarda para poder leer por qué no sirvió; no se
+		   escribe un veredicto a medias. */
+		const rawPath = join(auditDir, "visual-qa.raw.txt");
+		writeFileSync(rawPath, result.summary ?? "", "utf8");
+		console.error(`video audit: ${parsed.error}. Respuesta guardada en ${rawPath}. Log: ${result.logPath}`);
+		return 1;
+	}
+
+	const audit: AuditFile = {
+		version: AUDIT_VERSION,
+		createdAt: new Date().toISOString(),
+		intent: brief.intent,
+		author,
+		auditor: {
+			profile: profileName,
+			harness: result.harness,
+			model: result.model ?? "",
+			runId: result.runId,
+		},
+		inputs,
+		...parsed.reply,
+	};
+	writeFileSync(auditFilePath(project), `${JSON.stringify(audit, null, 2)}\n`, "utf8");
+
+	for (const scene of audit.scenes) {
+		const checks = scene.failed.length > 0 ? ` (checks ${scene.failed.join(", ")})` : "";
+		console.log(`  ${scene.id}  ${scene.verdict}${checks}${scene.fix ? `  -> ${scene.fix}` : ""}`);
+	}
+	console.log(
+		`  pieza: intent ${audit.piece.intent}${audit.piece.became ? ` (${audit.piece.became})` : ""}, variedad ${audit.piece.variety}`,
+	);
+	console.log(`video audit: veredicto en ${auditFilePath(project)}`);
+	return checkAuditGate(project);
 }
 
 /* Duracion declarada por la composicion; timeline.total es el fallback. */
@@ -836,6 +1024,9 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi video render [--project <dir>]      The only path that produces an MP4");
 	out("                                  Full renders enforce the style gate:");
 	out("                                  intent, lane, art-direction.md and approved e00");
+	out("                                  Full renders also enforce the audit gate");
+	out("  idu-pi video audit [--project <dir>]       Independent artistic audit by another harness;");
+	out("                                  writes audit/visual-qa.json (spends one model call)");
 	out("                                  --width/--height/--gpu for the render profile");
 }
 
