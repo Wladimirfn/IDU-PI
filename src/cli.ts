@@ -405,7 +405,8 @@ async function main(): Promise<void> {
 					"Uso: idu-pi video studio [--project <dir>] [--port <n>]\n" +
 						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
 						"     idu-pi video validate [--project <dir>] [--video <file>] [--debug [dir]]\n" +
-						"     idu-pi video render [--project <dir>] [--out <mp4>] [--audio <file>] [--end <s>] [--no-validate]",
+						"     idu-pi video render [--project <dir>] [--out <mp4>] [--audio <file>] [--end <s>] [--no-validate]\n" +
+						"                        [--width <px>] [--height <px>] [--gpu] [--angle <backend>] [--skip-style-gate]",
 				);
 				process.exit(1);
 			}
@@ -443,6 +444,13 @@ async function main(): Promise<void> {
 					console.error("No pude determinar la duración. Pasá --end <segundos>.");
 					process.exit(1);
 				}
+				/* Un render completo es una entrega: exige lane válida,
+				   contrato de dirección artística y e00 aprobado. Un render
+				   parcial es revisión y puede correr antes de la aprobación. */
+				if (endFlag === undefined) {
+					const gate = checkStyleGate(projectRoot, args.includes("--skip-style-gate"));
+					if (gate !== 0) process.exit(gate);
+				}
 				const outFlag = flag("out");
 				const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 				const out = outFlag
@@ -463,6 +471,12 @@ async function main(): Promise<void> {
 				];
 				if (audio) renderArgs.push("--audio", audio);
 				if (playwright) renderArgs.push("--playwright", playwright);
+				for (const name of ["width", "height"]) {
+					const value = flag(name);
+					if (value) renderArgs.push(`--${name}`, value);
+				}
+				if (args.includes("--gpu")) renderArgs.push("--gpu");
+				if (flag("angle")) renderArgs.push("--angle", flag("angle") as string);
 				console.log(`render: ${projectRoot} -> ${out} (${end}s)`);
 				if (audio) console.log(`audio: ${audio}`);
 				else console.log("sin audio aprobado: el render sale mudo (pasá --audio)");
@@ -589,6 +603,84 @@ function resolveFrameRenderer(): string | null {
 	return existsSync(candidate) ? candidate : null;
 }
 
+/* Gate de estilo para un render completo. El brief y el e00 existían como
+   prosa; sin este chequeo un render de entrega podía salir sin lane válida,
+   sin contrato de dirección artística y sin aprobación. */
+function readStyleBrief(project: string): { lane: string | null; approvedE00: boolean } | null {
+	const file = join(project, "style-brief.md");
+	if (!existsSync(file)) return null;
+	/* El brief puede usar markdown (`- **Lane:** ...`); se normaliza antes de
+	   parsear para que el formato del documento no cambie el veredicto. */
+	const text = readFileSync(file, "utf8").replace(/\*\*/g, "");
+	const laneMatch = text.match(/^\s*-\s*Lane:\s*(.+)$/im);
+	const lane = laneMatch ? laneMatch[1].trim().split(/\s+/)[0].toLowerCase() : null;
+	const approvedE00 = /^\s*-\s*Approved e00:\s*(yes|sí|si|true|approved)\b/im.test(text);
+	return { lane, approvedE00 };
+}
+
+function resolveVideoLanes(): { lanes?: Record<string, unknown> } | null {
+	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const candidate = join(
+		root,
+		"skills-bundle",
+		"video-production",
+		"references",
+		"video-lanes.json",
+	);
+	if (!existsSync(candidate)) return null;
+	try {
+		return JSON.parse(readFileSync(candidate, "utf8")) as { lanes?: Record<string, unknown> };
+	} catch {
+		return null;
+	}
+}
+
+function checkStyleGate(project: string, skip: boolean): number {
+	if (skip) {
+		console.warn(
+			"style gate omitido por --skip-style-gate: NO PUBLICAR sin brief, dirección artística y e00 aprobados.",
+		);
+		return 0;
+	}
+	const brief = readStyleBrief(project);
+	if (!brief) {
+		console.error(
+			"style gate: falta style-brief.md. Escribí el brief, aprobá e00 y volvé a renderizar.",
+		);
+		return 1;
+	}
+	if (!brief.lane) {
+		console.error("style gate: style-brief.md no declara `Lane:`.");
+		return 1;
+	}
+	const lanes = resolveVideoLanes();
+	const laneIds = lanes?.lanes ? Object.keys(lanes.lanes) : [];
+	if (laneIds.length > 0 && !laneIds.includes(brief.lane)) {
+		console.error(
+			`style gate: lane desconocida "${brief.lane}". Valores válidos: ${laneIds.join(", ")}.`,
+		);
+		return 1;
+	}
+	if (!brief.approvedE00) {
+		console.error(
+			"style gate: e00 no aprobado. Presentá keyframes/e00-styleboard.png y poné `Approved e00: yes`.",
+		);
+		return 1;
+	}
+	if (!existsSync(join(project, "keyframes", "e00-styleboard.png"))) {
+		console.error("style gate: falta keyframes/e00-styleboard.png.");
+		return 1;
+	}
+	if (!existsSync(join(project, "art-direction.md"))) {
+		console.error(
+			"style gate: falta art-direction.md (contrato de dirección artística previo al HTML).",
+		);
+		return 1;
+	}
+	console.log("style gate: ok (lane, art direction, e00)");
+	return 0;
+}
+
 /* Duracion declarada por la composicion; timeline.total es el fallback. */
 function readCompositionDuration(project: string): number | null {
 	const index = join(project, "index.html");
@@ -707,6 +799,9 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi video studio [--project <dir>]      Open the hyperframes Studio (never renders)");
 	out("  idu-pi video status|measure                Lint state / Spanish coverage");
 	out("  idu-pi video render [--project <dir>]      The only path that produces an MP4");
+	out("                                  Full renders enforce the style gate:");
+	out("                                  lane, art-direction.md and approved e00");
+	out("                                  --width/--height/--gpu for the render profile");
 }
 
 main().catch((err) => {

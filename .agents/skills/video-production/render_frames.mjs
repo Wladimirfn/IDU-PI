@@ -5,7 +5,16 @@
 // Uso:
 //   node render_frames.mjs --url <file|http> --end 185 --out video.mp4 \
 //     [--start 0] [--fps 30] [--crf 16] [--audio approved.mp4] \
+//     [--width 1920] [--height 1080] [--gpu] [--angle d3d11] \
 //     [--chrome <ruta>] [--playwright <ruta a playwright/index.mjs>]
+//
+// Resolucion: si no se pasan --width/--height, se leen data-width y
+// data-height del elemento con data-composition-id. Asi un proyecto 9:16
+// renderiza a su propio tamano sin tocar el script.
+//
+// Determinismo: por defecto usa render por software (--disable-gpu). --gpu
+// acelera WebGL/3D pero puede variar entre maquinas; validalo con el gate de
+// motion antes de usarlo para entrega.
 //
 // Por que existe: el render completo de HyperFrames 0.9.21/0.9.25 introduce un
 // parpadeo periodico de texto en ventanas quietas (e01/e12 en idupi-explainer-v2).
@@ -41,11 +50,17 @@ const start = Number(arg("start", 0));
 const fps = Number(arg("fps", 30));
 const crf = String(arg("crf", 16));
 const audio = arg("audio");
+const widthArg = Number(arg("width", NaN));
+const heightArg = Number(arg("height", NaN));
+const useGpu = has("gpu");
+const angle = arg("angle");
 
 if (!url || !out || !Number.isFinite(end)) {
 	console.error(
 		"Uso: node render_frames.mjs --url <file|http> --end <segundos> --out <mp4> " +
-			"[--start 0] [--fps 30] [--crf 16] [--audio <archivo>] [--chrome <ruta>] [--playwright <ruta>]",
+			"[--start 0] [--fps 30] [--crf 16] [--audio <archivo>] " +
+			"[--width 1920] [--height 1080] [--gpu] [--angle d3d11] " +
+			"[--chrome <ruta>] [--playwright <ruta>]",
 	);
 	process.exit(1);
 }
@@ -104,17 +119,48 @@ function runFfmpeg(args, label) {
 
 const chromium = await loadChromium();
 const chrome = findChrome();
+const launchArgs = ["--force-device-scale-factor=1", "--hide-scrollbars"];
+if (useGpu) {
+	launchArgs.push("--use-gl=angle");
+	if (angle) launchArgs.push(`--use-angle=${angle}`);
+} else {
+	launchArgs.push("--disable-gpu");
+}
 const browser = await chromium.launch({
 	...(chrome ? { executablePath: chrome } : {}),
-	args: ["--force-device-scale-factor=1", "--hide-scrollbars", "--disable-gpu"],
+	args: launchArgs,
 });
 const page = await browser.newPage({
-	viewport: { width: 1920, height: 1080 },
+	viewport: {
+		width: Number.isFinite(widthArg) ? widthArg : 1920,
+		height: Number.isFinite(heightArg) ? heightArg : 1080,
+	},
 	deviceScaleFactor: 1,
 });
 await page.goto(url, { waitUntil: "load" });
 await page.evaluate(() => document.fonts.ready);
 await page.waitForTimeout(400);
+
+/* La composicion declara su tamano; el renderer lo respeta salvo override. */
+const declared = await page.evaluate(() => {
+	const el = document.querySelector("[data-composition-id]");
+	if (!el) return null;
+	const w = Number(el.getAttribute("data-width"));
+	const h = Number(el.getAttribute("data-height"));
+	return Number.isFinite(w) && Number.isFinite(h) ? { width: w, height: h } : null;
+});
+const width = Number.isFinite(widthArg) ? widthArg : declared?.width ?? 1920;
+const height = Number.isFinite(heightArg) ? heightArg : declared?.height ?? 1080;
+if (width <= 0 || height <= 0 || width % 2 !== 0 || height % 2 !== 0) {
+	await browser.close();
+	console.error(
+		`error: resolución inválida ${width}x${height}. yuv420p exige dimensiones ` +
+			"positivas y pares; ajustá --width/--height o data-width/data-height.",
+	);
+	process.exit(1);
+}
+await page.setViewportSize({ width, height });
+console.log(`resolución: ${width}x${height}${useGpu ? " (gpu)" : " (software)"}`);
 
 const hasSeek = await page.evaluate(() => typeof window.seek === "function");
 if (!hasSeek) {
@@ -161,6 +207,15 @@ const write = (buf) =>
 		else ff.stdin.once("drain", resolve);
 	});
 
+/* Attach before the loop: a short render can finish ffmpeg before the final
+   await attaches its listeners, leaving an unsettled top-level await. */
+const ffDone = new Promise((resolve, reject) => {
+	ff.on("close", (code) =>
+		code === 0 ? resolve() : reject(new Error(`ffmpeg salió con ${code}`)),
+	);
+	ff.on("error", reject);
+});
+
 ff.stdin.on("error", (error) => {
 	console.error(`error escribiendo a ffmpeg: ${error.message}`);
 	process.exit(1);
@@ -181,12 +236,7 @@ for (let i = 0; i < total; i++) {
 
 ff.stdin.end();
 await browser.close();
-await new Promise((resolve, reject) => {
-	ff.on("close", (code) =>
-		code === 0 ? resolve() : reject(new Error(`ffmpeg salió con ${code}`)),
-	);
-	ff.on("error", reject);
-});
+await ffDone;
 
 if (audio) {
 	console.log("muxeando audio…");

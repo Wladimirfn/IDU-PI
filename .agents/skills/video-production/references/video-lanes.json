@@ -1,0 +1,272 @@
+{
+  "version": 2,
+  "updated": "2026-11-09",
+  "purpose": "Capability-first router for video requests. Determine the production capability the piece needs, probe that the harness can produce it, record the visual language in an art-direction contract, approve an e00 styleboard, then load only the minimum skills for that capability set.",
+  "rules": {
+    "capabilityFirst": true,
+    "capabilityProbeRequired": true,
+    "capabilityGapPolicy": "A missing capability is a blocker or an explicitly approved downgrade. Never silently replace the shot with cards and text.",
+    "laneMeaning": "A lane names a production capability set, not an aesthetic. The visual language comes from art-direction.md.",
+    "onePrimaryEnginePerProject": true,
+    "startingSkillSet": "Start with the minimum useful set: one preproduction, one or two visual, one audio, one render/QA. Add another skill only when the task requires it; never load the whole catalog.",
+    "companionSelection": "Lane skills are candidates with conditions. Load only available skills whose condition holds; omit planned ones and note them as follow-ups.",
+    "loadOrder": ["preproduction", "art-direction", "visual", "motion-or-render", "audio", "visual-qa"],
+    "neverLoadWholeCatalog": true,
+    "styleBriefRequiredWhenStyleIsMissing": true,
+    "artDirectionRequiredBeforeHtml": true,
+    "e00ApprovalRequiredBeforeFullRender": true,
+    "e00EnforcedBy": "idu-pi video render",
+    "stylePresetPolicy": "A named aesthetic preset is opt-in. kanagawa-html contributes its tokens, fonts, ambient blur, particles and chart palette only when art-direction.md selects the Gentleman Kanagawa aesthetic; otherwise it is loaded in craft-only mode.",
+    "craftOnlySkill": {
+      "skill": "kanagawa-html",
+      "mode": "craft-only",
+      "usableWhen": "the declared aesthetic is not Gentleman Kanagawa",
+      "parts": ["Motion craft", "Film-level motion", "Export recipes", "Dataviz validation"]
+    },
+    "effectBudget": "No effect layer by default. Add shader, pixel or 3D effects only when art-direction.md names them and they survive legibility and the delivery renderer.",
+    "organizingPrinciple": "No two consecutive shots share the same layout skeleton unless art-direction.md names the repetition as a deliberate motif."
+  },
+  "productionCapabilities": {
+    "code-2d": "HTML/CSS/SVG/canvas composition rendered deterministically by HyperFrames or the frame renderer.",
+    "vector-diagram": "Exact geometry, connectors, labels and data diagrams drawn in code.",
+    "kinetic-type": "Type-led motion where the words are the subject.",
+    "ui-mock": "A product interface reproduced or staged in code, never faked with generated raster.",
+    "progressive-draw": "Stroke-by-stroke drawing or reveal driven by the timeline.",
+    "sprite-animation": "Sprite sheets or per-frame pixel animation with nearest-neighbor scaling.",
+    "pixel-art": "A limited palette and pixel grid as the primary visual language.",
+    "character-rig": "Named, separable character parts with pivots, z-order and pose/expression control.",
+    "raster-composite": "Generated or painted raster layers composited under code elements.",
+    "raster-generation": "Local or approved image generation for characters, textures or stills.",
+    "i2v": "Image-to-video or generated motion clips for narrative shots.",
+    "3d-render": "A deterministic 3D scene rendered frame by frame.",
+    "camera-3d": "Programmatic camera moves with depth and perspective.",
+    "depth-composite": "Layered 2.5D planes with parallax and depth of field.",
+    "shader-fx": "Deterministic GLSL or post-process effects: grain, CRT, VHS, dither, distortion.",
+    "footage-montage": "Licensed or generated footage edited into a sequence.",
+    "interview-edit": "Talking-head and B-roll editing with clear attribution.",
+    "sound-design": "SFX and ambience layered under voice and music.",
+    "voice": "Narration generated locally or through an approved service.",
+    "music": "A composed or generated score with a declared tempo and key."
+  },
+  "skills": {
+    "video-production": { "status": "available", "capability": "render", "source": "bundled" },
+    "kanagawa-html": { "status": "available", "capability": "visual-craft", "source": "bundled", "modes": ["preset", "craft-only"], "defaultMode": "craft-only" },
+    "soul-icons": { "status": "available", "capability": "visual", "source": "bundled" },
+    "higgsfield-scene": { "status": "available", "capability": "visual", "source": "bundled" },
+    "voice-narration": { "status": "available", "capability": "audio", "source": "bundled" },
+    "music-composition": { "status": "available", "capability": "audio", "source": "bundled" },
+    "director-craft": { "status": "planned", "capability": "preproduction", "source": "wuwangzhang1216/DirectorSKILL", "license": "MIT", "note": "The art-direction contract in video-production covers shot language until this ships." },
+    "story-continuity": { "status": "available", "capability": "preproduction", "source": "bundled" },
+    "shader-fx": { "status": "available", "capability": "effects", "source": "bundled" },
+    "pixelfx": { "status": "planned", "capability": "effects", "source": "patch-gg/pixelfx", "license": "MIT" },
+    "webgpu-claude-skill": { "status": "planned", "capability": "visual", "source": "dgreenheck/webgpu-claude-skill", "license": "verify" },
+    "remotion-engine": { "status": "planned", "capability": "motion-or-render", "source": "remotion-dev/skills", "license": "verify" },
+    "comfyui-8gb": { "status": "planned", "capability": "visual", "source": "artokun/comfyui-mcp", "license": "MIT", "vramTargetGb": 8 },
+    "elevenlabs-sfx-voice": { "status": "planned", "capability": "audio", "source": "elevenlabs/skills", "license": "MIT" },
+    "music-mastering": { "status": "planned", "capability": "audio", "source": "bitwize-music-studio/claude-ai-music-skills", "license": "CC0" },
+    "qa-visual": { "status": "available", "kind": "reference", "capability": "qa", "source": "bundled references/visual-qa.md", "license": "MIT" }
+  },
+  "engines": {
+    "hyperframes": {
+      "skill": "video-production",
+      "renderer": "render_frames.mjs",
+      "deterministic": true,
+      "output": "mp4",
+      "status": "available"
+    },
+    "remotion": {
+      "skill": "remotion-engine",
+      "renderer": "remotion render",
+      "deterministic": true,
+      "status": "planned"
+    },
+    "comfyui": {
+      "skill": "comfyui-8gb",
+      "renderer": "curated ComfyUI workflows + ffmpeg",
+      "deterministic": false,
+      "status": "planned",
+      "vramTargetGb": 8
+    }
+  },
+  "lanes": {
+    "vector-explainer": {
+      "tags": ["2d", "vector", "explainer", "corporate", "infographic"],
+      "capabilities": ["code-2d", "vector-diagram", "kinetic-type", "ui-mock"],
+      "primaryEngine": "hyperframes",
+      "requires": ["deterministic seek(t)", "code-rendered diagrams", "typography system"],
+      "candidateSkills": [
+        { "skill": "director-craft", "role": "preproduction", "status": "planned" },
+        { "skill": "kanagawa-html", "role": "visual-craft", "defaultMode": "craft-only", "presetWhen": "aesthetic=gentleman-kanagawa" },
+        { "skill": "soul-icons", "role": "visual", "when": "the icon language is original and stroke-based" },
+        { "skill": "story-continuity", "role": "preproduction", "when": "a subject recurs across shots" },
+        { "skill": "shader-fx", "role": "effects", "when": "the art direction names a deterministic effect" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "calm", "voice": "local", "palette": "from art direction" },
+      "avoid": ["same card grid in three or more consecutive scenes", "Kanagawa preset by default", "full-screen shader art", "AI raster for legible text", "9:16 unless requested"]
+    },
+    "whiteboard": {
+      "tags": ["whiteboard", "hand-drawn", "education", "infographic"],
+      "capabilities": ["code-2d", "progressive-draw", "kinetic-type", "vector-diagram"],
+      "primaryEngine": "hyperframes",
+      "requires": ["stroke-draw pipeline", "deterministic reveal", "paper or ink texture decision"],
+      "candidateSkills": [
+        { "skill": "director-craft", "role": "preproduction", "status": "planned" },
+        { "skill": "kanagawa-html", "role": "visual-craft", "defaultMode": "craft-only" },
+        { "skill": "soul-icons", "role": "visual", "when": "hand-drawn stroke icons fit the declared family" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "progressive-draw", "background": "paper", "voice": "local" },
+      "avoid": ["Kanagawa ambient blur and particles", "photo-real textures", "heavy shaders", "dense text"]
+    },
+    "3d-cinematic": {
+      "tags": ["3d", "cinematic", "product", "environment", "camera"],
+      "capabilities": ["3d-render", "camera-3d", "depth-composite", "shader-fx"],
+      "primaryEngine": "hyperframes",
+      "layers": ["three", "webgpu", "shader-fx"],
+      "requires": ["deterministic 3D engine", "verified headless render", "camera plan per shot"],
+      "candidateSkills": [
+        { "skill": "higgsfield-scene", "role": "visual", "when": "generated footage or stills are part of the shot" },
+        { "skill": "webgpu-claude-skill", "role": "visual", "status": "planned" },
+        { "skill": "shader-fx", "role": "effects", "when": "the art direction names a deterministic effect" },
+        { "skill": "story-continuity", "role": "preproduction", "when": "the same subject, set or prop recurs" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "camera-led", "fps": 60 },
+      "avoid": ["text inside 3D", "raymarching over 64 steps", "WebGPU in headless unless proven deterministic"]
+    },
+    "pixel-retro": {
+      "tags": ["pixel", "retro", "game", "8bit", "16bit"],
+      "capabilities": ["sprite-animation", "pixel-art", "code-2d", "shader-fx"],
+      "primaryEngine": "hyperframes",
+      "requires": ["sprite or frame pipeline", "nearest-neighbor scaling", "limited palette"],
+      "candidateSkills": [
+        { "skill": "story-continuity", "role": "preproduction", "when": "characters or sprites recur" },
+        { "skill": "pixelfx", "role": "effects", "status": "planned" },
+        { "skill": "shader-fx", "role": "effects", "when": "CRT, dither or scanline post is named" },
+        { "skill": "comfyui-8gb", "role": "visual", "status": "planned", "when": "generated sprite sheets are approved" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "stepped", "palette": "limited", "scaling": "nearest-neighbor" },
+      "avoid": ["anti-aliased pixel art", "smooth gradients", "high-resolution photos", "Kanagawa preset"]
+    },
+    "horror-2d": {
+      "tags": ["horror", "dark", "ink", "analog", "vhs", "terror"],
+      "capabilities": ["raster-composite", "character-rig", "shader-fx", "sound-design"],
+      "primaryEngine": "hyperframes",
+      "requires": ["raster asset source", "grain/VHS post pipeline", "SFX source"],
+      "candidateSkills": [
+        { "skill": "higgsfield-scene", "role": "visual", "when": "generated stills or footage are approved" },
+        { "skill": "story-continuity", "role": "preproduction", "when": "characters or locations recur" },
+        { "skill": "shader-fx", "role": "effects", "when": "grain, VHS or analog distortion is named" },
+        { "skill": "comfyui-8gb", "role": "visual", "status": "planned" },
+        { "skill": "elevenlabs-sfx-voice", "role": "audio", "status": "planned" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "slow", "grain": "on", "palette": "desaturated" },
+      "avoid": ["Kanagawa preset", "clean corporate palette", "bright flat vector", "text over heavy grain"]
+    },
+    "anime-short-drama": {
+      "tags": ["anime", "manga", "short-drama", "motion-comic", "narrative"],
+      "capabilities": ["character-rig", "raster-generation", "i2v", "voice", "sound-design"],
+      "primaryEngine": "hyperframes",
+      "assetEngines": ["comfyui"],
+      "requires": ["character continuity chain", "raster or i2v source", "voice and SFX"],
+      "candidateSkills": [
+        { "skill": "story-continuity", "role": "preproduction", "required": true },
+        { "skill": "higgsfield-scene", "role": "visual", "when": "footage or stills are generated" },
+        { "skill": "comfyui-8gb", "role": "visual", "status": "planned" },
+        { "skill": "elevenlabs-sfx-voice", "role": "audio", "status": "planned" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "i2v", "voice": "local-or-elevenlabs" },
+      "avoid": ["drama hooks and cliffhangers unless requested", "unlicensed model outputs", "AI text", "Kanagawa preset"]
+    },
+    "motion-graphics": {
+      "tags": ["motion-graphics", "kinetic-type", "data", "infographic", "title"],
+      "capabilities": ["kinetic-type", "code-2d", "ui-mock"],
+      "primaryEngine": "remotion",
+      "requires": ["one motion engine", "type system", "beat grid"],
+      "candidateSkills": [
+        { "skill": "director-craft", "role": "preproduction", "status": "planned" },
+        { "skill": "remotion-engine", "role": "motion-or-render", "status": "planned" },
+        { "skill": "kanagawa-html", "role": "visual-craft", "defaultMode": "craft-only" },
+        { "skill": "shader-fx", "role": "effects", "when": "the art direction names a deterministic effect" },
+        { "skill": "soul-icons", "role": "visual", "when": "icons are part of the type system" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "beat-driven", "fps": 60 },
+      "avoid": ["mixing HyperFrames and Remotion timelines", "heavy shader behind text", "Kanagawa preset by default"]
+    },
+    "documentary": {
+      "tags": ["documentary", "realistic", "interview", "b-roll", "stock"],
+      "capabilities": ["footage-montage", "interview-edit", "voice", "music", "sound-design"],
+      "primaryEngine": "hyperframes",
+      "requires": ["licensed footage or approved generated inserts", "voice", "music"],
+      "candidateSkills": [
+        { "skill": "director-craft", "role": "preproduction", "status": "planned" },
+        { "skill": "higgsfield-scene", "role": "visual", "when": "generated inserts are approved and labeled" },
+        { "skill": "comfyui-8gb", "role": "visual", "status": "planned" },
+        { "skill": "voice-narration", "role": "audio" },
+        { "skill": "music-mastering", "role": "audio", "status": "planned" },
+        { "skill": "story-continuity", "role": "preproduction", "when": "a subject or location recurs" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "observed", "voice": "local" },
+      "avoid": ["AI footage presented as real", "unlicensed stock", "text over faces", "Kanagawa preset"]
+    },
+    "hybrid-ui-broll": {
+      "tags": ["hybrid", "ui", "product", "b-roll", "presenter"],
+      "capabilities": ["ui-mock", "footage-montage", "depth-composite", "code-2d"],
+      "primaryEngine": "hyperframes",
+      "requires": ["real UI capture or code mock", "licensed b-roll", "product state consistency"],
+      "candidateSkills": [
+        { "skill": "director-craft", "role": "preproduction", "status": "planned" },
+        { "skill": "kanagawa-html", "role": "visual-craft", "defaultMode": "craft-only", "presetWhen": "aesthetic=gentleman-kanagawa" },
+        { "skill": "higgsfield-scene", "role": "visual", "when": "generated B-roll is approved" },
+        { "skill": "story-continuity", "role": "preproduction", "when": "the product UI or a presenter recurs" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "mixed" },
+      "avoid": ["AI-generated UI or text", "fake screenshots", "inconsistent product state"]
+    },
+    "custom": {
+      "tags": ["custom", "unspecified", "experimental"],
+      "capabilities": [],
+      "primaryEngine": "hyperframes",
+      "requires": ["declared capability set in art-direction.md", "capability probe per capability"],
+      "candidateSkills": [
+        { "skill": "director-craft", "role": "preproduction", "status": "planned" },
+        { "skill": "kanagawa-html", "role": "visual-craft", "defaultMode": "craft-only", "presetWhen": "aesthetic=gentleman-kanagawa" },
+        { "skill": "shader-fx", "role": "effects", "when": "the art direction names a deterministic effect" }
+      ],
+      "defaults": { "aspect": "from style brief", "motion": "from style brief" },
+      "avoid": ["forcing a lane when the brief does not match any listed lane", "falling back to the previous project's look"]
+    }
+  },
+  "styleBrief": {
+    "record": "style-brief.md",
+    "artDirection": "art-direction.md",
+    "gate": "approval-required-before-full-render",
+    "questionMode": "one grouped question by default; ask again only if the answer would change the outcome",
+    "axes": [
+      {
+        "id": "lane",
+        "question": "Which visual lane and format?",
+        "default": "inferred from the request",
+        "options": ["vector-explainer", "whiteboard", "3d-cinematic", "pixel-retro", "horror-2d", "anime-short-drama", "motion-graphics", "documentary", "hybrid-ui-broll", "custom"]
+      },
+      {
+        "id": "aesthetic",
+        "question": "Palette, typography, and motion rhythm?",
+        "default": "from art-direction.md plus one reference; never the previous project"
+      },
+      {
+        "id": "audio",
+        "question": "Voice, music, and SFX?",
+        "default": "local voice + local music, no paid service without approval"
+      }
+    ],
+    "rules": [
+      "Infer a candidate lane and its capabilities first; ask only what changes the outcome.",
+      "Probe every required capability before promising the lane.",
+      "Offer a recommended default and one or two alternatives, not an open questionnaire.",
+      "Accept 'surprise me' and state the chosen lane with a one-line rationale.",
+      "Record the asset policy per project with a reason; never inherit a ban.",
+      "Generate e00 with the real hero shot, palette, typography in scene, texture, and a 5-second audio preview.",
+      "Do not render the full sequence before e00 approval; idu-pi video render enforces it.",
+      "After a change, update only the affected decisions and regenerate e00."
+    ]
+  }
+}
