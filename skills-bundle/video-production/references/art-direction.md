@@ -27,10 +27,13 @@ and specific enough to fail.
 # Art Direction
 
 - Approved: no
-- Contract version: 1
+- Contract version: 2
+- Piece intent: <presentation | story | experience, copied from style-brief.md>
 
 ## Intent
-One sentence per beat: what the viewer must understand or feel after it.
+One sentence per beat, in the unit the piece intent defines: the claim the
+viewer can restate (presentation), the change in the protagonist's situation
+(story), or the shift of energy or mood (experience).
 
 ## Reading order
 Per shot: what the eye hits first, second, third.
@@ -46,11 +49,11 @@ Per shot: what the eye hits first, second, third.
 | Motion language | | |
 
 ## Shot / beat sheet
-| Beat | Time | Shot type | Subject | Composition | Movement | Transition | Must be legible |
-| --- | --- | --- | --- | --- | --- | --- | --- |
+| Beat | Time | Shot type | Subject | Composition | Movement | Transition | Must read | Proof |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
 ## Character performance
-Only when characters act. Pose, expression, gaze, hand interaction per beat.
+Required for a story; otherwise only when characters act. Pose, expression, gaze, hand interaction per beat.
 Point to `performance-sheet.md` from story-continuity.
 
 ## Asset strategy
@@ -69,6 +72,24 @@ Each reference says what to borrow and what not to copy.
 ```
 
 ## How to fill each field
+
+### Piece intent
+
+Copy the intent from `style-brief.md`. It decides what a beat is and what the
+shot sheet must contain, so the rest of the contract is read through it:
+
+- **presentation**: each beat is a claim. The sheet needs a `Proof` value per
+  beat and the type system is part of the language.
+- **story**: each beat is a change for the protagonist. `## Character
+  performance` is required, and the sheet reads as cause and effect: a beat
+  exists because of the one before it.
+- **experience**: each beat is a shift of energy. Time comes from the music, so
+  the `Time` column follows its sections; narration and text are absent unless
+  the brief asks for them.
+
+If the beats cannot be written in the unit of the declared intent, the intent is
+wrong or the piece is still a presentation in disguise. Fix that before the
+shot sheet.
 
 ### Intent and reading order
 
@@ -111,7 +132,13 @@ shot with a shot type, a subject, a composition, a movement, and a transition.
 - Composition: where the subject sits, what carries the eye, negative space.
 - Movement: what moves between the start and end of the shot, and why.
 - Transition: cut, match cut, whip, dissolve, hard replace, hold.
-- Must be legible: the one fact that must survive a pause and a small screen.
+- Must read: what must survive a pause and a small screen. A fact for a
+  presentation; who wants what and what changed for a story; the mood for an
+  experience.
+- Proof: `demo`, `diagram` or `none`. In a presentation, a beat that asserts the
+  behaviour of a real, existing artifact is `demo`: the artifact itself on
+  screen, working. `diagram` is for what is abstract or invisible. Story and
+  experience beats are normally `none`.
 
 If two consecutive rows have the same shot type, composition, and movement, the
 piece will feel like one card repeated. That is a directing decision, not a
@@ -119,7 +146,7 @@ rendering bug.
 
 ### Character performance
 
-Only when the piece has characters. The performance sheet from
+Required for a story; otherwise only when the piece has characters. The performance sheet from
 `story-continuity/references/character-continuity.md` supplies poses,
 expressions, gaze, hand interaction, and rig constraints per shot. Link it here;
 do not duplicate the locks.
@@ -190,6 +217,11 @@ signature is not.
 
 ## Hard rules
 
+- The beats are written in the unit of the piece intent. A story or an
+  experience whose beats are claims is a presentation and is built as one or
+  rewritten.
+- A presentation beat marked `demo` shows the real artifact. If it cannot be
+  captured, that is a capability gap to report, not a diagram to draw.
 - No HTML before the contract for a multi-shot piece.
 - No `e00` approval without the contract; no full render without `e00` approval.
 - A missing capability is reported, never papered over.

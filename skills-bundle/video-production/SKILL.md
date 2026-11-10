@@ -23,6 +23,9 @@ produce, never a house aesthetic.
 - A delivery MP4 is produced by `render_frames.mjs`, not by `hyperframes render`.
 - Never publish a video when the motion or audio gate exits 1.
 - `keyframes/eNN.png` are the approved oracle. The renderer never regenerates them.
+- Intent precedes lane: decide whether the piece is a presentation, a story or
+  an experience before choosing a technique. A piece with no declared intent
+  becomes a narrated slide deck by default.
 - Art direction precedes HTML: write `art-direction.md` before the first
   composition line for any multi-shot piece.
 - A named aesthetic preset is opt-in. `kanagawa-html` is one style, not the
@@ -38,9 +41,39 @@ produce, never a house aesthetic.
   `keyframes/e00-styleboard.png` are approved. One primary engine per project.
   `idu-pi video render` enforces the style gate on full renders.
 
+## Intent first
+
+The same subject makes three different pieces. Decide which one this is before
+anything else, and record it as the first line of `style-brief.md`:
+
+| Intent | The viewer leaves | Time is driven by | A beat is | It fails as |
+| --- | --- | --- | --- | --- |
+| `presentation` | able to restate something | the voice | one claim | a narrated slide deck |
+| `story` | having followed someone through a change | the performance | one change in the protagonist's situation | an explainer with a mascot |
+| `experience` | having felt a mood, rhythm or scale | the music | one shift of energy or mood | an explainer without words |
+
+- Infer the intent from the request. "Explain", "teach", "show what we built"
+  is a presentation. "Tell", a named character, a conflict is a story. "Trailer",
+  "mood", "visualizer", "intro", "make it feel" is an experience. Ask only when
+  two intents would produce different pieces.
+- The intent changes the structure, not the decoration. A story is not a
+  presentation plus a character; it has no claims to list. An experience has no
+  narrator and no on-screen text unless the request asks for them.
+- The intent is independent of the lane. A pixel story, a 3D presentation and a
+  vector experience are all valid. Never pick the intent from the technique.
+- A presentation beat that asserts the behaviour of something real and existing
+  (a command, a test run, a UI, a file) is shown as a demonstration of that
+  thing. Diagrams are for what is abstract or invisible. If the harness cannot
+  capture the real thing, record that as a capability gap; do not draw a box
+  with its name.
+- `references/video-lanes.json` holds the full defaults per intent under
+  `intents`. `idu-pi video render` refuses a full render without a valid
+  `Intent:` line.
+
 ## Capability-first routing
 
-Video requests are capability-driven, not template-driven. Before loading a
+Video requests are capability-driven, not template-driven. Once the intent is
+decided, and before loading a
 visual skill, read `references/video-lanes.json` and determine **what the piece
 must be able to produce**; the lane is only the label for that capability set.
 
@@ -55,7 +88,7 @@ must be able to produce**; the lane is only the label for that capability set.
   collapses into the same explainer.
 - If the request names a style, reference, or aspect ratio, use it. If style is
   missing or ambiguous, follow `references/style-brief.md` and ask one grouped
-  three-axis question. Never default to the previous project's look.
+  question. Never default to the previous project's look.
 - If no lane fits, use `custom` and define its capability set in the style brief;
   never force a lane that changes the request's intent.
 - Start with the minimum useful set: one preproduction, one or two visual, one
@@ -102,14 +135,16 @@ visual language needs an asset class the policy forbids.
 
 Read `references/style-brief.md` before the first edit. The short version:
 
-1. Infer the lane and its capability set; ask one grouped question only if style
-   is missing. Axes: lane/format, aesthetic/rhythm, audio.
+1. Infer the intent, then the lane and its capability set; ask one grouped
+   question only if a decision is missing. Axes: intent, lane/format,
+   aesthetic/rhythm, audio.
 2. Probe every required capability and record the evidence.
 3. Write `art-direction.md` (visual language, shot sheet, asset policy,
    acceptance criteria) and `style-brief.md`.
 4. Render `keyframes/e00-styleboard.png`: a real hero frame that proves the
-   contract — palette, typography, texture, depth, and a motion cue; include a
-   5-second audio preview when relevant.
+   contract — palette, texture, depth, a motion cue, and what the intent says
+   `e00` must prove (a real claim, the protagonist acting, or the mood at full
+   quality); include a 5-second audio preview when relevant.
 5. Stop for approval of the art direction, the brief and `e00` together. No full
    render before approval.
 6. After approval, load the lane's minimum skill set and build.
@@ -134,7 +169,9 @@ scene reads; an artistic pass never excuses a flicker.
 
 When auditing or redesigning a scene, the brief MUST include:
 
-- the scene's narration lines from `guion.md`, verbatim;
+- the piece's intent, so the scene is judged as what it is;
+- the scene's narration lines from `guion.md`, verbatim, when the piece has
+  narration; otherwise the beat's line from the art-direction intent;
 - the beat timings from `timeline.json`;
 - the scene's row in the art-direction shot sheet;
 - the current keyframe `keyframes/eNN.png`;
@@ -153,9 +190,9 @@ close-up, a full-bleed frame, type-only — not more cards.
 
 ## Pipeline
 
-1. **Capability and style decisions.**
-   Read `references/video-lanes.json`, infer the lane, probe its capabilities,
-   write `style-brief.md`.
+1. **Intent, capability and style decisions.**
+   Decide the intent, read `references/video-lanes.json`, infer the lane, probe
+   its capabilities, write `style-brief.md`.
 2. **Art direction.**
    Write `art-direction.md` from `references/art-direction.md`: intent, reading
    order, six language axes, shot sheet, asset policy, capability evidence, and
@@ -176,7 +213,7 @@ close-up, a full-bleed frame, type-only — not more cards.
    audit before accepting it; it is the contract the motion gate compares against.
 7. **Render the delivery video.**
    `idu-pi video render --project <project>`
-   Enforces the style gate on full renders (lane exists, `art-direction.md`
+   Enforces the style gate on full renders (valid intent, lane exists, `art-direction.md`
    present, `e00` approved and rendered), resolves the duration from
    `data-duration`/`timeline.json`, picks the approved `*-hq.mp4` audio, finds
    Playwright, renders with `render_frames.mjs`, and runs the motion gate.
@@ -223,7 +260,7 @@ size. Width and height must be even; `yuv420p` silently corrupts odd dimensions.
 The style gate runs only on a full render. A partial render is a review tool and
 may run before approval; `--skip-style-gate` exists for tests and non-delivery
 renders, and prints a warning. A full delivery render without an approved
-`style-brief.md`, a valid lane, `art-direction.md`, and a rendered `e00` is
+`style-brief.md`, a valid intent, a valid lane, `art-direction.md`, and a rendered `e00` is
 refused.
 
 ## Why `hyperframes render` is not the delivery path
@@ -298,6 +335,8 @@ which is the evidence to inspect before changing any threshold.
 | Playwright not found | Not installed in the project | `npm i playwright` or `--playwright <path>` |
 | Chrome not found | No system Chrome | `--chrome <path>` or install Chromium |
 | `style gate: falta style-brief.md` | Project has no decisions recorded | Write the brief and approve `e00` |
+| `style gate: ... no declara Intent` | Brief written before the intent existed, or the decision was skipped | Add `- Intent: presentation \| story \| experience` as the first line of the brief |
+| `style gate: intent desconocido` | Typo, or a format name used as the intent | Use one of the ids under `intents` in `video-lanes.json` |
 | `style gate: lane desconocida` | Lane typo or not in `video-lanes.json` | Fix the `Lane:` line or add the lane |
 | `style gate: e00 no aprobado` | Brief still says `Approved e00: no` | Present `e00`, get approval, update the line |
 | `style gate: falta art-direction.md` | HTML was written without the contract | Write it from the approved frames, then render |
@@ -319,7 +358,7 @@ pin bump requires a full render and both gates before it is accepted.
   acceptance criteria.
 - `references/visual-qa.md` — the artistic audit, separate from the motion and
   audio gates: beat legibility, hierarchy, fidelity, variety, the same-card test.
-- `references/video-lanes.json` — capability-first lane map, conditional skills,
-  engine status, and the style brief contract.
-- `references/style-brief.md` — three-axis style question, `style-brief.md`
+- `references/video-lanes.json` — intent defaults, capability-first lane map,
+  conditional skills, engine status, and the style brief contract.
+- `references/style-brief.md` — intent decision, grouped style question, `style-brief.md`
   template, asset policy, and the `e00` approval gate.
