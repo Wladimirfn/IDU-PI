@@ -1,12 +1,32 @@
 ---
 name: music-composition
-description: Compose a soundtrack with the Lofi Live AI engine. The engine has TWO layers — an AI composer that writes a real score and a procedural synth that only makes loops. Use when a video, demo, or presentation needs music; always compose with the AI layer before rendering.
+description: Compose and mix a soundtrack with the Lofi Live AI engine. The engine has TWO layers — an AI composer that writes a real score and a procedural synth that only makes loops. Use when a video, demo, or presentation needs music; write the music direction, render the score's full length, and mix it under the voice with ducking.
 ---
 
 # Music composition (Lofi Live AI)
 
 Generates a real WAV soundtrack from the Lofi Live AI engine: an **AI-composed
 PlanCancion** rendered through the headless bridge.
+
+## Music direction (before composing)
+
+A cue that "sounds fine" but does not follow the piece is a failed cue. Write the
+brief before calling the composer, in `style-brief.md` or `music-brief.md`:
+
+| Field | Decision |
+| --- | --- |
+| Intent | What the music must make the viewer feel: the claim, the change, or the mood. |
+| Arc | 3-5 acts and the energy of each: sparse -> build -> lift -> resolve. |
+| Hit points | The scene or act boundaries where the music must change or land. Not every cut. |
+| Instrumentation | The palette, and what stays out. Drums under a voiceover are out by default. |
+| Voice space | Leave 1-4 kHz open: no bright cymbals, no dense plucks, no pad wash in that band. |
+| Tempo/key | One tempo and key; modulate only when the arc earns it. |
+| Reference | What to borrow (texture, energy) and what not to copy. |
+| Duration | Film length plus tail; map the score's `vueltas` to the cut. |
+
+The prompt carries the arc, the palette and the exclusions. After composing,
+inspect the returned `PlanCancion`; direct `vueltas`, `desarrollo` and the voices
+to the film. A generic prompt returns a generic cue.
 
 ## The two layers (do not confuse them)
 
@@ -80,11 +100,12 @@ const partitura = await page.evaluate((p) => window.__componerCancionIA(p), prom
 for (const campo of ["titulo", "tempo", "progresion"]) {
   if (!partitura?.[campo]) throw new Error(`Invalid score: missing ${campo}`);
 }
+console.log("score:", partitura.titulo, "|", partitura.tempo, "BPM |", partitura.vueltas, "vueltas");
 
-// 4. Render WITH the score.
+// 4. Render the score's declared length. A smaller `loops` is a fragment.
 const base64 = await page.evaluate(
   async (p) => {
-    const buf = await window.__renderHeadless({ partitura: p, loops: 8 });
+    const buf = await window.__renderHeadless({ partitura: p });
     const bytes = new Uint8Array(buf);
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -101,8 +122,11 @@ await browser.close();
 
 Valid shortcuts, in order of preference:
 
-- `__generarYRenderizarIA(prompt, { loops })` — composes and renders in one call.
-- `__renderHeadless({ partitura, loops })` — when you already have a score.
+- `__generarYRenderizarIA(prompt, { loops })` — composes and renders in one call;
+  only pass `loops` when it equals the score's `vueltas`.
+- `__renderHeadless({ partitura })` — when you already have a score; it renders
+  the declared length. Pass `loops` only for a larger sketch, never below
+  `partitura.vueltas`.
 
 ## Verify it is NOT a procedural variation
 
@@ -134,10 +158,24 @@ failure, not a style opinion.
 `partitura.json` next to the WAV. It is the only durable proof that the music
 was composed rather than synthesised, and the gate reads it.
 
+## Render the score, not a fragment
+
+The composer returns a `PlanCancion` with a declared `vueltas` length. That is
+the composition. `__renderHeadless({ partitura })` renders that length.
+
+Passing a smaller `loops` — for example `loops: 4` on a 12-vuelta score — renders
+the first four loops of the song, not the song: the development and the
+resolution are missing, and the result sounds like a loop. That is a defect, not
+a taste issue. If the film needs a shorter cue, edit `vueltas` and `desarrollo`
+to the act structure you want, render the edited score, and trim with a fade.
+Never let the render length be an accident.
+
 ## Duration and loops
 
 Each loop is **~24.6 s** at 44.1 kHz stereo (16 bars at the default tempo).
-Render time on CPU: ~20 s per loop.
+Render time on CPU: ~20 s per loop. The table is for a procedural sketch; for an
+AI score, the declared `vueltas` is the length and a smaller `loops` is a
+fragment.
 
 | loops | duration |
 | ----- | -------- |
@@ -147,21 +185,60 @@ Render time on CPU: ~20 s per loop.
 | 5     | ~123 s   |
 | 8     | ~197 s   |
 
-Plan the loop count from the film length. If the render is shorter than the
-video, the soundtrack cuts off; render extra loops and trim, never stretch.
+For a procedural sketch, choose the loop count from the film length. For an AI
+score, render `partitura.vueltas`; if the cue is longer than the cut, edit
+`vueltas` and `desarrollo` to the acts you need and trim with a fade. If the
+render is shorter than the video, the soundtrack cuts off; render extra and trim,
+never stretch.
 
 ## Mixing with narration
 
-In the HyperFrames composition, put the soundtrack on its own track, well under
-the voice:
+The music is a bed, not a second narrator. Do not pick a fader by habit; measure.
 
-```html
-<audio class="clip" src="soundtrack.wav"
-       data-start="0" data-duration="138.1" data-track-index="1"
-       data-volume="0.22" data-fade-in="2" data-fade-out="4"></audio>
+- **Voice:** -16 LUFS integrated, true peak -1.5 dBTP.
+- **Music in the gaps:** 16-20 dB below the voice (voice -16 -> music -32 to
+  -36 LUFS). Start around 0.10-0.14 linear and measure; the final mix is the
+  source of truth. The old fixed `0.22` is not a default.
+- **Ducking:** sidechain compression under the voice, 3-6 dB, 20-30 ms attack,
+  300-400 ms release. It must not pump.
+- **EQ:** high-pass 90 Hz, low-pass 9 kHz, and a 2-3 dB cut at 2.5 kHz. The voice
+  owns 1-4 kHz.
+- **Loudness:** one `loudnorm` at the end: `I=-16`, `TP=-1.5`, `LRA=11`.
+- **Fades:** 1-2 s in, 3-4 s out; end on a resolved chord, not a cut mid-loop.
+
+Minimal recipe (music input 0, voice clips 1..N; adapt the delays):
+
+```bash
+ffmpeg -i soundtrack.wav -i voz/e01.wav ... \
+  -filter_complex "\
+  [0:a]aformat=sample_rates=48000:channel_layouts=stereo,\
+highpass=f=90,lowpass=f=9000,equalizer=f=2500:width_type=o:width=1.2:g=-3,\
+volume=0.10,afade=t=in:st=0:d=1.5,afade=t=out:st=72:d=3.56[music];\
+  [1:a]aformat=sample_rates=48000:channel_layouts=stereo,adelay=1000|1000[a1];...\
+  [a1]...[aN]amix=inputs=N:duration=longest:normalize=0,\
+apad=whole_dur=<film>,asplit=2[voice][sc];\
+  [music][sc]sidechaincompress=threshold=0.04:ratio=3:attack=30:release=350:makeup=1[ducked];\
+  [voice][ducked]amix=inputs=2:duration=longest:normalize=0,\
+loudnorm=I=-16:TP=-1.5:LRA=11,apad=whole_dur=<film>,atrim=0:<film>[a]" \
+  -map "[a]" -t <film> -c:a pcm_s16le mix.wav
 ```
 
-`0.22` (−13 dB) sits under speech without masking it. Fades prevent a hard cut.
+`sidechaincompress` stops when the sidechain (voice) ends. Pad the voice bus with
+`apad=whole_dur=<film>` before the split, or the music tail is cut. Keep the
+HTML `data-volume` in sync with the measured bed: the audio gate rejects values
+above `0.20` and warns above `0.14`.
+
+## Music audit (before delivery)
+
+- Does the cue follow the brief's arc, with an audible change per act?
+- Does it resolve, or is it a cut mid-loop?
+- Are drums and percussion absent unless the brief asks for them?
+- Is the music 16-20 dB below the voice in the gaps and ducked under speech?
+- Is 1-4 kHz clear for the voice, with no cymbal, pluck or pad masking?
+- Is the loop seam inaudible, and does the cue avoid constant 4-bar repetition?
+- Does the music support the scene's intent, not just fill silence?
+
+A failed check is a rebuild, not a fader tweak.
 
 ## Styles
 
@@ -175,6 +252,12 @@ prompt, so describe the music in words instead of relying on the style enum.
 
 ## Anti-patterns
 
+- Do **not** render an AI score with fewer loops than its `vueltas`: that is a
+  fragment without development or resolution, not an edit.
+- Do **not** use a fixed `0.22` music fader. Measure the bed in the gaps; the
+  measured default is 0.10-0.14 with ducking.
+- Do **not** keep the composer's default drum layer under a voiceover. Remove it
+  unless the music brief asks for percussion.
 - Do **not** call `__renderHeadless({ loops })` in a fresh Playwright context as
   the final step. `localStorage` is empty, AI config is missing, and the engine
   silently falls back to the procedural core.

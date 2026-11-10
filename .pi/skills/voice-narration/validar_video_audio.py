@@ -5,6 +5,7 @@ Comprueba las cuatro cosas que se rompieron en el video de idu-pi:
   2. Ningun clip se solapa con el siguiente.
   3. Ningun final de voz tiene chasquido ni cola ruidosa.
   4. La musica existe, dura lo suficiente y NO es una variacion procedural.
+  5. La musica es una cama: gain medido y sin bateria bajo la voz por defecto.
 
 Uso (requiere numpy):
     python validar_video_audio.py --proyecto "/ruta/al/proyecto"
@@ -27,6 +28,11 @@ CLICK_RATIO = 5.0
 # sibilant lasts longer; flagging it as a click is how real speech gets "cleaned".
 CLICK_MAX_MS = 40
 TAIL_AUDIBLE = 0.006
+
+# A music bed above this gain masks a voice at normal listening levels. The
+# measured default is 0.10-0.14 with ducking. The old fixed 0.22 is an error.
+MUSIC_VOLUME_WARN = 0.14
+MUSIC_VOLUME_ERROR = 0.20
 
 
 def read_audio(path):
@@ -112,6 +118,26 @@ def tagged_clips(html, id_pattern, errors):
     return sorted(found, key=lambda c: c[1])
 
 
+def first_tag_attrs(html, id_pattern):
+    """Attributes of the first tag whose id matches, for non-timing fields."""
+    for m in TAG.finditer(html):
+        attrs = {k: a if a or not b else b for k, a, b in ATTR.findall(m.group(1))}
+        if re.fullmatch(id_pattern, attrs.get("id", "")):
+            return attrs
+    return None
+
+
+def drum_hits(bateria):
+    """Pieces with at least one hit in a 16/32-step pattern."""
+    if not isinstance(bateria, dict):
+        return []
+    return [
+        piece
+        for piece, pattern in bateria.items()
+        if isinstance(pattern, str) and re.search(r"[xX]", pattern)
+    ]
+
+
 def check_voices(project, errors, warnings):
     html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
     clips = tagged_clips(html, r"vo\d+", errors)
@@ -178,6 +204,26 @@ def check_music(project, errors, warnings):
     path = project / src
     print(f"\n  musica: {src}")
 
+    attrs = first_tag_attrs(html, r"bgm") or {}
+    raw_volume = attrs.get("data-volume")
+    if raw_volume is not None:
+        try:
+            volume = float(raw_volume)
+        except ValueError:
+            errors.append('id="bgm" has a non-numeric data-volume')
+        else:
+            if volume > MUSIC_VOLUME_ERROR:
+                errors.append(
+                    f"music bed gain {volume:.2f} is above {MUSIC_VOLUME_ERROR:.2f}: "
+                    "it masks the voice. Measure a ducked mix and lower it; "
+                    "0.10-0.14 is the measured default."
+                )
+            elif volume > MUSIC_VOLUME_WARN:
+                warnings.append(
+                    f"music bed gain {volume:.2f} is above {MUSIC_VOLUME_WARN:.2f}; "
+                    "confirm the mix is ducked and the voice still wins."
+                )
+
     if not path.exists():
         errors.append(f"missing music file: {src}")
         return
@@ -201,6 +247,22 @@ def check_music(project, errors, warnings):
         else:
             print(f"    partitura IA: \"{data['titulo']}\" · {data['tempo']} BPM · "
                   f"{len(data['progresion'])} acordes  ok")
+            active = []
+            voces = data.get("voces")
+            if isinstance(voces, dict):
+                active += drum_hits(voces.get("bateria"))
+            sections = data.get("vocesPorSeccion")
+            if isinstance(sections, list):
+                for i, section in enumerate(sections):
+                    if isinstance(section, dict):
+                        active += [f"section {i}:{p}" for p in drum_hits(section.get("bateria"))]
+            if active:
+                warnings.append(
+                    "the score writes drums/percussion ("
+                    + ", ".join(active[:6])
+                    + "); a voiceover bed usually leaves them out. "
+                    "Confirm the music brief wants them or remove the layer."
+                )
     else:
         warnings.append(
             "no partitura.json next to the music: cannot prove the AI composed it. "

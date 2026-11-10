@@ -65,10 +65,11 @@ class Project:
             .format(n=n, start=start, declared=declared)
         )
 
-    def music(self, seconds, start, declared, score=None):
+    def music(self, seconds, start, declared, score=None, volume=None):
         write_wav(self.dir / "bgm.wav", np.zeros(int(seconds * SR)))
+        volume_attr = f' data-volume="{volume}"' if volume is not None else ""
         self.tags.append(
-            f'<audio id="bgm" src="bgm.wav" data-start="{start}" data-duration="{declared}"></audio>'
+            f'<audio id="bgm" src="bgm.wav" data-start="{start}" data-duration="{declared}"{volume_attr}></audio>'
         )
         if score is not None:
             (self.dir / "partitura.json").write_text(json.dumps(score), encoding="utf-8")
@@ -167,6 +168,30 @@ class ValidarVideoAudio(unittest.TestCase):
         q.music(3, 0, 3, {"titulo": "Sin tempo"})
         errors, _ = q.run()
         self.assertTrue(any("tempo" in e for e in errors), errors)
+
+    def test_loud_music_bed_fails(self):
+        p = self.project()
+        p.voice(1, speech(), 0, 1.9)
+        p.music(3, 0, 3, SCORE, volume="0.22")
+        errors, _ = p.run()
+        self.assertTrue(any("music bed gain" in e for e in errors), errors)
+
+    def test_music_bed_warns_between_default_and_error(self):
+        p = self.project()
+        p.voice(1, speech(), 0, 1.9)
+        p.music(3, 0, 3, SCORE, volume="0.16")
+        errors, warnings = p.run()
+        self.assertEqual(errors, [])
+        self.assertTrue(any("music bed gain" in w for w in warnings), warnings)
+
+    def test_score_with_drums_warns(self):
+        p = self.project()
+        p.voice(1, speech(), 0, 1.9)
+        score = {**SCORE, "voces": {"bateria": {"kick": "x...x...", "hat": "....x..."}}}
+        p.music(3, 0, 3, score, volume="0.10")
+        errors, warnings = p.run()
+        self.assertEqual(errors, [])
+        self.assertTrue(any("drums" in w for w in warnings), warnings)
 
     def test_hyperframes_markup_with_attributes_in_between(self):
         # Regression: the regex required id, src, data-start, data-duration back to
