@@ -846,20 +846,28 @@ async function runVideoAudit(
 	console.log(
 		`video audit: ${sceneIds.length} escena(s), intent ${brief.intent}, auditor ${profileName} (autor: ${author})...`,
 	);
-	const result = await CrossCliProcessManager.getInstance().delegate({
-		task: buildAuditPrompt({
-			intent: brief.intent,
-			sceneIds,
-			hasScript: existsSync(join(project, "guion.md")),
-			hasTimeline: existsSync(join(project, "timeline.json")),
-			contractPath,
-		}),
-		profile: profileName,
-		profileExplicit: true,
-		parentOrchestrator: "cli",
-		workingDir: project,
-		timeoutMs,
-	});
+	let result: Awaited<ReturnType<CrossCliProcessManager["delegate"]>>;
+	try {
+		result = await CrossCliProcessManager.getInstance().delegate({
+			task: buildAuditPrompt({
+				intent: brief.intent,
+				sceneIds,
+				hasScript: existsSync(join(project, "guion.md")),
+				hasTimeline: existsSync(join(project, "timeline.json")),
+				contractPath,
+			}),
+			profile: profileName,
+			profileExplicit: true,
+			parentOrchestrator: "cli",
+			workingDir: project,
+			timeoutMs,
+		});
+	} catch (err) {
+		/* Un worker no puede auditar a otro: la regla de un solo orquestador
+		   rechaza la delegación, y eso se informa en vez de reventar. */
+		console.error(`video audit: no se pudo despachar el auditor: ${err instanceof Error ? err.message : String(err)}`);
+		return 1;
+	}
 	if (result.status !== "completed") {
 		console.error(`video audit: el auditor terminó en "${result.status}". Log: ${result.logPath}`);
 		return 1;

@@ -199,8 +199,11 @@ export function parseAuditReply(
 	if (!Array.isArray(data.scenes)) return { ok: false, error: "falta `scenes` en el veredicto" };
 
 	const scenes: AuditScene[] = [];
-	for (const entry of data.scenes as Array<Record<string, unknown>>) {
-		const id = asText(entry?.id).toLowerCase();
+	for (const entry of data.scenes as Array<Record<string, unknown> | null>) {
+		if (!entry || typeof entry !== "object") {
+			return { ok: false, error: "`scenes` trae una entrada que no es una escena" };
+		}
+		const id = asText(entry.id).toLowerCase();
 		const verdict = asText(entry?.verdict).toLowerCase();
 		if (verdict !== "pass" && verdict !== "revise" && verdict !== "block") {
 			return { ok: false, error: `veredicto inválido en ${id || "una escena sin id"}: "${asText(entry?.verdict)}"` };
@@ -289,15 +292,20 @@ export function evaluateAudit(project: string): { errors: string[]; warnings: st
 			`el auditor dice que la pieza no cumple su intent \`${audit.intent}\`${audit.piece.became ? `: quedó como ${audit.piece.became}` : ""}.`,
 		);
 	}
-	const byId = new Map(audit.scenes.map((scene) => [scene.id, scene]));
+	const byId = new Map(
+		audit.scenes.filter((scene) => scene && typeof scene === "object").map((scene) => [scene.id, scene]),
+	);
 	for (const id of sceneIds) {
 		const scene = byId.get(id);
 		if (!scene) {
 			errors.push(`la auditoría no trae veredicto para ${id}. ${rerun}`);
 			continue;
 		}
-		const checks = scene.failed.length > 0 ? ` (checks ${scene.failed.join(", ")})` : "";
-		const line = `${id}${checks}: ${scene.evidence}${scene.fix ? ` -> ${scene.fix}` : ""}`;
+		/* El archivo pudo escribirse con otra versión del comando: un campo
+		   ausente no debe tirar el gate, solo dejar de imprimirse. */
+		const failed = Array.isArray(scene.failed) ? scene.failed : [];
+		const checks = failed.length > 0 ? ` (checks ${failed.join(", ")})` : "";
+		const line = `${id}${checks}: ${asText(scene.evidence)}${scene.fix ? ` -> ${scene.fix}` : ""}`;
 		if (scene.verdict === "block") errors.push(`escena bloqueada ${line}`);
 		else if (scene.verdict === "revise") warnings.push(`a revisar ${line}`);
 	}

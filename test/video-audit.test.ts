@@ -127,6 +127,11 @@ test("parseAuditReply rejects a failing verdict with no evidence", () => {
 	if (!parsed.ok) assert.match(parsed.error, /sin evidencia en: e01/);
 });
 
+test("parseAuditReply rejects a scene list with a non-scene entry instead of throwing", () => {
+	const parsed = parseAuditReply(reply({ scenes: [null as unknown as object] }), SCENES);
+	assert.equal(parsed.ok, false);
+});
+
 test("parseAuditReply rejects a reply with no JSON verdict", () => {
 	const parsed = parseAuditReply("Everything looks great, approved.", SCENES);
 	assert.equal(parsed.ok, false);
@@ -204,6 +209,17 @@ test("evaluateAudit refuses a piece that did not deliver its intent", () => {
 			audit.piece.became = "a narrated slide deck";
 		});
 		assert.match(evaluateAudit(dir).errors.join("\n"), /no cumple su intent `presentation`.*slide deck/);
+	});
+});
+
+test("evaluateAudit reads a record whose scene has no failed list", () => {
+	// A record written by another version of the command must not crash the
+	// render gate; the verdict still decides.
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.scenes[1] = { id: "e02", verdict: "block", evidence: "same skeleton as e01" } as never;
+		});
+		assert.match(evaluateAudit(dir).errors.join("\n"), /escena bloqueada e02: same skeleton/);
 	});
 });
 
