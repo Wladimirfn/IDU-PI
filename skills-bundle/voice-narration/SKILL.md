@@ -138,7 +138,9 @@ narration clip as a tag with `id="voN"`, `src`, `data-start` and `data-duration`
 music as `id="bgm"` with the same three attributes. It checks, per clip: declared vs real duration, overlap with the next
 clip, closing clicks (temporal signature, not voicing), and tail audibility. It
 also verifies the music lasts its `data-duration` and that a `partitura.json`
-beside it proves the AI composed it. Its tests:
+beside it proves the AI composed it. It also checks the `bgm` gain against the
+measured default (error above `0.20`, warning above `0.14`) and warns when the
+score writes drums or percussion under the voice. Its tests:
 `cd skills-bundle/voice-narration && python -m unittest test_validar_video_audio`.
 
 Every clip must pass every check:
