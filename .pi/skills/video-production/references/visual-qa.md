@@ -16,9 +16,10 @@ flickering render.
 
 ## Inputs
 
+- The piece intent from `style-brief.md`. It decides how check 1 is read.
 - `art-direction.md` (intent, reading order, language, shot sheet, acceptance
   criteria).
-- `guion.md` lines for the scene, verbatim.
+- `guion.md` lines for the scene, verbatim, when the piece has narration.
 - `timeline.json` beats.
 - `keyframes/eNN.png` and, when available, a short capture of the motion.
 - The previous and next scene, for variety.
@@ -30,7 +31,7 @@ required by the narration; an element that looks fine may contradict the beat.
 
 | # | Check | Question | Fails when |
 | --- | --- | --- | --- |
-| 1 | Beat legibility | Can a viewer who only sees this frame state the beat? | The frame shows the topic but not the sentence |
+| 1 | Beat reads | Does the frame carry the beat in the unit of the piece intent? See below | The frame shows the topic but not the beat |
 | 2 | Focal hierarchy | Does the eye hit the contract's first, second, third? | Everything has equal weight, or the wrong element wins |
 | 3 | Style fidelity | Do the six language axes hold, with evidence? | Any axis drifted, especially shape and texture |
 | 4 | Variety | Does this shot differ from its neighbours? | Consecutive shots share the layout skeleton |
@@ -39,6 +40,27 @@ required by the narration; an element that looks fine may contradict the beat.
 | 7 | Motion motivation | Does each movement express the beat? | Decorative loops, idle float, motion for motion |
 | 8 | Composition | Safe areas, aspect framings, tangents, collisions | Subject clipped, accidental tangents, dead thirds |
 | 9 | Reference use | Borrowed what was named, copied nothing forbidden | A layout or brand was reproduced |
+| 10 | Proof | Does every beat that asserts the behaviour of a real command, test run, UI or file show that artifact or its real output, whatever its `Proof` cell says? | The artifact is drawn as a labelled box, invented, or relabelled `diagram` to avoid showing it |
+
+### Check 1 by intent
+
+| Intent | The frame passes when | Typical failure |
+| --- | --- | --- |
+| `presentation` | a viewer who only sees it can state the claim | a headline and cards that name the topic |
+| `story` | a viewer can say who wants what and what just changed | a character standing next to an explanation |
+| `experience` | it carries the declared mood with no caption | text or a diagram doing the work the image should do |
+
+Judge the piece as what it declares. A wordless frame is not a legibility
+failure in an experience, and a clear diagram is not a pass in a story.
+
+### The intent test
+
+Once over the full piece: does it deliver its declared intent, or did it fall
+back to a narrated slide deck? Signs of the fallback, whatever the intent says:
+every scene opens with a headline, the voice carries all the meaning while the
+image waits, the protagonist never causes anything, the cut ignores the music.
+A piece that fails this test is a `block`, because every scene was built on the
+wrong structure.
 
 ### The same-card test
 
@@ -92,6 +114,7 @@ fix: <one concrete change>
 Full piece:
 
 ```
+intent: <declared intent> | delivered | fell back to <what it became>
 variety: pass | revise
 rhythm: <one paragraph: where the piece breathes, where it repeats>
 capability gaps: <none | list>
