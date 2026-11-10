@@ -3,10 +3,11 @@
 - Locator: `odd/tasks/video-audit-gate.md`
 - Engram mirror: `odd/video-audit-gate/tasks` (project `idu-pi`)
 - Branch: `feat/style-first-video` (continues after `video-intent-gate`)
-- Delivery strategy: `ask-on-risk`. Forecast about 450 authored changed lines;
-  with the 414 of `video-intent-gate` the branch passes the budget. Slice
-  boundary: `ae52dfc` closes the first slice, this feature is the second. The
-  chain strategy is the owner's call and is asked before any pull request.
+- Delivery strategy: `ask-on-risk`. Owner decision 2026-11-10: four stacked
+  slices, each with its own approved issue: #636 skills, #637 style-first
+  router/art direction/gate, #638 intent, #639 audit. First PR #640 (skills) is
+  open and green; merge in order. Stacked-to-main because the repo CI only runs
+  on pull requests targeting `main`.
 - TDD: not configured in this repository. Tests are written before the code
   they cover and RED is observed.
 - Test runner: `corepack pnpm test` (full check: `corepack pnpm verify`).
@@ -163,17 +164,19 @@ metric computed in code.
   motion gate 0 px / 1.00 / 0.0, final render
   `renders/skills-system-explainer_2026-11-10T11-24-30.mp4`. The author line is
   now `opencode/deepseek-v4.1-flash`.
+- 2026-11-10: issues #636-#639 created and approved; PR #640 (skills slice) is
+  open with all checks green (`Build and diff check`, `Build and verify (Linux)`,
+  `Validate PR policy`). The other slices remain local.
 
 ## Open decisions for the owner
 
-- Pull request slicing: local branch `feat/video-intent-gate` at `ae52dfc` is
-  prepared; `feat/style-first-video` holds the audit gate plus T7, ahead 16 and
-  unpushed. `main..ae52dfc` is 59 files / +7,175 (skill mirrors included);
-  `ae52dfc..HEAD` is 17 files / +1,521. The owner chooses the chain strategy and
-  the approved issues before any pull request.
+- None on slicing. Issues #636-#639 are created with `status:approved`; PR #640
+  is the first slice. The remaining branches are local and unpushed.
 
 ## Next step
 
-Feature complete on the branch, not pushed. The worker-double test gap is closed.
-Follow-ups in order: the owner's PR slicing decision; timeline driver per intent
-in the motion gate; live demonstration capture; character pipeline.
+PR #640 is green; merge it first, then push and open the remaining slices in
+order (#637, #638, #639). Feature complete on `feat/style-first-video`, not
+pushed. The worker-double test gap is closed. Follow-ups after the chain:
+timeline driver per intent in the motion gate; live demonstration capture;
+character pipeline.
