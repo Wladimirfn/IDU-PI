@@ -82,7 +82,9 @@ shot sheet must contain, so the rest of the contract is read through it:
   beat and the type system is part of the language.
 - **story**: each beat is a change for the protagonist. `## Character
   performance` is required, and the sheet reads as cause and effect: a beat
-  exists because of the one before it.
+  exists because of the one before it. If a headline, a card or the voice
+  carries the point while the character only illustrates it, the beat is a
+  presentation beat.
 - **experience**: each beat is a shift of energy. Time comes from the music, so
   the `Time` column follows its sections; narration and text are absent unless
   the brief asks for them.
@@ -136,9 +138,11 @@ shot with a shot type, a subject, a composition, a movement, and a transition.
   presentation; who wants what and what changed for a story; the mood for an
   experience.
 - Proof: `demo`, `diagram` or `none`. In a presentation, a beat that asserts the
-  behaviour of a real, existing artifact is `demo`: the artifact itself on
-  screen, working. `diagram` is for what is abstract or invisible. Story and
-  experience beats are normally `none`.
+  behaviour of a real, existing artifact is `demo`: a capture of the artifact
+  working, or its real output or content reproduced verbatim in code, never an
+  invented stand-in. `diagram` is for what is abstract or invisible, not for a
+  real artifact that is easier to draw than to show. Story and experience beats
+  are normally `none`.
 
 If two consecutive rows have the same shot type, composition, and movement, the
 piece will feel like one card repeated. That is a directing decision, not a
@@ -220,8 +224,9 @@ signature is not.
 - The beats are written in the unit of the piece intent. A story or an
   experience whose beats are claims is a presentation and is built as one or
   rewritten.
-- A presentation beat marked `demo` shows the real artifact. If it cannot be
-  captured, that is a capability gap to report, not a diagram to draw.
+- A presentation beat that asserts the behaviour of a real artifact shows that
+  artifact or its real output, whatever its `Proof` cell says. If neither can be
+  obtained, that is a capability gap to report, not a diagram to draw.
 - No HTML before the contract for a multi-shot piece.
 - No `e00` approval without the contract; no full render without `e00` approval.
 - A missing capability is reported, never papered over.

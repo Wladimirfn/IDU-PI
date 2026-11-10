@@ -24,19 +24,24 @@ Before the lane, decide what kind of piece this is. The `intents` block of
   from the other.
 - A mixed request has one dominant intent. A product story that ends on a claim
   is a story; a talk with one anecdote is a presentation. Record the dominant
-  one and note the exception in the art direction.
+  one and note the exception in the art direction. A request that pairs an
+  experience format with content to explain ("a trailer that shows what we
+  built") is not settled by its words: ask.
 - If two intents would produce different pieces and the request does not settle
   it, this is the first axis of the grouped question.
 - For a presentation, mark each beat that asserts the behaviour of something
   real and existing. Those beats need a demonstration of that thing; a labelled
-  box is not evidence. If it cannot be captured, record the capability gap.
+  box is not evidence. A capture of the artifact, or its real output or content
+  reproduced verbatim in code, is. If neither can be obtained, record the
+  capability gap.
 
 ## 1. Infer, do not assume
 
 Read the request and `references/video-lanes.json`. With the intent decided,
 determine the **production capability**, then the lane label that carries it.
 
-- If the request names a style, reference, or format, use it and skip the question.
+- If the request names a style, reference, or format, use it and drop that axis
+  from the question. Naming a style does not settle the intent.
 - If the request is style-ambiguous, propose one lane plus its capability set as
   the recommendation.
 - If no lane fits, use `custom` and define its capability set in the brief; never
@@ -128,7 +133,8 @@ aspect and resolution:
 - the intended texture and depth model, visible in the frame;
 - a motion cue: one still frame that shows the intended camera, parallax, or
   effect layer;
-- a 5-second audio preview, if voice or music is part of the brief.
+- a 5-second audio preview as a separate file next to the project (for example
+  `e00-preview.wav`), if voice or music is part of the brief.
 
 `e00` proves the contract. It is not a mood board and it is not a scene: it does
 not belong in `timeline.json` and the motion gate ignores it.

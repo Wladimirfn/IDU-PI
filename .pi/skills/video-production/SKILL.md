@@ -30,8 +30,8 @@ produce, never a house aesthetic.
   composition line for any multi-shot piece.
 - A named aesthetic preset is opt-in. `kanagawa-html` is one style, not the
   house look; in any other style it is loaded in craft-only mode.
-- Every new scene or presentation is audited at creation with its `guion.md`
-  lines, timeline beats, keyframe, and motion. The audit is part of creation, not
+- Every new scene or presentation is audited at creation with its narration
+  lines (or the beat's intent line when the piece has no narration), timeline beats, keyframe, and motion. The audit is part of creation, not
   an optional review.
 - The artistic audit and the technical gates are two separate verdicts. Neither
   substitutes for the other.
@@ -63,9 +63,13 @@ anything else, and record it as the first line of `style-brief.md`:
   vector experience are all valid. Never pick the intent from the technique.
 - A presentation beat that asserts the behaviour of something real and existing
   (a command, a test run, a UI, a file) is shown as a demonstration of that
-  thing. Diagrams are for what is abstract or invisible. If the harness cannot
-  capture the real thing, record that as a capability gap; do not draw a box
-  with its name.
+  thing: a capture of it, or its real output or content reproduced verbatim in
+  code. Run the command and show what it printed; open the file and show its
+  lines. Diagrams are for what is abstract or invisible. An invented stand-in or
+  a box with the artifact's name is not a demonstration; if the real thing
+  cannot be obtained, record a capability gap.
+- A request that pairs an experience format with content to explain ("a trailer
+  that shows what we built") is not settled by its words. Ask.
 - `references/video-lanes.json` holds the full defaults per intent under
   `intents`. `idu-pi video render` refuses a full render without a valid
   `Intent:` line.
@@ -86,9 +90,10 @@ must be able to produce**; the lane is only the label for that capability set.
 - A missing capability is a blocker or an explicitly approved downgrade. Never
   silently replace the missing shot with cards and text; that is how every lane
   collapses into the same explainer.
-- If the request names a style, reference, or aspect ratio, use it. If style is
-  missing or ambiguous, follow `references/style-brief.md` and ask one grouped
-  question. Never default to the previous project's look.
+- If the request names a style, reference, or aspect ratio, use it. If any
+  decision (intent, lane, style, audio) is missing or ambiguous, follow
+  `references/style-brief.md` and ask one grouped question for the unsettled
+  axes. Never default to the previous project's look.
 - If no lane fits, use `custom` and define its capability set in the style brief;
   never force a lane that changes the request's intent.
 - Start with the minimum useful set: one preproduction, one or two visual, one
@@ -114,7 +119,7 @@ Style is a decision, not a template. Before the first line of HTML, write
   logic, typography role, motion language — each with what it **is** and **is
   not**;
 - the shot/beat sheet: shot type, subject, composition, movement, transition,
-  and what must stay legible;
+  what must read, and the proof each beat needs;
 - character performance when the piece has characters (linked to
   `story-continuity/references/character-continuity.md`);
 - the asset strategy and the approved asset policy for this project;
@@ -158,9 +163,9 @@ Every new scene or presentation must pass two separate audits before it is
 accepted; both are part of creation, not an optional review.
 
 **Artistic audit** (`references/visual-qa.md`), before the keyframe is accepted:
-beat legibility, focal hierarchy, style fidelity, variety against the
+whether the beat reads for the declared intent, focal hierarchy, style fidelity, variety against the
 neighbouring shots, asset appropriateness, typography, motion motivation,
-composition, and reference use. A `block` verdict stops the scene.
+composition, reference use, and proof. A `block` verdict stops the scene.
 
 **Technical gates**, after the render: motion (`validar_motion.py`) and audio
 (`validar_video_audio.py`). They measure alignment, flicker, frozen frames,

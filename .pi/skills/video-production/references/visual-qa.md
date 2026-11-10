@@ -40,7 +40,7 @@ required by the narration; an element that looks fine may contradict the beat.
 | 7 | Motion motivation | Does each movement express the beat? | Decorative loops, idle float, motion for motion |
 | 8 | Composition | Safe areas, aspect framings, tangents, collisions | Subject clipped, accidental tangents, dead thirds |
 | 9 | Reference use | Borrowed what was named, copied nothing forbidden | A layout or brand was reproduced |
-| 10 | Proof | Does each `demo` beat show the real artifact working? | A real command, test run, UI or file is drawn as a labelled box |
+| 10 | Proof | Does every beat that asserts the behaviour of a real command, test run, UI or file show that artifact or its real output, whatever its `Proof` cell says? | The artifact is drawn as a labelled box, invented, or relabelled `diagram` to avoid showing it |
 
 ### Check 1 by intent
 

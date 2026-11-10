@@ -37,7 +37,7 @@
       "onScreenText": "expected",
       "beatUnit": "one claim",
       "beatReads": "A viewer who only sees the frame can state the claim.",
-      "proof": "A beat that asserts the behaviour of a real, existing artifact shows that artifact working. Diagrams are for what is abstract or invisible.",
+      "proof": "A beat that asserts the behaviour of a real, existing artifact shows that artifact working: a capture of it, or its real output or content reproduced verbatim in code. Diagrams are for what is abstract or invisible.",
       "e00MustProve": "one real claim shown the way the piece will show claims, with the type system in scene",
       "failsAs": "a narrated slide deck: the same headline-and-cards skeleton under a voice-over"
     },
@@ -294,7 +294,7 @@
       {
         "id": "aesthetic",
         "question": "Palette, typography, and motion rhythm?",
-        "default": "from art-direction.md plus one reference; never the previous project"
+        "default": "from art-direction.md plus one reference, never the previous project; rhythm follows the intent's time driver"
       },
       {
         "id": "audio",
@@ -309,7 +309,7 @@
       "Offer a recommended default and one or two alternatives, not an open questionnaire.",
       "Accept 'surprise me' and state the chosen lane with a one-line rationale.",
       "Record the asset policy per project with a reason; never inherit a ban.",
-      "Generate e00 with the real hero shot, palette, typography in scene, texture, and a 5-second audio preview.",
+      "Generate e00 with the real hero shot, palette, texture, what the intent says e00 must prove, and a 5-second audio preview file. Typography in scene only when the intent expects on-screen text.",
       "Do not render the full sequence before e00 approval; idu-pi video render enforces it.",
       "After a change, update only the affected decisions and regenerate e00."
     ]
