@@ -93,6 +93,7 @@ Create `style-brief.md` in the project root. Keep it short and machine-readable:
 # Style Brief
 
 - Intent: <presentation | story | experience>; <one line: why this and not the others>
+- Author: <harness>/<model that builds the composition, e.g. claude-code/fable>
 - Lane: <lane id from video-lanes.json>
 - Capabilities: <the lane capabilities this project actually uses>
 - Art direction: art-direction.md (approved: no)
@@ -113,6 +114,10 @@ Create `style-brief.md` in the project root. Keep it short and machine-readable:
 The `Intent` line starts with the intent id as a single word; the gate reads
 that word and ignores the rest of the line. `Voice: none` is the normal value
 for an experience, not an omission.
+
+The `Author` line names the harness that builds the piece. `idu-pi video audit`
+reads it to pick an auditor on a different harness, and refuses to run without
+it.
 
 The `Asset policy` line is a project decision, not a house rule. Record the
 reason. When the visual language needs an asset class the policy forbids, surface
@@ -154,6 +159,8 @@ not belong in `timeline.json` and the motion gate ignores it.
 - No lane before the intent. `idu-pi video render` refuses a full render whose
   brief has no valid `Intent:` line.
 - No full render before `e00` approval; `idu-pi video render` enforces this gate.
+- No full render before an independent audit of the keyframes; `idu-pi video
+  audit` produces it and `idu-pi video render` enforces it.
 - No multi-shot HTML before `art-direction.md` exists.
 - One primary engine per project. Other engines provide assets or effects, not a
   second timeline.

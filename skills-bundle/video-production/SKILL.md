@@ -35,6 +35,10 @@ produce, never a house aesthetic.
   an optional review.
 - The artistic audit and the technical gates are two separate verdicts. Neither
   substitutes for the other.
+- The author never approves its own scenes. `idu-pi video audit` sends the
+  keyframes to a model on another harness, and a full render is refused without
+  its verdict. Your own audit while building is how you get there, not the
+  approval.
 - One variable at a time: if a scene fails, first look at the diff image, then
   change a threshold. Never "fix" a gate by raising the bitrate.
 - No full render before the art direction, the style brief and
@@ -172,6 +176,29 @@ composition, reference use, and proof. A `block` verdict stops the scene.
 black frames, clipping, overlaps and duration. A passing gate never proves the
 scene reads; an artistic pass never excuses a flicker.
 
+### The independent audit
+
+Run your own artistic audit while you build; it is how scenes get good. It is
+not the approval. Before a full render:
+
+1. Make sure `style-brief.md` has `- Author: <harness>/<model>` naming who built
+   the composition (you). The auditor is chosen to be on a different harness.
+2. Run `idu-pi video audit --project <project>`. It spends one model call. The
+   auditor reads `references/visual-qa.md`, the brief, the art direction, the
+   script and every `keyframes/eNN.png`, and its verdict is written to
+   `audit/visual-qa.json`.
+3. Read the verdict. A `block` scene, a piece that "fell back" from its intent,
+   a `revise` scene that fails check 4 (repeated skeleton) or check 10 (a real
+   artifact drawn instead of shown), or a piece whose variety is `revise`, all
+   stop the render: fix the scene, not the audit file. Any other `revise` is
+   printed as a warning; fix it or tell the user which ones you left and why.
+4. Changing a keyframe or `art-direction.md` makes the audit stale. Re-run it
+   after the fixes; do not re-run it in a loop hoping for a different verdict.
+
+Never write or edit `audit/visual-qa.json` by hand, and never pass
+`--skip-style-gate` to get a delivery render past a verdict you disagree with.
+If you think the auditor is wrong, show the user the verdict and the frame.
+
 When auditing or redesigning a scene, the brief MUST include:
 
 - the piece's intent, so the scene is judged as what it is;
@@ -218,6 +245,10 @@ close-up, a full-bleed frame, type-only — not more cards.
    audit before accepting it; it is the contract the motion gate compares against.
 7. **Render the delivery video.**
    `idu-pi video render --project <project>`
+   Run `idu-pi video audit --project <project>` first: a full render also
+   enforces the audit gate (a fresh, independent `audit/visual-qa.json` with no
+   blocked scene, no repeated skeleton, no drawn-instead-of-shown artifact and
+   the intent delivered).
    Enforces the style gate on full renders (valid intent, lane exists, `art-direction.md`
    present, `e00` approved and rendered), resolves the duration from
    `data-duration`/`timeline.json`, picks the approved `*-hq.mp4` audio, finds
@@ -236,6 +267,8 @@ close-up, a full-bleed frame, type-only — not more cards.
 | Studio | `idu-pi video studio --project <dir>` |
 | Status | `idu-pi video status` |
 | HyperFrames status | `idu-pi video measure --project <dir>` |
+| Independent audit | `idu-pi video audit --project <dir>` (one model call) |
+| Audit with a chosen profile | add `--profile <idu-pi profile>` (must not be the author's harness) |
 | **Delivery render** | `idu-pi video render --project <dir>` |
 | Partial render | add `--end <s>` (style and motion gates skipped) |
 | Render + custom audio | add `--audio <file>` (default: newest `*-hq.mp4`) |
@@ -342,6 +375,11 @@ which is the evidence to inspect before changing any threshold.
 | `style gate: falta style-brief.md` | Project has no decisions recorded | Write the brief and approve `e00` |
 | `style gate: ... no declara Intent` | Brief written before the intent existed, or the decision was skipped | Add `- Intent: presentation \| story \| experience` as the first line of the brief |
 | `style gate: intent desconocido` | Typo, or a format name used as the intent | Use one of the ids under `intents` in `video-lanes.json` |
+| `audit gate: falta audit/visual-qa.json` | Nobody but the author looked at the piece | Run `idu-pi video audit` |
+| `audit gate: auditoría vencida` | A keyframe or `art-direction.md` changed after the audit | Re-run `idu-pi video audit` |
+| `audit gate: auditoría no independiente` | The auditor profile shares the author's harness | Re-run with `--profile` on another harness |
+| `audit gate: escena bloqueada` / `no cumple su intent` | The auditor's verdict | Fix the scene or the structure, then re-audit; never edit the audit file |
+| `video audit: ... no declara Author` | The brief does not say who built the piece | Add `- Author: <harness>/<model>` to `style-brief.md` |
 | `style gate: lane desconocida` | Lane typo or not in `video-lanes.json` | Fix the `Lane:` line or add the lane |
 | `style gate: e00 no aprobado` | Brief still says `Approved e00: no` | Present `e00`, get approval, update the line |
 | `style gate: falta art-direction.md` | HTML was written without the contract | Write it from the approved frames, then render |

@@ -146,6 +146,85 @@ test("video render refuses a missing art-direction contract", () => {
 	);
 });
 
+// A project that satisfies the whole style gate. What is left to refuse it is
+// the audit gate: nobody but the author has looked at the scenes.
+const STYLE_OK = {
+	"style-brief.md":
+		"# Style Brief\n- Intent: presentation\n- Author: claude-code/fable\n- Lane: vector-explainer\n- Approved e00: yes\n",
+	"art-direction.md": "# Art Direction\n- Approved: yes\n",
+	"keyframes/e00-styleboard.png": "styleboard",
+	"keyframes/e01.png": "frame one",
+};
+
+test("video render refuses a piece nobody but the author audited", () => {
+	assertRefused(project(STYLE_OK), /audit gate: falta audit\/visual-qa\.json/);
+});
+
+test("video render refuses an audit that predates the current keyframe", () => {
+	const audit = {
+		version: 1,
+		createdAt: "2026-11-10T00:00:00.000Z",
+		intent: "presentation",
+		author: "claude-code/fable",
+		auditor: { profile: "consult-gemini38", harness: "antigravity", model: "gemini", runId: "IDU-test" },
+		inputs: { keyframes: { e01: "hash of an earlier frame" }, artDirection: "hash of an earlier contract" },
+		piece: { intent: "delivered", became: "", variety: "pass", rhythm: "", capabilityGaps: [] },
+		scenes: [{ id: "e01", verdict: "pass", failed: [], evidence: "a terminal", fix: "" }],
+	};
+	assertRefused(
+		project({ ...STYLE_OK, "audit/visual-qa.json": JSON.stringify(audit) }),
+		/audit gate: auditoría vencida: e01/,
+	);
+});
+
+test("video audit refuses a brief that does not name its author", () => {
+	// Independence cannot be checked against an unknown author, so the audit is
+	// refused before any worker is spawned.
+	const dir = project({
+		...STYLE_OK,
+		"style-brief.md": "# Style Brief\n- Intent: presentation\n- Lane: vector-explainer\n- Approved e00: yes\n",
+	});
+	try {
+		const res = spawnSync(process.execPath, [CLI, "video", "audit", "--project", dir], { encoding: "utf8" });
+		assert.notEqual(res.status, 0);
+		assert.match(`${res.stdout ?? ""}${res.stderr ?? ""}`, /no declara `Author:`/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("video audit refuses an unknown intent before spending a model call", () => {
+	const dir = project({
+		...STYLE_OK,
+		"style-brief.md":
+			"# Style Brief\n- Intent: explainer\n- Author: claude-code/fable\n- Lane: vector-explainer\n- Approved e00: yes\n",
+	});
+	try {
+		const res = spawnSync(process.execPath, [CLI, "video", "audit", "--project", dir], { encoding: "utf8" });
+		assert.notEqual(res.status, 0);
+		assert.match(`${res.stdout ?? ""}${res.stderr ?? ""}`, /video audit: intent desconocido "explainer"/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("video audit refuses a profile on the author's own harness", () => {
+	// audit-claude is a built-in profile on the claude harness; the author in
+	// STYLE_OK is claude-code. The refusal happens before any worker starts.
+	const dir = project(STYLE_OK);
+	try {
+		const res = spawnSync(
+			process.execPath,
+			[CLI, "video", "audit", "--project", dir, "--profile", "audit-claude"],
+			{ encoding: "utf8" },
+		);
+		assert.notEqual(res.status, 0);
+		assert.match(`${res.stdout ?? ""}${res.stderr ?? ""}`, /mismo harness que el autor|no existe en/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test("video render reads a markdown-formatted brief", () => {
 	// "- **Intent:** ...", "- **Lane:** ..." and "- **Approved e00:** yes" must
 	// parse; the refusal has to be the missing contract, not a formatting false

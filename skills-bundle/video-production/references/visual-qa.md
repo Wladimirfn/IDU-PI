@@ -8,6 +8,22 @@ and is it saying the same thing the same way over and over.
 A passing gate does not make a good scene. A good scene does not excuse a
 flickering render.
 
+## Who audits
+
+Two readers use this document.
+
+- **The author**, while building: audit your own scenes with these checks so
+  they are good before anyone else sees them. This is craft, not approval.
+- **The independent auditor**, before delivery: `idu-pi video audit` hands this
+  document, the project files and the keyframes to a model on a different
+  harness. Its verdict is written to `audit/visual-qa.json` and a full render is
+  refused without it. The author does not approve its own work.
+
+If you are the independent auditor: be strict. Report what is on screen, not
+what was intended. A lenient pass ships a generic piece; a `block` costs one
+more iteration. Use `block` for comprehension and contract violations only,
+never for taste.
+
 ## When it runs
 
 1. **Before `e00` approval**: does the visual language exist at all?
@@ -120,11 +136,34 @@ rhythm: <one paragraph: where the piece breathes, where it repeats>
 capability gaps: <none | list>
 ```
 
+### The audit record
+
+`idu-pi video audit` stores the independent verdict in `audit/visual-qa.json`:
+the auditor and the author, the SHA-256 of every audited keyframe and of
+`art-direction.md`, the piece verdict (`intent`, `variety`, `rhythm`,
+`capabilityGaps`) and one entry per scene (`verdict`, `failed`, `evidence`,
+`fix`). The render gate reads it:
+
+| Condition | Result |
+| --- | --- |
+| No record | Refused |
+| A keyframe or the art direction changed since the audit | Refused as stale |
+| Auditor on the author's harness | Refused as not independent |
+| Piece verdict "fell back" | Refused |
+| Any scene `block` | Refused |
+| Scene `revise` that fails check 4 or check 10 | Refused: a repeated skeleton or a real artifact drawn instead of shown is what makes a piece read as a template |
+| Piece variety `revise` | Refused |
+| Any other scene `revise` | Printed as a warning |
+
+The record is produced by the command. Editing it by hand defeats the only
+check that someone else looked.
+
 ## Relationship to the technical gates
 
 | Verdict | Owner | Blocks delivery |
 | --- | --- | --- |
-| Artistic audit | `references/visual-qa.md` | Yes, on `block` |
+| Independent audit | `idu-pi video audit` -> `audit/visual-qa.json` | Yes: missing, stale, not independent, intent not delivered, or `block` |
+| Artistic audit while building | `references/visual-qa.md`, by the author | No; it is how scenes reach a passing audit |
 | Motion gate | `validar_motion.py` | Yes, on error |
 | Audio gate | `validar_video_audio.py` | Yes, on error |
 | Lint | `hyperframes lint` | Yes, on error; warnings advisory |

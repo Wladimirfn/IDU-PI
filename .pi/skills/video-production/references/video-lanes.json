@@ -19,6 +19,8 @@
     "artDirectionRequiredBeforeHtml": true,
     "e00ApprovalRequiredBeforeFullRender": true,
     "e00EnforcedBy": "idu-pi video render",
+    "independentAuditRequiredBeforeFullRender": true,
+    "independentAuditEnforcedBy": "idu-pi video render",
     "stylePresetPolicy": "A named aesthetic preset is opt-in. kanagawa-html contributes its tokens, fonts, ambient blur, particles and chart palette only when art-direction.md selects the Gentleman Kanagawa aesthetic; otherwise it is loaded in craft-only mode.",
     "craftOnlySkill": {
       "skill": "kanagawa-html",
@@ -63,6 +65,17 @@
       "e00MustProve": "texture, light and a motion cue at full quality, with the audio preview that drives the cut",
       "failsAs": "an explainer without words, or a loop with no progression"
     }
+  },
+  "audit": {
+    "command": "idu-pi video audit",
+    "record": "audit/visual-qa.json",
+    "contract": "references/visual-qa.md",
+    "independence": "The auditor runs on a harness different from the one named in the brief's Author line. The author never approves its own scenes.",
+    "boundTo": "SHA-256 of every keyframes/eNN.png and of art-direction.md; changing either makes the audit stale.",
+    "profiles": ["consult-gemini38", "audit-gemini", "consult-openai", "audit-claude"],
+    "profilesNote": "Tried in order; the first one present in the effective idu-pi profile list whose harness differs from the author's is used. The model must be able to read images.",
+    "blocksRender": ["missing", "stale", "not independent", "intent not delivered", "any scene with verdict block", "any scene that fails check 4 (repeated skeleton) or check 10 (real artifact drawn, not shown), even as revise", "variety revise"],
+    "warnsOnly": ["scene with verdict revise that fails no blocking check"]
   },
   "productionCapabilities": {
     "code-2d": "HTML/CSS/SVG/canvas composition rendered deterministically by HyperFrames or the frame renderer.",
