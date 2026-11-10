@@ -38,7 +38,8 @@ verdict bound to the exact keyframes is what makes it a checked one.
   audited keyframe and of `art-direction.md`.
 - `idu-pi video render` refuses a full render when the audit is missing, stale
   (a keyframe or the contract changed), not independent, reports the intent as
-  not delivered, or has a `block` scene. `revise` scenes are listed as warnings.
+  not delivered, or has a `block` scene. A `revise` that fails check 4 or 10
+  also refuses (T6); other `revise` scenes are listed as warnings.
 - The brief gains `- Author: <harness>/<model>`; the skill text describes the
   command, the file and the refusals.
 
@@ -92,8 +93,8 @@ metric computed in code.
   - Observation: an earlier free-form audit by the same model family counted
     five scenes on one skeleton; this run counted three and blocked none. The
     auditor is real and its evidence is concrete, but `revise` does not stop a
-    render, so this piece would still ship. Whether repeated-skeleton or
-    missing-proof findings should block is an open product decision.
+    render, so this piece would still ship. The owner then decided that
+    repeated-skeleton and missing-proof findings must block (T6).
 
 - [x] T5. Accepted review findings. Added after an independent code review by
   `audit-deepseek` (commandcode, DeepSeek), which verified several by running
@@ -131,12 +132,12 @@ metric computed in code.
     exit 0, 225 pass / 0 fail / 1 skip. The real record of
     `skills-system-explainer` now evaluates to 4 errors (e04, e05, e06,
     variety) and 0 warnings, so that piece is refused until it is redesigned.
-    The video was not touched.
+    The video was not touched. Commit `1df492d`.
 
 ## Progress
 
 - 2026-11-10: document created, all tasks pending.
-- 2026-11-10: T1 to T5 done. Authored change since `ae52dfc`, mirrors
+- 2026-11-10: T1 to T6 done. Authored change since `ae52dfc` up to T5, mirrors
   excluded: 1122 insertions, 12 deletions across 8 files. The forecast of 450
   was wrong by more than half; tests are about 480 of those lines and the
   review fixes added the rest.
