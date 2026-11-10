@@ -613,10 +613,19 @@ function readStyleBrief(
 	if (!existsSync(file)) return null;
 	/* El brief puede usar markdown (`- **Lane:** ...`); se normaliza antes de
 	   parsear para que el formato del documento no cambie el veredicto. */
-	const text = readFileSync(file, "utf8").replace(/\*\*/g, "");
-	/* El intent es una sola palabra; lo que siga en la línea es la razón. */
-	const intentMatch = text.match(/^\s*-\s*Intent:\s*([a-z-]+)/im);
-	const intent = intentMatch ? intentMatch[1].toLowerCase() : null;
+	/* Un bloque cercado es una plantilla o un ejemplo, no una decisión: se
+	   descarta antes de leer cualquier campo. */
+	const text = readFileSync(file, "utf8")
+		.replace(/```[\s\S]*?```/g, "")
+		.replace(/\*\*|`/g, "");
+	/* El intent es la primera palabra de su propia línea; lo que siga es la
+	   razón. `[ \t]` y no `\s`: un `Intent:` vacío no toma su valor de la línea
+	   siguiente. La palabra se devuelve entera para que el rechazo nombre lo
+	   que estaba escrito. */
+	const intentMatch = text.match(/^[ \t]*-[ \t]*Intent:[ \t]*(\S.*)$/im);
+	const intent = intentMatch
+		? intentMatch[1].trim().split(/[\s;:,.]+/)[0].toLowerCase() || null
+		: null;
 	const laneMatch = text.match(/^\s*-\s*Lane:\s*(.+)$/im);
 	const lane = laneMatch ? laneMatch[1].trim().split(/\s+/)[0].toLowerCase() : null;
 	const approvedE00 = /^\s*-\s*Approved e00:\s*(yes|sí|si|true|approved)\b/im.test(text);
