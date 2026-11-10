@@ -1,0 +1,219 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import {
+	AUDIT_VERSION,
+	type AuditFile,
+	auditFilePath,
+	buildAuditPrompt,
+	collectAuditInputs,
+	evaluateAudit,
+	listSceneKeyframes,
+	normalizeHarness,
+	parseAuditReply,
+	readBriefField,
+} from "../src/video-audit.js";
+
+// The artistic audit used to be prose that the authoring model approved for
+// itself. These cases pin the two things that make it a real verdict: a reply
+// that does not cover every scene is rejected, and an audit file that no longer
+// matches the keyframes, or that the author signed, does not open the gate.
+
+const SCENES = ["e01", "e02"];
+
+function reply(overrides: { piece?: object; scenes?: object[] } = {}): string {
+	const body = {
+		piece: { intent: "delivered", became: "", variety: "pass", rhythm: "steady", capabilityGaps: [] },
+		scenes: [
+			{ id: "e01", verdict: "pass", failed: [], evidence: "a terminal fills the frame", fix: "" },
+			{ id: "e02", verdict: "pass", failed: [], evidence: "one diagram, centred", fix: "" },
+		],
+		...overrides,
+	};
+	return `The piece reads as declared.\n\n\`\`\`json\n${JSON.stringify(body, null, 2)}\n\`\`\`\n`;
+}
+
+function project(): string {
+	const dir = mkdtempSync(join(tmpdir(), "idu-video-audit-"));
+	const files: Record<string, string> = {
+		"art-direction.md": "# Art Direction\n- Approved: yes\n",
+		"keyframes/e00-styleboard.png": "styleboard",
+		"keyframes/e01.png": "frame one",
+		"keyframes/e02.png": "frame two",
+	};
+	for (const [name, content] of Object.entries(files)) {
+		const path = join(dir, name);
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, content, "utf8");
+	}
+	return dir;
+}
+
+function writeAudit(dir: string, change: (audit: AuditFile) => void = () => {}): void {
+	const parsed = parseAuditReply(reply(), SCENES);
+	assert.equal(parsed.ok, true);
+	if (!parsed.ok) return;
+	const audit: AuditFile = {
+		version: AUDIT_VERSION,
+		createdAt: "2026-11-10T00:00:00.000Z",
+		intent: "presentation",
+		author: "claude-code/fable",
+		auditor: { profile: "consult-gemini38", harness: "antigravity", model: "gemini", runId: "IDU-test" },
+		inputs: collectAuditInputs(dir, SCENES),
+		...parsed.reply,
+	};
+	change(audit);
+	const path = auditFilePath(dir);
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(audit), "utf8");
+}
+
+function withProject(run: (dir: string) => void): void {
+	const dir = project();
+	try {
+		run(dir);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+}
+
+test("listSceneKeyframes returns the scenes and leaves the styleboard out", () => {
+	withProject((dir) => assert.deepEqual(listSceneKeyframes(dir), SCENES));
+});
+
+test("parseAuditReply accepts a verdict that covers every scene", () => {
+	const parsed = parseAuditReply(reply(), SCENES);
+	assert.equal(parsed.ok, true);
+	if (parsed.ok) assert.equal(parsed.reply.scenes.length, 2);
+});
+
+test("parseAuditReply rejects a verdict that skips a scene", () => {
+	const parsed = parseAuditReply(
+		reply({ scenes: [{ id: "e01", verdict: "pass", failed: [], evidence: "x", fix: "" }] }),
+		SCENES,
+	);
+	assert.equal(parsed.ok, false);
+	if (!parsed.ok) assert.match(parsed.error, /no cubre: e02/);
+});
+
+test("parseAuditReply rejects a verdict outside pass, revise, block", () => {
+	const parsed = parseAuditReply(
+		reply({
+			scenes: [
+				{ id: "e01", verdict: "looks fine", failed: [], evidence: "x", fix: "" },
+				{ id: "e02", verdict: "pass", failed: [], evidence: "x", fix: "" },
+			],
+		}),
+		SCENES,
+	);
+	assert.equal(parsed.ok, false);
+	if (!parsed.ok) assert.match(parsed.error, /veredicto inválido en e01/);
+});
+
+test("parseAuditReply rejects a failing verdict with no evidence", () => {
+	// "block" with nothing on screen to point at is an opinion, not an audit.
+	const parsed = parseAuditReply(
+		reply({
+			scenes: [
+				{ id: "e01", verdict: "block", failed: [4], evidence: "", fix: "change it" },
+				{ id: "e02", verdict: "pass", failed: [], evidence: "x", fix: "" },
+			],
+		}),
+		SCENES,
+	);
+	assert.equal(parsed.ok, false);
+	if (!parsed.ok) assert.match(parsed.error, /sin evidencia en: e01/);
+});
+
+test("parseAuditReply rejects a reply with no JSON verdict", () => {
+	const parsed = parseAuditReply("Everything looks great, approved.", SCENES);
+	assert.equal(parsed.ok, false);
+});
+
+test("normalizeHarness treats aliases of one harness as the same auditor", () => {
+	assert.equal(normalizeHarness("claude-code/fable"), normalizeHarness("claude"));
+	assert.equal(normalizeHarness("agy"), normalizeHarness("antigravity"));
+	assert.notEqual(normalizeHarness("claude-code/fable"), normalizeHarness("antigravity"));
+});
+
+test("readBriefField reads a bold field and ignores an empty one", () => {
+	assert.equal(readBriefField("- **Author:** claude-code/fable\n", "Author"), "claude-code/fable");
+	assert.equal(readBriefField("- Author:\n- Lane: custom\n", "Author"), null);
+});
+
+test("buildAuditPrompt names every keyframe and the declared intent", () => {
+	const prompt = buildAuditPrompt({
+		intent: "story",
+		sceneIds: SCENES,
+		hasScript: false,
+		hasTimeline: true,
+		contractPath: "/skills/visual-qa.md",
+	});
+	assert.match(prompt, /keyframes\/e01\.png, keyframes\/e02\.png/);
+	assert.match(prompt, /declares the intent `story`/);
+	assert.doesNotMatch(prompt, /guion\.md/);
+});
+
+test("evaluateAudit refuses a project nobody audited", () => {
+	withProject((dir) => {
+		const { errors } = evaluateAudit(dir);
+		assert.match(errors.join("\n"), /falta audit\/visual-qa\.json/);
+	});
+});
+
+test("evaluateAudit accepts a fresh independent audit that passes", () => {
+	withProject((dir) => {
+		writeAudit(dir);
+		assert.deepEqual(evaluateAudit(dir), { errors: [], warnings: [] });
+	});
+});
+
+test("evaluateAudit refuses an audit older than a keyframe", () => {
+	withProject((dir) => {
+		writeAudit(dir);
+		writeFileSync(join(dir, "keyframes", "e02.png"), "frame two, redesigned", "utf8");
+		assert.match(evaluateAudit(dir).errors.join("\n"), /auditoría vencida: e02/);
+	});
+});
+
+test("evaluateAudit refuses an audit older than the art direction", () => {
+	withProject((dir) => {
+		writeAudit(dir);
+		writeFileSync(join(dir, "art-direction.md"), "# Art Direction\n- Approved: yes\n- changed\n", "utf8");
+		assert.match(evaluateAudit(dir).errors.join("\n"), /art-direction\.md cambió/);
+	});
+});
+
+test("evaluateAudit refuses an audit signed by the author's own harness", () => {
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.auditor = { profile: "audit-claude", harness: "claude", model: "opus", runId: "IDU-test" };
+		});
+		assert.match(evaluateAudit(dir).errors.join("\n"), /no independiente/);
+	});
+});
+
+test("evaluateAudit refuses a piece that did not deliver its intent", () => {
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.piece.intent = "fell-back";
+			audit.piece.became = "a narrated slide deck";
+		});
+		assert.match(evaluateAudit(dir).errors.join("\n"), /no cumple su intent `presentation`.*slide deck/);
+	});
+});
+
+test("evaluateAudit blocks on a blocked scene and only warns on revise", () => {
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.scenes[0] = { id: "e01", verdict: "revise", failed: [2], evidence: "two focal points", fix: "shrink the label" };
+			audit.scenes[1] = { id: "e02", verdict: "block", failed: [4], evidence: "same skeleton as e01", fix: "use a close-up" };
+		});
+		const { errors, warnings } = evaluateAudit(dir);
+		assert.equal(errors.length, 1);
+		assert.match(errors[0], /escena bloqueada e02 \(checks 4\)/);
+		assert.match(warnings.join("\n"), /a revisar e01/);
+	});
+});
