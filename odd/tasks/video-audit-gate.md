@@ -113,9 +113,8 @@ metric computed in code.
   - Not accepted: binding the audit to the whole `style-brief.md` by hash; it
     would expire the audit on any brief edit and cost a model call. The gate
     compares the intent and the author instead.
-  - Not covered by tests: a worker that ends in a status other than
-    `completed`, and the path that saves `visual-qa.raw.txt`; both need a
-    worker double.
+  - Covered by T7: a worker that ends in a status other than `completed`, and
+    the path that saves `visual-qa.raw.txt`, through an injected delegate.
   - Checks: `corepack pnpm verify`.
   - Evidence: RED observed on nine new unit tests, then `corepack pnpm verify`
     exit 0, 222 pass / 0 fail / 1 skip. The real record of
@@ -134,6 +133,16 @@ metric computed in code.
     variety) and 0 warnings, so that piece is refused until it is redesigned.
     The video was not touched. Commit `1df492d`.
 
+- [x] T7. Worker-double coverage: extracted `runVideoAuditCore` into
+  `src/video-audit.ts` with an injected delegate, profile map, contract resolver
+  and gate; `src/cli.ts` keeps a thin wrapper over the real manager.
+  - Acceptance: a worker that does not complete, a reply that cannot be parsed
+    (raw file kept, no verdict written), a dispatch failure, and a valid reply
+    are covered without spawning a model.
+  - Checks: `corepack pnpm test`, `corepack pnpm verify`.
+  - Evidence: 4 new tests in `test/video-audit-run.test.ts`; `corepack pnpm
+    verify` exit 0, 229 pass / 0 fail / 1 skip. Commit `de0ec3b`.
+
 ## Progress
 
 - 2026-11-10: document created, all tasks pending.
@@ -147,14 +156,24 @@ metric computed in code.
   nothing was added there. `- **Author:** opencode (...)` was added to
   `skills-system-explainer` by the orchestrator, inferred from the build
   session id format; the model was not recorded.
+- 2026-11-10: T7 done. The audit runner is testable with a delegate double; the
+  non-completed and unreadable paths no longer rely on a real worker.
+- 2026-11-10: `skills-system-explainer` redesigned after T6: e02-e07 revised,
+  independent audit 7/7 pass (intent delivered, variety pass, 0 warnings),
+  motion gate 0 px / 1.00 / 0.0, final render
+  `renders/skills-system-explainer_2026-11-10T11-24-30.mp4`. The author line is
+  now `opencode/deepseek-v4.1-flash`.
 
 ## Open decisions for the owner
 
-- Pull request slicing: this branch now holds two features well past the
-  400-line budget. Slice boundary proposed at `ae52dfc`.
+- Pull request slicing: local branch `feat/video-intent-gate` at `ae52dfc` is
+  prepared; `feat/style-first-video` holds the audit gate plus T7, ahead 16 and
+  unpushed. `main..ae52dfc` is 59 files / +7,175 (skill mirrors included);
+  `ae52dfc..HEAD` is 17 files / +1,521. The owner chooses the chain strategy and
+  the approved issues before any pull request.
 
 ## Next step
 
-Feature complete on the branch, not pushed. Follow-ups in the order
-recommended: timeline driver per intent in the motion gate, live demonstration
-capture, character pipeline.
+Feature complete on the branch, not pushed. The worker-double test gap is closed.
+Follow-ups in order: the owner's PR slicing decision; timeline driver per intent
+in the motion gate; live demonstration capture; character pipeline.
