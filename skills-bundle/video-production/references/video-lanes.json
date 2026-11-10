@@ -74,8 +74,8 @@
     "boundTo": "SHA-256 of every keyframes/eNN.png and of art-direction.md; changing either makes the audit stale.",
     "profiles": ["consult-gemini38", "audit-gemini", "consult-openai", "audit-claude"],
     "profilesNote": "Tried in order; the first one present in the effective idu-pi profile list whose harness differs from the author's is used. The model must be able to read images.",
-    "blocksRender": ["missing", "stale", "not independent", "intent not delivered", "any scene with verdict block"],
-    "warnsOnly": ["scene with verdict revise", "variety revise"]
+    "blocksRender": ["missing", "stale", "not independent", "intent not delivered", "any scene with verdict block", "any scene that fails check 4 (repeated skeleton) or check 10 (real artifact drawn, not shown), even as revise", "variety revise"],
+    "warnsOnly": ["scene with verdict revise that fails no blocking check"]
   },
   "productionCapabilities": {
     "code-2d": "HTML/CSS/SVG/canvas composition rendered deterministically by HyperFrames or the frame renderer.",

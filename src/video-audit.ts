@@ -20,6 +20,12 @@ export const AUDIT_VERSION = 1;
 
 export type SceneVerdict = "pass" | "revise" | "block";
 
+/* Los dos defectos que hacen que una pieza parezca una plantilla: un esqueleto
+   repetido (check 4) y un artefacto real dibujado en vez de mostrado (check 10).
+   Un `revise` que falle alguno frena el render igual que un `block`; el resto de
+   los `revise` son avisos. */
+export const BLOCKING_CHECKS = [4, 10];
+
 export interface AuditScene {
 	id: string;
 	verdict: SceneVerdict;
@@ -180,6 +186,7 @@ export function buildAuditPrompt(options: {
 		"- A beat that asserts the behaviour of a real command, test run, UI or file fails check 10 if the frame shows a labelled box or an invented stand-in instead of the artifact or its real output.",
 		"- `block` is for a scene that misreads its beat, breaks the declared language, or duplicates a neighbour. Taste is never a reason.",
 		"- A scene with any failed check is `revise` or `block`, never `pass`.",
+		"- A failed check 4 (repeated skeleton) or check 10 (a real artifact drawn instead of shown) stops the render even on a `revise` scene, so list those check numbers in `failed` whenever they apply. Do not soften a verdict to avoid stopping the render.",
 		"",
 		"Reply with your reasoning in at most ten lines, then end with exactly one fenced JSON block in this shape and nothing after it:",
 		"",
@@ -391,11 +398,13 @@ export function evaluateAudit(project: string): { errors: string[]; warnings: st
 		const checks = failed.length > 0 ? ` (checks ${failed.join(", ")})` : "";
 		const line = `${id}${checks}: ${asText(scene.evidence)}${scene.fix ? ` -> ${scene.fix}` : ""}`;
 		if (verdict === "block") errors.push(`escena bloqueada ${line}`);
-		else if (verdict === "revise") warnings.push(`a revisar ${line}`);
+		else if (verdict === "revise" && failed.some((n) => BLOCKING_CHECKS.includes(Number(n)))) {
+			errors.push(`escena a corregir ${line}. Esqueleto repetido o artefacto real sin mostrar: bloquea el render`);
+		} else if (verdict === "revise") warnings.push(`a revisar ${line}`);
 		else if (verdict !== "pass") errors.push(`veredicto desconocido "${asText(scene.verdict)}" en ${id}. ${rerun}`);
 	}
 	if (asText(audit.piece.variety).toLowerCase() === "revise") {
-		warnings.push(`variedad a revisar: ${asText(audit.piece.rhythm)}`);
+		errors.push(`variedad: ${asText(audit.piece.rhythm)}. Una pieza que repite su esqueleto bloquea el render`);
 	}
 	return { errors, warnings };
 }

@@ -187,10 +187,11 @@ not the approval. Before a full render:
    auditor reads `references/visual-qa.md`, the brief, the art direction, the
    script and every `keyframes/eNN.png`, and its verdict is written to
    `audit/visual-qa.json`.
-3. Read the verdict. A `block` scene, or a piece that "fell back" from its
-   intent, stops the render: fix the scene, not the audit file. `revise` items
-   are printed as warnings; fix them or tell the user which ones you left and
-   why.
+3. Read the verdict. A `block` scene, a piece that "fell back" from its intent,
+   a `revise` scene that fails check 4 (repeated skeleton) or check 10 (a real
+   artifact drawn instead of shown), or a piece whose variety is `revise`, all
+   stop the render: fix the scene, not the audit file. Any other `revise` is
+   printed as a warning; fix it or tell the user which ones you left and why.
 4. Changing a keyframe or `art-direction.md` makes the audit stale. Re-run it
    after the fixes; do not re-run it in a loop hoping for a different verdict.
 
@@ -246,7 +247,8 @@ close-up, a full-bleed frame, type-only — not more cards.
    `idu-pi video render --project <project>`
    Run `idu-pi video audit --project <project>` first: a full render also
    enforces the audit gate (a fresh, independent `audit/visual-qa.json` with no
-   blocked scene and the intent delivered).
+   blocked scene, no repeated skeleton, no drawn-instead-of-shown artifact and
+   the intent delivered).
    Enforces the style gate on full renders (valid intent, lane exists, `art-direction.md`
    present, `e00` approved and rendered), resolves the duration from
    `data-duration`/`timeline.json`, picks the approved `*-hq.mp4` audio, finds

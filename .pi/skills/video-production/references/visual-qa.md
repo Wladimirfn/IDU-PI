@@ -151,7 +151,9 @@ the auditor and the author, the SHA-256 of every audited keyframe and of
 | Auditor on the author's harness | Refused as not independent |
 | Piece verdict "fell back" | Refused |
 | Any scene `block` | Refused |
-| Scene `revise`, variety `revise` | Printed as a warning |
+| Scene `revise` that fails check 4 or check 10 | Refused: a repeated skeleton or a real artifact drawn instead of shown is what makes a piece read as a template |
+| Piece variety `revise` | Refused |
+| Any other scene `revise` | Printed as a warning |
 
 The record is produced by the command. Editing it by hand defeats the only
 check that someone else looked.

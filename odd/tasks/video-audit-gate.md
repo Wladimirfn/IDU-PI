@@ -121,6 +121,18 @@ metric computed in code.
     `skills-system-explainer` still evaluates to 0 errors and 4 warnings.
     Commit `d0ebe6f`.
 
+- [x] T6. Owner decision on `revise`: a `revise` scene that fails check 4
+  (repeated skeleton) or check 10 (real artifact drawn, not shown), and a piece
+  whose variety is `revise`, now stop the render like a `block`. Any other
+  `revise` stays a warning. The auditor's brief tells it so and not to soften
+  verdicts to avoid stopping the render.
+  - Checks: `corepack pnpm verify`.
+  - Evidence: RED observed on three new tests, then `corepack pnpm verify`
+    exit 0, 225 pass / 0 fail / 1 skip. The real record of
+    `skills-system-explainer` now evaluates to 4 errors (e04, e05, e06,
+    variety) and 0 warnings, so that piece is refused until it is redesigned.
+    The video was not touched.
+
 ## Progress
 
 - 2026-11-10: document created, all tasks pending.
@@ -137,9 +149,6 @@ metric computed in code.
 
 ## Open decisions for the owner
 
-- Should a `revise` on check 4 (repeated skeleton) or check 10 (missing proof)
-  stop a render? Today only `block` and an undelivered intent do, and the real
-  run let `skills-system-explainer` through with three such warnings.
 - Pull request slicing: this branch now holds two features well past the
   400-line budget. Slice boundary proposed at `ae52dfc`.
 

@@ -300,6 +300,36 @@ test("evaluateAudit refuses a piece that did not deliver its intent", () => {
 	});
 });
 
+test("evaluateAudit blocks a revise that fails the repeated-skeleton check", () => {
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.scenes[1] = { id: "e02", verdict: "revise", failed: [4], evidence: "same skeleton as e01", fix: "close-up" };
+		});
+		const { errors } = evaluateAudit(dir);
+		assert.equal(errors.length, 1);
+		assert.match(errors[0], /escena a corregir e02 \(checks 4\).*bloquea el render/);
+	});
+});
+
+test("evaluateAudit blocks a revise that fails the proof check", () => {
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.scenes[0] = { id: "e01", verdict: "revise", failed: [2, 10], evidence: "a box named tests", fix: "show the run" };
+		});
+		assert.match(evaluateAudit(dir).errors.join("\n"), /escena a corregir e01 \(checks 2, 10\)/);
+	});
+});
+
+test("evaluateAudit blocks a piece whose variety is revise", () => {
+	withProject((dir) => {
+		writeAudit(dir, (audit) => {
+			audit.piece.variety = "revise";
+			audit.piece.rhythm = "three scenes repeat one layout";
+		});
+		assert.match(evaluateAudit(dir).errors.join("\n"), /variedad: three scenes repeat one layout/);
+	});
+});
+
 test("evaluateAudit reads a record whose scene has no failed list", () => {
 	// A record written by another version of the command must not crash the
 	// render gate; the verdict still decides.
