@@ -135,6 +135,8 @@ test("parseAuditReply rejects a reply with no JSON verdict", () => {
 test("normalizeHarness treats aliases of one harness as the same auditor", () => {
 	assert.equal(normalizeHarness("claude-code/fable"), normalizeHarness("claude"));
 	assert.equal(normalizeHarness("agy"), normalizeHarness("antigravity"));
+	// A note after the harness must not turn it into a different auditor.
+	assert.equal(normalizeHarness("opencode (model not recorded)"), "opencode");
 	assert.notEqual(normalizeHarness("claude-code/fable"), normalizeHarness("antigravity"));
 });
 

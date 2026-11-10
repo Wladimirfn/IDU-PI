@@ -92,7 +92,8 @@ const HARNESS_ALIASES: Record<string, string> = {
 /* El mismo harness aparece con varios nombres según quién lo escriba. Dos
    nombres del mismo harness no son dos auditores. */
 export function normalizeHarness(name: string): string {
-	const key = name.trim().toLowerCase().split("/")[0].replace(/\s+/g, "-");
+	/* `claude-code/fable (nota)` y `claude-code` nombran el mismo harness. */
+	const key = name.trim().toLowerCase().split(/[\s/]+/)[0];
 	return HARNESS_ALIASES[key] ?? key;
 }
 
