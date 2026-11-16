@@ -63,6 +63,25 @@ export function resolveSessionProfile(
  *
  * Pure: no I/O, so it is directly unit-testable.
  */
+const HARNESS_ALIASES: Record<string, string> = {
+	"claude-code": "claude",
+	"pi-cli": "pi",
+	"kimi-code": "kimi",
+	"qwen-code": "qwen",
+	agy: "antigravity",
+	cmdc: "commandcode",
+	"minimax-code": "mcode",
+};
+
+/**
+ * Canonicalizes equivalent CLI harness names while keeping distinct runtimes
+ * (such as `pi` vs `gentle-shell`) separate so their session stores never collide.
+ */
+export function canonicalHarnessName(harness: string): string {
+	const normalized = harness.trim().toLowerCase();
+	return HARNESS_ALIASES[normalized] ?? normalized;
+}
+
 export function checkSessionHarnessAffinity(
 	owner: Pick<SessionTreeEntry, "harness" | "profile"> | undefined,
 	sessionId: string,
@@ -70,7 +89,7 @@ export function checkSessionHarnessAffinity(
 	force = false,
 ): string | null {
 	if (!owner?.harness || !target.harness) return null;
-	if (owner.harness === target.harness) return null;
+	if (canonicalHarnessName(owner.harness) === canonicalHarnessName(target.harness)) return null;
 	if (force) return null;
 	return (
 		`SESSION HARNESS MISMATCH: session "${sessionId}" was created by harness "${owner.harness}" ` +

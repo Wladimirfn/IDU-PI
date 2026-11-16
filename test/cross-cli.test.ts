@@ -7,8 +7,14 @@ import {
 } from "../src/process-manager.js";
 import { killProcessTree, isProcessAlive } from "../src/process-utils.js";
 import { acquireSessionLock } from "../src/session-lock.js";
-import { resolveSessionProfile, checkSessionHarnessAffinity, shouldCountTurn, resolveHardCapMs } from "../src/session-policy.js";
-import { aliasToUuid, findOwnerSessionEntry, getSessionKey } from "../src/session-ids.js";
+import {
+	resolveSessionProfile,
+	checkSessionHarnessAffinity,
+	canonicalHarnessName,
+	shouldCountTurn,
+	resolveHardCapMs,
+} from "../src/session-policy.js";
+import { aliasToUuid, findOwnerSessionEntry, getSessionKey, extractNativeSessionId } from "../src/session-ids.js";
 import { extractCleanSummary } from "../src/summary.js";
 import { getProfile, IDU_SESSIONS_DIR, IDU_LOGS_DIR } from "../src/config.js";
 import type { IduConfig, IduProfile, RunRecord } from "../src/types.js";
@@ -829,6 +835,40 @@ test("Session Triad: buildWorkerArgs handles OpenCode Turn 1 without --session a
 	assert.ok(forked.args.includes("--fork"));
 });
 
+test("Session Triad: OpenCode omits invalid raw UUID --session on resume/fork while keeping native ses_ IDs", () => {
+	const opencodeProfile: IduProfile = { harness: "opencode", model: "deepseek-v4-flash", provider: "nan" };
+	const rawUuid = "12345678-1234-4234-8234-123456789abc";
+
+	const resumedWithoutNative = buildWorkerArgs(opencodeProfile, "Retry turn", [], mockConfig, {
+		sessionId: rawUuid,
+		isResumed: true,
+	});
+	assert.ok(!resumedWithoutNative.args.includes("--session"), "Raw UUID must not be passed to OpenCode v2.3+ --session");
+
+	const resumedWithNative = buildWorkerArgs(opencodeProfile, "Resume turn", [], mockConfig, {
+		sessionId: rawUuid,
+		nativeSessionId: "ses_abc123xyz",
+		isResumed: true,
+	});
+	assert.ok(resumedWithNative.args.includes("--session"));
+	assert.equal(resumedWithNative.args[resumedWithNative.args.indexOf("--session") + 1], "ses_abc123xyz");
+
+	const forkWithoutNative = buildWorkerArgs(opencodeProfile, "Fork turn", [], mockConfig, {
+		parentSessionId: rawUuid,
+		fork: true,
+	});
+	assert.ok(!forkWithoutNative.args.includes("--session"));
+
+	const forkWithNative = buildWorkerArgs(opencodeProfile, "Fork turn", [], mockConfig, {
+		parentSessionId: rawUuid,
+		parentNativeSessionId: "ses_parent99",
+		fork: true,
+	});
+	assert.ok(forkWithNative.args.includes("--session"));
+	assert.equal(forkWithNative.args[forkWithNative.args.indexOf("--session") + 1], "ses_parent99");
+	assert.ok(forkWithNative.args.includes("--fork"));
+});
+
 test("Session Triad: buildWorkerArgs handles Pi CLI --session-id, --session, and --fork", () => {
 	const piProfile: IduProfile = { harness: "pi", model: "MiniMax-M3" };
 	const sessId = "session-test-456";
@@ -913,7 +953,7 @@ test("buildWorkerArgs builds correct argv for minimax Code (mcode) as implemente
 	assert.equal(command, "mcode.cmd");
 	assert.equal(args[0], "exec", "mcode must use the headless exec subcommand, not the TUI");
 	assert.ok(args.includes("--output-format"));
-	assert.equal(args[args.indexOf("--output-format") + 1], "json");
+	assert.equal(args[args.indexOf("--output-format") + 1], "stream-json");
 
 	// The default policy is "smart", which prompts interactively and hangs a
 	// detached worker. Implementers must get "full" explicitly.
@@ -944,6 +984,16 @@ test("buildWorkerArgs joins provider and model at most once for minimax Code", (
 	const model = args[args.indexOf("--model") + 1];
 	assert.equal(model, "minimax/MiniMax-M3.1-Flash-Preview");
 	assert.ok(!model.includes("minimax/minimax"), `double-joined model: ${model}`);
+
+	// Non-minimax providers in mcode 0.7.x map to custom_provider:<provider>/<model>
+	const nanProfile: IduProfile = {
+		harness: "mcode",
+		provider: "nan",
+		model: "deepseek-v4-flash",
+		permissions: "workspace",
+	};
+	const nanBuilt = buildWorkerArgs(nanProfile, "Task", [], mockConfig);
+	assert.equal(nanBuilt.args[nanBuilt.args.indexOf("--model") + 1], "custom_provider:nan/deepseek-v4-flash");
 });
 
 test("buildWorkerArgs gives minimax Code a read-only permission policy", () => {
@@ -1042,6 +1092,21 @@ test("checkSessionHarnessAffinity refuses a cross-harness resume and --force ove
 
 	// Missing harness on either side cannot be compared, so it passes.
 	assert.equal(checkSessionHarnessAffinity({ harness: "", profile: "x" }, "s", cross), null);
+});
+
+test("canonicalHarnessName & checkSessionHarnessAffinity normalize CLI aliases while keeping pi vs gentle-shell distinct", () => {
+	assert.equal(canonicalHarnessName("pi-cli"), "pi");
+	assert.equal(canonicalHarnessName("claude-code"), "claude");
+	assert.equal(canonicalHarnessName("cmdc"), "commandcode");
+	assert.equal(canonicalHarnessName("agy"), "antigravity");
+	assert.equal(canonicalHarnessName("minimax-code"), "mcode");
+
+	assert.equal(checkSessionHarnessAffinity({ harness: "pi", profile: "p" }, "s1", { harness: "pi-cli", profileName: "p2" }), null);
+	assert.equal(checkSessionHarnessAffinity({ harness: "agy", profile: "a" }, "s2", { harness: "antigravity", profileName: "a2" }), null);
+	assert.equal(checkSessionHarnessAffinity({ harness: "cmdc", profile: "c" }, "s3", { harness: "commandcode", profileName: "c2" }), null);
+
+	const piVsGs = checkSessionHarnessAffinity({ harness: "pi", profile: "p" }, "s4", { harness: "gentle-shell", profileName: "gs" });
+	assert.ok(piVsGs, "pi and gentle-shell use separate session stores and must not silently mix");
 });
 
 test("shouldCountTurn only counts runs that actually completed", () => {
@@ -1972,6 +2037,354 @@ test("checkActiveSddAttempt detects heuristic markers and permits non-SDD tasks"
 	// 2. Regular non-SDD task triggers blocked: false
 	const res2 = checkActiveSddAttempt(process.cwd(), "Check memory health and git status");
 	assert.equal(res2.blocked, false);
+});
+
+test("buildWorkerArgs handles updated compatibility flags across all 10 CLI harnesses", () => {
+	const compatConfig: IduConfig = {
+		...mockConfig,
+		clis: {
+			claude: { command: "claude.cmd", argsTemplate: ["-p", "--output-format", "stream-json", "--verbose"] },
+			opencode: { command: "opencode.cmd", argsTemplate: ["run", "--format", "json", "--auto"] },
+			pi: { command: "pi.cmd", argsTemplate: ["--mode", "json", "-p"] },
+			"gentle-shell": { command: "gentle-shell.cmd", argsTemplate: ["--mode", "json", "-p"] },
+			codex: { command: "codex.cmd", argsTemplate: ["exec", "--json", "--skip-git-repo-check", "-s", "workspace-write"] },
+			kimi: { command: "kimi.cmd", argsTemplate: ["--output-format", "stream-json", "-p"] },
+			qwen: { command: "qwen.cmd", argsTemplate: ["-o", "stream-json"] },
+			antigravity: { command: "agy.cmd", argsTemplate: ["chat", "-p", "--output-format", "stream-json"] },
+			commandcode: { command: "cmdc.cmd", argsTemplate: ["-p", "--output-format", "stream-json", "--no-auto-update"] },
+			mcode: { command: "mcode.cmd", argsTemplate: ["exec", "--output-format", "stream-json"] },
+		},
+	};
+
+	// Claude read-only uses --permission-mode plan instead of bypassPermissions
+	const claudeRo = buildWorkerArgs({ harness: "claude", permissions: "read-only" }, "Inspect", [], compatConfig);
+	assert.equal(claudeRo.args[claudeRo.args.indexOf("--permission-mode") + 1], "plan");
+	assert.ok(!claudeRo.args.includes("bypassPermissions"));
+
+	// Pi and Gentle Shell pass --mode json and restrict --tools on read-only
+	for (const h of ["pi", "gentle-shell"] as const) {
+		const ro = buildWorkerArgs({ harness: h, provider: "nan", model: "hy4", permissions: "read-only" }, "Audit", [], compatConfig);
+		assert.equal(ro.args[ro.args.indexOf("--mode") + 1], "json");
+		assert.equal(ro.args[ro.args.indexOf("--tools") + 1], "read,grep,find,ls");
+
+		const resumed = buildWorkerArgs(
+			{ harness: h },
+			"Follow up",
+			[],
+			compatConfig,
+			{ isResumed: true, sessionId: "alias-1", nativeSessionId: "pi-native-sess-42" },
+		);
+		assert.equal(resumed.args[resumed.args.indexOf("--session") + 1], "pi-native-sess-42");
+	}
+
+	// Codex Turn 1 read-only includes -s read-only; resume/fork strip -s and use native thread ID
+	const codexTurn1 = buildWorkerArgs({ harness: "codex", permissions: "read-only" }, "Audit", [], compatConfig);
+	assert.ok(codexTurn1.args.includes("--json"));
+	assert.ok(codexTurn1.args.includes("--skip-git-repo-check"));
+	assert.equal(codexTurn1.args[codexTurn1.args.indexOf("-s") + 1], "read-only");
+
+	const codexResume = buildWorkerArgs(
+		{ harness: "codex", permissions: "read-only" },
+		"Continue",
+		[],
+		compatConfig,
+		{ isResumed: true, sessionId: "a", nativeSessionId: "019d-thread-id" },
+	);
+	assert.ok(codexResume.args.includes("resume"));
+	assert.ok(codexResume.args.includes("019d-thread-id"));
+	assert.ok(!codexResume.args.includes("-s"), "codex exec resume must not pass -s");
+
+	// Kimi omits --auto and omits -S on Turn 1, passes -S nativeSessionId on resume
+	const kimiTurn1 = buildWorkerArgs(
+		{ harness: "kimi", provider: "nan", model: "deepseek-v4-pro" },
+		"Hello",
+		[],
+		compatConfig,
+		{ sessionId: "non-existent-uuid" },
+	);
+	assert.ok(!kimiTurn1.args.includes("--auto"));
+	assert.ok(!kimiTurn1.args.includes("-S"));
+	assert.equal(kimiTurn1.args[kimiTurn1.args.indexOf("--output-format") + 1], "stream-json");
+
+	const kimiResume = buildWorkerArgs(
+		{ harness: "kimi" },
+		"Next",
+		[],
+		compatConfig,
+		{ isResumed: true, sessionId: "alias", nativeSessionId: "kimi-native-99" },
+	);
+	assert.equal(kimiResume.args[kimiResume.args.indexOf("-S") + 1], "kimi-native-99");
+
+	// Qwen Nan BYOK flags, approval modes, and UUID gate on --session-id
+	const qwenNan = buildWorkerArgs(
+		{ harness: "qwen", provider: "nan", model: "qwen3.8-max", permissions: "read-only" },
+		"Check",
+		[],
+		compatConfig,
+		{ sessionId: "550e8400-e29b-41d4-a716-446655440000" },
+	);
+	assert.equal(qwenNan.args[qwenNan.args.indexOf("-o") + 1], "stream-json");
+	assert.equal(qwenNan.args[qwenNan.args.indexOf("--auth-type") + 1], "openai");
+	assert.equal(qwenNan.args[qwenNan.args.indexOf("--openai-base-url") + 1], "https://api.nan.builders/v1");
+	assert.equal(qwenNan.args[qwenNan.args.indexOf("--approval-mode") + 1], "plan");
+	assert.equal(qwenNan.args[qwenNan.args.indexOf("--session-id") + 1], "550e8400-e29b-41d4-a716-446655440000");
+
+	const qwenAlias = buildWorkerArgs(
+		{ harness: "qwen", permissions: "workspace" },
+		"Edit",
+		[],
+		compatConfig,
+		{ sessionId: "not-a-uuid" },
+	);
+	assert.ok(qwenAlias.args.includes("-y"));
+	assert.ok(!qwenAlias.args.includes("--session-id"));
+
+	// Antigravity maps legacy pro alias to gemini-4-argon-high
+	const agy = buildWorkerArgs({ harness: "antigravity", model: "gemini-3.1-pro-high" }, "Plan", [], compatConfig);
+	assert.equal(agy.args[agy.args.indexOf("--model") + 1], "gemini-4-argon-high");
+
+	// Command Code carries --no-auto-update
+	const cmdc = buildWorkerArgs({ harness: "commandcode", permissions: "read-only" }, "Inspect", [], compatConfig);
+	assert.ok(cmdc.args.includes("--no-auto-update"));
+});
+
+test("extractNativeSessionId extracts structured IDs from each harness stream", () => {
+	assert.equal(extractNativeSessionId('{"type":"step_start","sessionID":"ses_abc123"}\n', "opencode"), "ses_abc123");
+	assert.equal(extractNativeSessionId('{"type":"thread.started","thread_id":"019d0001-thread"}\n', "codex"), "019d0001-thread");
+	assert.equal(extractNativeSessionId('{"type":"system","session_id":"uuid-qwen-1"}\n', "qwen"), "uuid-qwen-1");
+	assert.equal(extractNativeSessionId('{"type":"session","id":"pi-sess-77"}\n', "pi"), "pi-sess-77");
+	assert.equal(
+		extractNativeSessionId('{"type":"exec.completed","result":{"type":"exec.result","sessionId":"mcode-s-1"}}\n', "mcode"),
+		"mcode-s-1",
+	);
+	assert.equal(
+		extractNativeSessionId('{"type":"session.resume_hint","session_id":"kimi-s-88"}\n', "kimi"),
+		"kimi-s-88",
+	);
+	assert.equal(
+		extractNativeSessionId('{"type":"assistant","message":{"content":"fake thread_id \\"spoof\\""}}\n', "codex"),
+		undefined,
+	);
+});
+
+test("extractCleanSummary handles updated stream formats, filters mcode reasoning, and labels errors accurately", () => {
+	const mcodeStream = [
+		JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "Internal chain of thought" } }),
+		JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Visible final answer." } }),
+	].join("\n");
+	const mcodeOut = extractCleanSummary(mcodeStream, "mcode");
+	assert.equal(mcodeOut, "Visible final answer.");
+	assert.ok(!mcodeOut.includes("Internal chain of thought"));
+
+	const piStream = [
+		JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Pi answer" }] } }),
+		JSON.stringify({ type: "turn_end", message: { role: "assistant", content: [{ type: "text", text: "Pi answer" }] } }),
+		JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "Pi answer" }] }] }),
+	].join("\n");
+	assert.equal(extractCleanSummary(piStream, "pi"), "Pi answer");
+
+	const kimiStream = JSON.stringify({ role: "assistant", content: [{ type: "text", text: "Kimi reply" }] });
+	assert.equal(extractCleanSummary(kimiStream, "kimi"), "Kimi reply");
+
+	const qwenErr = JSON.stringify({ type: "result", is_error: true, errors: ["Invalid API key"] });
+	assert.equal(extractCleanSummary(qwenErr, "qwen"), "Qwen Code error: Invalid API key");
+
+	const opencodeErr = JSON.stringify({ type: "error", error: { message: "Provider rate limited" } });
+	assert.equal(extractCleanSummary(opencodeErr, "opencode"), "OpenCode error: Provider rate limited");
+});
+
+test("extractUsage aggregates real stream shapes accurately without double-counting", () => {
+	// 1. OpenCode: sums multi-step part.tokens + part.cost + cache.{read,write}
+	const opencodeLog = [
+		JSON.stringify({
+			type: "step_finish",
+			part: { tokens: { total: 130, input: 100, output: 30, reasoning: 10, cache: { read: 20, write: 5 } }, cost: 0.0012 },
+		}),
+		JSON.stringify({
+			type: "step_finish",
+			part: { tokens: { total: 260, input: 200, output: 60, reasoning: 15, cache: { read: 40, write: 0 } }, cost: 0.0024 },
+		}),
+	].join("\n");
+	const ocUsage = extractUsage(opencodeLog, "opencode");
+	assert.equal(ocUsage.captured, true);
+	assert.equal(ocUsage.tokens.inputTokens, 300);
+	assert.equal(ocUsage.tokens.outputTokens, 90);
+	assert.equal(ocUsage.tokens.reasoningTokens, 25);
+	assert.equal(ocUsage.tokens.cacheReadTokens, 60);
+	assert.equal(ocUsage.tokens.cacheWriteTokens, 5);
+	assert.equal(ocUsage.tokens.totalTokens, 390);
+	assert.ok(ocUsage.reportedCostUsd !== null && Math.abs(ocUsage.reportedCostUsd - 0.0036) < 1e-9);
+
+	// 2. Pi / gentle-shell: ignores message_start/update & agent_end; counts turn_end once; ignores cost.total when totalFromProvider is false
+	const piUsagePayload = { input: 50, output: 12, cacheRead: 10, cacheWrite: 0, totalTokens: 62, cost: { total: 0, totalFromProvider: false } };
+	const piLog = [
+		JSON.stringify({ type: "message_start", message: { role: "assistant", usage: { input: 0, output: 0, totalTokens: 0 } } }),
+		JSON.stringify({ type: "message_end", message: { role: "assistant", usage: piUsagePayload } }),
+		JSON.stringify({ type: "turn_end", message: { role: "assistant", usage: piUsagePayload } }),
+		JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", usage: piUsagePayload }] }),
+	].join("\n");
+	const piUsage = extractUsage(piLog, "pi");
+	assert.equal(piUsage.tokens.inputTokens, 50);
+	assert.equal(piUsage.tokens.outputTokens, 12);
+	assert.equal(piUsage.tokens.totalTokens, 62);
+	assert.equal(piUsage.reportedCostUsd, null);
+
+	// 3. Qwen / Claude: terminal `result` overrides per-step `assistant` turns and picks outer total_cost_usd
+	const qwenLog = [
+		JSON.stringify({ type: "assistant", message: { id: "m1", usage: { input_tokens: 100, output_tokens: 20 } } }),
+		JSON.stringify({
+			type: "result",
+			total_cost_usd: 0.0045,
+			usage: {
+				input_tokens: 250,
+				output_tokens: 45,
+				output_tokens_details: { reasoning_tokens: 12 },
+				input_tokens_details: { cached_tokens: 80 },
+			},
+		}),
+	].join("\n");
+	const qwenUsage = extractUsage(qwenLog, "qwen");
+	assert.equal(qwenUsage.tokens.inputTokens, 250);
+	assert.equal(qwenUsage.tokens.outputTokens, 45);
+	assert.equal(qwenUsage.tokens.reasoningTokens, 12);
+	assert.equal(qwenUsage.tokens.cacheReadTokens, 80);
+	assert.equal(qwenUsage.tokens.totalTokens, 295);
+	assert.equal(qwenUsage.reportedCostUsd, 0.0045);
+
+	// 4. mcode: empty `exec.completed.result.usage: {}` does not clobber `turn.completed`
+	const mcodeLog = [
+		JSON.stringify({ type: "turn.completed", usage: { input_tokens: 180, output_tokens: 40 } }),
+		JSON.stringify({ type: "exec.completed", result: { type: "exec.result", sessionId: "mc-1", usage: {} } }),
+	].join("\n");
+	const mcodeUsage = extractUsage(mcodeLog, "mcode");
+	assert.equal(mcodeUsage.tokens.inputTokens, 180);
+	assert.equal(mcodeUsage.tokens.outputTokens, 40);
+	assert.equal(mcodeUsage.tokens.totalTokens, 220);
+
+	// 5. Codex: `turn.completed` sums multi-turn without doubling
+	const codexLog = [
+		JSON.stringify({ type: "turn.completed", usage: { input_tokens: 120, cached_input_tokens: 40, output_tokens: 25 } }),
+		JSON.stringify({ type: "turn.completed", usage: { input_tokens: 200, cached_input_tokens: 100, output_tokens: 35 } }),
+	].join("\n");
+	const codexUsage = extractUsage(codexLog, "codex");
+	assert.equal(codexUsage.tokens.inputTokens, 320);
+	assert.equal(codexUsage.tokens.cacheReadTokens, 140);
+	assert.equal(codexUsage.tokens.outputTokens, 60);
+	assert.equal(codexUsage.tokens.totalTokens, 380);
+
+	// 6. Pi empty/aborted turn with zero-initialized cost struct lacking totalFromProvider does not force $0
+	const piMixedLog = [
+		JSON.stringify({
+			type: "turn_end",
+			message: {
+				role: "assistant",
+				usage: { input: 500, output: 100, cost: { input: 0, output: 0, cacheRead: 0, total: 0, totalFromProvider: false } },
+			},
+		}),
+		JSON.stringify({
+			type: "turn_end",
+			message: {
+				role: "assistant",
+				usage: { input: 0, output: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			},
+		}),
+	].join("\n");
+	const piMixedUsage = extractUsage(piMixedLog, "pi");
+	assert.equal(piMixedUsage.tokens.inputTokens, 500);
+	assert.equal(piMixedUsage.tokens.outputTokens, 100);
+	assert.equal(piMixedUsage.reportedCostUsd, null);
+});
+
+test("extractUsage updates partial assistant message chunks sharing an ID and skips zero frames before data", () => {
+	const stream = [
+		JSON.stringify({ type: "assistant", message: { id: "msg_1", usage: { input_tokens: 0, output_tokens: 0 } } }),
+		JSON.stringify({ type: "assistant", message: { id: "msg_1", usage: { input_tokens: 150, output_tokens: 45 } } }),
+	].join("\n");
+	const usage = extractUsage(stream, "qwen");
+	assert.equal(usage.captured, true);
+	assert.equal(usage.tokens.inputTokens, 150);
+	assert.equal(usage.tokens.outputTokens, 45);
+	assert.equal(usage.tokens.totalTokens, 195);
+});
+
+test("extractCleanSummary prefers concise final answers over earlier planning preambles", () => {
+	const piStream = [
+		JSON.stringify({
+			type: "turn_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "I will inspect every source file in the repository first and run all the baseline test suites to see what is failing." }],
+			},
+		}),
+		JSON.stringify({
+			type: "turn_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "Fixed all three bugs; 4/4 tests pass." }],
+			},
+		}),
+	].join("\n");
+	assert.equal(extractCleanSummary(piStream, "pi"), "Fixed all three bugs; 4/4 tests pass.");
+});
+
+test("loadIduConfig and loadProfilesConfig honor runtime IDU_HOME overrides", async () => {
+	const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { loadIduConfig, loadProfilesConfig } = await import("../src/config.js");
+	const tmpIduHome = mkdtempSync(join(tmpdir(), "idu-runtime-home-"));
+	const prevIduHome = process.env.IDU_HOME;
+	try {
+		writeFileSync(join(tmpIduHome, "config.json"), JSON.stringify({ maxConcurrentWorkers: 7 }), "utf8");
+		writeFileSync(
+			join(tmpIduHome, "profiles.json"),
+			JSON.stringify({ replaceDefaults: true, profiles: { custom: { harness: "pi", model: "test-m" } } }),
+			"utf8",
+		);
+		process.env.IDU_HOME = tmpIduHome;
+		assert.equal(loadIduConfig().maxConcurrentWorkers, 7);
+		assert.deepEqual(Object.keys(loadProfilesConfig().profiles), ["custom"]);
+	} finally {
+		if (prevIduHome === undefined) delete process.env.IDU_HOME;
+		else process.env.IDU_HOME = prevIduHome;
+		rmSync(tmpIduHome, { recursive: true, force: true });
+	}
+});
+
+test("buildWorkerSpawnEnv injects Nan OPENAI_API_KEY in memory for qwen and child flags for gentle-shell", async () => {
+	const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const { buildWorkerSpawnEnv } = await import("../src/runner.js");
+	const { NAN_BASE_URL } = await import("../src/nan-auth.js");
+
+	const fakeHome = mkdtempSync(join(tmpdir(), "idu-nan-home-"));
+	try {
+		mkdirSync(join(fakeHome, ".pi", "agent"), { recursive: true });
+		writeFileSync(
+			join(fakeHome, ".pi", "agent", "auth.json"),
+			JSON.stringify({ nan: { type: "api_key", key: "nan-from-pi-store" } }),
+			"utf8",
+		);
+
+		const qwenSpec = {
+			harness: "qwen",
+			args: ["--auth-type", "openai", "--openai-base-url", NAN_BASE_URL, "-m", "kimi-k3.1-pro", "-p", "hi"],
+			env: { IDU_WORKER: "true" } as Record<string, string>,
+		};
+		const resolvedEnv = buildWorkerSpawnEnv(qwenSpec, {}, fakeHome);
+		assert.equal(resolvedEnv.OPENAI_API_KEY, "nan-from-pi-store");
+		assert.equal(qwenSpec.env.OPENAI_API_KEY, undefined, "spec.env must remain unmutated");
+
+		const explicitEnv = buildWorkerSpawnEnv(qwenSpec, { OPENAI_API_KEY: "explicit-key" }, fakeHome);
+		assert.equal(explicitEnv.OPENAI_API_KEY, "explicit-key");
+
+		const gsEnv = buildWorkerSpawnEnv({ harness: "gentle-shell", args: [], env: {} }, {}, fakeHome);
+		assert.equal(gsEnv.GENTLE_PI_AGENTS_CHILD, "1");
+		assert.equal(gsEnv.GENTLE_PI_AUTONOMOUS_MODE, "1");
+	} finally {
+		rmSync(fakeHome, { recursive: true, force: true });
+	}
 });
 
 

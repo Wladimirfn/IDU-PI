@@ -81,19 +81,17 @@ the effective list as authoritative — if a profile is not there, it is not del
 
 | Role | Profiles (CLI · model) |
 |---|---|
-| Exploración (read-only, parallel) | `explore-deepseek` (mcode · DeepSeek V4 Flash nan) · `explore-glm` (cmdc · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash nan) |
-| Consultas (read-only) | `consult-openai` (opencode · GPT-6.1 Terra high) · `consult-mimo` (cmdc · MiMo 2.6 Pro max) · `consult-claude` (claude · Opus 5.5 high) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
-| Arquitectura (read-only) | `arch-claude` (claude · Opus 5.5 high) · `arch-sol` (opencode · GPT-6.1 Sol high) · `arch-gemini` (agy · Gemini 4 Argon high) · `arch-deepseek` (mcode · DeepSeek V4 Flash max) |
-| Diseño (workspace assets) | `design-opencode` (opencode · DeepSeek V4 Flash nan) · `design-gentle` (gentle-shell · DeepSeek V4 Flash nan) |
-| Iconografía (workspace assets, parallel) | `iconographer` (mcode · GLM 5.3 Flash nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max) |
-| Voz (workspace assets) | `voice-narrator` (commandcode · GLM 5.3 Flash nan) — narra guiones con voicebox |
-| Música (workspace assets) | `music-composer` (commandcode · GLM 5.3 Flash nan) — compone con Lofi Live AI |
-| Auditoría (read-only, cross) | `audit-claude` (claude · Opus 5.5 high) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash max) · `audit-mimo` (cmdc · MiMo 2.6 Pro max) · `audit-minimax` (cmdc · MiniMax M3.1 Flash high) |
-| **Trabajo / implementación** (workspace) | `work-glm` (gentle-shell · GLM 5.3 Flash high) · `work-deepseek` (gentle-shell · DeepSeek V4 Flash high) · `work-mimo` (gentle-shell · MiMo 2.6 Flash max) |
+| Exploración (read-only, parallel) | `explore-deepseek` (pi · DeepSeek V4 Flash nan) · `explore-glm` (cmdc · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash high nan) |
+| Consultas (read-only) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · Xiaomi MiMo 2.6 Pro) · `consult-claude` (claude · Opus 5.5) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
+| Arquitectura (read-only) | `arch-gemini` (agy · Gemini 4 Argon high) · `arch-claude` (claude · Opus 5.5) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-deepseek` (opencode · Kimi K3.1 Pro nan) |
+| Diseño (workspace assets) | `design-opencode` (opencode · Kimi K3.1 Pro nan) · `design-gentle` (mcode · Kimi K3.1 Pro nan) |
+| Iconografía (workspace assets, parallel) | `iconographer` (mcode · Kimi K3.1 Pro nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max nan) |
+| Voz (workspace assets) | `voice-narrator` (cmdc · DeepSeek V4 Flash nan) — narra guiones con voicebox |
+| Música (workspace assets) | `music-composer` (cmdc · DeepSeek V4 Flash nan) — compone con Lofi Live AI |
+| Auditoría (read-only, cross) | `audit-gemini` (agy · Gemini 4 Argon high) · `audit-claude` (claude · Opus 5.5) · `audit-deepseek` (opencode · DeepSeek V4 Flash nan) · `audit-mimo` (pi · HY4 nan) · `audit-minimax` (pi · Kimi K3.1 Pro nan) |
+| **Trabajo / implementación** (workspace) | `work-glm` (mcode · GLM 5.3 Flash nan) · `work-deepseek` (pi · DeepSeek V4 Flash nan) · `work-mimo` (kimi · HY4 nan) |
 
-The work role uses **NaN-hosted models only**. Effort lives in the model slug
-(`:high` / `:max`) for gentle-shell, never in a profile field. All three were verified to
-actually write files, not just answer.
+The work role uses **NaN-hosted models only** across verified top harnesses (`mcode`, `pi`, `kimi`). Effort lives in each CLI's config or slug convention, never in a profile field. All three were verified to actually write files, not just answer.
 
 **Arbitration is a tool, not a role.** Call `idu_arbitrate` to choose among options you
 already formulated, without spawning a CLI:
@@ -146,7 +144,12 @@ Role boundaries:
     but the gateway ids fail with `400 Provider not available`.
   Because of that, **OpenAI models run on opencode** (`openai/<id>`) and cmdc keeps the
   gateway models. Never put an `openai/...` id in a cmdc profile.
-- **cmdc read-only workers still get `--yolo`** (idu-pi always passes it), because print
+- **kimi** ignores `provider` (it passes `-m <model>`); use `nan/<model>` defined in
+  `~/.kimi-code/config.toml` and no `provider` field.
+- **pi** uses `provider: "nan"` + bare `<model>` defined in `~/.pi/agent/models.json`.
+- **qwen** with `provider: "nan"` passes `--openai-base-url https://api.nan.builders/v1`
+  without injecting `OPENAI_API_KEY`; ensure `OPENAI_API_KEY` is exported before delegating.
+- **cmdc** read-only workers still get `--yolo` (idu-pi always passes it), because print
   mode blocks `shell_command` otherwise and a blocked tool aborts the whole run. The
   read-only guarantee comes from the worker prompt, not the flag.
 

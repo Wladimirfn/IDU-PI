@@ -155,7 +155,7 @@ export const DEFAULT_PROFILES: ProfilesConfig = {
 			model: "minimax/MiniMax-M3.1-Flash-Preview",
 			permissions: "workspace",
 			description: "minimax Code CLI (mcode exec) como segundo implementador, nativo a este protocolo",
-			streams: false,
+			streams: true,
 			timeoutMs: 1800000,
 			idleTimeoutMs: 300000,
 			hardCapMs: 7200000,
@@ -172,26 +172,32 @@ const DEFAULT_CONFIG: IduConfig = {
 	clis: {
 		claude: { command: "claude", argsTemplate: ["-p", "{task}"] },
 		opencode: { command: "opencode", argsTemplate: ["run", "--auto", "{task}"] },
-		codex: { command: "codex", argsTemplate: ["exec", "{task}"] },
-		pi: { command: "pi", argsTemplate: ["-p", "{task}"] },
-		"gentle-shell": { command: "gentle-shell", argsTemplate: ["-p", "{task}"] },
-		kimi: { command: "kimi", argsTemplate: ["-p", "{task}"] },
-		qwen: { command: "qwen", argsTemplate: ["-p", "{task}"] },
+		codex: { command: "codex", argsTemplate: ["exec", "--json", "--skip-git-repo-check", "{task}"] },
+		pi: { command: "pi", argsTemplate: ["--mode", "json", "-p", "{task}"] },
+		"gentle-shell": { command: "gentle-shell", argsTemplate: ["--mode", "json", "-p", "{task}"] },
+		kimi: { command: "kimi", argsTemplate: ["--output-format", "stream-json", "-p", "{task}"] },
+		qwen: { command: "qwen", argsTemplate: ["-o", "stream-json", "-p", "{task}"] },
 		antigravity: { command: "agy", argsTemplate: ["-p", "{task}"] },
-		commandcode: { command: "cmdc", argsTemplate: ["--output-format", "json", "--yolo", "--skip-onboarding", "-p", "{task}"] },
-		mcode: { command: "mcode", argsTemplate: ["exec", "--output-format", "json", "{task}"] },
+		commandcode: { command: "cmdc", argsTemplate: ["--output-format", "json", "--yolo", "--skip-onboarding", "--no-auto-update", "-p", "{task}"] },
+		mcode: { command: "mcode", argsTemplate: ["exec", "--output-format", "stream-json", "{task}"] },
 	},
 	defaultTimeoutMs: 300_000,
 	maxConcurrentWorkers: 4,
 };
 
+/** Runtime-resolvable profiles path honoring live `IDU_HOME` overrides. */
+export function getIduProfilesPath(): string {
+	return join(getIduHome(), "profiles.json");
+}
+
 export function loadIduConfig(): IduConfig {
 	ensureIduDirectories();
-	if (!existsSync(IDU_CONFIG_PATH)) {
+	const configPath = getIduConfigPath();
+	if (!existsSync(configPath)) {
 		return DEFAULT_CONFIG;
 	}
 	try {
-		const raw = readFileSync(IDU_CONFIG_PATH, "utf8");
+		const raw = readFileSync(configPath, "utf8");
 		const parsed = JSON.parse(raw) as IduConfig;
 		warnAboutRetiredRuleFlags(parsed);
 		return {
@@ -250,11 +256,12 @@ function warnAboutRetiredRuleFlags(config: IduConfig): void {
 
 export function loadProfilesConfig(): ProfilesConfig {
 	ensureIduDirectories();
-	if (!existsSync(IDU_PROFILES_PATH)) {
+	const profilesPath = getIduProfilesPath();
+	if (!existsSync(profilesPath)) {
 		return DEFAULT_PROFILES;
 	}
 	try {
-		const raw = readFileSync(IDU_PROFILES_PATH, "utf8");
+		const raw = readFileSync(profilesPath, "utf8");
 		const parsed = JSON.parse(raw) as ProfilesConfig;
 		if (parsed.replaceDefaults === true) {
 			return { profiles: parsed.profiles ?? {}, replaceDefaults: true };
