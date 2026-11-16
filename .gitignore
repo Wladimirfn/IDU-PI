@@ -115,3 +115,9 @@ outputMode/
 # Python bytecode (skill helpers such as voice-narration/validar_video_audio.py)
 __pycache__/
 *.pyc
+
+# Benchmark runtime outputs
+bench/results/
+
+# Local Playwright MCP browser scratch captures
+.playwright-mcp/
