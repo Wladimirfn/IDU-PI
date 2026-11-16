@@ -853,12 +853,25 @@ function findApprovedAudio(project: string, out: string): string | null {
 	return candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null;
 }
 
-/* Playwright puede estar instalado en el proyecto, global o en el cache de npx. */
+/* Playwright puede estar instalado en el proyecto, user home (npm/pnpm), global o en cache de npx. */
 function resolvePlaywrightEntry(project: string): string | null {
 	const explicit = process.env.PLAYWRIGHT_PATH;
 	if (explicit && existsSync(explicit)) return explicit;
 	const local = join(project, "node_modules", "playwright", "index.mjs");
 	if (existsSync(local)) return local;
+	const homeDir = process.env.USERPROFILE ?? process.env.HOME ?? "";
+	if (homeDir) {
+		const homeDirect = join(homeDir, "node_modules", "playwright", "index.mjs");
+		if (existsSync(homeDirect)) return homeDirect;
+		const homePnpm = join(homeDir, "node_modules", ".pnpm");
+		if (existsSync(homePnpm)) {
+			for (const entry of readdirSync(homePnpm)) {
+				if (!entry.startsWith("playwright@")) continue;
+				const candidate = join(homePnpm, entry, "node_modules", "playwright", "index.mjs");
+				if (existsSync(candidate)) return candidate;
+			}
+		}
+	}
 	const npx = process.env.LOCALAPPDATA
 		? join(process.env.LOCALAPPDATA, "npm-cache", "_npx")
 		: join(process.env.HOME ?? "", ".npm", "_npx");
