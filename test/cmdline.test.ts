@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, realpathSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { resolveWindowsShim } from "../src/cmdline.js";
+import { resolveWindowsShim, unwrapCmdExecutable } from "../src/cmdline.js";
+import { spawnSync } from "node:child_process";
 
 // These cases build their own PATH entry instead of trusting whichever npm
 // shims happen to be installed on the machine running the suite.
@@ -81,4 +82,38 @@ test("resolveWindowsShim ignores names that are already paths", () => {
 	// before touching PATH or spawning anything.
 	assert.equal(resolveWindowsShim("tools/cli"), null);
 	assert.equal(resolveWindowsShim("C:\\tools\\cli"), null);
+});
+
+test("Windows npm shim forwarding preserves quotes, spaces, %, &, |, <, > and option-like prompts verbatim", () => {
+	if (process.platform !== "win32") return;
+	const dir = mkdtempSync(join(tmpdir(), "idu-argv-forward-"));
+	try {
+		const targetScript = join(dir, "echo-argv.mjs");
+		writeFileSync(
+			targetScript,
+			"process.stdout.write(JSON.stringify(process.argv.slice(2)));\n",
+			"utf8",
+		);
+		const shimCmd = join(dir, "echo-argv.cmd");
+		writeFileSync(
+			shimCmd,
+			`@ECHO off\r\n"%~dp0..\\node.exe" "%~dp0echo-argv.mjs" %*\r\n`,
+			"utf8",
+		);
+
+		const nastyPrompt = `--flag "quoted value" & %PATH% | <tag> 'single' (parens) 100% done`;
+		const unwrapped = unwrapCmdExecutable(shimCmd, ["-p", nastyPrompt, "--end"]);
+		assert.equal(unwrapped.isShell, false);
+		assert.equal(unwrapped.command, process.execPath);
+
+		const res = spawnSync(unwrapped.command, unwrapped.args, {
+			encoding: "utf8",
+			windowsHide: true,
+		});
+		assert.equal(res.status, 0, res.stderr);
+		const parsed = JSON.parse(res.stdout) as string[];
+		assert.deepEqual(parsed, ["-p", nastyPrompt, "--end"]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

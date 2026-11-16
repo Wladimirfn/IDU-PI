@@ -18,12 +18,41 @@ import {
 	upsertSessionTreeEntry,
 } from "./process-manager.js";
 import { killProcessTree } from "./process-utils.js";
-import { shouldCountTurn } from "./session-policy.js";
-import { getSessionKey } from "./session-ids.js";
+import { shouldCountTurn, canonicalHarnessName } from "./session-policy.js";
+import { getSessionKey, extractNativeSessionId } from "./session-ids.js";
 import { extractCleanSummary } from "./summary.js";
 import { extractUsage } from "./usage.js";
 import { errorMessage } from "./errors.js";
 import { DISK_SYNC_INTERVAL_MS, STARTUP_GRACE_MS } from "./timeouts.js";
+import { NAN_BASE_URL, resolveNanApiKey } from "./nan-auth.js";
+
+/**
+ * Builds the in-memory subprocess environment right before `spawn()` so host
+ * Nan keys (`qwen`) and child-mode flags (`gentle-shell`) never get written
+ * to disk inside `~/.idu/runtime/*.spec.json` or log headers.
+ */
+export function buildWorkerSpawnEnv(
+	spec: Pick<RunnerSpec, "harness" | "args" | "env">,
+	baseEnv: NodeJS.ProcessEnv = process.env,
+	homeDir?: string,
+): NodeJS.ProcessEnv {
+	const merged: NodeJS.ProcessEnv = {
+		...baseEnv,
+		...spec.env,
+	};
+	const harness = canonicalHarnessName(spec.harness.trim().toLowerCase());
+	if (harness === "qwen" && spec.args.includes(NAN_BASE_URL) && !merged.OPENAI_API_KEY?.trim()) {
+		const nanKey = resolveNanApiKey({ env: merged, homeDir });
+		if (nanKey) {
+			merged.OPENAI_API_KEY = nanKey;
+		}
+	}
+	if (harness === "gentle-shell") {
+		if (!merged.GENTLE_PI_AGENTS_CHILD) merged.GENTLE_PI_AGENTS_CHILD = "1";
+		if (!merged.GENTLE_PI_AUTONOMOUS_MODE) merged.GENTLE_PI_AUTONOMOUS_MODE = "1";
+	}
+	return merged;
+}
 
 function parseArgs(): string {
 	const args = process.argv.slice(2);
@@ -114,10 +143,7 @@ async function runDaemon(): Promise<void> {
 	try {
 		child = spawn(spec.command, spec.args, {
 			cwd: spec.workingDir,
-			env: {
-				...process.env,
-				...spec.env,
-			},
+			env: buildWorkerSpawnEnv(spec),
 			stdio: ["ignore", logFd, logFd],
 			shell: false,
 			windowsHide: true,
@@ -237,20 +263,9 @@ async function runDaemon(): Promise<void> {
 
 			if (runSucceeded) {
 				if (!entry.nativeSessionId && fullOutput) {
-					if (spec.harness === "opencode") {
-						const m = fullOutput.match(/"sessionID"\s*:\s*"([^"]+)"/);
-						if (m) entry.nativeSessionId = m[1];
-					} else if (spec.harness === "antigravity" || spec.harness === "agy") {
-						const m = fullOutput.match(/"conversation_?id"\s*:\s*"([^"]+)"/i);
-						if (m) entry.nativeSessionId = m[1];
-					} else if (spec.harness === "commandcode" || spec.harness === "cmdc") {
-						const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
-						if (m) entry.nativeSessionId = m[1];
-					} else if (spec.harness === "mcode" || spec.harness === "minimax-code") {
-						// mcode exec emits a single exec.result object with a
-						// top-level sessionId (format: mvs_<hex>).
-						const m = fullOutput.match(/"sessionId"\s*:\s*"([^"]+)"/i);
-						if (m) entry.nativeSessionId = m[1];
+					const detectedNativeId = extractNativeSessionId(fullOutput, spec.harness);
+					if (detectedNativeId) {
+						entry.nativeSessionId = detectedNativeId;
 					}
 				}
 				entry.turnCount += 1;

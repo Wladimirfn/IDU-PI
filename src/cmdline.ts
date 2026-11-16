@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import type { IduConfig, IduProfile } from "./types.js";
+import { isUuid } from "./session-ids.js";
+import { canonicalHarnessName } from "./session-policy.js";
 
 export interface ResolvedCommand {
 	command: string;
@@ -141,11 +143,12 @@ export function buildWorkerArgs(
 	config: IduConfig,
 	sessionOptions: BuildWorkerArgsOptions = {},
 ): BuiltCommandLine {
-	const harness = profile.harness.toLowerCase();
+	const rawHarness = profile.harness.trim().toLowerCase();
+	const harness = canonicalHarnessName(rawHarness);
 	const cliDef =
 		config.clis[harness] ||
+		config.clis[rawHarness] ||
 		(harness === "antigravity" ? config.clis["agy"] : undefined) ||
-		(harness === "cmdc" ? config.clis["commandcode"] : undefined) ||
 		(harness === "commandcode" ? config.clis["cmdc"] : undefined);
 	let command =
 		cliDef?.command ||
@@ -179,6 +182,8 @@ export function buildWorkerArgs(
 			);
 			if (hasWorkspacePermissions(profile)) {
 				args.push("--permission-mode", "bypassPermissions");
+			} else {
+				args.push("--permission-mode", "plan");
 			}
 
 			// Claude Code Session Handling:
@@ -214,8 +219,11 @@ export function buildWorkerArgs(
 			// Turn 1: do NOT pass --session (prevents "Session not found" error)
 			// Fork: --session <parentNativeSessionId || parentSessionId> --fork
 			// Turn 2+ (resume): --session <nativeSessionId || sessionId>
-			const targetParent = sessionOptions.parentNativeSessionId || parentSessionId;
-			const targetSession = sessionOptions.nativeSessionId || sessionId;
+			// OpenCode v2.3+ rejects `--session` IDs not starting with "ses" via Zod.
+			const rawParent = sessionOptions.parentNativeSessionId || parentSessionId;
+			const targetParent = rawParent && rawParent.startsWith("ses") ? rawParent : undefined;
+			const rawSession = sessionOptions.nativeSessionId || sessionId;
+			const targetSession = rawSession && rawSession.startsWith("ses") ? rawSession : undefined;
 			if (sessionOptions.fork && targetParent) {
 				args.push("--session", targetParent, "--fork");
 			} else if (targetSession && sessionOptions.isResumed) {
@@ -229,6 +237,10 @@ export function buildWorkerArgs(
 		case "pi":
 		case "pi-cli":
 		case "gentle-shell": {
+			args.push("--mode", "json");
+			if (!hasWorkspacePermissions(profile)) {
+				args.push("--tools", "read,grep,find,ls");
+			}
 			if (profile.provider) {
 				args.push("--provider", profile.provider);
 			}
@@ -237,17 +249,17 @@ export function buildWorkerArgs(
 			}
 
 			// Pi Session Handling:
-			// Fork: --fork <parentSessionId>
+			// Fork: --fork <targetParent>
 			// Turn 1 (new): --session-id <sessionId>
-			// Turn 2+ (resume): --session <sessionId>
-			if (sessionOptions.fork && parentSessionId) {
-				args.push("--fork", parentSessionId);
+			// Turn 2+ (resume): --session <targetSession>
+			const targetParent = sessionOptions.parentNativeSessionId || parentSessionId;
+			const targetSession = sessionOptions.nativeSessionId || sessionId;
+			if (sessionOptions.fork && targetParent) {
+				args.push("--fork", targetParent);
+			} else if (sessionOptions.isResumed && targetSession) {
+				args.push("--session", targetSession);
 			} else if (sessionId) {
-				if (sessionOptions.isResumed) {
-					args.push("--session", sessionId);
-				} else {
-					args.push("--session-id", sessionId);
-				}
+				args.push("--session-id", sessionId);
 			}
 
 			args.push("-p", fullMessage);
@@ -255,15 +267,22 @@ export function buildWorkerArgs(
 		}
 
 		case "codex": {
+			const targetParent = sessionOptions.parentNativeSessionId || parentSessionId;
+			const targetSession = sessionOptions.nativeSessionId || sessionId;
+			const isFork = Boolean(sessionOptions.fork && targetParent);
+			const isResume = !isFork && Boolean(sessionOptions.isResumed && targetSession);
 			args.push("exec");
-			if (sessionOptions.fork && parentSessionId) {
-				args.push("fork", parentSessionId);
-			} else if (sessionOptions.isResumed && sessionId) {
-				args.push("resume", sessionId);
+			if (isFork) {
+				args.push("fork", targetParent!);
+			} else if (isResume) {
+				args.push("resume", targetSession!);
 			}
-			args.push("--json");
+			args.push("--json", "--skip-git-repo-check");
 			if (hasWorkspacePermissions(profile)) {
 				args.push("--dangerously-bypass-approvals-and-sandbox");
+			} else if (!isFork && !isResume) {
+				// `codex exec resume/fork` do not accept `-s`; only initial `exec` takes it.
+				args.push("-s", "read-only");
 			}
 			if (profile.model) {
 				args.push("-m", profile.model);
@@ -277,11 +296,13 @@ export function buildWorkerArgs(
 			if (profile.model) {
 				args.push("-m", profile.model);
 			}
-			if (hasWorkspacePermissions(profile)) {
-				args.push("--auto");
-			}
-			if (sessionId) {
-				args.push("-S", sessionId);
+			// `kimi 0.29.x` rejects combining `-p` with `--auto`, `--plan`, or `--yolo`.
+			args.push("--output-format", "stream-json");
+			// `-S <id>` fails on Turn 1 if the session does not already exist; only
+			// pass it on resume using the verified native session ID from `session.resume_hint`.
+			const targetSession = sessionOptions.nativeSessionId;
+			if (!sessionOptions.fork && sessionOptions.isResumed && targetSession) {
+				args.push("-S", targetSession);
 			}
 			args.push("-p", fullMessage);
 			break;
@@ -289,15 +310,22 @@ export function buildWorkerArgs(
 
 		case "qwen":
 		case "qwen-code": {
+			args.push("-o", "stream-json");
+			if (profile.provider === "nan") {
+				args.push("--auth-type", "openai", "--openai-base-url", "https://api.nan.builders/v1");
+			}
 			if (profile.model) {
 				args.push("-m", profile.model);
 			}
 			if (hasWorkspacePermissions(profile)) {
 				args.push("-y");
+			} else {
+				args.push("--approval-mode", "plan");
 			}
-			if (sessionOptions.isResumed && sessionId) {
-				args.push("-r", sessionId);
-			} else if (sessionId) {
+			const targetSession = sessionOptions.nativeSessionId || sessionId;
+			if (!sessionOptions.fork && sessionOptions.isResumed && targetSession) {
+				args.push("-r", targetSession);
+			} else if (sessionId && isUuid(sessionId)) {
 				args.push("--session-id", sessionId);
 			}
 			args.push("-p", fullMessage);
@@ -309,8 +337,7 @@ export function buildWorkerArgs(
 			if (profile.model) {
 				let model = profile.model;
 				if (model === "flash") model = "gemini-3.8-flash-high";
-				else if (model === "pro") model = "gemini-3.1-pro-high";
-				else if (model === "argon") model = "gemini-4-argon-high";
+				else if (model === "pro" || model === "argon" || model === "gemini-3.1-pro-high") model = "gemini-4-argon-high";
 				args.push("--model", model);
 			}
 			args.push("--output-format", "stream-json");
@@ -333,10 +360,12 @@ export function buildWorkerArgs(
 			args.push("--output-format", "json");
 			// cmdc in print mode blocks shell_command unless --yolo is passed, and a
 			// blocked tool aborts the whole run (stopReason "permission_denied"). Read-only
-			// workers still need shell for inspection (wc, git, grep), so --yolo is always
-			// required here; the read-only guarantee is enforced by the worker's prompt.
+			// workers still need shell for inspection (wc, git, grep, tsc), while `--permission-mode plan`
+			// blocks commands like `git --version`. So --yolo is required here; read-only is
+			// enforced by the worker's prompt (isolated benchmarks configure `--permission-mode` explicitly).
 			args.push("--yolo");
 			args.push("--skip-onboarding");
+			args.push("--no-auto-update");
 
 			// Command Code Session Handling:
 			// Turn 1: do not pass --session (starts fresh session)
@@ -359,7 +388,7 @@ export function buildWorkerArgs(
 		case "mcode":
 		case "minimax-code": {
 			args.push("exec");
-			args.push("--output-format", "json");
+			args.push("--output-format", "stream-json");
 
 			// mcode --permission accepts smart | full | off. The default is
 			// "smart", which asks for interactive confirmation and therefore
@@ -368,7 +397,18 @@ export function buildWorkerArgs(
 			args.push("--permission", hasWorkspacePermissions(profile) ? "full" : "off");
 
 			if (profile.model) {
-				const fullModel = profile.provider ? `${profile.provider}/${profile.model}` : profile.model;
+				let fullModel = profile.model;
+				if (profile.provider) {
+					const prefix =
+						profile.provider === "minimax" || profile.provider.startsWith("custom_provider:")
+							? profile.provider
+							: `custom_provider:${profile.provider}`;
+					if (!profile.model.startsWith(`${profile.provider}/`) && !profile.model.startsWith(`${prefix}/`)) {
+						fullModel = `${prefix}/${profile.model}`;
+					} else if (profile.provider !== "minimax" && !profile.provider.startsWith("custom_provider:") && !profile.model.startsWith("custom_provider:")) {
+						fullModel = `custom_provider:${profile.model}`;
+					}
+				}
 				args.push("--model", fullModel);
 			}
 
