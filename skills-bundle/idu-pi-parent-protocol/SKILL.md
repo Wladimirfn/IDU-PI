@@ -85,7 +85,7 @@ the effective list as authoritative — if a profile is not there, it is not del
 | Role | Profiles (CLI · model) |
 |---|---|
 | Exploración (read-only, parallel) | `explore-deepseek` (pi · DeepSeek V4 Flash nan) · `explore-glm` (gentle-shell · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash high nan) |
-| Consultas (read-only) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · Xiaomi MiMo 2.6 Pro) · `consult-claude` (claude · Opus 5.5) · `consult-gemini38` (agy · Gemini 3.8 Flash high) |
+| Consultas (read-only) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · Xiaomi MiMo 2.6 Pro) · `consult-claude` (claude · Opus 5.5) · `consult-gemini38` (agy · Gemini 4 Hydrogen XHigh) |
 | Arquitectura (read-only) | `arch-gemini` (agy · Gemini 4 Argon high) · `arch-claude` (claude · Opus 5.5) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-deepseek` (pi · Kimi K3.1 Pro nan) |
 | Diseño (workspace assets) | `design-opencode` (opencode · Kimi K3.1 Pro nan) · `design-gentle` (mcode · Kimi K3.1 Pro nan) |
 | Iconografía (workspace assets, parallel) | `iconographer` (mcode · Kimi K3.1 Pro nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max nan) |
