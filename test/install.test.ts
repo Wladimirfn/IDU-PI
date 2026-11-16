@@ -53,11 +53,14 @@ test("installer plan lists the shim files this platform actually writes", () => 
 	const { status, stdout } = runInstaller(["--dry-run"]);
 	assert.equal(status, 0);
 	if (IS_WINDOWS) {
-		assert.match(stdout, /idu-pi\.cmd/u, "Windows plan must include the .cmd shim");
-		assert.match(stdout, /idu-pi\.ps1/u, "Windows plan must include the .ps1 shim");
+		assert.match(stdout, /idu-pi\.cmd/u, "Windows plan must include the idu-pi.cmd shim");
+		assert.match(stdout, /idu-pi\.ps1/u, "Windows plan must include the idu-pi.ps1 shim");
+		assert.match(stdout, /idupi\.cmd/u, "Windows plan must include the idupi.cmd shim");
+		assert.match(stdout, /idupi\.ps1/u, "Windows plan must include the idupi.ps1 shim");
 		return;
 	}
 	assert.match(stdout, /[\\/]idu-pi$/mu, "POSIX plan must include a bare idu-pi shim");
+	assert.match(stdout, /[\\/]idupi$/mu, "POSIX plan must include a bare idupi shim");
 	assert.doesNotMatch(
 		stdout,
 		/idu-pi\.cmd/u,
@@ -99,6 +102,12 @@ test("POSIX install writes an executable idu-pi shim", { skip: IS_WINDOWS }, () 
 		const launched = spawnSync(shim, ["--help"], { encoding: "utf8" });
 		assert.equal(launched.status, 0, launched.stderr ?? "");
 		assert.match(launched.stdout ?? "", /idu|usage/iu);
+
+		const idupiShim = join(shimDir, "idupi");
+		assert.ok(existsSync(idupiShim), `expected ${idupiShim} to exist`);
+		const idupiLaunched = spawnSync(idupiShim, ["--help"], { encoding: "utf8" });
+		assert.equal(idupiLaunched.status, 0, idupiLaunched.stderr ?? "");
+		assert.match(idupiLaunched.stdout ?? "", /idupi/iu);
 	} finally {
 		rmSync(shimDir, { recursive: true, force: true });
 	}
@@ -115,6 +124,8 @@ test("Windows install writes the .cmd and .ps1 shims", { skip: !IS_WINDOWS }, ()
 		assert.equal(status, 0, `${stdout}\n${stderr}`);
 		assert.ok(existsSync(join(shimDir, "idu-pi.cmd")), "expected idu-pi.cmd");
 		assert.ok(existsSync(join(shimDir, "idu-pi.ps1")), "expected idu-pi.ps1");
+		assert.ok(existsSync(join(shimDir, "idupi.cmd")), "expected idupi.cmd");
+		assert.ok(existsSync(join(shimDir, "idupi.ps1")), "expected idupi.ps1");
 	} finally {
 		rmSync(shimDir, { recursive: true, force: true });
 	}
