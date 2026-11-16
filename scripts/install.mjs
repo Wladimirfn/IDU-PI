@@ -174,9 +174,14 @@ function defaultShimDir(userHome) {
 /** Files the shim step writes on this platform. Mirrors installShim(). */
 function shimPaths(shimDir) {
 	if (process.platform === "win32") {
-		return [join(shimDir, "idu-pi.cmd"), join(shimDir, "idu-pi.ps1")];
+		return [
+			join(shimDir, "idu-pi.cmd"),
+			join(shimDir, "idu-pi.ps1"),
+			join(shimDir, "idupi.cmd"),
+			join(shimDir, "idupi.ps1"),
+		];
 	}
-	return [join(shimDir, "idu-pi")];
+	return [join(shimDir, "idu-pi"), join(shimDir, "idupi")];
 }
 
 /** Single-quote for POSIX sh, so a path with spaces or quotes stays one word. */
@@ -468,41 +473,43 @@ function runCommand(commandTuple) {
 	}
 }
 
-function installShim() {
-	const state = detectInstallState();
-	const cliPath = join(packageRoot, "dist", "src", "cli.js");
-	mkdirSync(state.shimDir, { recursive: true });
-
+function writeLauncherShim(shimDir, shimName, targetScriptPath) {
 	if (process.platform !== "win32") {
 		// POSIX has no .cmd/.ps1 equivalent: without this branch the installer wrote
-		// two files the shell cannot execute, so `idu-pi` never resolved on Linux
+		// two files the shell cannot execute, so `idu-pi`/`idupi` never resolved on Linux
 		// even though the CLI itself already ran there.
-		const shimPath = join(state.shimDir, "idu-pi");
-		const content = `#!/bin/sh\nexec node ${shQuote(cliPath)} "$@"\n`;
-		writeIfChangedWithBackup(shimPath, content, "");
+		const shimPath = join(shimDir, shimName);
+		const content = `#!/bin/sh\nexec node ${shQuote(targetScriptPath)} "$@"\n`;
+		writeIfChangedWithBackup(shimPath, content, shimName, "");
 		// writeFileSync does not carry the exec bit; 0o755 is what makes the shim
 		// runnable without an explicit `sh` prefix.
 		chmodSync(shimPath, 0o755);
-		console.log(`Shim idu-pi instalado/verificado en: ${state.shimDir}`);
 		return;
 	}
 
-	const cmdPath = join(state.shimDir, "idu-pi.cmd");
-	const ps1Path = join(state.shimDir, "idu-pi.ps1");
-	const cmdContent = `@echo off\r\nnode "${cliPath}" %*\r\n`;
-	const ps1Content = `& node "${cliPath}" @args\n`;
-	writeIfChangedWithBackup(cmdPath, cmdContent, ".cmd");
-	writeIfChangedWithBackup(ps1Path, ps1Content, ".ps1");
-	console.log(`Shim idu-pi instalado/verificado en: ${state.shimDir}`);
+	const cmdPath = join(shimDir, `${shimName}.cmd`);
+	const ps1Path = join(shimDir, `${shimName}.ps1`);
+	const cmdContent = `@echo off\r\nnode "${targetScriptPath}" %*\r\n`;
+	const ps1Content = `& node "${targetScriptPath}" @args\n`;
+	writeIfChangedWithBackup(cmdPath, cmdContent, shimName, ".cmd");
+	writeIfChangedWithBackup(ps1Path, ps1Content, shimName, ".ps1");
 }
 
-function writeIfChangedWithBackup(path, content, extension) {
+function installShim() {
+	const state = detectInstallState();
+	mkdirSync(state.shimDir, { recursive: true });
+	writeLauncherShim(state.shimDir, "idu-pi", join(packageRoot, "dist", "src", "cli.js"));
+	writeLauncherShim(state.shimDir, "idupi", join(packageRoot, "dist", "src", "idupi-bin.js"));
+	console.log(`Shims idu-pi e idupi instalados/verificados en: ${state.shimDir}`);
+}
+
+function writeIfChangedWithBackup(path, content, prefix, extension) {
 	if (existsSync(path)) {
 		const current = readFileSync(path, "utf8");
 		if (current === content) return;
 		const backupPath = join(
 			dirname(path),
-			`idu-pi.backup-${timestamp(new Date())}${extension}`,
+			`${prefix}.backup-${timestamp(new Date())}${extension}`,
 		);
 		writeFileSync(backupPath, current, "utf8");
 	}
