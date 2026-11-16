@@ -207,6 +207,12 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "optimize": {
+			const { runOptimizeCli } = await import("./optimizer/index.js");
+			await runOptimizeCli(args.slice(1));
+			break;
+		}
+
 		case "preflight": {
 			let workingDirIndex = args.indexOf("--working-dir");
 			if (workingDirIndex === -1) workingDirIndex = args.indexOf("--cwd");
@@ -929,6 +935,7 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi sessions                            Display session hierarchy tree");
 	out("  idu-pi capabilities                        Print JSON capabilities");
 	out("  idu-pi tui [--plain] [--json]              Interactive TUI of configured agents (also `idupi`)");
+	out("  idu-pi optimize [--run-bench] [--apply]    Discover CLIs/plans + AA metrics, propose shortlist, bench & apply");
 	out("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)");
 	out("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
 	out("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");

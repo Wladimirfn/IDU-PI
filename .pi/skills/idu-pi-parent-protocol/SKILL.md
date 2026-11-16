@@ -22,6 +22,9 @@ description: |
 ```bash
 idu-pi status                                # IDU home, detected CLIs, profile list
 idu-pi quota                                 # remaining quota per CLI (--fresh ignores the 10 min cache)
+idu-pi optimize [--roles a,b] [--json]       # zero-spend discovery + Artificial Analysis shortlist & cost estimate
+idu-pi optimize --run-bench [--json]         # run bounded mini-benchmark only on approved shortlist
+idu-pi optimize --apply                      # backup & apply approved updates to ~/.idu/profiles.json
 idu-pi delegate "<task>" --profile <name>    # spawn one worker (defaults to "fast" when --profile is omitted)
 idu-pi wait <runId> --timeout 540000         # block until a delegated worker finishes
 ```
@@ -113,6 +116,14 @@ Role boundaries:
   orchestrator-owns-coding rule: use it when the user asks for parallel implementation, or
   when a self-contained task is better isolated in a worker. The orchestrator still reviews
   the diff and runs postflight.
+
+### Fleet Auto-Optimization (`idu-pi optimize`)
+
+When the user asks to review, update, or optimize `idupi` agents/models/CLIs (for example: *"actualiza o revisa la optimizacion de idupi"*, *"revisa qué planes y modelos me convienen"*), **never guess models or edit `~/.idu/profiles.json` blindly**. Follow this interactive 3-stage loop:
+
+1. **Discover & Propose first (zero spend)**: run `idu-pi optimize --json` (or scoped with `--roles Trabajo,Exploración`). This inspects installed CLIs, active plans/quotas vs metered APIs, live `/v1/models` endpoints in memory, and Artificial Analysis metrics (quality, coding, speed, cost) to produce a shortlist + estimated USD cost and plan calls.
+2. **Consult the user before spending tokens**: show the shortlist, role concepts, estimated cost/time, and ask the user for confirmation (and any role/model adjustments) **before** running `idu-pi optimize --run-bench --json`.
+3. **Present measured results before applying**: after `--run-bench` finishes, present the empirical latency, tokens, cost, pass rate, and exact recommended `harness`/`model` changes per profile, ask the user to confirm or tweak, and only then apply with `idu-pi optimize --apply` (or targeted profile updates) and record the change via `idu_decision_record`.
 
 ### Usage rules
 
