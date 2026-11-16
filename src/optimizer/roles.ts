@@ -17,7 +17,7 @@ export const ROLE_OBJECTIVES: Record<string, RoleObjectiveSpec> = {
 		role: "Trabajo",
 		concept: "Alta calidad en código/terminal, baja latencia y bajo costo operativo por iteración.",
 		permissions: "workspace",
-		benchmarkTaskId: "tb-01-async-retry",
+		benchmarkTaskId: "tb-01-log-forensics",
 		benchmarkCategory: "terminal-bench",
 		weights: { intelligence: 0.25, coding: 0.35, speed: 0.2, costEfficiency: 0.2, visual3d: 0 },
 		estBenchTokensPerCell: 28_000,
@@ -185,6 +185,9 @@ function normalizeCostEfficiencyScore(
 	conservePlanQuota = false,
 ): { costEfficiency: number; estCostPer1MTokensUsd: number; headroomPenalty: number } {
 	if (candidate.billingModel === "plan") {
+		if (quotaRemaining !== null && quotaRemaining <= 0) {
+			return { costEfficiency: 5, estCostPer1MTokensUsd: 0, headroomPenalty: 55 };
+		}
 		if (quotaRemaining !== null && quotaRemaining < 10) {
 			return { costEfficiency: 45, estCostPer1MTokensUsd: 0, headroomPenalty: 18 };
 		}
@@ -250,12 +253,24 @@ export function groupCurrentProfilesByRole(
 	return grouped;
 }
 
+function effortRankForModel(rawModelId: string, speedFirst: boolean): number {
+	const lower = rawModelId.toLowerCase().replace(/:[a-z0-9-]+$/i, "");
+	if (/(?:^|[-#])xhigh$/.test(lower)) return speedFirst ? 2 : 6;
+	if (/(?:^|[-#])max$/.test(lower)) return speedFirst ? 3 : 5;
+	if (/(?:^|[-#])high$/.test(lower)) return speedFirst ? 4 : 4;
+	if (/(?:^|[-#])fast$/.test(lower)) return speedFirst ? 6 : 0;
+	if (/(?:^|[-#])medium$/.test(lower)) return 2;
+	if (/(?:^|[-#])low$/.test(lower)) return 1;
+	return speedFirst ? 5 : 3;
+}
+
 export function scoreCandidatesForRole(params: {
 	roleSpec: RoleObjectiveSpec;
 	candidates: DiscoveredModelCandidate[];
 	aaCatalog: AaModelMetrics[];
 	quotas: QuotaSnapshot[];
 	historicalMetrics: HistoricalBenchMetric[];
+	preferredIncumbents?: Set<string>;
 }): ScoredCandidate[] {
 	const { roleSpec, candidates, aaCatalog, quotas, historicalMetrics } = params;
 	const maxIq = Math.max(65, ...aaCatalog.map((m) => m.intelligenceIndex ?? 0));
@@ -354,7 +369,17 @@ export function scoreCandidatesForRole(params: {
 		});
 	}
 
-	scored.sort((a, b) => b.compositeScore - a.compositeScore);
+	const speedFirst = roleSpec.role === "Exploración" || roleSpec.role === "Voz" || roleSpec.role === "Música";
+	const preferredSet = params.preferredIncumbents ?? new Set<string>();
+	scored.sort((a, b) => {
+		const scoreDiff = b.compositeScore - a.compositeScore;
+		if (Math.abs(scoreDiff) > 0.001) return scoreDiff;
+		const effDiff = effortRankForModel(b.modelId, speedFirst) - effortRankForModel(a.modelId, speedFirst);
+		if (effDiff !== 0) return effDiff;
+		const bPref = preferredSet.has(`${b.harness}::${b.profileModel}`) || preferredSet.has(`${b.harness}::${b.modelId}`) ? 1 : 0;
+		const aPref = preferredSet.has(`${a.harness}::${a.profileModel}`) || preferredSet.has(`${a.harness}::${a.modelId}`) ? 1 : 0;
+		return bPref - aPref;
+	});
 	// Collapse effort/alias duplicates resolving to the same model on the same harness.
 	const collapsed: ScoredCandidate[] = [];
 	const seenNormalized = new Set<string>();
@@ -426,12 +451,14 @@ export function buildRoleProposals(params: {
 	for (const role of roleNames) {
 		const roleSpec = ROLE_OBJECTIVES[role];
 		const currentProfiles = grouped[role] ?? [];
+		const preferredIncumbents = new Set(currentProfiles.map((p) => `${p.harness}::${p.model ?? ""}`));
 		const scored = scoreCandidatesForRole({
 			roleSpec,
 			candidates: params.candidates,
 			aaCatalog: params.aaCatalog,
 			quotas: params.quotas,
 			historicalMetrics: params.historicalMetrics,
+			preferredIncumbents,
 		});
 
 		// Pick diverse shortlist across distinct (harness, modelId), ensuring incumbent coverage first.
@@ -444,13 +471,13 @@ export function buildRoleProposals(params: {
 			const pickedKeys = new Set<string>();
 			const targetProfileNames = currentProfiles.map((p) => p.profileName);
 
-			// 1. Seed primary incumbent if available in discovered set so new challengers compare head-to-head.
-			const primary = currentProfiles[0];
-			if (primary) {
+			// 1. Seed the highest-priority available incumbent so new challengers compare against a live baseline.
+			for (const prof of currentProfiles) {
 				const incumbentMatch = scored.find(
 					(c) =>
-						c.harness === primary.harness &&
-						(c.profileModel === primary.model || c.modelId === primary.model),
+						c.harness === prof.harness &&
+						(c.profileModel === prof.model || c.modelId === prof.model) &&
+						(c.quotaRemainingPercent === null || c.quotaRemainingPercent > 0),
 				);
 				if (incumbentMatch) {
 					pickedKeys.add(`${incumbentMatch.harness}::${incumbentMatch.modelId}`);
@@ -468,8 +495,9 @@ export function buildRoleProposals(params: {
 						estCostUsd: incumbentMatch.estCostPerBenchRunUsd,
 						estDurationSec: roleSpec.estBenchDurationSecPerCell,
 						aaScore: incumbentMatch.compositeScore,
-						reason: `Titular actual (${primary.profileName}) como línea base`,
+						reason: `Titular actual (${prof.profileName}) como línea base`,
 					});
+					break;
 				}
 			}
 
@@ -484,6 +512,9 @@ export function buildRoleProposals(params: {
 			}
 			for (const cand of scored) {
 				if (shortlist.length >= shortlistSize) break;
+				if (cand.billingModel === "plan" && cand.quotaRemainingPercent !== null && cand.quotaRemainingPercent <= 0) {
+					continue;
+				}
 				const fk = cand.aaMatch.matched?.id ?? normalizeModelKeyForAa(cand.modelId);
 				const k = `${cand.harness}::${fk}`;
 				if (seenHarnessModel.has(k)) continue;

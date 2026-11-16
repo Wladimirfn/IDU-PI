@@ -355,6 +355,21 @@ async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Prom
 	await Promise.all(workers);
 }
 
+function normalizeProfilePairKey(harness: string, model: string | undefined): string {
+	const raw = (model ?? "").trim().toLowerCase();
+	const tail = raw.replace(/^custom_provider:/, "");
+	return `${harness.trim().toLowerCase()}::${tail}`;
+}
+
+function isTransientQuotaFailure(outcome: MiniBenchCellOutcome | undefined): boolean {
+	if (!outcome || outcome.resolved) return false;
+	const tokensZero = outcome.totalTokens === null || outcome.totalTokens === 0;
+	if (!tokensZero) return false;
+	return /hit your .*limit|weekly limit|rate.?limit|resets \d|too many requests|\b429\b/i.test(
+		outcome.summaryPreview || outcome.error || "",
+	);
+}
+
 function buildRecommendations(
 	proposal: OptimizeProposal,
 	outcomes: MiniBenchCellOutcome[],
@@ -379,6 +394,9 @@ function buildRecommendations(
 
 		const topAa = roleSummary.topCandidates[0];
 		const winner = passing[0];
+		const activePairsInRole = new Set(
+			roleSummary.currentProfiles.map((p) => normalizeProfilePairKey(p.harness, p.model)),
+		);
 
 		for (const cur of roleSummary.currentProfiles) {
 			if (!roleTaskId || roleOutcomes.length === 0) {
@@ -437,23 +455,43 @@ function buildRecommendations(
 			const incumbentOutcome = roleOutcomes.find(
 				(o) => o.harness === cur.harness && (o.profileModel === cur.model || o.modelId === cur.model),
 			);
+			const transientQuota = isTransientQuotaFailure(incumbentOutcome);
 
 			// Only swap #1 profile directly when challenger clearly outperforms incumbent (> +5 pts or incumbent failed),
-			// while keeping secondary parallel fleet diversity untouched unless it failed or matches rank 1 duplicate.
+			// while keeping secondary parallel fleet diversity untouched unless it failed cleanly for a non-quota reason.
+			// Never overwrite an active profile with a transient subscription limit, and never clone a sibling's pair.
 			const matchesWinner =
 				winner.harness === cur.harness &&
 				(winner.profileModel === cur.model || winner.modelId === cur.model);
 			const incumbentHealthy = Boolean(
 				incumbentOutcome?.supported && incumbentOutcome.resolved && incumbentOutcome.regressionsClean,
 			);
-			const clearUpgrade =
-				cur.rank === 1 &&
-				!matchesWinner &&
-				(!incumbentHealthy || winner.compositeBenchScore >= (incumbentOutcome?.compositeBenchScore ?? 0) + 5);
+			const needsReplacement =
+				!transientQuota &&
+				((cur.rank === 1 &&
+					!matchesWinner &&
+					(!incumbentHealthy || winner.compositeBenchScore >= (incumbentOutcome?.compositeBenchScore ?? 0) + 5)) ||
+					(Boolean(incumbentOutcome) && !incumbentHealthy && !matchesWinner));
 
-			if (clearUpgrade || (incumbentOutcome && !incumbentHealthy && !matchesWinner)) {
-				const sec = (winner.durationMs / 1000).toFixed(1);
-				const tokLabel = winner.totalTokens !== null ? `${Math.round(winner.totalTokens / 1000)}k tok` : "tok n/a";
+			const curPairKey = normalizeProfilePairKey(cur.harness, cur.model);
+			const replacement = needsReplacement
+				? passing.find((cand) => {
+						const candKey = normalizeProfilePairKey(cand.harness, cand.profileModel);
+						if (candKey === curPairKey) return false;
+						return !activePairsInRole.has(candKey);
+					})
+				: undefined;
+			const validReplacement =
+				replacement &&
+				(!incumbentHealthy || replacement.compositeBenchScore >= (incumbentOutcome?.compositeBenchScore ?? 0) + 5)
+					? replacement
+					: undefined;
+
+			if (validReplacement) {
+				activePairsInRole.delete(curPairKey);
+				activePairsInRole.add(normalizeProfilePairKey(validReplacement.harness, validReplacement.profileModel));
+				const sec = (validReplacement.durationMs / 1000).toFixed(1);
+				const tokLabel = validReplacement.totalTokens !== null ? `${Math.round(validReplacement.totalTokens / 1000)}k tok` : "tok n/a";
 				const roleHeader = cur.description?.match(/^ROL [^:]+:/)?.[0] ?? `ROL ${roleSummary.role.toUpperCase()}:`;
 				recommendations.push({
 					profileName: cur.profileName,
@@ -461,15 +499,24 @@ function buildRecommendations(
 					action: "update",
 					current: { harness: cur.harness, provider: cur.provider, model: cur.model },
 					recommended: {
-						harness: winner.harness,
-						...(winner.profileProvider ? { provider: winner.profileProvider } : {}),
-						model: winner.profileModel,
-						description: `${roleHeader} ${winner.harness} + ${winner.modelId} (auto-optimize: 100% en ${winner.taskId}, ${sec}s, ${tokLabel}).`,
+						harness: validReplacement.harness,
+						...(validReplacement.profileProvider ? { provider: validReplacement.profileProvider } : {}),
+						model: validReplacement.profileModel,
+						description: `${roleHeader} ${validReplacement.harness} + ${validReplacement.modelId} (auto-optimize: 100% en ${validReplacement.taskId}, ${sec}s, ${tokLabel}).`,
 					},
-					reason: `${winner.harness} · ${winner.modelId} obtuvo ${winner.compositeBenchScore} pts (${sec}s, ${tokLabel}) en ${winner.taskId}${incumbentOutcome ? ` vs ${incumbentOutcome.compositeBenchScore} pts actual` : ""}.`,
+					reason: `${validReplacement.harness} · ${validReplacement.modelId} obtuvo ${validReplacement.compositeBenchScore} pts (${sec}s, ${tokLabel}) en ${validReplacement.taskId}${incumbentOutcome ? ` vs ${incumbentOutcome.compositeBenchScore} pts actual` : ""}.`,
 					applyAllowed: true,
 				});
 			} else {
+				const reason = transientQuota
+					? `Límite temporal de suscripción (${incumbentOutcome!.summaryPreview.slice(0, 70)}); se conserva titular sin duplicar.`
+					: needsReplacement
+						? `El ganador (${winner.harness} · ${winner.modelId}) ya está asignado a otro perfil del rol; se conserva diversidad.`
+						: matchesWinner
+							? `Ya usa el ganador del mini-bench (${winner.harness} · ${winner.modelId}, ${winner.compositeBenchScore} pts).`
+							: incumbentHealthy
+								? `Titular estable (${incumbentOutcome!.compositeBenchScore} pts en ${winner.taskId}); conserva diversidad paralela en el rol.`
+								: "Mantiene configuración actual.";
 				recommendations.push({
 					profileName: cur.profileName,
 					role: roleSummary.role,
@@ -481,11 +528,7 @@ function buildRecommendations(
 						model: cur.model || "",
 						description: cur.description || "",
 					},
-					reason: matchesWinner
-						? `Ya usa el ganador del mini-bench (${winner.harness} · ${winner.modelId}, ${winner.compositeBenchScore} pts).`
-						: incumbentHealthy
-							? `Titular estable (${incumbentOutcome!.compositeBenchScore} pts en ${winner.taskId}); conserva diversidad paralela en el rol.`
-							: "Mantiene configuración actual.",
+					reason,
 					applyAllowed: false,
 				});
 			}

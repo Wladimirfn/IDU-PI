@@ -7,6 +7,8 @@ export interface ProviderAuthSummary {
 	harnessHints: string[];
 	authType: BillingModel;
 	source: string;
+	authStatus?: "active" | "expired" | "free-tier-only" | "invalid";
+	remainingCreditsUsd?: number | null;
 	baseUrl?: string;
 	liveEndpointQueried?: boolean;
 	liveModelCount?: number;
