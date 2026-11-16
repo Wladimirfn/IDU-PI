@@ -238,24 +238,24 @@ aplica, el `provider` que lo enruta.
 
 | Rol | Perfiles (CLI · modelo) |
 | :--- | :--- |
-| **Exploración** (3) | `explore-deepseek` (mcode · DeepSeek V4 Flash) · `explore-glm` (cmdc · GLM 5.3 Flash) · `explore-mimo` (opencode · MiMo 2.6 Flash) |
-| **Consultas** (4) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · MiMo 2.6 Pro) · `consult-claude` (claude · Opus) · `consult-gemini38` (agy · Gemini 3.8 Flash) |
-| **Arquitectura** (4) | `arch-claude` (claude · Opus) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-gemini` (agy · Gemini 4 Argon) · `arch-deepseek` (mcode · DeepSeek V4 Flash) |
-| **Diseño** (2) | `design-opencode` (opencode · DeepSeek V4 Flash) · `design-gentle` (gentle-shell · DeepSeek V4 Flash) |
-| **Iconografía** (2) | `iconographer` (mcode · GLM 5.3 Flash) · `iconographer-mimo` (opencode · MiMo 2.6 Flash) |
-| **Voz** (1) | `voice-narrator` (cmdc · GLM 5.3 Flash) |
-| **Música** (1) | `music-composer` (cmdc · GLM 5.3 Flash) |
-| **Auditoría** (5) | `audit-claude` (claude · Opus) · `audit-gemini` (agy · Gemini 4 Argon) · `audit-deepseek` (cmdc · DeepSeek V4.1 Flash) · `audit-mimo` (cmdc · MiMo 2.6 Pro) · `audit-minimax` (cmdc · MiniMax M3.1 Flash) |
-| **Trabajo** (3) | `work-glm` (gentle-shell · GLM 5.3 Flash `:high`) · `work-deepseek` (gentle-shell · DeepSeek V4 Flash `:high`) · `work-mimo` (gentle-shell · MiMo 2.6 Flash `:max`) |
+| **Exploración** (3) | `explore-deepseek` (pi · DeepSeek V4 Flash nan) · `explore-glm` (gentle-shell · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash high nan) |
+| **Consultas** (4) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · MiMo 2.6 Pro) · `consult-claude` (claude · Opus 5.5) · `consult-gemini38` (agy · Gemini 4 Hydrogen XHigh) |
+| **Arquitectura** (4) | `arch-gemini` (agy · Gemini 4 Argon high) · `arch-claude` (claude · Opus 5.5) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-deepseek` (pi · Kimi K3.1 Pro nan) |
+| **Diseño** (2) | `design-opencode` (opencode · Kimi K3.1 Pro nan) · `design-gentle` (mcode · Kimi K3.1 Pro nan) |
+| **Iconografía** (2) | `iconographer` (mcode · Kimi K3.1 Pro nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max nan) |
+| **Voz** (1) | `voice-narrator` (cmdc · DeepSeek V4 Flash nan) |
+| **Música** (1) | `music-composer` (cmdc · DeepSeek V4 Flash nan) |
+| **Auditoría** (5) | `audit-gemini` (agy · Gemini 4 Argon high) · `audit-claude` (claude · Opus 5.5) · `audit-deepseek` (opencode · DeepSeek V4 Flash nan) · `audit-mimo` (pi · HY4 nan) · `audit-minimax` (pi · Kimi K3.1 Pro nan) |
+| **Trabajo** (3) | `work-glm` (mcode · GLM 5.3 Flash nan) · `work-deepseek` (pi · DeepSeek V4 Flash nan) · `work-mimo` (kimi · HY4 nan) |
 
 **El identificador de modelo es un pass-through opaco.** El arnés no lo valida ni normaliza: lo
 reenvía al CLI, que acepta lo que entienda. Por eso conviven formas distintas
-(`nan/glm5.3-flash`, `custom_provider:nan/deepseek-v4-flash`, `xiaomi/mimo-v2.6-pro`) según cómo
+(`custom_provider:nan/glm5.3-flash`, `nan/hy4`, `xiaomi/mimo-v2.6-pro`) según cómo
 exponga cada proveedor su catálogo. Para usar otro modelo, agrega un perfil — no hace falta tocar
 código.
 
-**El esfuerzo vive en el slug, no en un campo.** `work-glm` usa `glm5.3-flash:high`;
-`work-mimo`, `mimo-v2.6-flash:max`. No hay un campo `effort` en el perfil.
+**El esfuerzo vive en el slug o config de cada CLI, no en un campo.** `explore-mimo` usa
+`mimo-v2.6-flash#high`; `iconographer-mimo`, `mimo-v2.6-flash#max`; Antigravity usa `-high` / `-xhigh`. No hay un campo `effort` en el perfil.
 
 **Inactividad vs. streaming.** `idleTimeoutMs` solo aplica a perfiles con `streams: true`. En un
 perfil sin streaming el único freno es el timeout total: si delegas tareas largas, añade
@@ -365,6 +365,10 @@ Detalle completo: [docs/mcp-server.md](docs/mcp-server.md).
 ## Comandos CLI
 
 ```bash
+idupi                               # TUI interactiva con la flota por rol (--plain / --json)
+idupi optimize                      # Stage 1: descubrimiento + shortlist sin gasto
+idupi optimize --run-bench          # Stage 2: mini-benchmark aislado en shortlist
+idupi optimize --apply              # Stage 3: aplica mejoras aprobadas con backup
 pnpm run cli status                 # CLIs detectados y salud
 pnpm run cli capabilities           # perfiles en JSON
 pnpm run cli capabilities --quota   # añade la cuota de cada cuenta
@@ -466,7 +470,9 @@ código vive en el tag `legacy-archive-pre-purge` y ya no ocupa el árbol de tra
 4. **Protocolo v2.3.0**: skill reescrita tras auditoría cruzada de cuatro modelos — fronteras de
    rol explícitas, gobernanza inequívoca y orden real del arbitraje.
 5. **Instalación en Antigravity**: el instalador cubre `~/.gemini/antigravity-cli/skills`.
-6. **Perfiles curados**: instalación de referencia sin los 16 heredados de benchmarks.
+6. **Perfiles curados y calibrados**: flota de 25 agentes calibrada por benchmarks de rol reales (`bench/`) y sincronizada sin los 16 heredados.
+7. **Visor TUI `idupi`**: tablero interactivo de agentes configurados por rol (`--plain` / `--json` fuera de TTY).
+8. **Auto-Optimizador `idu-pi optimize` (3 etapas)**: descubrimiento seguro de CLIs/keys/cuotas + catálogo Artificial Analysis (`propose`), mini-benchmark aislado (`--run-bench`) con guarda anti-duplicados/cuotas y aplicación con backup (`--apply`).
 
 </details>
 
