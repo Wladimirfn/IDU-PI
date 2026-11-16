@@ -280,7 +280,12 @@ export const consultArchTradeoffTask: BenchmarkTaskDef = {
 		const d = parsed?.recommendedDesign ?? {};
 		const designOk =
 			Boolean(d.claimMechanism && /atomic|cas|compare|lease|lock|skip locked|returning/i.test(d.claimMechanism)) &&
-			Boolean(d.retryScheduling && /next.?run|schedul|timestamp|delay|queue|non.?block/i.test(d.retryScheduling)) &&
+			Boolean(
+				d.retryScheduling &&
+					/next.?run|available.?at|schedul|timestamp|delay|queue|defer(?:red)?|non.?block|does not block|without blocking/i.test(
+						d.retryScheduling,
+					),
+			) &&
 			Boolean(d.idempotencyStrategy && /unique|dedup|short.?circuit|persist|ttl|evict|bound/i.test(d.idempotencyStrategy)) &&
 			Boolean(d.primaryTradeoff && /trade|latency|contention|throughput|memory|complex|cost/i.test(d.primaryTradeoff));
 		checks.push({

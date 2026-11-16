@@ -1,3 +1,28 @@
+function hasStructuredDeliverable(text: string): boolean {
+	const trimmed = text.trim();
+	if (!trimmed) return false;
+	if (/^[\[{][\s\S]*[\]}]$/.test(trimmed)) return true;
+	return /```(?:json)?\s*[\r\n]+[\[{]/i.test(trimmed);
+}
+
+function referencesPriorDeliverable(text: string): boolean {
+	return /\b(?:(?:delivered|provided|shown|printed|generated|submitted|completed|stands)\s+(?:as\s+delivered\s+)?above|above\s+(?:json|code|block|deliverable|output|response|analysis)|see\s+(?:the\s+)?above)\b/i.test(
+		text,
+	);
+}
+
+/**
+ * Preserves an earlier fenced JSON deliverable when a trailing confirmation or
+ * rejected `exit_plan_mode` turn replaces the final summary text.
+ */
+function withPriorStructuredDeliverable(trailing: string, assistantTexts: string[], sawExitPlanDenial: boolean): string {
+	const cleanTrailing = trailing.trim();
+	if (!cleanTrailing || hasStructuredDeliverable(cleanTrailing)) return cleanTrailing;
+	if (!sawExitPlanDenial && !referencesPriorDeliverable(cleanTrailing)) return cleanTrailing;
+	const prior = [...assistantTexts].map((t) => t.trim()).reverse().find((t) => hasStructuredDeliverable(t));
+	return prior ? `${prior}\n\n${cleanTrailing}` : cleanTrailing;
+}
+
 export function extractCleanSummary(stdout: string, harness = ""): string {
 	if (!stdout) return "";
 
@@ -9,6 +34,7 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 	const piTurnTexts: string[] = [];
 	const piMessageEndTexts: string[] = [];
 	let definitiveResult = "";
+	let sawExitPlanDenial = false;
 	let cmdcStreamedText = "";
 	const normalizedHarness = harness.toLowerCase();
 	const isCmdc = normalizedHarness === "commandcode" || normalizedHarness === "cmdc";
@@ -62,6 +88,15 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 			// Claude Code & Qwen Code final result event
 			if (parsed.type === "result" && typeof parsed.result === "string" && parsed.result.trim()) {
 				definitiveResult = parsed.result.trim();
+			}
+			if (
+				parsed.type === "result" &&
+				Array.isArray(parsed.permission_denials) &&
+				parsed.permission_denials.some(
+					(entry: unknown) => entry && typeof entry === "object" && (entry as Record<string, unknown>).tool_name === "exit_plan_mode",
+				)
+			) {
+				sawExitPlanDenial = true;
 			}
 
 			// Command Code (cmdc) / Qwen / Claude error envelope on `type: "result"`
@@ -155,7 +190,7 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 	}
 
 	if (definitiveResult) {
-		return definitiveResult;
+		return withPriorStructuredDeliverable(definitiveResult, assistantTexts, sawExitPlanDenial);
 	}
 
 	if (assistantTexts.length > 0) {
@@ -163,8 +198,8 @@ export function extractCleanSummary(stdout: string, harness = ""): string {
 		if (nonEmpty.length > 0) {
 			// Skip trivial trailing acks (< 20 chars) when an earlier substantive message exists,
 			// while still capturing concise 20-100 char final replies instead of stale preambles.
-			const lastMeaningful = [...nonEmpty].reverse().find((t) => t.length >= 20);
-			return lastMeaningful ?? nonEmpty[nonEmpty.length - 1];
+			const lastMeaningful = [...nonEmpty].reverse().find((t) => t.length >= 20) ?? nonEmpty[nonEmpty.length - 1];
+			return withPriorStructuredDeliverable(lastMeaningful, nonEmpty, sawExitPlanDenial);
 		}
 	}
 

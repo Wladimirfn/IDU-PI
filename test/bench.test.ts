@@ -648,3 +648,55 @@ test("collectGitChangedFiles detects committed edits against baseRef and gentle-
 		rmSync(baseDir, { recursive: true, force: true });
 	}
 });
+
+test("StreamLineCapture discards wrapped Command Code message_update spam and consult-01 accepts available_at non-blocking phrasing", async () => {
+	const { rmSync } = await import("node:fs");
+	const { StreamLineCapture } = await import("../bench/isolation.js");
+	const cap = new StreamLineCapture(64 * 1024, 5);
+	const wrappedSpam = JSON.stringify({
+		type: "event",
+		event: { type: "message_update", content: [{ type: "thinking", thinking: "y".repeat(900) }] },
+	});
+	for (let i = 0; i < 600; i++) {
+		cap.pushChunk(`${wrappedSpam}\n`);
+	}
+	const runEnd = JSON.stringify({
+		type: "event",
+		event: { type: "run_end", result: { finalText: '{"ok":true}' } },
+	});
+	cap.pushChunk(`${runEnd}\n`);
+	const captured = cap.finalize();
+	assert.equal(captured.droppedTransientCount, 600);
+	assert.ok(captured.text.includes('"finalText":"{\\"ok\\":true}"'));
+
+	const consultTask = BENCHMARK_TASKS.find((t) => t.id === "consult-01-arch-tradeoff")!;
+	const sb = prepareTaskSandbox(consultTask, "CONSULT_REGEX_SENTINEL");
+	const baseDir = sb.sandboxDir.replace(/[/\\]repo$/, "");
+	try {
+		const validAltAnswer = [
+			"```json",
+			JSON.stringify({
+				rootCauses: [
+					{ causeId: "NON_ATOMIC_CLAIM", file: "src/job-dispatcher.mjs", symbol: "JobDispatcher.pollAndRun", explanation: "Concurrent workers read the same pending jobs without an atomic lease." },
+					{ causeId: "HOL_BACKOFF_BLOCKING", file: "src/job-dispatcher.mjs", symbol: "JobDispatcher.dispatchSingleJob", explanation: "Inline sleep stalls the batch poll loop behind one retry backoff." },
+					{ causeId: "NON_IDEMPOTENT_LEDGER", file: "src/ledger-store.mjs", symbol: "LedgerStore.recordCompletion", explanation: "Appends duplicate completions and grows seenKeys Set unboundedly." },
+				],
+				recommendedDesign: {
+					claimMechanism: "Claim atomically with UPDATE ... FOR UPDATE SKIP LOCKED RETURNING * and lease TTL.",
+					retryScheduling: "Write available_at=now()+backoff and continue immediately so backoff does not block other jobs.",
+					idempotencyStrategy: "Enforce unique constraint on idempotency_key with INSERT ON CONFLICT DO NOTHING and bound caches.",
+					primaryTradeoff: "Adds database write contention and lease tuning overhead in exchange for correctness.",
+				},
+				nonCulpritFiles: ["src/metrics-reporter.mjs"],
+			}),
+			"```",
+		].join("\n");
+		const res = await consultTask.evaluate(sb.sandboxDir, {
+			changedFiles: [],
+			summary: validAltAnswer,
+		});
+		assert.equal(res.resolved, true, `expected consult-01 to resolve valid available_at phrasing: ${JSON.stringify(res.checks)}`);
+	} finally {
+		rmSync(baseDir, { recursive: true, force: true });
+	}
+});
