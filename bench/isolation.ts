@@ -676,8 +676,13 @@ function isTransientStreamDeltaLine(line: string): boolean {
 	if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
 	if (!trimmed.includes('"message_update"') && !trimmed.includes('"item.updated"')) return false;
 	try {
-		const parsed = JSON.parse(trimmed) as { type?: unknown };
-		return parsed.type === "message_update" || parsed.type === "item.updated";
+		const parsed = JSON.parse(trimmed) as { type?: unknown; event?: { type?: unknown } };
+		// Command Code wraps stream events under `{ type: "event", event: { type: "message_update", ... } }`.
+		const eventType =
+			parsed.type === "event" && parsed.event && typeof parsed.event === "object"
+				? parsed.event.type
+				: parsed.type;
+		return eventType === "message_update" || eventType === "item.updated";
 	} catch {
 		return false;
 	}

@@ -2387,4 +2387,45 @@ test("buildWorkerSpawnEnv injects Nan OPENAI_API_KEY in memory for qwen and chil
 	}
 });
 
+test("extractCleanSummary preserves prior fenced JSON when qwen plan mode trails with exit_plan_mode denial ack", () => {
+	const qwenPlanStream = [
+		JSON.stringify({
+			type: "assistant",
+			message: {
+				id: "msg_2",
+				content: [{ type: "text", text: 'Analysis complete.\n\n```json\n{\n  "rootCauses": ["NON_ATOMIC_CLAIM"]\n}\n```' }],
+			},
+		}),
+		JSON.stringify({
+			type: "assistant",
+			message: {
+				id: "msg_3",
+				content: [{ type: "text", text: "The read-only consultation stands as delivered above — no files were modified." }],
+			},
+		}),
+		JSON.stringify({
+			type: "result",
+			result: "The read-only consultation stands as delivered above — no files were modified.",
+			permission_denials: [{ tool_name: "exit_plan_mode" }],
+		}),
+	].join("\n");
+
+	const preserved = extractCleanSummary(qwenPlanStream, "qwen");
+	assert.ok(preserved.includes('"rootCauses"'), "must keep Turn 2 JSON block");
+	assert.ok(preserved.endsWith("no files were modified."));
+
+	// Normal final result without plan denial or back-reference keeps final result verbatim.
+	const normalStream = [
+		JSON.stringify({
+			type: "assistant",
+			message: { id: "msg_1", content: [{ type: "text", text: '```json\n{"scratch":true}\n```' }] },
+		}),
+		JSON.stringify({
+			type: "result",
+			result: "Implemented all fixes and verified tests pass.",
+		}),
+	].join("\n");
+	assert.equal(extractCleanSummary(normalStream, "qwen"), "Implemented all fixes and verified tests pass.");
+});
+
 
