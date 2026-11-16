@@ -15,10 +15,14 @@ import {
 	parseAaLeaderboardHtml,
 	parseCsvFlag,
 	proposeOptimization,
+	ROLE_OBJECTIVES,
 	runOptimizationBench,
 	type AaModelMetrics,
 	type MiniBenchCellOutcome,
+	type MiniBenchCellPlan,
+	type OptimizeProposal,
 } from "../src/optimizer/index.js";
+import { getBenchmarkTask } from "../bench/tasks/registry.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..", "..");
@@ -497,4 +501,423 @@ test("parseCsvFlag and matchesRoleFilter handle PowerShell arrays, accents, and 
 	assert.equal(matchesRoleFilter("Consultas", ["consult"]), true);
 	assert.equal(matchesRoleFilter("Arquitectura", ["architecture"]), true);
 	assert.equal(matchesRoleFilter("Trabajo", ["exploracion", "auditoria"]), false);
+});
+
+test("every ROLE_OBJECTIVES benchmarkTaskId resolves in BENCHMARK_TASKS", () => {
+	for (const spec of Object.values(ROLE_OBJECTIVES)) {
+		if (!spec.benchmarkTaskId) continue;
+		const resolvedTask = getBenchmarkTask(spec.benchmarkTaskId);
+		assert.ok(resolvedTask, `ROLE_OBJECTIVES.${spec.role}.benchmarkTaskId (${spec.benchmarkTaskId}) must exist`);
+		assert.equal(resolvedTask.id, spec.benchmarkTaskId);
+	}
+});
+
+test("discovery excludes expired opencode OAuth, @ai-sdk/anthropic commandcode gateway, and paid OpenRouter models on free tier", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-opt-auth-filters-"));
+	const prevIduHome = process.env.IDU_HOME;
+	const iduHome = join(root, "idu-home");
+	const fakeHome = join(root, "user-home");
+
+	try {
+		process.env.IDU_HOME = iduHome;
+		mkdirSync(iduHome, { recursive: true });
+		mkdirSync(join(fakeHome, ".local", "share", "opencode"), { recursive: true });
+		mkdirSync(join(fakeHome, ".config", "opencode"), { recursive: true });
+		mkdirSync(join(fakeHome, ".pi", "agent"), { recursive: true });
+
+		writeFileSync(
+			join(fakeHome, ".pi", "agent", "models.json"),
+			JSON.stringify({
+				providers: {
+					"commandcode-anth": {
+						models: [{ id: "claude-fable-5" }],
+					},
+				},
+			}),
+			"utf8",
+		);
+		writeFileSync(
+			join(fakeHome, ".local", "share", "opencode", "auth.json"),
+			JSON.stringify({
+				openai: { type: "oauth", access: "expired-tok", expires: 1_000_000 },
+				zai: { type: "api", key: "valid-zai-tok" },
+			}),
+			"utf8",
+		);
+		writeFileSync(
+			join(fakeHome, ".config", "opencode", "opencode.json"),
+			JSON.stringify({
+				provider: {
+					"commandcode-anth": {
+						npm: "@ai-sdk/anthropic",
+						options: { baseURL: "https://api.commandcode.ai/provider/v1", apiKey: "stale-cmdc-key" },
+					},
+				},
+			}),
+			"utf8",
+		);
+
+		const discovery = await discoverFleetCapabilities({
+			homeDir: fakeHome,
+			env: { PATH: process.env.PATH ?? "", OPENROUTER_API_KEY: "or-free-key" },
+			checkCliImpl: (cmd) => cmd === "pi" || cmd === "opencode",
+			execCliImpl: (cmd, args) => {
+				if (cmd === "opencode" && args[0] === "models") {
+					return [
+						"openai/gpt-6.1-terra",
+						"commandcode-anth/claude-fable-5",
+						"zai/glm-5",
+						"openrouter/openai/o3",
+						"openrouter/deepseek/deepseek-r1:free",
+					].join("\n");
+				}
+				return null;
+			},
+			fetchImpl: (async (url: string | URL) => {
+				const u = String(url);
+				if (u.endsWith("/api/v1/models")) {
+					return new Response(
+						JSON.stringify({
+							data: [{ id: "openai/o3" }, { id: "deepseek/deepseek-r1:free" }],
+						}),
+						{ status: 200 },
+					);
+				}
+				if (u.endsWith("/api/v1/key")) {
+					return new Response(
+						JSON.stringify({ data: { is_free_tier: true, limit_remaining: null } }),
+						{ status: 200 },
+					);
+				}
+				return new Response("{}", { status: 404 });
+			}) as unknown as typeof fetch,
+			readQuotaImpl: async () => [],
+		});
+
+		assert.ok(discovery.candidates.some((c) => c.harness === "opencode" && c.profileModel === "zai/glm-5"));
+		assert.ok(
+			discovery.candidates.some((c) => c.provider === "openrouter" && c.modelId.endsWith(":free")),
+			"free-tier :free models should remain available",
+		);
+		assert.ok(
+			!discovery.candidates.some((c) => c.profileModel === "openai/gpt-6.1-terra"),
+			"expired OpenAI OAuth must be excluded",
+		);
+		assert.ok(
+			!discovery.candidates.some((c) => c.harness === "pi" && c.modelId === "claude-fable-5"),
+			"blocked opencode custom provider must not bleed into pi models.json candidates",
+		);
+		assert.ok(
+			!discovery.candidates.some((c) => c.profileModel === "commandcode-anth/claude-fable-5"),
+			"@ai-sdk/anthropic commandcode gateway must be excluded",
+		);
+		assert.ok(
+			!discovery.candidates.some((c) => c.provider === "openrouter" && !c.modelId.endsWith(":free")),
+			"paid OpenRouter models must be excluded when key is free-tier without credits",
+		);
+		assert.ok(discovery.warnings.some((w) => /expirado/i.test(w)));
+		assert.ok(discovery.warnings.some((w) => /free-tier/i.test(w)));
+	} finally {
+		if (prevIduHome === undefined) delete process.env.IDU_HOME;
+		else process.env.IDU_HOME = prevIduHome;
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("buildRoleProposals preserves highest effort tier, seeds incumbents across collapsed variants, and avoids 0% quota plans", () => {
+	const catalog: AaModelMetrics[] = [
+		{
+			id: "claude-opus-5-5",
+			name: "Claude Opus 5.5 (Max)",
+			intelligenceIndex: 59.1,
+			codingScore: 54,
+			visual3dScore: null,
+			outputSpeedTokPerSec: 110,
+			ttftSeconds: 1.5,
+			timePerTaskSeconds: 900,
+			price1mInputUsd: 4,
+			price1mOutputUsd: 20,
+			price1mBlendedUsd: 8,
+			contextWindowTokens: 1_000_000,
+			isReasoning: true,
+			source: "aa-ssr-catalog",
+		},
+		{
+			id: "gemini-4-argon",
+			name: "Gemini 4 Argon (High)",
+			intelligenceIndex: 50.4,
+			codingScore: 48,
+			visual3dScore: null,
+			outputSpeedTokPerSec: 120,
+			ttftSeconds: 1.2,
+			timePerTaskSeconds: 800,
+			price1mInputUsd: 2,
+			price1mOutputUsd: 10,
+			price1mBlendedUsd: 4,
+			contextWindowTokens: 1_000_000,
+			isReasoning: true,
+			source: "aa-ssr-catalog",
+		},
+		{
+			id: "glm-5-3-flash",
+			name: "GLM-5.3-Flash",
+			intelligenceIndex: 27.8,
+			codingScore: 40,
+			visual3dScore: null,
+			outputSpeedTokPerSec: 90,
+			ttftSeconds: 1.0,
+			timePerTaskSeconds: 600,
+			price1mInputUsd: 0.15,
+			price1mOutputUsd: 0.5,
+			price1mBlendedUsd: 0.24,
+			contextWindowTokens: 1_000_000,
+			source: "aa-ssr-catalog",
+		},
+	];
+
+	assert.equal(matchAaModel("custom_provider:nan/glm5.3-flash", catalog).matched?.name, "GLM-5.3-Flash");
+
+	const proposals = buildRoleProposals({
+		profiles: {
+			"arch-gemini": {
+				harness: "antigravity",
+				model: "gemini-4-argon-high",
+				permissions: "read-only",
+				description: "ROL ARQUITECTURA (1)",
+			},
+		},
+		candidates: [
+			{
+				harness: "antigravity",
+				provider: "antigravity",
+				modelId: "claude-opus-5-5-low",
+				profileModel: "claude-opus-5-5-low",
+				displayName: "Claude Opus 5.5 (Low)",
+				billingModel: "plan",
+				source: "cli-list",
+				contextWindow: null,
+			},
+			{
+				harness: "antigravity",
+				provider: "antigravity",
+				modelId: "claude-opus-5-5-high",
+				profileModel: "claude-opus-5-5-high",
+				displayName: "Claude Opus 5.5 (High)",
+				billingModel: "plan",
+				source: "cli-list",
+				contextWindow: null,
+			},
+			{
+				harness: "antigravity",
+				provider: "antigravity",
+				modelId: "gemini-4-argon-medium",
+				profileModel: "gemini-4-argon-medium",
+				displayName: "Gemini 4 Argon (Medium)",
+				billingModel: "plan",
+				source: "cli-list",
+				contextWindow: null,
+			},
+			{
+				harness: "antigravity",
+				provider: "antigravity",
+				modelId: "gemini-4-argon-high",
+				profileModel: "gemini-4-argon-high",
+				displayName: "Gemini 4 Argon (High)",
+				billingModel: "plan",
+				source: "cli-list",
+				contextWindow: null,
+			},
+			{
+				harness: "codex",
+				provider: "openai-codex",
+				modelId: "claude-opus-5-5-high",
+				profileModel: "claude-opus-5-5-high",
+				displayName: "Exhausted Codex Plan",
+				billingModel: "plan",
+				source: "quota",
+				contextWindow: null,
+			},
+		],
+		aaCatalog: catalog,
+		quotas: [
+			{
+				source: "agy",
+				harness: "antigravity",
+				billingModel: "plan",
+				plan: "plan",
+				meters: { m: { id: "m", label: "agy", windows: { d: { remainingPercent: 54, resetsAt: null, resetsInSeconds: null, windowSeconds: 86400 } } } },
+				capturedAt: new Date().toISOString(),
+				stale: false,
+				unknownReason: null,
+			},
+			{
+				source: "codex",
+				harness: "codex",
+				billingModel: "plan",
+				plan: "plus",
+				meters: { m: { id: "m", label: "codex", windows: { h5: { remainingPercent: 0, resetsAt: null, resetsInSeconds: null, windowSeconds: 18000 } } } },
+				capturedAt: new Date().toISOString(),
+				stale: false,
+				unknownReason: null,
+			},
+		],
+		historicalMetrics: [],
+		selectedRoles: ["Arquitectura"],
+	});
+
+	const arch = proposals[0];
+	assert.equal(arch.topCandidates[0]?.profileModel, "claude-opus-5-5-high", "-high must beat -low when base score ties");
+	assert.ok(
+		arch.shortlist.some((s) => s.profileModel === "gemini-4-argon-high" && s.reason.includes("Titular actual")),
+		"incumbent -high variant must be seeded instead of dropped behind -medium",
+	);
+	assert.ok(!arch.shortlist.some((s) => s.harness === "codex"), "0% remaining plan CLI must not consume a shortlist cell");
+});
+
+test("runOptimizationBench preserves transient-quota profiles and avoids cloning sibling pairs", async () => {
+	const root = mkdtempSync(join(tmpdir(), "idu-opt-diversity-"));
+	const prevIduHome = process.env.IDU_HOME;
+	const iduHome = join(root, "idu-home");
+	const optDir = join(iduHome, "optimize");
+	try {
+		process.env.IDU_HOME = iduHome;
+		mkdirSync(iduHome, { recursive: true });
+		const syntheticShortlist: MiniBenchCellPlan[] = [
+			{
+				role: "Consultas",
+				harness: "commandcode",
+				provider: "xiaomi",
+				modelId: "mimo-v2.6-pro",
+				profileModel: "xiaomi/mimo-v2.6-pro",
+				billingModel: "plan",
+				taskId: "consult-01-arch-tradeoff",
+				permissionMode: "read-only",
+				targetProfiles: ["consult-openai", "consult-mimo", "consult-claude"],
+				estCostUsd: 0,
+				estDurationSec: 50,
+				aaScore: 80,
+				reason: "incumbent",
+			},
+			{
+				role: "Consultas",
+				harness: "antigravity",
+				provider: "antigravity",
+				modelId: "gemini-4-hydrogen-xhigh",
+				profileModel: "gemini-4-hydrogen-xhigh",
+				billingModel: "plan",
+				taskId: "consult-01-arch-tradeoff",
+				permissionMode: "read-only",
+				targetProfiles: ["consult-openai", "consult-mimo", "consult-claude"],
+				estCostUsd: 0,
+				estDurationSec: 65,
+				aaScore: 81,
+				reason: "challenger",
+			},
+			{
+				role: "Consultas",
+				harness: "claude",
+				provider: "anthropic",
+				modelId: "opus",
+				profileModel: "opus",
+				profileProvider: "anthropic",
+				billingModel: "plan",
+				taskId: "consult-01-arch-tradeoff",
+				permissionMode: "read-only",
+				targetProfiles: ["consult-openai", "consult-mimo", "consult-claude"],
+				estCostUsd: 0,
+				estDurationSec: 65,
+				aaScore: 81.4,
+				reason: "claude plan",
+			},
+		];
+		const syntheticProposal: OptimizeProposal = {
+			schemaVersion: 1,
+			generatedAt: new Date().toISOString(),
+			iduHome,
+			clis: [],
+			providers: [],
+			quotas: [],
+			aaSource: "cached",
+			aaFetchedAt: new Date().toISOString(),
+			aaModelCount: 0,
+			discoveredModelCount: 3,
+			estimatedTotalCostUsd: 0,
+			estimatedPlanCalls: 3,
+			estimatedDurationSec: 120,
+			roles: [
+				{
+					role: "Consultas",
+					concept: "Max reasoning",
+					permissions: "read-only",
+					benchmarkTaskId: "consult-01-arch-tradeoff",
+					currentProfiles: [
+						{ profileName: "consult-openai", rank: 1, harness: "opencode", model: "openai/gpt-6.1-terra", permissions: "read-only" },
+						{ profileName: "consult-mimo", rank: 2, harness: "commandcode", model: "xiaomi/mimo-v2.6-pro", permissions: "read-only" },
+						{ profileName: "consult-claude", rank: 3, harness: "claude", provider: "anthropic", model: "opus", permissions: "read-only" },
+					],
+					topCandidates: [],
+					shortlist: syntheticShortlist,
+					notes: [],
+				},
+			],
+			shortlist: syntheticShortlist,
+			warnings: [],
+		};
+
+		const runResult = await runOptimizationBench({
+			roles: ["Consultas"],
+			optimizeDir: optDir,
+			proposal: syntheticProposal,
+			aaFetcher: async () => ({ models: [], source: "cached", fetchedAt: new Date().toISOString() }),
+			discoverer: async () => ({ clis: [], providers: [], quotas: [], candidates: [], historicalMetrics: [], warnings: [] }),
+			cellRunner: async (cell): Promise<MiniBenchCellOutcome> => {
+				if (cell.harness === "claude") {
+					return {
+						...cell,
+						supported: true,
+						resolved: false,
+						regressionsClean: false,
+						autonomous: false,
+						failToPassPassed: 0,
+						failToPassTotal: 4,
+						durationMs: 5_000,
+						totalTokens: 0,
+						costUsd: 0,
+						compositeBenchScore: 0,
+						summaryPreview: "You've hit your weekly limit · resets 8pm",
+					};
+				}
+				return {
+					...cell,
+					supported: true,
+					resolved: true,
+					regressionsClean: true,
+					autonomous: true,
+					failToPassPassed: 4,
+					failToPassTotal: 4,
+					durationMs: cell.harness === "commandcode" ? 50_000 : 90_000,
+					totalTokens: 50_000,
+					costUsd: 0,
+					compositeBenchScore: cell.harness === "commandcode" ? 97 : 91,
+					summaryPreview: "ok",
+				};
+			},
+		});
+
+		const recOpenai = runResult.recommendations.find((r) => r.profileName === "consult-openai");
+		const recMimo = runResult.recommendations.find((r) => r.profileName === "consult-mimo");
+		const recClaude = runResult.recommendations.find((r) => r.profileName === "consult-claude");
+		assert.equal(recMimo?.action, "keep");
+		assert.equal(recClaude?.action, "keep", "transient weekly limit must not erase active claude profile");
+		assert.equal(recOpenai?.action, "update");
+		assert.equal(
+			recOpenai?.recommended.model,
+			"gemini-4-hydrogen-xhigh",
+			"must fall back to second distinct passing runner instead of cloning sibling consult-mimo",
+		);
+	} finally {
+		if (prevIduHome === undefined) delete process.env.IDU_HOME;
+		else process.env.IDU_HOME = prevIduHome;
+		rmSync(root, { recursive: true, force: true });
+	}
 });

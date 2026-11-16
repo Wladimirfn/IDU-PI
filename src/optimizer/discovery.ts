@@ -185,6 +185,36 @@ async function fetchLiveEndpointModels(
 	}
 }
 
+async function fetchOpenRouterKeyStatus(
+	apiKey: string,
+	fetchImpl: typeof fetch,
+): Promise<{ isFreeTierOnly: boolean; remainingCreditsUsd: number | null }> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 4500);
+	try {
+		const res = await fetchImpl("https://openrouter.ai/api/v1/key", {
+			headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+			signal: controller.signal,
+		});
+		if (!res.ok) return { isFreeTierOnly: false, remainingCreditsUsd: null };
+		const body = (await res.json()) as {
+			data?: { is_free_tier?: boolean; limit_remaining?: number | null };
+		};
+		const d = body?.data;
+		if (!d) return { isFreeTierOnly: false, remainingCreditsUsd: null };
+		const remaining = typeof d.limit_remaining === "number" ? d.limit_remaining : null;
+		const isFreeTierOnly = Boolean(d.is_free_tier === true && (remaining === null || remaining < 0.1));
+		return {
+			isFreeTierOnly,
+			remainingCreditsUsd: remaining ?? (d.is_free_tier ? 0 : null),
+		};
+	} catch {
+		return { isFreeTierOnly: false, remainingCreditsUsd: null };
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 function isAgentCapableModelId(modelId: string): boolean {
 	return !/(?:embed|tts|whisper|moderation|audio|image-gen|safeguard|shield|guardrail|rerank|transcribe|realtime|:(?:batch|free-pool)$|\bstealth\/|\breflection\/)/i.test(
 		modelId,
@@ -494,23 +524,98 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 		safeReadJson<Record<string, unknown>>(join(home, ".config", "opencode", "opencode.jsonc")) ??
 		safeReadJson<Record<string, unknown>>(join(home, ".config", "opencode", "opencode.json"));
 	const ocAuthedProviders = new Set<string>();
+	const blockedOcProviders = new Set<string>();
+	const nowMs = Date.now();
 	if (ocAuth) {
 		for (const [prov, v] of Object.entries(ocAuth)) {
-			ocAuthedProviders.add(prov);
+			const rec = v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+			const expiresAt = typeof rec?.expires === "number" ? rec.expires : null;
+			const isExpired = expiresAt !== null && expiresAt < nowMs;
 			registerProvider(
 				{
 					provider: prov,
 					harnessHints: ["opencode"],
 					authType: classifyBillingModel(prov),
+					authStatus: isExpired ? "expired" : "active",
 					source: "~/.local/share/opencode/auth.json",
+					...(isExpired ? { discoveryNote: "OAuth token expired" } : {}),
 				},
 				extractSecretString(v, env),
 			);
+			if (isExpired) {
+				blockedOcProviders.add(prov);
+				warnings.push(`opencode/${prov}: token OAuth expirado (excluido hasta re-autenticar).`);
+			} else {
+				ocAuthedProviders.add(prov);
+			}
 		}
 	}
+	const cmdcStoredApiKey = extractSecretString(cmdcAuth?.apiKey, env);
 	if (ocCfg && typeof ocCfg.provider === "object" && ocCfg.provider) {
-		for (const prov of Object.keys(ocCfg.provider as Record<string, unknown>)) {
-			ocAuthedProviders.add(prov);
+		const cfgProviders = ocCfg.provider as Record<string, unknown>;
+		for (const [prov, rawDef] of Object.entries(cfgProviders)) {
+			if (blockedOcProviders.has(prov)) continue;
+			const def = rawDef && typeof rawDef === "object" ? (rawDef as Record<string, unknown>) : {};
+			const opts = def.options && typeof def.options === "object" ? (def.options as Record<string, unknown>) : {};
+			const npmPkg = typeof def.npm === "string" ? def.npm : "";
+			const baseUrl =
+				typeof opts.baseURL === "string"
+					? opts.baseURL
+					: typeof def.baseURL === "string"
+						? def.baseURL
+						: "";
+			const staticKey = extractSecretString(opts, env);
+
+			// `@ai-sdk/anthropic` omits the Bearer header that Command Code gateway requires (`Invalid Authorization token`).
+			if (npmPkg === "@ai-sdk/anthropic" && /commandcode\.ai/i.test(baseUrl)) {
+				blockedOcProviders.add(prov);
+				registerProvider({
+					provider: prov,
+					harnessHints: ["opencode"],
+					authType: "plan",
+					authStatus: "invalid",
+					source: "~/.config/opencode/opencode.json",
+					baseUrl,
+					discoveryNote: "@ai-sdk/anthropic omits required Bearer header for Command Code gateway",
+				});
+				warnings.push(`opencode/${prov}: @ai-sdk/anthropic incompatible con gateway Bearer de commandcode (usa CLI cmdc).`);
+				continue;
+			}
+
+			// Custom `commandcode` entry in opencode.json using an outdated static key vs `~/.commandcode/auth.json`.
+			if (/commandcode/i.test(prov) && staticKey && cmdcStoredApiKey && staticKey !== cmdcStoredApiKey) {
+				blockedOcProviders.add(prov);
+				registerProvider({
+					provider: prov,
+					harnessHints: ["opencode"],
+					authType: "plan",
+					authStatus: "invalid",
+					source: "~/.config/opencode/opencode.json",
+					baseUrl: baseUrl || undefined,
+					discoveryNote: "Static token differs from active ~/.commandcode/auth.json",
+				});
+				warnings.push(`opencode/${prov}: token desactualizado respecto a ~/.commandcode/auth.json (usa CLI cmdc).`);
+				continue;
+			}
+
+			if (/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?/i.test(baseUrl) && !options.skipLiveEndpoints) {
+				try {
+					const probe = await fetchLiveEndpointModels(`${baseUrl.replace(/\/$/, "")}/models`, staticKey ?? "", fetchImpl);
+					if (probe.error && probe.models.length === 0) {
+						blockedOcProviders.add(prov);
+						continue;
+					}
+				} catch {
+					blockedOcProviders.add(prov);
+					continue;
+				}
+			}
+
+			if (ocAuth && prov in ocAuth) {
+				ocAuthedProviders.add(prov);
+			} else if (baseUrl && staticKey) {
+				ocAuthedProviders.add(prov);
+			}
 		}
 	}
 	if (nanKey) ocAuthedProviders.add("nan");
@@ -556,6 +661,7 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 
 	// 2. Live OpenAI-compatible `/v1/models` queries (using keys strictly in memory).
 	const liveModelsByProvider = new Map<string, Array<{ id: string; contextWindow: number | null; inPer1M: number | null; outPer1M: number | null }>>();
+	let openRouterFreeTierOnly = false;
 	if (!options.skipLiveEndpoints) {
 		await Promise.all(
 			Object.entries(KNOWN_OPENAI_ENDPOINTS).map(async ([prov, ep]) => {
@@ -571,6 +677,18 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 				}
 				if (live.models.length > 0) {
 					liveModelsByProvider.set(prov, live.models);
+				}
+				if (prov === "openrouter") {
+					const keyStatus = await fetchOpenRouterKeyStatus(key, fetchImpl);
+					if (keyStatus.isFreeTierOnly) {
+						openRouterFreeTierOnly = true;
+						if (summary) {
+							summary.authStatus = "free-tier-only";
+							summary.remainingCreditsUsd = keyStatus.remainingCreditsUsd;
+							summary.discoveryNote = "OpenRouter free-tier sin saldo pago (solo :free habilitado)";
+						}
+						warnings.push("openrouter: cuenta en free-tier sin saldo pago (modelos pagos excluidos; solo :free habilitado).");
+					}
 				}
 			}),
 		);
@@ -703,6 +821,7 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 		const liveRows = liveModelsByProvider.get(extraProv) ?? [];
 		if (liveRows.length > 0 && cliAvail.get("pi")?.available) {
 			for (const row of liveRows) {
+				if (extraProv === "openrouter" && openRouterFreeTierOnly && !row.id.endsWith(":free")) continue;
 				addCandidate({
 					harness: "pi",
 					provider: extraProv,
@@ -727,8 +846,19 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 		for (const [prov, def] of Object.entries(piModelsJson.providers)) {
 			if (prov === "nan" || !Array.isArray(def.models)) continue;
 			const billing = classifyBillingModel(prov);
+			const provSummary = providersMap.get(prov);
+			const piKey = piAuth && prov in piAuth ? extractSecretString(piAuth[prov], env) : null;
+			const stalePiCmdc = Boolean(/commandcode/i.test(prov) && piKey && cmdcStoredApiKey && piKey !== cmdcStoredApiKey);
+			if (stalePiCmdc) {
+				warnings.push(`pi/${prov}: token desactualizado respecto a ~/.commandcode/auth.json (usa CLI cmdc).`);
+			}
+			const isHealthyPiAuth =
+				Boolean(piAuth && prov in piAuth) &&
+				!stalePiCmdc &&
+				provSummary?.authStatus !== "invalid" &&
+				provSummary?.authStatus !== "expired";
 			for (const m of def.models) {
-				if (cliAvail.get("pi")?.available && providersMap.has(prov)) {
+				if (cliAvail.get("pi")?.available && isHealthyPiAuth) {
 					addCandidate({
 						harness: "pi",
 						provider: prov,
@@ -793,7 +923,8 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 				const full = line.trim();
 				if (!full || !full.includes("/")) continue;
 				const prov = full.slice(0, full.indexOf("/"));
-				if (!ocAuthedProviders.has(prov)) continue;
+				if (!ocAuthedProviders.has(prov) || blockedOcProviders.has(prov)) continue;
+				if (prov === "openrouter" && openRouterFreeTierOnly && !full.endsWith(":free")) continue;
 				addCandidate({
 					harness: "opencode",
 					provider: prov,
@@ -924,11 +1055,16 @@ export async function discoverFleetCapabilities(options: DiscoveryOptions = {}):
 		}
 	}
 
-	// 11. Seed currently configured profile combinations so incumbents always compete fairly!
+	// 11. Seed currently configured profile combinations so healthy incumbents always compete fairly!
 	for (const prof of Object.values(profiles)) {
 		if (!prof.model || !cliAvail.get(prof.harness)?.available) continue;
 		const prov = prof.provider ?? (prof.model.includes("/") ? prof.model.split("/")[0] : prof.harness);
-		const modelId = prof.model.replace(/^custom_provider:nan\//, "").replace(/^nan\//, "");
+		if (prof.harness === "opencode" && blockedOcProviders.has(prov)) continue;
+		if (prov === "openrouter" && openRouterFreeTierOnly && !prof.model.endsWith(":free")) continue;
+		let modelId = prof.model.replace(/^custom_provider:nan\//, "").replace(/^nan\//, "");
+		if (modelId.startsWith(`${prov}/`)) {
+			modelId = modelId.slice(prov.length + 1);
+		}
 		addCandidate({
 			harness: prof.harness,
 			provider: prov,

@@ -331,10 +331,18 @@ const KNOWN_ALIASES: Record<string, string[]> = {
 	hy4: ["tencent-hy4", "hunyuan-4", "hy4"],
 	"deepseek-v4-flash": ["deepseek-v4-1-flash-1017", "deepseek-v4-flash"],
 	"deepseek-v4-pro": ["deepseek-v4-pro", "deepseek-v4-pro-0424"],
+	"glm5-3-flash": ["glm-5-3-flash", "glm5-3-flash"],
+	"glm5-3": ["glm-5-3"],
 	"gemini-4-argon": ["gemini-4-argon", "gemini-4-carbon"],
 	"gemini-4-hydrogen": ["gemini-4-hydrogen"],
 	"gemini-3.8-flash": ["gemini-3-8-flash"],
 };
+
+function extractRequestedEffort(rawModelId: string): string | null {
+	const cleaned = rawModelId.trim().toLowerCase().replace(/:[a-z0-9-]+$/i, "");
+	const match = cleaned.match(/(?:^|[-#(])(xhigh|max|high|medium|low|fast)\)?$/i);
+	return match?.[1]?.toLowerCase() ?? null;
+}
 
 export function normalizeModelKeyForAa(rawModelId: string): string {
 	let s = rawModelId.trim().toLowerCase();
@@ -354,6 +362,14 @@ function stripReasoningSuffixFromAaName(aaName: string): string {
 	return slugifyModelName(aaName.replace(/\s*\([^)]*\)\s*$/g, ""));
 }
 
+function matchAaEffortTag(aaName: string, requestedEffort: string): boolean {
+	const paren = aaName.match(/\(([^)]+)\)\s*$/)?.[1]?.toLowerCase() ?? "";
+	if (!paren) return false;
+	if (requestedEffort === "fast") return paren.includes("non-reasoning") || paren.includes("fast");
+	const words = paren.split(/[^a-z0-9]+/).filter(Boolean);
+	return words.includes(requestedEffort);
+}
+
 /**
  * Matches a CLI/provider model ID against the Artificial Analysis catalog without
  * silently confusing unrelated sizes/tiers.
@@ -364,9 +380,19 @@ export function matchAaModel(rawModelId: string, catalog: AaModelMetrics[]): AaM
 		return { matched: null, confidence: "unmatched", normalizedQuery };
 	}
 
-	const preferredReasoning = /(high|xhigh|max|pro|opus|argon|carbon|hydrogen)/i.test(rawModelId);
+	const requestedEffort = extractRequestedEffort(rawModelId);
+	const preferredReasoning =
+		requestedEffort === "low" || requestedEffort === "fast"
+			? false
+			: /(high|xhigh|max|pro|opus|argon|carbon|hydrogen)/i.test(rawModelId);
 	const pickBestVariant = (candidates: AaModelMetrics[]): AaModelMetrics => {
 		if (candidates.length === 1) return candidates[0];
+		if (requestedEffort) {
+			const effortMatches = candidates.filter((m) => matchAaEffortTag(m.name, requestedEffort));
+			if (effortMatches.length > 0) {
+				candidates = effortMatches;
+			}
+		}
 		return [...candidates].sort((a, b) => {
 			if (preferredReasoning && Boolean(a.isReasoning) !== Boolean(b.isReasoning)) {
 				return a.isReasoning ? -1 : 1;
