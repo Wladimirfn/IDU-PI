@@ -368,6 +368,37 @@ export function scoreCandidatesForRole(params: {
 	return collapsed;
 }
 
+const ROLE_FILTER_ALIASES: Record<string, string[]> = {
+	trabajo: ["work", "coding", "refactor"],
+	auditoria: ["audit"],
+	consultas: ["consult"],
+	arquitectura: ["arch", "architecture"],
+	exploracion: ["explore"],
+	diseno: ["design"],
+	iconografia: ["icon", "iconographer"],
+	voz: ["voice"],
+	musica: ["music"],
+};
+
+function stripDiacriticsLower(value: string): string {
+	return value
+		.trim()
+		.normalize("NFD")
+		.replace(/\p{Diacritic}/gu, "")
+		.toLowerCase();
+}
+
+export function matchesRoleFilter(roleName: string, filters: string[]): boolean {
+	if (filters.length === 0) return true;
+	const normRole = stripDiacriticsLower(roleName);
+	const aliases = ROLE_FILTER_ALIASES[normRole] ?? [];
+	return filters.some((raw) => {
+		const token = stripDiacriticsLower(raw);
+		if (!token) return false;
+		return token === normRole || aliases.includes(token);
+	});
+}
+
 export function buildRoleProposals(params: {
 	profiles: Record<string, IduProfile>;
 	candidates: DiscoveredModelCandidate[];
@@ -385,9 +416,8 @@ export function buildRoleProposals(params: {
 
 	const roleNames = Object.keys(ROLE_OBJECTIVES).filter((r) => {
 		const hasProfiles = (grouped[r]?.length ?? 0) > 0;
-		const explicitlyRequested = params.selectedRoles?.some((sel) => sel.toLowerCase() === r.toLowerCase());
 		if (params.selectedRoles && params.selectedRoles.length > 0) {
-			return Boolean(explicitlyRequested);
+			return matchesRoleFilter(r, params.selectedRoles);
 		}
 		return hasProfiles || r === "Trabajo" || r === "Auditoría" || r === "Consultas" || r === "Exploración";
 	});

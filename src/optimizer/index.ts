@@ -10,13 +10,19 @@ export * from "./discovery.js";
 export * from "./roles.js";
 export * from "./runner.js";
 
-function parseCsvFlag(args: string[], flag: string): string[] | undefined {
-	const idx = args.indexOf(flag);
-	if (idx === -1 || !args[idx + 1] || args[idx + 1].startsWith("-")) return undefined;
-	return args[idx + 1]
-		.split(",")
-		.map((s) => s.trim())
-		.filter(Boolean);
+export function parseCsvFlag(args: string[], flag: string): string[] | undefined {
+	const values: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] !== flag) continue;
+		// Consume consecutive non-flag arguments so PowerShell unquoted `a,b` array args work seamlessly.
+		for (let j = i + 1; j < args.length && !args[j].startsWith("-"); j++) {
+			for (const item of args[j].split(",")) {
+				const trimmed = item.trim();
+				if (trimmed) values.push(trimmed);
+			}
+		}
+	}
+	return values.length > 0 ? [...new Set(values)] : undefined;
 }
 
 function parseIntFlag(args: string[], flag: string): number | undefined {
@@ -212,6 +218,7 @@ export async function runOptimizeCli(args: string[]): Promise<void> {
 			freshQuota,
 			includeHeavyBench,
 			skipLiveEndpoints,
+			onProgress: asJson ? undefined : (line) => console.log(line),
 		});
 		const md = formatRunResultMarkdown(runResult);
 		const reportDir = join(getIduHome(), "optimize");

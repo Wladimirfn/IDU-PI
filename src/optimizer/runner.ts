@@ -13,7 +13,7 @@ import type { IduConfig, IduProfile, ProfilesConfig } from "../types.js";
 import { extractUsage } from "../usage.js";
 import { fetchArtificialAnalysisCatalog, matchAaModel, type AaCatalogResult } from "./artificial-analysis.js";
 import { discoverFleetCapabilities, type DiscoveryResult } from "./discovery.js";
-import { buildRoleProposals, ROLE_OBJECTIVES } from "./roles.js";
+import { buildRoleProposals, matchesRoleFilter, ROLE_OBJECTIVES } from "./roles.js";
 import type {
 	AaModelMetrics,
 	MiniBenchCellOutcome,
@@ -43,6 +43,7 @@ export interface RunBenchOptions extends ProposeOptions {
 	concurrency?: number;
 	proposal?: OptimizeProposal;
 	cellRunner?: (cell: MiniBenchCellPlan, task: BenchmarkTaskDef) => Promise<MiniBenchCellOutcome>;
+	onProgress?: (line: string) => void;
 }
 
 export interface ApplyOptions {
@@ -357,10 +358,15 @@ async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Prom
 function buildRecommendations(
 	proposal: OptimizeProposal,
 	outcomes: MiniBenchCellOutcome[],
+	selectedRoles?: string[],
 ): ProfileChangeRecommendation[] {
 	const recommendations: ProfileChangeRecommendation[] = [];
+	const targetRoles =
+		selectedRoles && selectedRoles.length > 0
+			? proposal.roles.filter((r) => matchesRoleFilter(r.role, selectedRoles))
+			: proposal.roles;
 
-	for (const roleSummary of proposal.roles) {
+	for (const roleSummary of targetRoles) {
 		const roleTaskId = roleSummary.benchmarkTaskId;
 		const roleOutcomes = outcomes.filter(
 			(o) =>
@@ -493,12 +499,21 @@ export async function runOptimizationBench(options: RunBenchOptions = {}): Promi
 	const optDir = getOptimizeDir(options.optimizeDir);
 	const proposalPath = join(optDir, "latest-proposal.json");
 
-	let proposal: OptimizeProposal;
-	if (options.proposal) {
-		proposal = options.proposal;
-	} else if (!options.freshAa && !options.freshQuota && existsSync(proposalPath) && !options.roles?.length) {
-		proposal = JSON.parse(readFileSync(proposalPath, "utf8")) as OptimizeProposal;
-	} else {
+	let proposal: OptimizeProposal | undefined = options.proposal;
+	if (!proposal && !options.freshAa && !options.freshQuota && existsSync(proposalPath)) {
+		try {
+			const cachedProposal = JSON.parse(readFileSync(proposalPath, "utf8")) as OptimizeProposal;
+			const coversRequested =
+				!options.roles?.length ||
+				options.roles.every((filter) => cachedProposal.roles.some((r) => matchesRoleFilter(r.role, [filter])));
+			if (coversRequested) {
+				proposal = cachedProposal;
+			}
+		} catch {
+			// Fall back to fresh proposal generation below.
+		}
+	}
+	if (!proposal) {
 		proposal = await proposeOptimization(options);
 	}
 
@@ -511,12 +526,13 @@ export async function runOptimizationBench(options: RunBenchOptions = {}): Promi
 
 	const filteredShortlist = options.roles?.length
 		? proposal.shortlist.filter((c) =>
-				c.role.split(",").some((r) => options.roles!.some((req) => req.toLowerCase() === r.trim().toLowerCase())),
+				c.role.split(",").some((r) => matchesRoleFilter(r.trim(), options.roles!)),
 			)
 		: proposal.shortlist;
 
 	const outcomes: MiniBenchCellOutcome[] = [];
 	const concurrency = Math.max(1, Math.min(6, options.concurrency ?? 3));
+	let finishedCount = 0;
 
 	await runPool(filteredShortlist, concurrency, async (cell) => {
 		const task = BENCHMARK_TASKS.find((t) => t.id === cell.taskId);
@@ -549,6 +565,11 @@ export async function runOptimizationBench(options: RunBenchOptions = {}): Promi
 			? await options.cellRunner(cell, task)
 			: await runSingleShortlistCell(cell, task, iduConfig, nanKey, aa.models);
 		outcomes.push(result);
+		finishedCount++;
+		const sec = (result.durationMs / 1000).toFixed(1);
+		options.onProgress?.(
+			`[${finishedCount}/${filteredShortlist.length}] ${result.role} · ${result.harness}/${result.profileModel} -> resolved=${result.resolved} regClean=${result.regressionsClean} ${sec}s`,
+		);
 	});
 
 	const afterIdu = snapshotUserIduFiles();
@@ -556,7 +577,7 @@ export async function runOptimizationBench(options: RunBenchOptions = {}): Promi
 		beforeIdu.profilesSha256 === afterIdu.profilesSha256 &&
 		beforeIdu.configSha256 === afterIdu.configSha256;
 
-	const recommendations = buildRecommendations(proposal, outcomes);
+	const recommendations = buildRecommendations(proposal, outcomes, options.roles);
 	const warnings = [...proposal.warnings];
 	if (!userConfigUntouched) {
 		warnings.push("User ~/.idu config changed during mini-benchmark execution.");

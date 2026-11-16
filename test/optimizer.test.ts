@@ -11,7 +11,9 @@ import {
 	discoverFleetCapabilities,
 	fetchArtificialAnalysisCatalog,
 	matchAaModel,
+	matchesRoleFilter,
 	parseAaLeaderboardHtml,
+	parseCsvFlag,
 	proposeOptimization,
 	runOptimizationBench,
 	type AaModelMetrics,
@@ -365,58 +367,76 @@ test("3-stage optimizer flow: propose -> run-bench -> apply with backup and prov
 		assert.ok(proposal.shortlist.length >= 2);
 		assert.equal(JSON.parse(readFileSync(profilesPath, "utf8")).profiles["explore-glm"].harness, "commandcode");
 
-		const runResult = await runOptimizationBench({
-			roles: ["Exploración", "Consultas"],
-			optimizeDir: optDir,
-			aaFetcher: async () => ({ models: aaModels, source: "aa-ssr-catalog", fetchedAt: new Date().toISOString() }),
-			cellRunner: async (cell): Promise<MiniBenchCellOutcome> => {
-				if (cell.harness === "pi" && cell.modelId === "deepseek-v4-flash") {
-					return {
-						...cell,
-						supported: true,
-						resolved: true,
-						regressionsClean: true,
-						autonomous: true,
-						failToPassPassed: 3,
-						failToPassTotal: 3,
-						durationMs: 21_000,
-						totalTokens: 12_000,
-						costUsd: 0.004,
-						compositeBenchScore: 95,
-						summaryPreview: "fast clean pass",
-					};
-				}
-				if (cell.harness === "commandcode") {
-					return {
-						...cell,
-						supported: true,
-						resolved: false,
-						regressionsClean: true,
-						autonomous: true,
-						failToPassPassed: 0,
-						failToPassTotal: 3,
-						durationMs: 90_000,
-						totalTokens: 80_000,
-						costUsd: 0.02,
-						compositeBenchScore: 10,
-						summaryPreview: "truncated",
-					};
-				}
+		const stubCellRunner = async (cell: (typeof proposal.shortlist)[number]): Promise<MiniBenchCellOutcome> => {
+			if (cell.harness === "pi" && cell.modelId === "deepseek-v4-flash") {
 				return {
 					...cell,
 					supported: true,
 					resolved: true,
 					regressionsClean: true,
 					autonomous: true,
-					failToPassPassed: 4,
-					failToPassTotal: 4,
-					durationMs: 35_000,
-					totalTokens: null,
-					costUsd: 0,
-					compositeBenchScore: 92,
-					summaryPreview: "opus ok",
+					failToPassPassed: 3,
+					failToPassTotal: 3,
+					durationMs: 21_000,
+					totalTokens: 12_000,
+					costUsd: 0.004,
+					compositeBenchScore: 95,
+					summaryPreview: "fast clean pass",
 				};
+			}
+			if (cell.harness === "commandcode") {
+				return {
+					...cell,
+					supported: true,
+					resolved: false,
+					regressionsClean: true,
+					autonomous: true,
+					failToPassPassed: 0,
+					failToPassTotal: 3,
+					durationMs: 90_000,
+					totalTokens: 80_000,
+					costUsd: 0.02,
+					compositeBenchScore: 10,
+					summaryPreview: "truncated",
+				};
+			}
+			return {
+				...cell,
+				supported: true,
+				resolved: true,
+				regressionsClean: true,
+				autonomous: true,
+				failToPassPassed: 4,
+				failToPassTotal: 4,
+				durationMs: 35_000,
+				totalTokens: null,
+				costUsd: 0,
+				compositeBenchScore: 92,
+				summaryPreview: "opus ok",
+			};
+		};
+
+		// Accent-folded subset filter reuses cached latest-proposal.json instead of re-discovering.
+		const cachedSubsetRun = await runOptimizationBench({
+			roles: ["exploracion"],
+			optimizeDir: optDir,
+			discoverer: async () => {
+				throw new Error("should reuse cached proposal without re-running discovery");
 			},
+			aaFetcher: async () => ({ models: aaModels, source: "aa-ssr-catalog", fetchedAt: new Date().toISOString() }),
+			cellRunner: stubCellRunner,
+		});
+		assert.deepEqual(
+			cachedSubsetRun.recommendations.map((r) => r.role),
+			["Exploración"],
+		);
+
+		const runResult = await runOptimizationBench({
+			roles: ["Exploración", "Consultas"],
+			optimizeDir: optDir,
+			discoverer: async () => mockDiscovery,
+			aaFetcher: async () => ({ models: aaModels, source: "aa-ssr-catalog", fetchedAt: new Date().toISOString() }),
+			cellRunner: stubCellRunner,
 		});
 
 		assert.equal(runResult.userConfigUntouched, true);
@@ -456,4 +476,25 @@ test("idu-pi optimize --help and idupi optimize --help exit cleanly", () => {
 	});
 	assert.equal(idupiHelp.status, 0);
 	assert.match(idupiHelp.stdout, /--run-bench/);
+});
+
+test("parseCsvFlag and matchesRoleFilter handle PowerShell arrays, accents, and bilingual aliases", () => {
+	// PowerShell unquoted `--roles Exploración,Auditoría` arrives as separate array argv tokens.
+	assert.deepEqual(
+		parseCsvFlag(["optimize", "--run-bench", "--roles", "Exploración", "Auditoría", "--concurrency", "3"], "--roles"),
+		["Exploración", "Auditoría"],
+	);
+	assert.deepEqual(
+		parseCsvFlag(["--roles", "exploracion, auditoria", "--roles", "Trabajo"], "--roles"),
+		["exploracion", "auditoria", "Trabajo"],
+	);
+	assert.equal(parseCsvFlag(["--run-bench"], "--roles"), undefined);
+
+	assert.equal(matchesRoleFilter("Exploración", ["exploracion"]), true);
+	assert.equal(matchesRoleFilter("Auditoría", ["audit"]), true);
+	assert.equal(matchesRoleFilter("Auditoría", ["auditoría"]), true);
+	assert.equal(matchesRoleFilter("Trabajo", ["work"]), true);
+	assert.equal(matchesRoleFilter("Consultas", ["consult"]), true);
+	assert.equal(matchesRoleFilter("Arquitectura", ["architecture"]), true);
+	assert.equal(matchesRoleFilter("Trabajo", ["exploracion", "auditoria"]), false);
 });
