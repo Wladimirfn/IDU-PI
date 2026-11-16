@@ -27,7 +27,8 @@
 // mismas entradas -> mismos frames.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,7 +72,7 @@ if (total <= 0) {
 	process.exit(1);
 }
 
-/* Playwright puede venir del proyecto o de una ruta explicita (cache de npx). */
+/* Playwright puede venir del proyecto, user home (npm/pnpm) o ruta explicita (cache de npx). */
 async function loadChromium() {
 	const explicit = arg("playwright") || process.env.PLAYWRIGHT_PATH;
 	if (explicit) {
@@ -82,6 +83,23 @@ async function loadChromium() {
 		const mod = await import("playwright");
 		return mod.chromium;
 	} catch {
+		const home = homedir();
+		const homeDirect = join(home, "node_modules", "playwright", "index.mjs");
+		if (existsSync(homeDirect)) {
+			const mod = await import(pathToFileURL(homeDirect).href);
+			return mod.chromium;
+		}
+		const homePnpm = join(home, "node_modules", ".pnpm");
+		if (existsSync(homePnpm)) {
+			for (const entry of readdirSync(homePnpm)) {
+				if (!entry.startsWith("playwright@")) continue;
+				const candidate = join(homePnpm, entry, "node_modules", "playwright", "index.mjs");
+				if (existsSync(candidate)) {
+					const mod = await import(pathToFileURL(candidate).href);
+					return mod.chromium;
+				}
+			}
+		}
 		console.error(
 			"No encontré Playwright. Instalalo en el proyecto (npm i playwright) " +
 				"o pasá --playwright <ruta a playwright/index.mjs>.",
@@ -90,7 +108,7 @@ async function loadChromium() {
 	}
 }
 
-/* Chrome del sistema si existe; si no, Playwright usa su Chromium. */
+/* Chrome o Edge del sistema si existe; si no, Playwright usa su Chromium. */
 function findChrome() {
 	const explicit = arg("chrome") || process.env.CHROME_PATH;
 	if (explicit && existsSync(explicit)) return explicit;
@@ -99,6 +117,8 @@ function findChrome() {
 			? [
 					"C:/Program Files/Google/Chrome/Application/chrome.exe",
 					"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+					"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+					"C:/Program Files/Microsoft/Edge/Application/msedge.exe",
 				]
 			: process.platform === "darwin"
 				? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
