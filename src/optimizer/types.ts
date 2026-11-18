@@ -1,4 +1,4 @@
-import type { IduProfile, QuotaSnapshot } from "../types.js";
+import type { IduProfile, QuotaSnapshot, ReasoningEffort } from "../types.js";
 
 export type BillingModel = "plan" | "api";
 
@@ -136,6 +136,7 @@ export interface MiniBenchCellPlan {
 	modelId: string;
 	profileModel: string;
 	profileProvider?: string;
+	effort?: ReasoningEffort;
 	billingModel: BillingModel;
 	taskId: string;
 	permissionMode: "read-only" | "workspace";
@@ -253,4 +254,46 @@ export interface OptimizeApplyOutcome {
 		profileName: string;
 		reason: string;
 	}>;
+}
+
+export interface ModelTerminalTestCell {
+	harness: string;
+	compatible: boolean;
+	available: boolean;
+	incompatibleReason?: string;
+	profileProvider?: string;
+	profileModel: string;
+	effortApplied?: ReasoningEffort;
+	taskId: string;
+	supported: boolean;
+	unsupportedReason?: string;
+	resolved: boolean;
+	regressionsClean: boolean;
+	autonomous: boolean;
+	failToPassPassed: number;
+	failToPassTotal: number;
+	durationMs: number;
+	totalTokens: number | null;
+	costUsd: number | null;
+	compositeBenchScore: number;
+	summaryPreview: string;
+	error?: string;
+}
+
+export interface ModelTerminalTestReport {
+	testedAt: string;
+	role: string;
+	taskId: string;
+	taskIsFallbackProbe: boolean;
+	requestedEffort?: ReasoningEffort;
+	modelInput: string;
+	parsedModel: {
+		provider: string | null;
+		modelId: string;
+		display: string;
+	};
+	recommendedHarness: string | null;
+	recommendationReason: string;
+	userConfigUntouched: boolean;
+	results: ModelTerminalTestCell[];
 }

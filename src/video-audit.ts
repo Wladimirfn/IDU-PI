@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveAgentProfile } from "./fleets.js";
 
 /* Auditoría artística independiente de un proyecto de video.
 
@@ -507,14 +508,19 @@ export async function runVideoAuditCore(
 
 	const authorHarness = normalizeHarness(author);
 	const candidates = profileFlag ? [profileFlag] : options.auditProfiles;
-	const profileName = candidates.find((name) => {
-		const profile = options.profiles[name];
-		return Boolean(profile?.harness) && normalizeHarness(profile?.harness ?? "") !== authorHarness;
-	});
+	let profileName: string | undefined;
+	for (const candidate of candidates) {
+		const resolved = resolveAgentProfile(options.profiles, candidate);
+		if (resolved?.profile?.harness && normalizeHarness(resolved.profile.harness) !== authorHarness) {
+			profileName = resolved.resolvedName;
+			break;
+		}
+	}
 	if (!profileName) {
+		const flagResolved = profileFlag ? resolveAgentProfile(options.profiles, profileFlag) : null;
 		error(
 			profileFlag
-				? options.profiles[profileFlag]
+				? flagResolved
 					? `video audit: el perfil "${profileFlag}" usa el mismo harness que el autor (${author}). Elegí otro.`
 					: `video audit: el perfil "${profileFlag}" no existe en ~/.idu/profiles.json.`
 				: `video audit: ningún perfil de auditoría disponible es de un harness distinto del autor (${author}). Probados: ${candidates.join(", ") || "ninguno"}. Pasá --profile <perfil>.`,

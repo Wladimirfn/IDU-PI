@@ -3,6 +3,7 @@ import { arbitrateAndRecord } from "./arbitration-run.js";
 import { looksLikeHighRiskMitigation, normalizeThreshold } from "./arbitration.js";
 import { IDU_HOME } from "./config.js";
 import { listDecisions, recordDecision } from "./decision-ledger.js";
+import { listFleets, resolveEffectiveFleet } from "./fleets.js";
 import { CrossCliProcessManager } from "./process-manager.js";
 import { runPostflight, runPreflight, type ChangeMode } from "./quality.js";
 import { DEFAULT_DELEGATE_TIMEOUT_MS } from "./timeouts.js";
@@ -33,6 +34,8 @@ export async function handleStatus(args: HandlerArgs): Promise<unknown> {
 	} catch {
 		// Git unavailable or not initialized
 	}
+	const effectiveFleet = resolveEffectiveFleet({ workingDir: cwd });
+	const availableFleets = listFleets().map((f) => f.name);
 	return {
 		content: [
 			{
@@ -46,6 +49,9 @@ export async function handleStatus(args: HandlerArgs): Promise<unknown> {
 						dirtyFileCount: dirtyFiles.length,
 						dirtyFiles: dirtyFiles.slice(0, 20),
 						iduHome: IDU_HOME,
+						activeFleet: effectiveFleet.fleetName,
+						fleetSource: effectiveFleet.source,
+						availableFleets,
 					},
 					null,
 					2,
@@ -104,9 +110,17 @@ export async function handleCapabilities(args: HandlerArgs): Promise<unknown> {
 	// only_quota implies the quota read: asking for "just the quota" and
 	// getting a payload without it would be a worse lie than a big one.
 	const onlyQuota = args.only_quota === true;
+	const fleet = args.fleet ? String(args.fleet) : undefined;
+	const projectPath = args.project_path
+		? String(args.project_path)
+		: args.projectPath
+			? String(args.projectPath)
+			: undefined;
 	const caps = await manager.getCapabilities({
 		includeQuota: onlyQuota || args.include_quota === true,
 		freshQuota: args.fresh_quota === true,
+		fleet,
+		projectPath,
 	});
 	const payload = onlyQuota ? { quota: caps.quota ?? [] } : caps;
 	return {
@@ -117,6 +131,7 @@ export async function handleCapabilities(args: HandlerArgs): Promise<unknown> {
 export async function handleDelegate(args: HandlerArgs): Promise<unknown> {
 	const task = String(args.task || "");
 	const profile = String(args.profile || "");
+	const fleet = args.fleet ? String(args.fleet) : undefined;
 	const workingDir = args.working_dir ? String(args.working_dir) : (args.cwd ? String(args.cwd) : undefined);
 	const asyncExec = Boolean(args.async);
 	const timeoutMs = typeof args.timeout_ms === "number" ? args.timeout_ms : undefined;
@@ -131,6 +146,7 @@ export async function handleDelegate(args: HandlerArgs): Promise<unknown> {
 		{
 			task,
 			profile,
+			fleet,
 			// profile is a required arg here, so the caller always
 			// named it: never inherit the session's profile.
 			profileExplicit: true,
@@ -153,12 +169,14 @@ export async function handleDelegate(args: HandlerArgs): Promise<unknown> {
 }
 
 export async function handleDelegateParallel(args: HandlerArgs): Promise<unknown> {
+	const defaultFleet = args.fleet ? String(args.fleet) : undefined;
 	const tasks = Array.isArray(args.tasks) ? (args.tasks as Array<Record<string, unknown>>) : [];
 	const promises = tasks.map((t) =>
 		manager.delegate(
 			{
 				task: String(t.task || ""),
 				profile: String(t.profile || ""),
+				fleet: t.fleet ? String(t.fleet) : defaultFleet,
 				workingDir: t.working_dir ? String(t.working_dir) : undefined,
 				parentOrchestrator: "orchestrator",
 				verbose: Boolean(t.verbose),

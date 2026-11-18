@@ -12,10 +12,9 @@ import {
 	IDU_RUNTIME_DIR,
 	IDU_SESSIONS_DIR,
 	ensureIduDirectories,
-	getProfile,
 	loadIduConfig,
-	loadProfilesConfig,
 } from "./config.js";
+import { listFleets, resolveAgentProfile, resolveEffectiveFleet } from "./fleets.js";
 import { checkActiveSddAttempt } from "./sdd-guard.js";
 import { getRunnerScriptPath, isProcessAlive, killProcessTree } from "./process-utils.js";
 import { acquireSessionLock } from "./session-lock.js";
@@ -65,9 +64,18 @@ export class CrossCliProcessManager {
 		return CrossCliProcessManager.instance;
 	}
 
-	public async getCapabilities(options: { includeQuota?: boolean; freshQuota?: boolean } = {}): Promise<CapabilitiesResult> {
+	public async getCapabilities(options: {
+		includeQuota?: boolean;
+		freshQuota?: boolean;
+		fleet?: string;
+		projectPath?: string;
+	} = {}): Promise<CapabilitiesResult> {
 		const config = loadIduConfig();
-		const { profiles } = loadProfilesConfig();
+		const effective = resolveEffectiveFleet({
+			fleet: options.fleet,
+			workingDir: options.projectPath,
+		});
+		const availableFleets = listFleets().map((f) => f.name);
 
 		const installedClis = Object.entries(config.clis).map(([name, def]) => ({
 			name,
@@ -77,7 +85,10 @@ export class CrossCliProcessManager {
 
 		const result: CapabilitiesResult = {
 			installedClis,
-			profiles,
+			activeFleet: effective.fleetName,
+			fleetSource: effective.source,
+			availableFleets,
+			profiles: effective.config.profiles,
 			// Reported as always-on regardless of what ~/.idu/config.json holds.
 			// Echoing the file here would let `idu status` print DISABLED while
 			// delegation was still being refused, which is the kind of small lie
@@ -162,13 +173,28 @@ export class CrossCliProcessManager {
 		});
 		profileName = resolution.profileName;
 
-		// 3. Validate profile
-		const profile = getProfile(profileName);
-		if (!profile) {
+		// 3. Validate profile against active/requested fleet (supporting legacy aliases cleanly)
+		const effectiveFleet = resolveEffectiveFleet({
+			fleet: request.fleet,
+			workingDir,
+		});
+		const resolvedAgent = resolveAgentProfile(effectiveFleet.config.profiles, profileName);
+		if (!resolvedAgent) {
+			const loc =
+				effectiveFleet.fleetName === "default"
+					? "~/.idu/profiles.json"
+					: `fleet "${effectiveFleet.fleetName}" (${effectiveFleet.filePath})`;
 			throw new Error(
-				`Profile "${profileName}" not found in ~/.idu/profiles.json. Available profiles: ${Object.keys(loadProfilesConfig().profiles).join(", ")}`,
+				`Profile "${profileName}" not found in ${loc}. Available profiles: ${Object.keys(effectiveFleet.config.profiles).join(", ")}`,
 			);
 		}
+		if (resolvedAgent.aliasedFrom) {
+			console.error(
+				`[info] alias "${resolvedAgent.aliasedFrom}" resolved to canonical slot "${resolvedAgent.resolvedName}" (fleet "${effectiveFleet.fleetName}").`,
+			);
+			profileName = resolvedAgent.resolvedName;
+		}
+		const profile = resolvedAgent.profile;
 		if (resolution.inherited) {
 			console.error(
 				`[info] resuming session "${request.sessionId}" without --profile: inheriting its profile "${profileName}" (harness "${profile.harness}") over the default "${request.profile}".`,
@@ -295,7 +321,11 @@ export class CrossCliProcessManager {
 			sessionId: effectiveSessionId,
 			parentSessionId,
 			isResumed,
-			request,
+			request: {
+				...request,
+				profile: profileName,
+				fleet: effectiveFleet.fleetName,
+			},
 			profile,
 			command,
 			args,
@@ -315,6 +345,7 @@ export class CrossCliProcessManager {
 			IDU_ALLOW_DELEGATION: "false",
 			IDU_RUN_ID: runId,
 			IDU_PROFILE: profileName,
+			IDU_FLEET: effectiveFleet.fleetName,
 			IDU_SESSION_ID: effectiveSessionId,
 		};
 
@@ -392,6 +423,7 @@ export class CrossCliProcessManager {
 				sessionId: effectiveSessionId,
 				parentSessionId,
 				isResumed,
+				fleet: effectiveFleet.fleetName,
 				profile: profileName,
 				harness: profile.harness,
 				model: profile.model,
@@ -607,6 +639,7 @@ export class CrossCliProcessManager {
 			sessionId: record.sessionId,
 			parentSessionId: record.parentSessionId,
 			isResumed: record.isResumed,
+			...(record.request.fleet ? { fleet: record.request.fleet } : {}),
 			profile: record.request.profile,
 			harness: record.profile.harness,
 			model: record.profile.model,

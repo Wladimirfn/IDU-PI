@@ -17,6 +17,7 @@ import {
 	proposeOptimization,
 	ROLE_OBJECTIVES,
 	runOptimizationBench,
+	testModelAcrossTerminals,
 	type AaModelMetrics,
 	type MiniBenchCellOutcome,
 	type MiniBenchCellPlan,
@@ -920,4 +921,120 @@ test("runOptimizationBench preserves transient-quota profiles and avoids cloning
 		else process.env.IDU_HOME = prevIduHome;
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("testModelAcrossTerminals tests compatible terminals for a manual model and recommends the winner", async () => {
+	const capturedFormats: Array<{ harness: string; profileProvider?: string; profileModel: string }> = [];
+	const report = await testModelAcrossTerminals({
+		role: "Trabajo",
+		modelInput: "nan/kimi-k3.1-pro",
+		installedClisOverride: [
+			{ name: "pi", available: true },
+			{ name: "opencode", available: true },
+			{ name: "mcode", available: true },
+			{ name: "kimi", available: true },
+			{ name: "claude", available: true },
+			{ name: "antigravity", available: true },
+			{ name: "qwen", available: false },
+		],
+		aaFetcher: async () => ({ models: [], source: "unavailable", fetchedAt: null }),
+		cellRunner: async (cell, task) => {
+			capturedFormats.push({
+				harness: cell.harness,
+				profileProvider: cell.profileProvider,
+				profileModel: cell.profileModel,
+			});
+			assert.equal(task.id, "tb-01-log-forensics");
+			const scores: Record<string, { dur: number; score: number; resolved: boolean }> = {
+				pi: { dur: 31_000, score: 94.5, resolved: true },
+				opencode: { dur: 49_000, score: 87.2, resolved: true },
+				mcode: { dur: 62_000, score: 84.0, resolved: true },
+				kimi: { dur: 45_000, score: 42.0, resolved: false },
+			};
+			const entry = scores[cell.harness] ?? { dur: 50_000, score: 50, resolved: true };
+			return {
+				role: cell.role,
+				harness: cell.harness,
+				provider: cell.provider,
+				modelId: cell.modelId,
+				profileModel: cell.profileModel,
+				profileProvider: cell.profileProvider,
+				billingModel: cell.billingModel,
+				taskId: task.id,
+				supported: true,
+				resolved: entry.resolved,
+				regressionsClean: true,
+				autonomous: entry.resolved,
+				failToPassPassed: entry.resolved ? 4 : 1,
+				failToPassTotal: 4,
+				durationMs: entry.dur,
+				totalTokens: 15_000,
+				costUsd: 0.012,
+				compositeBenchScore: entry.score,
+				summaryPreview: entry.resolved ? "ok" : "failed",
+			};
+		},
+	});
+
+	assert.equal(report.taskId, "tb-01-log-forensics");
+	assert.equal(report.taskIsFallbackProbe, false);
+	assert.equal(report.recommendedHarness, "pi");
+	assert.equal(report.userConfigUntouched, true);
+	assert.ok(
+		capturedFormats.some((f) => f.harness === "mcode" && f.profileModel === "custom_provider:nan/kimi-k3.1-pro"),
+		"mcode must receive custom_provider:nan/ prefix",
+	);
+	assert.ok(
+		capturedFormats.some((f) => f.harness === "pi" && f.profileProvider === "nan" && f.profileModel === "kimi-k3.1-pro"),
+		"pi must receive provider=nan and bare modelId",
+	);
+	const claudeEntry = report.results.find((r) => r.harness === "claude");
+	assert.equal(claudeEntry?.compatible, false);
+	const qwenEntry = report.results.find((r) => r.harness === "qwen");
+	assert.equal(qwenEntry?.compatible, true);
+	assert.equal(qwenEntry?.available, false);
+});
+
+test("testModelAcrossTerminals propagates effort from option or #variant into benchmark cells and report", async () => {
+	const cellEfforts: Array<{ harness: string; effort?: string; profileModel: string }> = [];
+	const report = await testModelAcrossTerminals({
+		role: "Trabajo",
+		modelInput: "nan/kimi-k3.1-pro#max",
+		installedClisOverride: [
+			{ name: "opencode", available: true },
+			{ name: "codex", available: true },
+			{ name: "pi", available: true },
+		],
+		aaFetcher: async () => ({ models: [], source: "unavailable", fetchedAt: null }),
+		cellRunner: async (cell, task) => {
+			cellEfforts.push({ harness: cell.harness, effort: cell.effort, profileModel: cell.profileModel });
+			return {
+				role: cell.role,
+				harness: cell.harness,
+				provider: cell.provider,
+				modelId: cell.modelId,
+				profileModel: cell.profileModel,
+				profileProvider: cell.profileProvider,
+				billingModel: cell.billingModel,
+				taskId: task.id,
+				supported: true,
+				resolved: cell.harness === "opencode",
+				regressionsClean: true,
+				autonomous: cell.harness === "opencode",
+				failToPassPassed: cell.harness === "opencode" ? 4 : 0,
+				failToPassTotal: 4,
+				durationMs: 25_000,
+				totalTokens: 12_000,
+				costUsd: 0.01,
+				compositeBenchScore: cell.harness === "opencode" ? 92 : 30,
+				summaryPreview: "ok",
+			};
+		},
+	});
+
+	assert.equal(report.requestedEffort, "max");
+	assert.equal(report.recommendedHarness, "opencode");
+	assert.ok(cellEfforts.some((c) => c.harness === "opencode" && c.effort === "max" && c.profileModel === "kimi-k3.1-pro"));
+	const codexCell = report.results.find((r) => r.harness === "codex");
+	assert.equal(codexCell?.effortApplied, "xhigh");
 });

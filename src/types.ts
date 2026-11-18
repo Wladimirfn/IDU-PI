@@ -2,10 +2,13 @@ export type HarnessEngine = "claude" | "opencode" | "pi" | "codex" | "kimi" | "q
 
 export type PermissionLevel = "read-only" | "workspace" | string[];
 
+export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface IduProfile {
 	harness: HarnessEngine;
 	provider?: string;
 	model?: string;
+	effort?: ReasoningEffort;
 	permissions?: PermissionLevel;
 	description?: string;
 	timeoutMs?: number;
@@ -55,6 +58,35 @@ export interface ProfilesConfig {
 	 * written instead of being padded with built-in profiles.
 	 */
 	replaceDefaults?: boolean;
+	/** Optional human-friendly name for named fleet files under ~/.idu/fleets/. */
+	name?: string;
+	/** Optional description explaining what project or orchestrator style this fleet targets. */
+	description?: string;
+	/** ISO timestamp of the last modification to this fleet. */
+	updatedAt?: string;
+}
+
+export interface FleetRegistry {
+	/** Name of the globally active fleet ("default" or a slug under ~/.idu/fleets/). */
+	activeFleet?: string;
+	/** Optional mapping from normalized workspace directory path to fleet name. */
+	projectBindings?: Record<string, string>;
+}
+
+export interface FleetSummary {
+	name: string;
+	path: string;
+	isActive: boolean;
+	isDefault: boolean;
+	agentCount: number;
+	replaceDefaults: boolean;
+	description?: string;
+	updatedAt?: string;
+}
+
+export interface ResolveProfilesOptions {
+	fleet?: string;
+	workingDir?: string;
 }
 
 export type RunStatus = "pending" | "running" | "completed" | "failed" | "timeout";
@@ -62,6 +94,8 @@ export type RunStatus = "pending" | "running" | "completed" | "failed" | "timeou
 export interface DelegateRequest {
 	task: string;
 	profile: string;
+	/** Optional named fleet profile ("default" or ~/.idu/fleets/<name>.json). */
+	fleet?: string;
 	/**
 	 * True when the caller explicitly named the profile. When resuming a
 	 * session with this false, the session's own profile is inherited
@@ -131,6 +165,7 @@ export interface DelegateResult {
 	sessionId: string;
 	parentSessionId?: string;
 	isResumed?: boolean;
+	fleet?: string;
 	profile: string;
 	harness: string;
 	model?: string;
@@ -228,6 +263,12 @@ export interface CapabilitiesResult {
 		command: string;
 		available: boolean;
 	}>;
+	/** Active fleet name resolved for this call ("default" or ~/.idu/fleets/<name>.json). */
+	activeFleet?: string;
+	/** Source that selected activeFleet ("explicit", "env", "project-local", "project-binding", "active", "default"). */
+	fleetSource?: string;
+	/** All available fleet profile names on this machine. */
+	availableFleets?: string[];
 	profiles: Record<string, IduProfile>;
 	oneOrchestratorRule: OneOrchestratorRule;
 	/**

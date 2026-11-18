@@ -186,7 +186,12 @@ export const TOOLS = [
 				profile: {
 					type: "string",
 					description:
-						"Target profile from ~/.idu/profiles.json (e.g. 'cheap-explore', 'cheap-debug', 'coding', 'architecture', 'deep-refactor', 'fast').",
+						"Target agent slot/profile from the resolved fleet (e.g. 'work-1', 'audit-1', 'explore-1', or legacy names).",
+				},
+				fleet: {
+					type: "string",
+					description:
+						"Optional named fleet profile (e.g. 'perfil-1', 'perfil-20', or 'default') to resolve this agent slot from instead of the active global/project fleet.",
 				},
 				working_dir: {
 					type: "string",
@@ -245,6 +250,10 @@ export const TOOLS = [
 		inputSchema: {
 			type: "object",
 			properties: {
+				fleet: {
+					type: "string",
+					description: "Optional default named fleet profile applied to tasks that do not specify their own fleet.",
+				},
 				tasks: {
 					type: "array",
 					description: "Array of task delegation requests.",
@@ -253,6 +262,7 @@ export const TOOLS = [
 						properties: {
 							task: { type: "string" },
 							profile: { type: "string" },
+							fleet: { type: "string" },
 							working_dir: { type: "string" },
 							verbose: { type: "boolean" },
 							session_id: { type: "string" },
@@ -343,6 +353,20 @@ export const TOOLS = [
 					type: "boolean",
 					description:
 						"Ignore the quota cache and query the accounts now. Costs about eleven seconds and, for claude and antigravity, a model call each. Only needed when a cached reading is too old to reason with.",
+				},
+				fleet: {
+					type: "string",
+					description:
+						"Optional named fleet profile (e.g. 'perfil-1', 'perfil-20', or 'default') to inspect instead of the active global/project fleet.",
+				},
+				project_path: {
+					type: "string",
+					description:
+						"Optional project directory used to resolve project-bound or local .idu fleet profiles.",
+				},
+				projectPath: {
+					type: "string",
+					description: "Alias for project_path.",
 				},
 			},
 		},

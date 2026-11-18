@@ -4,10 +4,30 @@ import { basename, dirname, join } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { buildWorkerArgs } from "./cmdline.js";
-import { getIduProfilesPath, IDU_HOME, loadIduConfig, loadProfilesConfig } from "./config.js";
+import { IDU_HOME, loadIduConfig } from "./config.js";
+import { inspectProfileEffort, type EffortInspection } from "./effort.js";
+import {
+	extractRoleRank,
+	inferProfileRole,
+	LEGACY_AGENT_ALIASES,
+	listFleets,
+	resolveEffectiveFleet,
+} from "./fleets.js";
 import { CrossCliProcessManager } from "./process-manager.js";
 import { canonicalHarnessName } from "./session-policy.js";
-import type { CapabilitiesResult, IduConfig, IduProfile } from "./types.js";
+import {
+	runCreateAgentAction,
+	runDeleteAgentAction,
+	runEditEffortAction,
+	runEditModelAction,
+	runManageFleetsAction,
+	runManualTerminalAction,
+	runMigrateLegacyAction,
+	runTestTerminalsForCurrentAgent,
+} from "./tui-editor.js";
+import type { CapabilitiesResult, IduConfig, IduProfile, ReasoningEffort } from "./types.js";
+
+export { extractRoleRank, inferProfileRole } from "./fleets.js";
 
 const ANSI_RESET = "\x1b[0m";
 const ANSI_BOLD = "\x1b[1m";
@@ -49,21 +69,32 @@ export interface AgentEntry {
 	cliCommand: string;
 	provider?: string;
 	modelDisplay: string;
+	effort?: ReasoningEffort;
+	effectiveEffort?: ReasoningEffort;
+	effortSource: EffortInspection["source"];
+	effortBadge: string;
+	effortDetail: string;
 	permissions: "read-only" | "workspace";
 	streams: boolean;
 	timeoutLabel: string;
 	commandPreview: string;
 	description: string;
+	rawProfile?: IduProfile;
 }
 
 export interface AgentTuiSnapshot {
 	version: string;
 	iduHome: string;
+	activeFleet: string;
+	fleetSource: string;
+	availableFleets: string[];
+	hasLegacyNames: boolean;
 	profilesPath: string;
 	replaceDefaults: boolean;
 	installedClis: Array<{ name: string; command: string; available: boolean }>;
 	roles: Array<{ role: string; count: number }>;
 	agents: AgentEntry[];
+	rawProfiles?: Record<string, IduProfile>;
 }
 
 export interface AgentTuiState {
@@ -159,56 +190,6 @@ function readPackageVersion(): string {
 	return "2.3.0";
 }
 
-function normalizeRoleLabel(raw: string): string {
-	const key = raw
-		.trim()
-		.toLowerCase()
-		.normalize("NFD")
-		.replace(/[\u0300-\u036f]/g, "");
-	if (key.startsWith("trabajo")) return "Trabajo";
-	if (key.startsWith("auditoria")) return "Auditoría";
-	if (key.startsWith("diseno")) return "Diseño";
-	if (key.startsWith("arquitectura")) return "Arquitectura";
-	if (key.startsWith("consult")) return "Consultas";
-	if (key.startsWith("explor")) return "Exploración";
-	if (key.startsWith("iconograf")) return "Iconografía";
-	if (key.startsWith("voz")) return "Voz";
-	if (key.startsWith("musica")) return "Música";
-	return raw.trim() || "Otros";
-}
-
-/** Infers canonical role name from explicit `ROL ...` description header or profile naming convention. */
-export function inferProfileRole(name: string, profile: Pick<IduProfile, "description">): string {
-	const desc = profile.description ?? "";
-	const match = desc.match(/^ROL\s+([^:(\r\n]+)/i);
-	if (match?.[1]) {
-		return normalizeRoleLabel(match[1]);
-	}
-	const lower = name.toLowerCase();
-	if (lower.startsWith("work")) return "Trabajo";
-	if (lower.startsWith("audit")) return "Auditoría";
-	if (lower.startsWith("design")) return "Diseño";
-	if (lower.startsWith("arch")) return "Arquitectura";
-	if (lower.startsWith("consult")) return "Consultas";
-	if (lower.startsWith("explore")) return "Exploración";
-	if (lower.startsWith("icon")) return "Iconografía";
-	if (lower.startsWith("voice")) return "Voz";
-	if (lower.startsWith("music")) return "Música";
-	return "Otros";
-}
-
-/** Extracts priority ordinal `(1)`, `(2º)`, etc. from role descriptions so primary slots appear first. */
-export function extractRoleRank(description = ""): number {
-	const match = description.match(/ROL\s+[^:(\r\n]+\(\s*(\d+)/i);
-	if (match?.[1]) {
-		const n = Number.parseInt(match[1], 10);
-		if (Number.isFinite(n) && n > 0) return n;
-	}
-	if (/\(principal\)/i.test(description)) return 1;
-	if (/^ROL\s+[^:(\r\n]+:/i.test(description)) return 1;
-	return 999;
-}
-
 function formatDurationMs(ms?: number): string {
 	if (!ms || ms <= 0) return "-";
 	if (ms >= 3_600_000 && ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
@@ -234,14 +215,22 @@ export function buildAgentTuiSnapshot(params: {
 	profilesPath?: string;
 	version?: string;
 	iduHome?: string;
+	cliHomeDir?: string;
+	activeFleet?: string;
+	fleetSource?: string;
+	availableFleets?: string[];
 }): AgentTuiSnapshot {
 	const {
 		capabilities,
 		config,
 		replaceDefaults = false,
-		profilesPath = getIduProfilesPath(),
+		profilesPath = join(process.env.IDU_HOME || IDU_HOME, "profiles.json"),
 		version = readPackageVersion(),
 		iduHome = process.env.IDU_HOME || IDU_HOME,
+		cliHomeDir,
+		activeFleet = capabilities.activeFleet ?? "default",
+		fleetSource = capabilities.fleetSource ?? "default",
+		availableFleets = capabilities.availableFleets ?? ["default"],
 	} = params;
 
 	const cliByName = new Map(capabilities.installedClis.map((c) => [c.name.toLowerCase(), c]));
@@ -249,10 +238,11 @@ export function buildAgentTuiSnapshot(params: {
 		const canonical = canonicalHarnessName(profile.harness.trim().toLowerCase());
 		const cliInfo = cliByName.get(canonical) ?? cliByName.get(profile.harness.trim().toLowerCase());
 		const role = inferProfileRole(name, profile);
-		const rank = extractRoleRank(profile.description);
+		const rank = extractRoleRank(profile.description, name);
 		const modelDisplay = profile.provider && !profile.model?.startsWith(`${profile.provider}/`)
 			? `${profile.provider}/${profile.model || "default"}`
 			: profile.model || "default";
+		const effortInfo = inspectProfileEffort(profile, cliHomeDir);
 		const timeout = formatDurationMs(profile.timeoutMs ?? config.defaultTimeoutMs);
 		const idle = formatDurationMs(profile.idleTimeoutMs);
 		const cap = formatDurationMs(profile.hardCapMs);
@@ -267,11 +257,17 @@ export function buildAgentTuiSnapshot(params: {
 			cliCommand: cliInfo?.command || canonical,
 			provider: profile.provider,
 			modelDisplay,
+			...(effortInfo.explicit ? { effort: effortInfo.explicit } : {}),
+			...(effortInfo.effective ? { effectiveEffort: effortInfo.effective } : {}),
+			effortSource: effortInfo.source,
+			effortBadge: effortInfo.badge,
+			effortDetail: effortInfo.detail,
 			permissions: profile.permissions === "workspace" ? "workspace" : "read-only",
 			streams: Boolean(profile.streams),
 			timeoutLabel: `${timeout} · idle ${idle} · cap ${cap}`,
 			commandPreview: formatCommandPreview(profile, config),
 			description: profile.description?.trim() || "(sin descripción)",
+			rawProfile: profile,
 		};
 	});
 
@@ -300,27 +296,43 @@ export function buildAgentTuiSnapshot(params: {
 		}
 	}
 
+	const hasLegacyNames = Object.keys(capabilities.profiles).some((name) => name in LEGACY_AGENT_ALIASES);
+
 	return {
 		version,
 		iduHome,
+		activeFleet,
+		fleetSource,
+		availableFleets,
+		hasLegacyNames,
 		profilesPath,
 		replaceDefaults,
 		installedClis: capabilities.installedClis,
 		roles,
 		agents,
+		rawProfiles: capabilities.profiles,
 	};
 }
 
-export async function loadAgentTuiSnapshot(): Promise<AgentTuiSnapshot> {
-	const [capabilities, config, profilesCfg] = await Promise.all([
-		CrossCliProcessManager.getInstance().getCapabilities(),
+export async function loadAgentTuiSnapshot(options: { fleet?: string; workingDir?: string } = {}): Promise<AgentTuiSnapshot> {
+	const workingDir = options.workingDir ?? process.cwd();
+	const effective = resolveEffectiveFleet({ fleet: options.fleet, workingDir });
+	const [capabilities, config] = await Promise.all([
+		CrossCliProcessManager.getInstance().getCapabilities({
+			fleet: options.fleet,
+			projectPath: workingDir,
+		}),
 		Promise.resolve(loadIduConfig()),
-		Promise.resolve(loadProfilesConfig()),
 	]);
 	return buildAgentTuiSnapshot({
 		capabilities,
 		config,
-		replaceDefaults: Boolean(profilesCfg.replaceDefaults),
+		replaceDefaults: Boolean(effective.config.replaceDefaults),
+		profilesPath: effective.filePath,
+		cliHomeDir: homedir(),
+		activeFleet: effective.fleetName,
+		fleetSource: effective.source,
+		availableFleets: listFleets().map((f) => f.name),
 	});
 }
 
@@ -337,7 +349,15 @@ export function createTuiState(): AgentTuiState {
 export type TuiReducerOutcome =
 	| { action: "stay"; state: AgentTuiState }
 	| { action: "reload"; state: AgentTuiState }
-	| { action: "quit"; state: AgentTuiState };
+	| { action: "quit"; state: AgentTuiState }
+	| { action: "edit-model"; state: AgentTuiState }
+	| { action: "edit-effort"; state: AgentTuiState }
+	| { action: "edit-harness"; state: AgentTuiState }
+	| { action: "test-terminals"; state: AgentTuiState }
+	| { action: "manage-fleets"; state: AgentTuiState }
+	| { action: "create-agent"; state: AgentTuiState }
+	| { action: "delete-agent"; state: AgentTuiState }
+	| { action: "migrate-slots"; state: AgentTuiState };
 
 export function reduceTuiState(
 	state: AgentTuiState,
@@ -354,6 +374,30 @@ export function reduceTuiState(
 	}
 	if (key.name === "r" || seq === "r" || seq === "R") {
 		return { action: "reload", state };
+	}
+	if (key.name === "f" || seq === "f" || seq === "F") {
+		return { action: "manage-fleets", state };
+	}
+	if (key.name === "n" || seq === "n" || seq === "N") {
+		return { action: "create-agent", state };
+	}
+	if (key.name === "u" || seq === "u" || seq === "U") {
+		return { action: "migrate-slots", state };
+	}
+	if (key.name === "return" || key.name === "enter" || key.name === "m" || seq === "m" || seq === "M") {
+		return { action: "edit-model", state };
+	}
+	if (key.name === "e" || seq === "e" || seq === "E") {
+		return { action: "edit-effort", state };
+	}
+	if (key.name === "t" || seq === "t" || seq === "T") {
+		return { action: "test-terminals", state };
+	}
+	if (key.name === "c" || seq === "c" || seq === "C") {
+		return { action: "edit-harness", state };
+	}
+	if (key.name === "x" || seq === "x" || seq === "X") {
+		return { action: "delete-agent", state };
 	}
 
 	const roleCount = Math.max(1, snapshot.roles.length);
@@ -439,7 +483,9 @@ export function renderAgentTui(
 	if (height >= 28) {
 		out.push(...formatLogoLines(useColor));
 	}
-	const titleLine = `${c(ANSI_BOLD + ANSI_BRIGHT_PURPLE, "IDU-PI")} ${c(ANSI_DIM, `v${snapshot.version}`)}  ·  ${c(ANSI_CYAN, "Agentes configurados")} ${c(ANSI_BOLD, `(${snapshot.agents.length})`)}  ·  ${c(ANSI_DIM, `${homeShort} [${snapshot.replaceDefaults ? "replaceDefaults" : "merged"}]`)}`;
+	const fleetBadge = c(ANSI_BOLD + ANSI_CYAN, `Flota: ${snapshot.activeFleet}`) + c(ANSI_DIM, ` (${snapshot.fleetSource})`);
+	const legacyBadge = snapshot.hasLegacyNames ? `  ·  ${c(ANSI_YELLOW, "[u] Migrar nombres viejos")}` : "";
+	const titleLine = `${c(ANSI_BOLD + ANSI_BRIGHT_PURPLE, "IDU-PI")} ${c(ANSI_DIM, `v${snapshot.version}`)}  ·  ${fleetBadge}  ·  ${c(ANSI_CYAN, "Agentes")} ${c(ANSI_BOLD, `(${snapshot.agents.length})`)}  ·  ${c(ANSI_DIM, `${homeShort} [${snapshot.replaceDefaults ? "replaceDefaults" : "merged"}]`)}${legacyBadge}`;
 	out.push(truncateVisible(titleLine, width));
 
 	const okCount = snapshot.installedClis.filter((cli) => cli.available).length;
@@ -504,10 +550,11 @@ export function renderAgentTui(
 	}
 
 	out.push(c(ANSI_DIM, "─".repeat(width)));
-	const reloadTag = state.lastReloadedAt ? `  · recargado ${state.lastReloadedAt}` : "";
+	const reloadTag = state.lastReloadedAt ? `  · ${state.lastReloadedAt}` : "";
+	const migrateHint = snapshot.hasLegacyNames ? "  · u Migrar" : "";
 	out.push(
 		truncateVisible(
-			c(ANSI_DIM, `↑/↓ j/k Mover  ·  ←/→ Tab Rol (0-9)  ·  r Recargar  ·  q / Esc Salir${reloadTag}`),
+			c(ANSI_DIM, `↑/↓ Mover · ←/→ Tab Rol · Enter/m Modelo · e Esfuerzo · t Test · c Terminal · f Perfiles · n Nuevo · x Borrar${migrateHint} · r Recargar · q Salir${reloadTag}`),
 			width,
 		),
 	);
@@ -520,7 +567,8 @@ function formatAgentListRow(agent: AgentEntry, isSelected: boolean, width: numbe
 	const permTag = agent.permissions === "workspace" ? "W" : "R";
 	const cliTag = agent.cliAvailable ? "✓" : "✗";
 	const rankTag = agent.rank < 999 ? `#${agent.rank}` : "  ";
-	const raw = `${pointer} ${agent.name.padEnd(18)} ${agent.role.slice(0, 11).padEnd(11)} ${rankTag} ${cliTag} ${agent.harness.padEnd(11)} ${permTag} ${agent.modelDisplay}`;
+	const effTag = agent.effortBadge.padEnd(5).slice(0, 5);
+	const raw = `${pointer} ${agent.name.padEnd(13)} ${agent.role.slice(0, 10).padEnd(10)} ${rankTag} ${cliTag} ${agent.harness.padEnd(10)} ${permTag} ${effTag} ${agent.modelDisplay}`;
 	const padded = padRightVisible(raw, width);
 	if (!useColor) return padded;
 	if (isSelected) return `${ANSI_REVERSE}${ANSI_CYAN}${padded}${ANSI_RESET}`;
@@ -536,11 +584,16 @@ function buildInspectorLines(agent: AgentEntry | undefined, width: number, useCo
 		: c(ANSI_RED, `NO ENCONTRADO (${agent.harness})`);
 	const permState =
 		agent.permissions === "workspace" ? c(ANSI_YELLOW, "workspace (escritura)") : c(ANSI_GREEN, "read-only");
+	const effortValue =
+		agent.effortSource === "explicit" || agent.effortSource === "model-suffix"
+			? c(ANSI_BRIGHT_PURPLE, agent.effortDetail)
+			: agent.effortDetail;
 
 	const lines = [
 		`${c(ANSI_DIM, "Rol:")}        ${agent.role}${agent.rank < 999 ? ` (prioridad ${agent.rank})` : ""}`,
 		`${c(ANSI_DIM, "CLI:")}        ${cliState}`,
 		`${c(ANSI_DIM, "Modelo:")}     ${c(ANSI_BOLD, agent.modelDisplay)}`,
+		`${c(ANSI_DIM, "Esfuerzo:")}   ${effortValue}`,
 		`${c(ANSI_DIM, "Permisos:")}   ${permState}  ·  streams: ${agent.streams ? "sí" : "no"}`,
 		`${c(ANSI_DIM, "Timeouts:")}   ${agent.timeoutLabel}`,
 		"",
@@ -556,8 +609,9 @@ function buildInspectorLines(agent: AgentEntry | undefined, width: number, useCo
 /** Plain text non-TTY rendering showing every configured agent cleanly. */
 export function renderAgentsPlain(snapshot: AgentTuiSnapshot): string {
 	const lines: string[] = [
-		`IDU-PI v${snapshot.version} — Agentes configurados (${snapshot.agents.length})`,
+		`IDU-PI v${snapshot.version} — Flota: ${snapshot.activeFleet} (${snapshot.fleetSource}) — Agentes (${snapshot.agents.length})`,
 		`Profiles: ${snapshot.profilesPath} [${snapshot.replaceDefaults ? "replaceDefaults" : "merged"}]`,
+		`Flotas disponibles: ${snapshot.availableFleets.join(", ")}`,
 		`CLIs OK: ${snapshot.installedClis.filter((c) => c.available).map((c) => c.name).join(", ") || "ninguno"}`,
 		"",
 	];
@@ -569,15 +623,18 @@ export function renderAgentsPlain(snapshot: AgentTuiSnapshot): string {
 		}
 		const cliMark = ag.cliAvailable ? "OK" : "MISSING";
 		const rank = ag.rank < 999 ? `#${ag.rank}` : "  ";
+		const effTag = `[${ag.effortBadge}]`.padEnd(7);
 		lines.push(
-			`  ${rank} ${ag.name.padEnd(18)} ${ag.harness.padEnd(12)} [${cliMark}] ${ag.permissions.padEnd(9)} ${ag.modelDisplay}`,
+			`  ${rank} ${ag.name.padEnd(15)} ${ag.harness.padEnd(12)} [${cliMark}] ${effTag} ${ag.permissions.padEnd(9)} ${ag.modelDisplay}`,
 		);
 	}
 	return lines.join("\n");
 }
 
-export async function runAgentsTui(options: { plain?: boolean; json?: boolean } = {}): Promise<void> {
-	let snapshot = await loadAgentTuiSnapshot();
+export async function runAgentsTui(options: { plain?: boolean; json?: boolean; fleet?: string; workingDir?: string } = {}): Promise<void> {
+	let currentFleet = options.fleet;
+	const workingDir = options.workingDir ?? process.cwd();
+	let snapshot = await loadAgentTuiSnapshot({ fleet: currentFleet, workingDir });
 
 	if (options.json) {
 		console.log(JSON.stringify(snapshot, null, 2));
@@ -594,6 +651,7 @@ export async function runAgentsTui(options: { plain?: boolean; json?: boolean } 
 	const stdout = process.stdout;
 	let state = createTuiState();
 	let cleanupDone = false;
+	let modalBusy = false;
 
 	const draw = () => {
 		const width = stdout.columns || 100;
@@ -602,8 +660,21 @@ export async function runAgentsTui(options: { plain?: boolean; json?: boolean } 
 		stdout.write(`${ANSI_HOME_CLEAR}${frame}`);
 	};
 
+	const reloadSnapshot = async (resetSelection = false) => {
+		snapshot = await loadAgentTuiSnapshot({ fleet: currentFleet, workingDir });
+		const filtered = getFilteredAgents(snapshot, state);
+		state = {
+			...state,
+			roleIndex: Math.min(state.roleIndex, Math.max(0, snapshot.roles.length - 1)),
+			selectedIndex: resetSelection ? 0 : Math.min(state.selectedIndex, Math.max(0, filtered.length - 1)),
+			scrollOffset: resetSelection ? 0 : state.scrollOffset,
+			lastReloadedAt: new Date().toLocaleTimeString(),
+		};
+	};
+
 	await new Promise<void>((resolve) => {
 		const onKeypress = async (_str: string, key: TuiKeyEvent) => {
+			if (modalBusy) return;
 			const pageRows = Math.max(8, (stdout.rows || 30) - 14);
 			const outcome = reduceTuiState(state, snapshot, key, pageRows);
 			state = outcome.state;
@@ -612,17 +683,69 @@ export async function runAgentsTui(options: { plain?: boolean; json?: boolean } 
 				return;
 			}
 			if (outcome.action === "reload") {
-				snapshot = await loadAgentTuiSnapshot();
-				const now = new Date().toLocaleTimeString();
-				state = {
-					...state,
-					roleIndex: Math.min(state.roleIndex, Math.max(0, snapshot.roles.length - 1)),
-					selectedIndex: 0,
-					scrollOffset: 0,
-					lastReloadedAt: now,
-				};
+				await reloadSnapshot(true);
+				draw();
+				return;
 			}
-			draw();
+			if (outcome.action === "stay") {
+				draw();
+				return;
+			}
+
+			// Interactive editor modals suspend the browse keypress listener cleanly.
+			modalBusy = true;
+			stdin.off("keypress", onKeypress);
+			try {
+				const items = getFilteredAgents(snapshot, state);
+				const selected = items[Math.min(state.selectedIndex, Math.max(0, items.length - 1))];
+				const ctx = {
+					io: { stdin, stdout },
+					activeFleet: snapshot.activeFleet,
+					workingDir,
+					installedClis: snapshot.installedClis,
+					profiles: snapshot.rawProfiles ?? {},
+				};
+
+				if (outcome.action === "manage-fleets") {
+					const res = await runManageFleetsAction(ctx);
+					if (res.changed) {
+						currentFleet = res.fleetName;
+						await reloadSnapshot(true);
+					}
+				} else if (outcome.action === "create-agent") {
+					const changed = await runCreateAgentAction(ctx);
+					if (changed) await reloadSnapshot(false);
+				} else if (outcome.action === "migrate-slots") {
+					const changed = await runMigrateLegacyAction(ctx);
+					if (changed) await reloadSnapshot(true);
+				} else if (selected && selected.rawProfile) {
+					const target = {
+						name: selected.name,
+						role: selected.role,
+						rank: selected.rank,
+						harness: selected.harness,
+						provider: selected.provider,
+						modelDisplay: selected.modelDisplay,
+						...(selected.effort ? { effort: selected.effort } : {}),
+						permissions: selected.permissions,
+						description: selected.description,
+						rawProfile: selected.rawProfile,
+					};
+					let changed = false;
+					if (outcome.action === "edit-model") changed = await runEditModelAction(ctx, target);
+					else if (outcome.action === "edit-effort") changed = await runEditEffortAction(ctx, target);
+					else if (outcome.action === "test-terminals") changed = await runTestTerminalsForCurrentAgent(ctx, target);
+					else if (outcome.action === "edit-harness") changed = await runManualTerminalAction(ctx, target);
+					else if (outcome.action === "delete-agent") changed = await runDeleteAgentAction(ctx, target);
+					if (changed) await reloadSnapshot(false);
+				}
+			} finally {
+				modalBusy = false;
+				if (!cleanupDone) {
+					stdin.on("keypress", onKeypress);
+					draw();
+				}
+			}
 		};
 
 		const onResize = () => draw();

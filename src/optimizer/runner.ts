@@ -4,20 +4,32 @@ import { buildHarnessInvocation, collectGitChangedFiles, prepareTaskSandbox, res
 import { BENCHMARK_TASKS } from "../../bench/tasks/registry.js";
 import { assessAutonomy } from "../../bench/stats.js";
 import type { BenchmarkTaskDef } from "../../bench/types.js";
-import { buildWorkerArgs, unwrapCmdExecutable } from "../cmdline.js";
-import { getIduHome, getIduProfilesPath, loadIduConfig, loadProfilesConfig } from "../config.js";
+import { buildWorkerArgs, checkCliAvailable, unwrapCmdExecutable } from "../cmdline.js";
+import { resolveHarnessEffortArg } from "../effort.js";
+import { getIduHome, loadIduConfig } from "../config.js";
+import {
+	buildDynamicProfileDescription,
+	formatProfileFieldsForHarness,
+	listCompatibleHarnessesForModel,
+	normalizeRoleLabel,
+	parseModelSpec,
+	resolveEffectiveFleet,
+} from "../fleets.js";
 import { writeJsonAtomic } from "../json-file.js";
 import { buildWorkerSpawnEnv } from "../runner.js";
+import { canonicalHarnessName } from "../session-policy.js";
 import { extractCleanSummary } from "../summary.js";
-import type { IduConfig, IduProfile, ProfilesConfig } from "../types.js";
+import type { IduConfig, IduProfile, ProfilesConfig, ReasoningEffort } from "../types.js";
 import { extractUsage } from "../usage.js";
 import { fetchArtificialAnalysisCatalog, matchAaModel, type AaCatalogResult } from "./artificial-analysis.js";
 import { discoverFleetCapabilities, type DiscoveryResult } from "./discovery.js";
-import { buildRoleProposals, matchesRoleFilter, ROLE_OBJECTIVES } from "./roles.js";
+import { buildRoleProposals, HARNESS_EFFICIENCY_TIEBREAK, matchesRoleFilter, ROLE_OBJECTIVES } from "./roles.js";
 import type {
 	AaModelMetrics,
 	MiniBenchCellOutcome,
 	MiniBenchCellPlan,
+	ModelTerminalTestCell,
+	ModelTerminalTestReport,
 	OptimizeApplyOutcome,
 	OptimizeProposal,
 	OptimizeRunResult,
@@ -26,6 +38,8 @@ import type {
 } from "./types.js";
 
 export interface ProposeOptions {
+	fleet?: string;
+	workingDir?: string;
 	roles?: string[];
 	topN?: number;
 	shortlistPerRole?: number;
@@ -47,6 +61,7 @@ export interface RunBenchOptions extends ProposeOptions {
 }
 
 export interface ApplyOptions {
+	fleet?: string;
 	onlyProfiles?: string[];
 	runResult?: OptimizeRunResult;
 	optimizeDir?: string;
@@ -97,7 +112,11 @@ export async function proposeOptimization(options: ProposeOptions = {}): Promise
 				skipLiveEndpoints: options.skipLiveEndpoints,
 			});
 
-	const { profiles } = loadProfilesConfig();
+	const effectiveFleet = resolveEffectiveFleet({
+		fleet: options.fleet,
+		workingDir: options.workingDir,
+	});
+	const { profiles } = effectiveFleet.config;
 	const roles = buildRoleProposals({
 		profiles,
 		candidates: discovery.candidates,
@@ -234,6 +253,7 @@ async function runSingleShortlistCell(
 				track: "controlled",
 				apiKey: nanKey!,
 				permissionMode: task.permissionMode ?? "workspace",
+				...(cell.effort ? { effort: cell.effort } : {}),
 			});
 			if (!inv.supported) {
 				return {
@@ -267,6 +287,7 @@ async function runSingleShortlistCell(
 				harness: cell.harness,
 				provider: cell.profileProvider,
 				model: cell.profileModel,
+				...(cell.effort ? { effort: cell.effort } : {}),
 				permissions: task.permissionMode ?? "workspace",
 			};
 			const built = buildWorkerArgs(hostProfile, task.prompt, [], iduConfig);
@@ -492,7 +513,6 @@ function buildRecommendations(
 				activePairsInRole.add(normalizeProfilePairKey(validReplacement.harness, validReplacement.profileModel));
 				const sec = (validReplacement.durationMs / 1000).toFixed(1);
 				const tokLabel = validReplacement.totalTokens !== null ? `${Math.round(validReplacement.totalTokens / 1000)}k tok` : "tok n/a";
-				const roleHeader = cur.description?.match(/^ROL [^:]+:/)?.[0] ?? `ROL ${roleSummary.role.toUpperCase()}:`;
 				recommendations.push({
 					profileName: cur.profileName,
 					role: roleSummary.role,
@@ -502,7 +522,24 @@ function buildRecommendations(
 						harness: validReplacement.harness,
 						...(validReplacement.profileProvider ? { provider: validReplacement.profileProvider } : {}),
 						model: validReplacement.profileModel,
-						description: `${roleHeader} ${validReplacement.harness} + ${validReplacement.modelId} (auto-optimize: 100% en ${validReplacement.taskId}, ${sec}s, ${tokLabel}).`,
+						description: buildDynamicProfileDescription({
+							slotName: cur.profileName,
+							role: roleSummary.role,
+							rank: cur.rank,
+							existingDescription: cur.description,
+							harness: validReplacement.harness,
+							provider: validReplacement.profileProvider,
+							model: validReplacement.profileModel,
+							benchmark: {
+								taskId: validReplacement.taskId,
+								resolved: validReplacement.resolved,
+								regressionsClean: validReplacement.regressionsClean,
+								durationMs: validReplacement.durationMs,
+								totalTokens: validReplacement.totalTokens,
+								score: validReplacement.compositeBenchScore,
+								recommended: true,
+							},
+						}),
 					},
 					reason: `${validReplacement.harness} · ${validReplacement.modelId} obtuvo ${validReplacement.compositeBenchScore} pts (${sec}s, ${tokLabel}) en ${validReplacement.taskId}${incumbentOutcome ? ` vs ${incumbentOutcome.compositeBenchScore} pts actual` : ""}.`,
 					applyAllowed: true,
@@ -654,10 +691,11 @@ export function applyOptimization(options: ApplyOptions = {}): OptimizeApplyOutc
 			return JSON.parse(readFileSync(runPath, "utf8")) as OptimizeRunResult;
 		})();
 
-	const profilesPath = options.profilesPath ?? getIduProfilesPath();
+	const resolvedFleet = resolveEffectiveFleet({ fleet: options.fleet });
+	const profilesPath = options.profilesPath ?? resolvedFleet.filePath;
 	const currentCfg: ProfilesConfig = existsSync(profilesPath)
 		? (JSON.parse(readFileSync(profilesPath, "utf8")) as ProfilesConfig)
-		: { ...loadProfilesConfig(), profiles: { ...loadProfilesConfig().profiles } };
+		: { ...resolvedFleet.config, profiles: { ...resolvedFleet.config.profiles } };
 
 	const updatedProfiles: OptimizeApplyOutcome["updatedProfiles"] = [];
 	const skippedProfiles: OptimizeApplyOutcome["skippedProfiles"] = [];
@@ -713,5 +751,212 @@ export function applyOptimization(options: ApplyOptions = {}): OptimizeApplyOutc
 		backupPath,
 		updatedProfiles,
 		skippedProfiles,
+	};
+}
+
+export interface TestModelAcrossTerminalsOptions {
+	role: string;
+	modelInput: string;
+	effort?: ReasoningEffort;
+	permissions?: "read-only" | "workspace";
+	harnesses?: string[];
+	includeHeavyBench?: boolean;
+	concurrency?: number;
+	aaApiKey?: string;
+	aaFetcher?: () => Promise<AaCatalogResult>;
+	installedClisOverride?: Array<{ name: string; available: boolean }>;
+	cellRunner?: (cell: MiniBenchCellPlan, task: BenchmarkTaskDef) => Promise<MiniBenchCellOutcome>;
+	onProgress?: (line: string) => void;
+}
+
+/**
+ * Benchmarks ONE user-chosen model (e.g. `nan/kimi-k3.1-pro`) across all compatible
+ * installed terminals in isolated sandboxes, returning ranked results and a
+ * recommended terminal so the user can accept it or choose one manually.
+ */
+export async function testModelAcrossTerminals(
+	options: TestModelAcrossTerminalsOptions,
+): Promise<ModelTerminalTestReport> {
+	const canonicalRole = normalizeRoleLabel(options.role);
+	const roleSpec = ROLE_OBJECTIVES[canonicalRole];
+	const parsedModel = parseModelSpec(options.modelInput);
+	const requestedEffort = options.effort ?? parsedModel.effortSuffix;
+	const permissions = options.permissions ?? roleSpec?.permissions ?? "workspace";
+
+	let taskId = roleSpec?.benchmarkTaskId ?? null;
+	let taskIsFallbackProbe = false;
+	if (!taskId || (taskId === "design-01-3d-benchmark-explainer" && !options.includeHeavyBench)) {
+		taskId = permissions === "workspace" ? "tb-01-log-forensics" : "explore-01-callflow-map";
+		taskIsFallbackProbe = true;
+	}
+	const task = BENCHMARK_TASKS.find((t) => t.id === taskId);
+	if (!task) {
+		throw new Error(`No existe tarea de benchmark "${taskId}" para el rol "${canonicalRole}".`);
+	}
+
+	const iduConfig = loadIduConfig();
+	const installedClis =
+		options.installedClisOverride ??
+		Object.entries(iduConfig.clis).map(([name, def]) => ({
+			name,
+			available: checkCliAvailable(def.command),
+		}));
+
+	const requestedHarnessSet = options.harnesses?.length
+		? new Set(options.harnesses.map((h) => canonicalHarnessName(h.trim().toLowerCase())))
+		: null;
+
+	const compatibility = listCompatibleHarnessesForModel(parsedModel, installedClis).filter(
+		(c) => !requestedHarnessSet || requestedHarnessSet.has(c.harness),
+	);
+
+	const runnable = compatibility.filter((c) => c.compatible && c.available);
+	const skippedCells: ModelTerminalTestCell[] = compatibility
+		.filter((c) => !c.compatible || !c.available)
+		.map((c) => {
+			const formatted = formatProfileFieldsForHarness(c.harness, parsedModel);
+			return {
+				harness: c.harness,
+				compatible: c.compatible,
+				available: c.available,
+				incompatibleReason: !c.compatible ? c.reason : "CLI no detectado en PATH",
+				profileProvider: formatted.provider,
+				profileModel: formatted.model,
+				taskId: task.id,
+				supported: false,
+				unsupportedReason: !c.compatible ? c.reason : "CLI no detectado en PATH",
+				resolved: false,
+				regressionsClean: true,
+				autonomous: false,
+				failToPassPassed: 0,
+				failToPassTotal: 1,
+				durationMs: 0,
+				totalTokens: null,
+				costUsd: null,
+				compositeBenchScore: 0,
+				summaryPreview: "",
+			};
+		});
+
+	const aa = options.aaFetcher
+		? await options.aaFetcher()
+		: await fetchArtificialAnalysisCatalog({ apiKey: options.aaApiKey }).catch(
+				(): AaCatalogResult => ({
+					models: [],
+					source: "unavailable",
+					fetchedAt: null,
+				}),
+			);
+	const nanKey = resolveNanApiKey();
+	const beforeIdu = snapshotUserIduFiles();
+	const billingModel: "plan" | "api" =
+		parsedModel.provider && ["anthropic", "antigravity", "openai-codex", "command-code", "minimax"].includes(parsedModel.provider)
+			? "plan"
+			: "api";
+
+	const executedCells: ModelTerminalTestCell[] = [];
+	const concurrency = Math.max(1, Math.min(6, options.concurrency ?? 3));
+	let finished = 0;
+
+	await runPool(runnable, concurrency, async (item) => {
+		const formatted = formatProfileFieldsForHarness(item.harness, parsedModel);
+		const effortInfo = resolveHarnessEffortArg(item.harness, requestedEffort);
+		const planCell: MiniBenchCellPlan = {
+			role: canonicalRole,
+			harness: item.harness,
+			provider: parsedModel.provider ?? item.harness,
+			modelId: parsedModel.modelId,
+			profileModel: formatted.model,
+			profileProvider: formatted.provider,
+			...(requestedEffort ? { effort: requestedEffort } : {}),
+			billingModel,
+			taskId: task.id,
+			permissionMode: permissions,
+			targetProfiles: [],
+			estCostUsd: 0,
+			estDurationSec: roleSpec?.estBenchDurationSecPerCell ?? 60,
+			aaScore: 0,
+			reason: `Manual model terminal probe (${parsedModel.display})`,
+		};
+
+		const outcome = options.cellRunner
+			? await options.cellRunner(planCell, task)
+			: await runSingleShortlistCell(planCell, task, iduConfig, nanKey, aa.models);
+
+		executedCells.push({
+			harness: item.harness,
+			compatible: true,
+			available: true,
+			profileProvider: formatted.provider,
+			profileModel: formatted.model,
+			...(effortInfo.effective ? { effortApplied: effortInfo.effective } : {}),
+			taskId: task.id,
+			supported: outcome.supported,
+			unsupportedReason: outcome.unsupportedReason,
+			resolved: outcome.resolved,
+			regressionsClean: outcome.regressionsClean,
+			autonomous: outcome.autonomous,
+			failToPassPassed: outcome.failToPassPassed,
+			failToPassTotal: outcome.failToPassTotal,
+			durationMs: outcome.durationMs,
+			totalTokens: outcome.totalTokens,
+			costUsd: outcome.costUsd,
+			compositeBenchScore: outcome.compositeBenchScore,
+			summaryPreview: outcome.summaryPreview,
+			error: outcome.error,
+		});
+		finished++;
+		const sec = `${(outcome.durationMs / 1000).toFixed(1)}s`;
+		options.onProgress?.(
+			`[${finished}/${runnable.length}] ${item.harness} (${parsedModel.display}) -> resolved=${outcome.resolved} regClean=${outcome.regressionsClean} ${sec} score=${outcome.compositeBenchScore}`,
+		);
+	});
+
+	const afterIdu = snapshotUserIduFiles();
+	const userConfigUntouched =
+		beforeIdu.profilesSha256 === afterIdu.profilesSha256 &&
+		beforeIdu.configSha256 === afterIdu.configSha256;
+
+	executedCells.sort((a, b) => {
+		const aPass = a.supported && a.resolved && a.regressionsClean && a.autonomous ? 1 : 0;
+		const bPass = b.supported && b.resolved && b.regressionsClean && b.autonomous ? 1 : 0;
+		if (bPass !== aPass) return bPass - aPass;
+		const scoreDiff = b.compositeBenchScore - a.compositeBenchScore;
+		if (Math.abs(scoreDiff) > 0.25) return scoreDiff;
+		const effDiff =
+			(HARNESS_EFFICIENCY_TIEBREAK[b.harness] ?? 0) - (HARNESS_EFFICIENCY_TIEBREAK[a.harness] ?? 0);
+		if (effDiff !== 0) return effDiff;
+		return a.durationMs - b.durationMs;
+	});
+
+	const winner = executedCells.find((c) => c.supported && c.resolved && c.regressionsClean && c.autonomous) ?? null;
+	const recommendedHarness = winner?.harness ?? null;
+	let recommendationReason: string;
+	if (winner) {
+		const sec = `${(winner.durationMs / 1000).toFixed(1)}s`;
+		const tok = winner.totalTokens !== null ? `, ${Math.round(winner.totalTokens / 1000)}k tok` : "";
+		recommendationReason = `${winner.harness} resolvió ${task.id} limpio (score ${winner.compositeBenchScore}, ${sec}${tok}) entre ${runnable.length} terminal(es) compatible(s).`;
+	} else if (runnable.length === 0) {
+		recommendationReason = `Ninguna terminal instalada resultó compatible con "${parsedModel.display}".`;
+	} else {
+		recommendationReason = `Ninguna de las ${runnable.length} terminal(es) probadas pasó ${task.id} limpiamente; podés elegir una terminal manualmente o revisar los logs.`;
+	}
+
+	return {
+		testedAt: new Date().toISOString(),
+		role: canonicalRole,
+		taskId: task.id,
+		taskIsFallbackProbe,
+		...(requestedEffort ? { requestedEffort } : {}),
+		modelInput: options.modelInput,
+		parsedModel: {
+			provider: parsedModel.provider,
+			modelId: parsedModel.modelId,
+			display: parsedModel.display,
+		},
+		recommendedHarness,
+		recommendationReason,
+		userConfigUntouched,
+		results: [...executedCells, ...skippedCells],
 	};
 }

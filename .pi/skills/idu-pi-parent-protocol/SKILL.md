@@ -20,13 +20,16 @@ description: |
 `idu-pi` is a global command. Use it from anywhere; do not spell out a path to the repo.
 
 ```bash
-idu-pi status                                # IDU home, detected CLIs, profile list
-idu-pi quota                                 # remaining quota per CLI (--fresh ignores the 10 min cache)
-idu-pi optimize [--roles a,b] [--json]       # zero-spend discovery + Artificial Analysis shortlist & cost estimate
-idu-pi optimize --run-bench [--json]         # run bounded mini-benchmark only on approved shortlist
-idu-pi optimize --apply                      # backup & apply approved updates to ~/.idu/profiles.json
-idu-pi delegate "<task>" --profile <name>    # spawn one worker (defaults to "fast" when --profile is omitted)
-idu-pi wait <runId> --timeout 540000         # block until a delegated worker finishes
+idu-pi status [--fleet <name>] [--cwd <dir>]            # IDU home, active fleet, detected CLIs, profile list
+idu-pi quota                                           # remaining quota per CLI (--fresh ignores the 10 min cache)
+idu-pi fleet list | create <name> | use <name> | bind <name>  # create/switch named fleet profiles
+idu-pi fleet set-agent <slot> --model <m> [--harness <h> | --test-terminals]  # update agent & description
+idu-pi fleet test-model --model <m> [--role <r>] [--apply-to <slot>]          # test compatible terminals for a model
+idu-pi optimize [--fleet <name>] [--roles a,b] [--json]       # zero-spend discovery + Artificial Analysis shortlist & cost estimate
+idu-pi optimize --run-bench [--fleet <name>] [--json]         # run bounded mini-benchmark only on approved shortlist
+idu-pi optimize --apply [--fleet <name>]                      # backup & apply approved updates to target fleet
+idu-pi delegate "<task>" --profile <slot> [--fleet <name>]    # spawn one worker (defaults to "fast" when --profile is omitted)
+idu-pi wait <runId> --timeout 540000                          # block until a delegated worker finishes
 ```
 
 Never use `idu wait`: there is no such binary. Never `node dist/src/cli.js`, which
@@ -51,48 +54,42 @@ The IDU-PI MCP server exposes the same tool surface per harness. The table lists
 
 | Base Tool | Purpose | Required | Key optional |
 |---|---|---|---|
-| `idu_status` | Workspace `cwd`, git branch, clean/dirty tree, idu home. | none | `project_path` |
+| `idu_status` | Workspace `cwd`, git branch, clean/dirty tree, active fleet, idu home. | none | `project_path` |
 | `idu_project_status` | Alias of `idu_status`. | none | `project_path` |
 | `idu_preflight` | Change risk, dirty tree, blast radius before modifying code. | `request` | `expected_files`, `change_mode` (`additive\|refactor\|modification\|destructive`), `working_dir` |
 | `idu_postflight` | Verifies observed git diffs against expected files. | `task_id`, `expected_files` | `working_dir` |
 | `idu_decision_record` | Records a durable decision in the ledger. | `project_id`, `decision`, `decided_by`, `target_kind`, `target_id` | `rationale`, `profile_ref` |
 | `idu_decision_list` | Recent ledger decisions. | none | `project_id`, `limit` |
-| `idu_delegate` | Spawns one CLI worker with `IDU_WORKER=true`. | `task`, `profile` | `async`, `working_dir`, `context_files`, `session_id`, `parent_session_id`, `fork`, `timeout_ms`, `verbose` |
-| `idu_delegate_parallel` | Spawns several workers concurrently (always async). | `tasks` | — |
+| `idu_delegate` | Spawns one CLI worker with `IDU_WORKER=true`. | `task`, `profile` | `fleet`, `async`, `working_dir`, `context_files`, `session_id`, `parent_session_id`, `fork`, `timeout_ms`, `verbose` |
+| `idu_delegate_parallel` | Spawns several workers concurrently (always async). | `tasks` | `fleet` |
 | `idu_worker_status` | Real-time status, duration, health, recent logs. | `run_id` | — |
 | `idu_worker_wait` | Blocks until a worker finishes without killing it. | `run_id` | `timeout_ms`, `verbose` |
 | `idu_worker_result` | Full output, summary and log path of a finished worker. | `run_id` | `verbose` |
 | `idu_session_list` | Tracked cross-cli sessions (id, parent, timestamps). | none | — |
-| `idu_capabilities` | Detected CLIs + effective profiles (built-in defaults merged with `~/.idu/profiles.json`). | none | `only_quota`, `include_quota`, `fresh_quota` |
+| `idu_capabilities` | Detected CLIs + resolved fleet profiles (default, active, project-bound, or explicit `fleet`). | none | `fleet`, `project_path`, `only_quota`, `include_quota`, `fresh_quota` |
 | `idu_arbitrate` | Decision arbitration: Kev local → Jev cloud (SOM) → deterministic fallback. | `options` | `state_summary`, `threshold`, `offline` |
 
 Parameter names are exact and the schema rejects unknown ones. `request` is not `task`;
 `profile` is not `--profile`. The worker id is `runId` (camelCase) from `idu_delegate` but
 `run_id` (snake_case) in the worker tools.
 
-## Agent Fleet Matrix (roles, not CLIs)
+## Agent Fleet Matrix (model-agnostic role slots + named fleets)
 
-Profiles are organized by **role**. Every role has 2–5 alternative CLI/model agents. Pick
-freely among them by task fit, parallelism (cross-audits, parallel exploration) or
-remaining quota. The matrix is a menu, not a fixed assignment. `audit-minimax` is an
-optional comparative extra, not a required fifth auditor.
+Profiles are organized by **role** using model-agnostic slot IDs (`work-1..3`, `audit-1..5`, etc.) so swapping a model or terminal never makes a slot name stale (legacy aliases like `work-mimo` still resolve as fallback). Multiple named **fleet profiles** (`~/.idu/fleets/<name>.json`, e.g. `perfil-1`, `perfil-20`) let different projects or orchestrators run separate model configurations simultaneously: pass `fleet: "<name>"` to `idu_capabilities` / `idu_delegate` / `idu_delegate_parallel`, bind a project with `idu-pi fleet bind <name>`, or switch the active fleet with `idu-pi fleet use <name>`.
 
-`idu_capabilities` returns the **effective** set: built-in defaults merged with
-`~/.idu/profiles.json`. A fleet can opt out of that padding with `"replaceDefaults": true`
-at the root of `~/.idu/profiles.json`, which makes the file the complete list. Always treat
-the effective list as authoritative — if a profile is not there, it is not delegable.
+`idu_capabilities` returns the **effective** set for the resolved fleet (`explicit fleet > IDU_FLEET > project-local .idu/ > project binding > active fleet > ~/.idu/profiles.json`). A fleet can opt out of built-in defaults with `"replaceDefaults": true`. Always treat the effective list as authoritative — if a slot is not there, it is not delegable.
 
-| Role | Profiles (CLI · model) |
+| Role | Canonical Slots (current CLI · model in default fleet) |
 |---|---|
-| Exploración (read-only, parallel) | `explore-deepseek` (pi · DeepSeek V4 Flash nan) · `explore-glm` (gentle-shell · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash high nan) |
-| Consultas (read-only) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · Xiaomi MiMo 2.6 Pro) · `consult-claude` (claude · Opus 5.5) · `consult-gemini38` (agy · Gemini 4 Hydrogen XHigh) |
-| Arquitectura (read-only) | `arch-gemini` (agy · Gemini 4 Argon high) · `arch-claude` (claude · Opus 5.5) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-deepseek` (pi · Kimi K3.1 Pro nan) |
-| Diseño (workspace assets) | `design-opencode` (opencode · Kimi K3.1 Pro nan) · `design-gentle` (mcode · Kimi K3.1 Pro nan) |
-| Iconografía (workspace assets, parallel) | `iconographer` (mcode · Kimi K3.1 Pro nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max nan) |
-| Voz (workspace assets) | `voice-narrator` (cmdc · DeepSeek V4 Flash nan) — narra guiones con voicebox |
-| Música (workspace assets) | `music-composer` (cmdc · DeepSeek V4 Flash nan) — compone con Lofi Live AI |
-| Auditoría (read-only, cross) | `audit-gemini` (agy · Gemini 4 Argon high) · `audit-claude` (claude · Opus 5.5) · `audit-deepseek` (opencode · DeepSeek V4 Flash nan) · `audit-mimo` (pi · HY4 nan) · `audit-minimax` (pi · Kimi K3.1 Pro nan) |
-| **Trabajo / implementación** (workspace) | `work-glm` (mcode · GLM 5.3 Flash nan) · `work-deepseek` (pi · DeepSeek V4 Flash nan) · `work-mimo` (kimi · HY4 nan) |
+| Exploración (read-only, parallel) | `explore-1` (pi · DeepSeek V4 Flash nan) · `explore-2` (gentle-shell · GLM 5.3 Flash nan) · `explore-3` (opencode · MiMo 2.6 Flash high nan) |
+| Consultas (read-only) | `consult-1` (opencode · GPT-6.1 Terra) · `consult-2` (cmdc · Xiaomi MiMo 2.6 Pro) · `consult-3` (claude · Opus 5.5) · `consult-4` (agy · Gemini 4 Hydrogen XHigh) |
+| Arquitectura (read-only) | `arch-1` (agy · Gemini 4 Argon high) · `arch-2` (claude · Opus 5.5) · `arch-3` (opencode · GPT-6.1 Sol) · `arch-4` (pi · Kimi K3.1 Pro nan) |
+| Diseño (workspace assets) | `design-1` (opencode · Kimi K3.1 Pro nan) · `design-2` (mcode · Kimi K3.1 Pro nan) |
+| Iconografía (workspace assets, parallel) | `icon-1` (mcode · Kimi K3.1 Pro nan) · `icon-2` (opencode · MiMo 2.6 Flash max nan) |
+| Voz (workspace assets) | `voice-1` (cmdc · DeepSeek V4 Flash nan) — narra guiones con voicebox |
+| Música (workspace assets) | `music-1` (cmdc · DeepSeek V4 Flash nan) — compone con Lofi Live AI |
+| Auditoría (read-only, cross) | `audit-1` (agy · Gemini 4 Argon high) · `audit-2` (claude · Opus 5.5) · `audit-3` (opencode · DeepSeek V4 Flash nan) · `audit-4` (pi · HY4 nan) · `audit-5` (pi · Kimi K3.1 Pro nan) |
+| **Trabajo / implementación** (workspace) | `work-1` (mcode · GLM 5.3 Flash nan) · `work-2` (pi · DeepSeek V4 Flash nan) · `work-3` (kimi · HY4 nan) |
 
 The work role uses **NaN-hosted models only** across verified top harnesses (`mcode`, `pi`, `kimi`). Effort lives in each CLI's config or slug convention, never in a profile field. All three were verified to actually write files, not just answer.
 
@@ -132,8 +129,7 @@ When the user asks to review, update, or optimize `idupi` agents/models/CLIs (fo
 - **CREATE requires approval**: never add a new role or a new profile key without explicit
   user approval. To go faster inside a role, ask first, then add another CLI/model
   alternative *within that role* — that still counts as creating a profile.
-- `~/.idu/profiles.json` is global and shared by every project, so any modification
-  affects all of them.
+- `~/.idu/profiles.json` is the global `default` fleet; create/use named fleets (`~/.idu/fleets/<name>.json` via `idu-pi fleet create`) or pass `fleet` when projects or orchestrators need isolated configurations.
 - `effort` is **not** a profile field. It lives in each CLI's own config:
   `reasoningEffort[<model>]` in `~/.commandcode/config.json` (cmdc), the model slug suffix
   (`deepseek-v4-flash:high`) for gentle-shell, the `-high` slug for agy, and

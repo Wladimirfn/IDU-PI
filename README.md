@@ -147,17 +147,17 @@ memoria común.
 Los perfiles se agrupan por **rol**, no por CLI. Cada rol ofrece entre 2 y 5 alternativas para
 lanzar agentes en paralelo o cambiar de modelo según la tarea y la cuota.
 
-| Rol | Perfiles | Escribe |
+| Rol | Slots (agnósticos al modelo) | Escribe |
 | :--- | :--- | :---: |
-| **Exploración** | `explore-deepseek` · `explore-glm` · `explore-mimo` | No |
-| **Consultas** | `consult-openai` · `consult-mimo` · `consult-claude` · `consult-gemini38` | No |
-| **Arquitectura** | `arch-claude` · `arch-sol` · `arch-gemini` · `arch-deepseek` | No |
-| **Diseño** | `design-opencode` · `design-gentle` | Sí (assets) |
-| **Iconografía** | `iconographer` · `iconographer-mimo` | Sí (assets) |
-| **Voz** | `voice-narrator` | Sí (assets) |
-| **Música** | `music-composer` | Sí (assets) |
-| **Auditoría** | `audit-claude` · `audit-gemini` · `audit-deepseek` · `audit-mimo` · `audit-minimax` | No |
-| **Trabajo** | `work-glm` · `work-deepseek` · `work-mimo` | Sí (código) |
+| **Exploración** | `explore-1` · `explore-2` · `explore-3` | No |
+| **Consultas** | `consult-1` · `consult-2` · `consult-3` · `consult-4` | No |
+| **Arquitectura** | `arch-1` · `arch-2` · `arch-3` · `arch-4` | No |
+| **Diseño** | `design-1` · `design-2` | Sí (assets) |
+| **Iconografía** | `icon-1` · `icon-2` | Sí (assets) |
+| **Voz** | `voice-1` | Sí (assets) |
+| **Música** | `music-1` | Sí (assets) |
+| **Auditoría** | `audit-1` · `audit-2` · `audit-3` · `audit-4` · `audit-5` | No |
+| **Trabajo** | `work-1` · `work-2` · `work-3` | Sí (código) |
 
 Los roles read-only no editan nada: su garantía está en el prompt del worker, no en un flag.
 
@@ -236,17 +236,17 @@ La flota de referencia del autor. El instalador todavía no la escribe: copia a
 `~/.idu/profiles.json` los perfiles que quieras usar. Cada perfil declara su `harness` y, cuando
 aplica, el `provider` que lo enruta.
 
-| Rol | Perfiles (CLI · modelo) |
+| Rol | Slots (CLI · modelo actual) |
 | :--- | :--- |
-| **Exploración** (3) | `explore-deepseek` (pi · DeepSeek V4 Flash nan) · `explore-glm` (gentle-shell · GLM 5.3 Flash nan) · `explore-mimo` (opencode · MiMo 2.6 Flash high nan) |
-| **Consultas** (4) | `consult-openai` (opencode · GPT-6.1 Terra) · `consult-mimo` (cmdc · MiMo 2.6 Pro) · `consult-claude` (claude · Opus 5.5) · `consult-gemini38` (agy · Gemini 4 Hydrogen XHigh) |
-| **Arquitectura** (4) | `arch-gemini` (agy · Gemini 4 Argon high) · `arch-claude` (claude · Opus 5.5) · `arch-sol` (opencode · GPT-6.1 Sol) · `arch-deepseek` (pi · Kimi K3.1 Pro nan) |
-| **Diseño** (2) | `design-opencode` (opencode · Kimi K3.1 Pro nan) · `design-gentle` (mcode · Kimi K3.1 Pro nan) |
-| **Iconografía** (2) | `iconographer` (mcode · Kimi K3.1 Pro nan) · `iconographer-mimo` (opencode · MiMo 2.6 Flash max nan) |
-| **Voz** (1) | `voice-narrator` (cmdc · DeepSeek V4 Flash nan) |
-| **Música** (1) | `music-composer` (cmdc · DeepSeek V4 Flash nan) |
-| **Auditoría** (5) | `audit-gemini` (agy · Gemini 4 Argon high) · `audit-claude` (claude · Opus 5.5) · `audit-deepseek` (opencode · DeepSeek V4 Flash nan) · `audit-mimo` (pi · HY4 nan) · `audit-minimax` (pi · Kimi K3.1 Pro nan) |
-| **Trabajo** (3) | `work-glm` (mcode · GLM 5.3 Flash nan) · `work-deepseek` (pi · DeepSeek V4 Flash nan) · `work-mimo` (kimi · HY4 nan) |
+| **Exploración** (3) | `explore-1` (pi · DeepSeek V4 Flash nan) · `explore-2` (gentle-shell · GLM 5.3 Flash nan) · `explore-3` (opencode · MiMo 2.6 Flash high nan) |
+| **Consultas** (4) | `consult-1` (opencode · GPT-6.1 Terra) · `consult-2` (cmdc · MiMo 2.6 Pro) · `consult-3` (claude · Opus 5.5) · `consult-4` (agy · Gemini 4 Hydrogen XHigh) |
+| **Arquitectura** (4) | `arch-1` (agy · Gemini 4 Argon high) · `arch-2` (claude · Opus 5.5) · `arch-3` (opencode · GPT-6.1 Sol) · `arch-4` (pi · Kimi K3.1 Pro nan) |
+| **Diseño** (2) | `design-1` (opencode · Kimi K3.1 Pro nan) · `design-2` (mcode · Kimi K3.1 Pro nan) |
+| **Iconografía** (2) | `icon-1` (mcode · Kimi K3.1 Pro nan) · `icon-2` (opencode · MiMo 2.6 Flash max nan) |
+| **Voz** (1) | `voice-1` (cmdc · DeepSeek V4 Flash nan) |
+| **Música** (1) | `music-1` (cmdc · DeepSeek V4 Flash nan) |
+| **Auditoría** (5) | `audit-1` (agy · Gemini 4 Argon high) · `audit-2` (claude · Opus 5.5) · `audit-3` (opencode · DeepSeek V4 Flash nan) · `audit-4` (pi · HY4 nan) · `audit-5` (pi · Kimi K3.1 Pro nan) |
+| **Trabajo** (3) | `work-1` (mcode · GLM 5.3 Flash nan) · `work-2` (pi · DeepSeek V4 Flash nan) · `work-3` (kimi · HY4 nan) |
 
 **El identificador de modelo es un pass-through opaco.** El arnés no lo valida ni normaliza: lo
 reenvía al CLI, que acepta lo que entienda. Por eso conviven formas distintas
@@ -254,8 +254,8 @@ reenvía al CLI, que acepta lo que entienda. Por eso conviven formas distintas
 exponga cada proveedor su catálogo. Para usar otro modelo, agrega un perfil — no hace falta tocar
 código.
 
-**El esfuerzo vive en el slug o config de cada CLI, no en un campo.** `explore-mimo` usa
-`mimo-v2.6-flash#high`; `iconographer-mimo`, `mimo-v2.6-flash#max`; Antigravity usa `-high` / `-xhigh`. No hay un campo `effort` en el perfil.
+**El esfuerzo vive en el slug o config de cada CLI, no en un campo.** `explore-3` usa
+`mimo-v2.6-flash#high`; `icon-2`, `mimo-v2.6-flash#max`; Antigravity usa `-high` / `-xhigh`. No hay un campo `effort` en el perfil.
 
 **Inactividad vs. streaming.** `idleTimeoutMs` solo aplica a perfiles con `streams: true`. En un
 perfil sin streaming el único freno es el timeout total: si delegas tareas largas, añade
@@ -263,6 +263,35 @@ perfil sin streaming el único freno es el timeout total: si delegas tareas larg
 
 Techos por perfil: `timeoutMs` (trabajo), `idleTimeoutMs` (silencio), `hardCapMs` (techo duro;
 `0` lo desactiva).
+
+---
+
+## Perfiles de Flota y Editor TUI (`idupi`)
+
+Podés crear **N perfiles de flota nombrados** (`~/.idu/fleets/<nombre>.json`, por ejemplo `perfil-1`,
+`perfil-20`, `opencode-fast`), asignarlos por proyecto o indicárselos al orquestador al vuelo
+(`fleet: "perfil-20"` en MCP o `--fleet perfil-20` en CLI).
+
+Orden de resolución: `fleet explícito` > `IDU_FLEET` > `.idu/profiles.json` o `.idu/fleet` local >
+vínculo de proyecto en `~/.idu/fleets.json` > `activeFleet` global > `~/.idu/profiles.json` (`default`).
+
+Desde la TUI interactiva **`idupi`** podés:
+- **`f`**: crear, clonar, cambiar, renombrar, eliminar o vincular perfiles de flota al proyecto actual.
+- **`Enter` / `m`**: cambiar el modelo de cualquier agente (del catálogo descubierto o manual como `nan/kimi-k3.1-pro`) y elegir esfuerzo (`off|minimal|low|medium|high|xhigh|max|default`) más **testear todas las terminales compatibles** (con recomendación medida) o **elegir una terminal manualmente**, regenerando la descripción automáticamente.
+- **`e`**: ver y cambiar el nivel de esfuerzo (`off|minimal|low|medium|high|xhigh|max|default`) y mostrar el default real que usa la terminal (`--thinking`, `--effort`, `#variant` o `-c model_reasoning_effort`).
+- **`t`**: testear terminales para el modelo actual del agente seleccionado.
+- **`c`**: cambiar la terminal manualmente sin cambiar de modelo.
+- **`n` / `x` / `u`**: crear un slot nuevo, borrar un slot o migrar nombres viejos (`work-mimo` → `work-3`).
+
+```bash
+idupi fleet list
+idupi fleet create perfil-1 --use
+idupi fleet bind perfil-1 --cwd "C:/ruta/proyecto"
+idupi fleet set-agent work-3 --model nan/kimi-k3.1-pro --effort high --test-terminals --fleet perfil-1
+idupi fleet set-agent work-1 --effort max
+idupi fleet test-model --model nan/kimi-k3.1-pro --effort high --role Trabajo --apply-to work-3
+idupi fleet migrate --refresh-descriptions
+```
 
 ---
 
@@ -384,7 +413,7 @@ pnpm run cli status                 # CLIs detectados y salud
 pnpm run cli capabilities           # perfiles en JSON
 pnpm run cli capabilities --quota   # añade la cuota de cada cuenta
 pnpm run cli preflight "tarea" --cwd "C:/ruta/proyecto"
-pnpm run cli delegate "auditar X" --profile audit-claude
+pnpm run cli delegate "auditar X" --profile audit-2 [--fleet perfil-1]
 pnpm run cli arbitrate --option "a:desc" --option "b:desc" --state "contexto"
 node dist/src/cli.js wait <run_id> --timeout 540000
 pnpm run mcp                        # servidor MCP por stdio
