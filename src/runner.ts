@@ -47,6 +47,12 @@ export function buildWorkerSpawnEnv(
 			merged.OPENAI_API_KEY = nanKey;
 		}
 	}
+	if (harness === "codex" && spec.args.some((a) => a.includes('model_provider="nan"')) && !merged.NAN_API_KEY?.trim()) {
+		const nanKey = resolveNanApiKey({ env: merged, homeDir });
+		if (nanKey) {
+			merged.NAN_API_KEY = nanKey;
+		}
+	}
 	if (harness === "gentle-shell") {
 		if (!merged.GENTLE_PI_AGENTS_CHILD) merged.GENTLE_PI_AGENTS_CHILD = "1";
 		if (!merged.GENTLE_PI_AUTONOMOUS_MODE) merged.GENTLE_PI_AUTONOMOUS_MODE = "1";

@@ -128,9 +128,14 @@ async function main(): Promise<void> {
 				console.log(JSON.stringify(status, null, 2));
 				break;
 			}
-			const caps = await CrossCliProcessManager.getInstance().getCapabilities();
+			const fleetIdx = args.indexOf("--fleet");
+			const fleet = fleetIdx !== -1 && args[fleetIdx + 1] && !args[fleetIdx + 1].startsWith("-") ? args[fleetIdx + 1] : undefined;
+			const cwdIdx = args.indexOf("--cwd");
+			const projectPath = cwdIdx !== -1 && args[cwdIdx + 1] && !args[cwdIdx + 1].startsWith("-") ? args[cwdIdx + 1] : undefined;
+			const caps = await CrossCliProcessManager.getInstance().getCapabilities({ fleet, projectPath });
 			console.log("\n=== IDU Cross-CLI Status ===");
 			console.log(`IDU Home: ${IDU_HOME}`);
+			console.log(`Active Fleet: ${caps.activeFleet ?? "default"} (${caps.fleetSource ?? "default"}) | Available: ${(caps.availableFleets ?? ["default"]).join(", ")}`);
 			console.log("One Orchestrator Rule: ACTIVE (always on, not configurable — see SECURITY.md)");
 			console.log("\nDetected CLIs:");
 			for (const cli of caps.installedClis) {
@@ -184,7 +189,11 @@ async function main(): Promise<void> {
 		}
 
 		case "capabilities": {
-			const caps = await CrossCliProcessManager.getInstance().getCapabilities();
+			const fleetIdx = args.indexOf("--fleet");
+			const fleet = fleetIdx !== -1 && args[fleetIdx + 1] && !args[fleetIdx + 1].startsWith("-") ? args[fleetIdx + 1] : undefined;
+			const cwdIdx = args.indexOf("--cwd");
+			const projectPath = cwdIdx !== -1 && args[cwdIdx + 1] && !args[cwdIdx + 1].startsWith("-") ? args[cwdIdx + 1] : undefined;
+			const caps = await CrossCliProcessManager.getInstance().getCapabilities({ fleet, projectPath });
 			console.log(JSON.stringify(caps, null, 2));
 			break;
 		}
@@ -201,10 +210,22 @@ async function main(): Promise<void> {
 		case "tui":
 		case "agents": {
 			const { runAgentsTui } = await import("./tui.js");
+			const fleetIdx = args.indexOf("--fleet");
+			const fleet = fleetIdx !== -1 && args[fleetIdx + 1] && !args[fleetIdx + 1].startsWith("-") ? args[fleetIdx + 1] : undefined;
+			const cwdIdx = args.indexOf("--cwd");
+			const workingDir = cwdIdx !== -1 && args[cwdIdx + 1] && !args[cwdIdx + 1].startsWith("-") ? args[cwdIdx + 1] : undefined;
 			await runAgentsTui({
 				plain: args.includes("--plain"),
 				json: args.includes("--json"),
+				fleet,
+				workingDir,
 			});
+			break;
+		}
+
+		case "fleet": {
+			const { runFleetCli } = await import("./fleet-cli.js");
+			await runFleetCli(args.slice(1));
 			break;
 		}
 
@@ -271,6 +292,8 @@ async function main(): Promise<void> {
 			const profileIndex = args.indexOf("--profile");
 			const profileExplicit = profileIndex !== -1;
 			const profile = profileExplicit ? args[profileIndex + 1] : "fast";
+			const fleetIndex = args.indexOf("--fleet");
+			const fleet = fleetIndex !== -1 && args[fleetIndex + 1] ? args[fleetIndex + 1] : undefined;
 			const sessionIndex = args.indexOf("--session");
 			const sessionId = sessionIndex !== -1 ? args[sessionIndex + 1] : undefined;
 			const parentIndex = args.indexOf("--parent");
@@ -291,6 +314,7 @@ async function main(): Promise<void> {
 
 			const flagsToFilter = new Set([
 				profileIndex, profileIndex !== -1 ? profileIndex + 1 : -1,
+				fleetIndex, fleetIndex !== -1 ? fleetIndex + 1 : -1,
 				sessionIndex, sessionIndex !== -1 ? sessionIndex + 1 : -1,
 				parentIndex, parentIndex !== -1 ? parentIndex + 1 : -1,
 				workingDirIndex, workingDirIndex !== -1 ? workingDirIndex + 1 : -1,
@@ -303,10 +327,11 @@ async function main(): Promise<void> {
 			const taskArgs = args.slice(1).filter((_, i) => !flagsToFilter.has(i + 1));
 			const task = taskArgs.join(" ") || "Status probe";
 
-			console.log(`Delegating task to profile: ${profile}${sessionId ? ` (session: ${sessionId})` : ""}${workingDir ? ` in ${workingDir}` : ""}...`);
+			console.log(`Delegating task to profile: ${profile}${fleet ? ` [fleet: ${fleet}]` : ""}${sessionId ? ` (session: ${sessionId})` : ""}${workingDir ? ` in ${workingDir}` : ""}...`);
 			const result = await CrossCliProcessManager.getInstance().delegate({
 				task,
 				profile,
+				fleet,
 				profileExplicit,
 				force,
 				parentOrchestrator: "cli",
@@ -817,7 +842,7 @@ async function runVideoAudit(
 	timeoutFlag: string | undefined,
 ): Promise<number> {
 	const lanes = resolveVideoLanes();
-	const { profiles } = loadProfilesConfig();
+	const { profiles } = loadProfilesConfig({ workingDir: project });
 	return runVideoAuditCore(project, profileFlag, timeoutFlag, {
 		validIntentIds: validIntentIds(lanes),
 		auditProfiles: lanes?.audit?.profiles ?? [],
@@ -944,9 +969,10 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi result <runId> [--verbose]          Display final execution result of run");
 	out("  idu-pi wait <runId> [--follow]             Wait for background run (with optional live streaming)");
 	out("  idu-pi sessions                            Display session hierarchy tree");
-	out("  idu-pi capabilities                        Print JSON capabilities");
-	out("  idu-pi tui [--plain] [--json]              Interactive TUI of configured agents (also `idupi`)");
-	out("  idu-pi optimize [--run-bench] [--apply]    Discover CLIs/plans + AA metrics, propose shortlist, bench & apply");
+	out("  idu-pi capabilities [--fleet <f>]          Print JSON capabilities");
+	out("  idu-pi tui [--fleet <f>] [--plain] [--json] Interactive TUI & profile/model editor (`idupi`)");
+	out("  idu-pi fleet <list|create|use|bind|set-agent|test-model|migrate> Manage named fleets & test terminals");
+	out("  idu-pi optimize [--fleet <f>] [--run-bench] [--apply] Discover, bench & apply updates");
 	out("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)");
 	out("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
 	out("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");

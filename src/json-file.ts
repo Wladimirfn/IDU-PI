@@ -1,7 +1,7 @@
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { IDU_RUNTIME_DIR } from "./config.js";
+import { IDU_RUNTIME_DIR } from "./config-defaults.js";
 
 /**
  * Write-then-rename, with a bounded retry for the Windows case where a reader

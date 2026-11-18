@@ -32,6 +32,42 @@ function parseIntFlag(args: string[], flag: string): number | undefined {
 	return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+function parseValueFlag(args: string[], flag: string): string | undefined {
+	const idx = args.indexOf(flag);
+	if (idx === -1 || !args[idx + 1] || args[idx + 1].startsWith("-")) return undefined;
+	return args[idx + 1].trim() || undefined;
+}
+
+export function formatTerminalTestMarkdown(report: import("./types.js").ModelTerminalTestReport): string {
+	const lines: string[] = [];
+	lines.push(`# Test de Terminales · ${report.parsedModel.display} (${report.role})`);
+	lines.push("");
+	lines.push(
+		`- **Tarea**: \`${report.taskId}\`${report.taskIsFallbackProbe ? " (probe general)" : ""}${report.requestedEffort ? ` | **Esfuerzo**: \`${report.requestedEffort}\`` : ""} | **Recomendada**: ${report.recommendedHarness ? `\`${report.recommendedHarness}\`` : "ninguna"}`,
+	);
+	lines.push(`- **Motivo**: ${report.recommendationReason}`);
+	lines.push("");
+	lines.push("| Terminal | Estado | Resuelto | Regresiones | Tiempo | Tokens | Score |");
+	lines.push("| --- | --- | --- | --- | ---: | ---: | ---: |");
+	for (const r of report.results) {
+		const st = !r.compatible
+			? `INCOMP (${r.incompatibleReason ?? ""})`
+			: !r.available
+				? "NO INSTALADA"
+				: !r.supported
+					? `UNSUP (${r.unsupportedReason ?? ""})`
+					: r.harness === report.recommendedHarness
+						? "★ RECOMENDADA"
+						: "probada";
+		const res = !r.compatible || !r.available || !r.supported ? "-" : r.resolved ? `SI (${r.failToPassPassed}/${r.failToPassTotal})` : `NO (${r.failToPassPassed}/${r.failToPassTotal})`;
+		const reg = !r.compatible || !r.available || !r.supported ? "-" : r.regressionsClean ? "clean" : "DIRTY";
+		const sec = r.durationMs > 0 ? `${(r.durationMs / 1000).toFixed(1)}s` : "-";
+		const tok = r.totalTokens !== null ? String(r.totalTokens) : "-";
+		lines.push(`| \`${r.harness}\` | ${st} | ${res} | ${reg} | ${sec} | ${tok} | ${r.compositeBenchScore} |`);
+	}
+	return lines.join("\n");
+}
+
 export function formatProposalMarkdown(proposal: OptimizeProposal): string {
 	const lines: string[] = [];
 	lines.push(`# IDU-PI Auto-Optimizer Proposal (${proposal.generatedAt})`);
@@ -166,15 +202,16 @@ export function printOptimizeHelp(): void {
 			"idu-pi optimize — Safe 3-stage fleet optimizer (Discover -> Mini-Bench -> Apply)",
 			"",
 			"Usage:",
-			"  idu-pi optimize [--propose] [--roles <a,b>] [--top <N>] [--fresh] [--json]",
+			"  idu-pi optimize [--fleet <name>] [--propose] [--roles <a,b>] [--top <N>] [--fresh] [--json]",
 			"      Stage 1 (DEFAULT, ZERO SPEND): discovers CLIs, active plans/quotas, live endpoint models,",
 			"      queries Artificial Analysis (quality/speed/cost), and proposes a shortlist + estimated cost.",
-			"  idu-pi optimize --run-bench [--roles <a,b>] [--top <N>] [--concurrency <N>] [--include-heavy] [--json]",
+			"  idu-pi optimize --run-bench [--fleet <name>] [--roles <a,b>] [--top <N>] [--concurrency <N>] [--include-heavy] [--json]",
 			"      Stage 2: runs the bounded mini-benchmark ONLY on shortlisted candidates in isolated sandboxes.",
-			"  idu-pi optimize --apply [--profiles <p1,p2>] [--json]",
-			"      Stage 3: creates a timestamped backup and writes approved updates to ~/.idu/profiles.json.",
+			"  idu-pi optimize --apply [--fleet <name>] [--profiles <p1,p2>] [--json]",
+			"      Stage 3: creates a timestamped backup and writes approved updates to the target fleet.",
 			"",
 			"Options:",
+			"  --fleet <name>  Target named fleet (defaults to active/project/default fleet)",
 			"  --fresh         Bypass caches for both Artificial Analysis and CLI quotas",
 			"  --fresh-aa      Force refresh of Artificial Analysis model catalog",
 			"  --fresh-quota   Force live quota probe across CLIs (may spend 1 call each on claude/agy)",
@@ -192,6 +229,7 @@ export async function runOptimizeCli(args: string[]): Promise<void> {
 	}
 
 	const asJson = args.includes("--json");
+	const fleet = parseValueFlag(args, "--fleet");
 	const roles = parseCsvFlag(args, "--roles");
 	const onlyProfiles = parseCsvFlag(args, "--profiles");
 	const shortlistPerRole = parseIntFlag(args, "--top");
@@ -203,7 +241,7 @@ export async function runOptimizeCli(args: string[]): Promise<void> {
 	const skipLiveEndpoints = args.includes("--offline");
 
 	if (args.includes("--apply")) {
-		const outcome = applyOptimization({ onlyProfiles });
+		const outcome = applyOptimization({ fleet, onlyProfiles });
 		if (asJson) console.log(JSON.stringify(outcome, null, 2));
 		else console.log(formatApplyOutcomeMarkdown(outcome));
 		return;
@@ -211,6 +249,7 @@ export async function runOptimizeCli(args: string[]): Promise<void> {
 
 	if (args.includes("--run-bench")) {
 		const runResult = await runOptimizationBench({
+			fleet,
 			roles,
 			shortlistPerRole,
 			concurrency,
@@ -231,6 +270,7 @@ export async function runOptimizeCli(args: string[]): Promise<void> {
 
 	// Default Stage 1: safe zero-spend `propose`
 	const proposal = await proposeOptimization({
+		fleet,
 		roles,
 		shortlistPerRole,
 		freshAa,

@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
+import { formatModelForOpenCode, resolveHarnessEffortArg, stripEffortVariantSuffix } from "./effort.js";
+import { NAN_BASE_URL } from "./nan-auth.js";
 import type { IduConfig, IduProfile } from "./types.js";
 import { isUuid } from "./session-ids.js";
 import { canonicalHarnessName } from "./session-policy.js";
@@ -169,12 +171,18 @@ export function buildWorkerArgs(
 	const args: string[] = [];
 	const sessionId = sessionOptions.sessionId?.trim();
 	const parentSessionId = sessionOptions.parentSessionId?.trim();
+	const effortRes = resolveHarnessEffortArg(harness, profile.effort);
+	const normalizeNonOpenCodeModel = (rawModel: string): string =>
+		profile.effort ? stripEffortVariantSuffix(rawModel).model : rawModel;
 
 	switch (harness) {
 		case "claude":
 		case "claude-code": {
 			if (profile.model) {
-				args.push("--model", profile.model);
+				args.push("--model", normalizeNonOpenCodeModel(profile.model));
+			}
+			if (effortRes.args.length > 0) {
+				args.push(...effortRes.args);
 			}
 			args.push(
 				"--output-format", "stream-json",
@@ -212,7 +220,7 @@ export function buildWorkerArgs(
 			args.push("run", "--format", "json", ...autoArgs);
 			if (profile.model) {
 				const fullModel = profile.provider ? `${profile.provider}/${profile.model}` : profile.model;
-				args.push("--model", fullModel);
+				args.push("--model", formatModelForOpenCode(fullModel, profile.effort));
 			}
 
 			// OpenCode Session Handling:
@@ -245,7 +253,10 @@ export function buildWorkerArgs(
 				args.push("--provider", profile.provider);
 			}
 			if (profile.model) {
-				args.push("--model", profile.model);
+				args.push("--model", normalizeNonOpenCodeModel(profile.model));
+			}
+			if (effortRes.args.length > 0) {
+				args.push(...effortRes.args);
 			}
 
 			// Pi Session Handling:
@@ -284,8 +295,19 @@ export function buildWorkerArgs(
 				// `codex exec resume/fork` do not accept `-s`; only initial `exec` takes it.
 				args.push("-s", "read-only");
 			}
+			if (profile.provider === "nan") {
+				args.push(
+					"-c",
+					`model_providers.nan={name="Nan",base_url="${NAN_BASE_URL}",env_key="NAN_API_KEY",wire_api="responses"}`,
+					"-c",
+					'model_provider="nan"',
+				);
+			}
+			if (effortRes.args.length > 0) {
+				args.push(...effortRes.args);
+			}
 			if (profile.model) {
-				args.push("-m", profile.model);
+				args.push("-m", normalizeNonOpenCodeModel(profile.model));
 			}
 			args.push(fullMessage);
 			break;
@@ -294,7 +316,7 @@ export function buildWorkerArgs(
 		case "kimi":
 		case "kimi-code": {
 			if (profile.model) {
-				args.push("-m", profile.model);
+				args.push("-m", normalizeNonOpenCodeModel(profile.model));
 			}
 			// `kimi 0.29.x` rejects combining `-p` with `--auto`, `--plan`, or `--yolo`.
 			args.push("--output-format", "stream-json");
@@ -315,7 +337,7 @@ export function buildWorkerArgs(
 				args.push("--auth-type", "openai", "--openai-base-url", "https://api.nan.builders/v1");
 			}
 			if (profile.model) {
-				args.push("-m", profile.model);
+				args.push("-m", normalizeNonOpenCodeModel(profile.model));
 			}
 			if (hasWorkspacePermissions(profile)) {
 				args.push("-y");
@@ -335,10 +357,13 @@ export function buildWorkerArgs(
 		case "antigravity":
 		case "agy": {
 			if (profile.model) {
-				let model = profile.model;
+				let model = normalizeNonOpenCodeModel(profile.model);
 				if (model === "flash") model = "gemini-3.8-flash-high";
 				else if (model === "pro" || model === "argon" || model === "gemini-3.1-pro-high") model = "gemini-4-argon-high";
 				args.push("--model", model);
+			}
+			if (effortRes.args.length > 0) {
+				args.push(...effortRes.args);
 			}
 			args.push("--output-format", "stream-json");
 			if (hasWorkspacePermissions(profile)) {
@@ -355,7 +380,10 @@ export function buildWorkerArgs(
 		case "commandcode":
 		case "cmdc": {
 			if (profile.model) {
-				args.push("-m", profile.model);
+				args.push("-m", normalizeNonOpenCodeModel(profile.model));
+			}
+			if (effortRes.args.length > 0) {
+				args.push(...effortRes.args);
 			}
 			args.push("--output-format", "json");
 			// cmdc in print mode blocks shell_command unless --yolo is passed, and a
@@ -397,19 +425,23 @@ export function buildWorkerArgs(
 			args.push("--permission", hasWorkspacePermissions(profile) ? "full" : "off");
 
 			if (profile.model) {
-				let fullModel = profile.model;
+				const cleanModel = normalizeNonOpenCodeModel(profile.model);
+				let fullModel = cleanModel;
 				if (profile.provider) {
 					const prefix =
 						profile.provider === "minimax" || profile.provider.startsWith("custom_provider:")
 							? profile.provider
 							: `custom_provider:${profile.provider}`;
-					if (!profile.model.startsWith(`${profile.provider}/`) && !profile.model.startsWith(`${prefix}/`)) {
-						fullModel = `${prefix}/${profile.model}`;
-					} else if (profile.provider !== "minimax" && !profile.provider.startsWith("custom_provider:") && !profile.model.startsWith("custom_provider:")) {
-						fullModel = `custom_provider:${profile.model}`;
+					if (!cleanModel.startsWith(`${profile.provider}/`) && !cleanModel.startsWith(`${prefix}/`)) {
+						fullModel = `${prefix}/${cleanModel}`;
+					} else if (profile.provider !== "minimax" && !profile.provider.startsWith("custom_provider:") && !cleanModel.startsWith("custom_provider:")) {
+						fullModel = `custom_provider:${cleanModel}`;
 					}
 				}
 				args.push("--model", fullModel);
+			}
+			if (effortRes.args.length > 0) {
+				args.push(...effortRes.args);
 			}
 
 			// minimax Code Session Handling:

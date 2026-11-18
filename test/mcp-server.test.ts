@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleMcpMethod, TOOLS } from "../src/mcp-server.js";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { QUOTA_CACHE_PATH } from "../src/json-file.js";
@@ -682,6 +682,46 @@ test("MCP idu_arbitrate evaluates options deterministically offline", async () =
 		else process.env.IDU_HOME = prevIduHome;
 		if (prevKey !== undefined) process.env.TYPESAFE_API_KEY = prevKey;
 		if (prevJev !== undefined) process.env.JEV_API_KEY = prevJev;
+		try { rmSync(isolated, { recursive: true, force: true }); } catch {}
+	}
+});
+
+test("MCP idu_capabilities resolves named fleets and project bindings via fleet/project_path", async () => {
+	delete process.env.IDU_WORKER;
+	const isolated = mkdtempSync(join(tmpdir(), "idu-mcp-fleet-"));
+	const prevIduHome = process.env.IDU_HOME;
+	process.env.IDU_HOME = isolated;
+	try {
+		mkdirSync(join(isolated, "fleets"), { recursive: true });
+		writeFileSync(
+			join(isolated, "fleets", "perfil-20.json"),
+			JSON.stringify({
+				name: "perfil-20",
+				replaceDefaults: true,
+				profiles: {
+					"work-1": { harness: "opencode", provider: "nan", model: "kimi-k3.1-pro", permissions: "workspace" },
+				},
+			}),
+			"utf8",
+		);
+
+		const res = (await handleMcpMethod("tools/call", {
+			name: "idu_capabilities",
+			arguments: { fleet: "perfil-20" },
+		})) as { content: Array<{ text: string }> };
+		const parsed = JSON.parse(res.content[0].text) as {
+			activeFleet?: string;
+			fleetSource?: string;
+			availableFleets?: string[];
+			profiles: Record<string, { model?: string }>;
+		};
+		assert.equal(parsed.activeFleet, "perfil-20");
+		assert.equal(parsed.fleetSource, "explicit");
+		assert.ok(parsed.availableFleets?.includes("perfil-20"));
+		assert.equal(parsed.profiles["work-1"]?.model, "kimi-k3.1-pro");
+	} finally {
+		if (prevIduHome === undefined) delete process.env.IDU_HOME;
+		else process.env.IDU_HOME = prevIduHome;
 		try { rmSync(isolated, { recursive: true, force: true }); } catch {}
 	}
 });

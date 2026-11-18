@@ -4,8 +4,10 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveWindowsShim, unwrapCmdExecutable } from "../src/cmdline.js";
+import { formatModelForOpenCode, resolveHarnessEffortArg } from "../src/effort.js";
 import { NAN_BASE_URL, resolveNanApiKey } from "../src/nan-auth.js";
 import { killProcessTree } from "../src/process-utils.js";
+import type { ReasoningEffort } from "../src/types.js";
 import type { BenchmarkModelSpec, BenchmarkTaskDef, BenchmarkTrack, PermissionMode } from "./types.js";
 
 export interface FileChecksumSnapshot {
@@ -171,10 +173,12 @@ export function buildHarnessInvocation(params: {
 	track: BenchmarkTrack;
 	apiKey: string;
 	permissionMode?: PermissionMode;
+	effort?: ReasoningEffort;
 }): HarnessInvocation {
-	const { harness, model, prompt, isolationRoot, track, apiKey, permissionMode = "workspace" } = params;
+	const { harness, model, prompt, isolationRoot, track, apiKey, permissionMode = "workspace", effort } = params;
 	const isReadOnly = permissionMode === "read-only";
 	const h = harness.toLowerCase();
+	const effortRes = resolveHarnessEffortArg(h, effort);
 	const realHome = homedir();
 	const env = cleanBaseEnv(isolationRoot, apiKey, track);
 
@@ -246,7 +250,7 @@ export function buildHarnessInvocation(params: {
 			"json",
 			...(isReadOnly ? [] : ["--auto"]),
 			"-m",
-			`nan/${model.providerModelId}`,
+			formatModelForOpenCode(`nan/${model.providerModelId}`, effort),
 			prompt,
 		]);
 		if (!exec) {
@@ -282,6 +286,7 @@ export function buildHarnessInvocation(params: {
 						"nan",
 						"--model",
 						model.providerModelId,
+						...effortRes.args,
 						"-p",
 						prompt,
 					]
@@ -293,6 +298,7 @@ export function buildHarnessInvocation(params: {
 						"nan",
 						"--model",
 						model.providerModelId,
+						...effortRes.args,
 						"-p",
 						prompt,
 					];
@@ -338,6 +344,7 @@ export function buildHarnessInvocation(params: {
 						"nan",
 						"--model",
 						model.providerModelId,
+						...effortRes.args,
 						"-p",
 						prompt,
 					]
@@ -349,6 +356,7 @@ export function buildHarnessInvocation(params: {
 						"nan",
 						"--model",
 						model.providerModelId,
+						...effortRes.args,
 						"-p",
 						prompt,
 					];
@@ -384,7 +392,12 @@ export function buildHarnessInvocation(params: {
 								api: "openai-responses",
 								baseURL: NAN_BASE_URL,
 								models: {
-									[model.providerModelId]: { name: model.displayName, contextWindow: 1000000, maxOutput: 131072 },
+									[model.providerModelId]: {
+										name: model.displayName,
+										contextWindow: 1000000,
+										maxOutput: 131072,
+										reasoningEfforts: ["off", "low", "medium", "high", "xhigh", "max"],
+									},
 								},
 							},
 						},
@@ -419,8 +432,8 @@ export function buildHarnessInvocation(params: {
 		}
 		const rawArgs =
 			track === "controlled"
-				? ["--local-only", "--skip-onboarding", "--no-auto-update", "--no-skills", "--safe-mode", "--no-session", "--yolo", "-m", `nan/${model.providerModelId}`, "-p", "--output-format", "json", prompt]
-				: ["--no-auto-update", "--yolo", "-m", `nan/${model.providerModelId}`, "-p", "--output-format", "json", prompt];
+				? ["--local-only", "--skip-onboarding", "--no-auto-update", "--no-skills", "--safe-mode", "--no-session", "--yolo", "-m", `nan/${model.providerModelId}`, ...effortRes.args, "-p", "--output-format", "json", prompt]
+				: ["--no-auto-update", "--yolo", "-m", `nan/${model.providerModelId}`, ...effortRes.args, "-p", "--output-format", "json", prompt];
 		const exec = resolveExecutable("cmdc", rawArgs);
 		if (!exec) {
 			return { supported: false, unsupportedReason: "cmdc CLI binary not found on PATH", command: "cmdc", args: [], env, apiProtocol: "openai-responses" };
@@ -459,6 +472,7 @@ export function buildHarnessInvocation(params: {
 			isReadOnly ? "off" : "full",
 			"--model",
 			`custom_provider:nan/${model.providerModelId}`,
+			...effortRes.args,
 			...extraArgs,
 			prompt,
 		];
@@ -519,6 +533,7 @@ export function buildHarnessInvocation(params: {
 			`model_providers.nan={name="Nan",base_url="${NAN_BASE_URL}",env_key="NAN_API_KEY",wire_api="responses"}`,
 			"-c",
 			'model_provider="nan"',
+			...effortRes.args,
 			"-m",
 			model.providerModelId,
 			prompt,

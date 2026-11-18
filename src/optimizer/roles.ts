@@ -1,4 +1,4 @@
-import { extractRoleRank, inferProfileRole } from "../tui.js";
+import { extractRoleRank, inferProfileRole } from "../fleets.js";
 import type { IduProfile, QuotaSnapshot } from "../types.js";
 import { matchAaModel, normalizeModelKeyForAa } from "./artificial-analysis.js";
 import type {
@@ -116,7 +116,7 @@ function clampScore(v: number): number {
 }
 
 /** Harnesses known to inflate tokens cleanly discounted as tie-breaker against lean harnesses (`pi`/`gentle-shell`/`opencode`). */
-const HARNESS_EFFICIENCY_TIEBREAK: Record<string, number> = {
+export const HARNESS_EFFICIENCY_TIEBREAK: Record<string, number> = {
 	pi: 4,
 	"gentle-shell": 3.5,
 	opencode: 3,
@@ -239,7 +239,7 @@ export function groupCurrentProfilesByRole(
 		if (!grouped[role]) grouped[role] = [];
 		grouped[role].push({
 			profileName,
-			rank: extractRoleRank(prof.description),
+			rank: extractRoleRank(prof.description, profileName),
 			harness: prof.harness,
 			provider: prof.provider,
 			model: prof.model,
