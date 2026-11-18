@@ -20,6 +20,7 @@ import {
 	evaluateAudit,
 	runVideoAuditCore,
 } from "./video-audit.js";
+import { checkAudioGate, resolvePython, runAudioValidator } from "./video-audio.js";
 import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
@@ -438,6 +439,7 @@ async function main(): Promise<void> {
 				sub !== "status" &&
 				sub !== "measure" &&
 				sub !== "validate" &&
+				sub !== "validate-audio" &&
 				sub !== "audit"
 			) {
 				console.error(
@@ -445,8 +447,9 @@ async function main(): Promise<void> {
 						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
 						"     idu-pi video audit [--project <dir>] [--profile <perfil>] [--timeout <ms>]\n" +
 						"     idu-pi video validate [--project <dir>] [--video <file>] [--debug [dir]]\n" +
+						"     idu-pi video validate-audio [--project <dir>] [--guion <file>] [--transcribir] [--no-stt] [--stt-python <exe>] [--json]\n" +
 						"     idu-pi video render [--project <dir>] [--out <mp4>] [--audio <file>] [--end <s>] [--no-validate]\n" +
-						"                        [--width <px>] [--height <px>] [--gpu] [--angle <backend>] [--skip-style-gate]",
+						"                        [--width <px>] [--height <px>] [--gpu] [--angle <backend>] [--skip-style-gate] [--skip-audio-gate]",
 				);
 				process.exit(1);
 			}
@@ -458,6 +461,22 @@ async function main(): Promise<void> {
 			   `render`. */
 			if (sub === "audit") {
 				process.exit(await runVideoAudit(projectRoot, flag("profile"), flag("timeout")));
+			}
+
+			/* Gate de voz y audio: verifica duraciones, solapes, clicks, colas de
+			   alucinación, transcripción Whisper contra guion.md y música. */
+			if (sub === "validate-audio") {
+				process.exit(
+					runAudioValidator(projectRoot, {
+						guion: flag("guion"),
+						transcribir: args.includes("--transcribir"),
+						requireStt: args.includes("--require-stt"),
+						noStt: args.includes("--no-stt"),
+						sttPython: flag("stt-python"),
+						noQa: args.includes("--no-qa"),
+						json: args.includes("--json"),
+					}),
+				);
 			}
 
 			/* Gate de motion: valida un MP4 ya renderizado. No renderiza nada;
@@ -504,6 +523,8 @@ async function main(): Promise<void> {
 						const audit = checkAuditGate(projectRoot);
 						if (audit !== 0) process.exit(audit);
 					}
+					const audioGate = checkAudioGate(projectRoot, args.includes("--skip-audio-gate"));
+					if (audioGate !== 0) process.exit(audioGate);
 				}
 				const outFlag = flag("out");
 				const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -637,16 +658,6 @@ function resolveMotionValidator(): string | null {
 	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 	const candidate = join(root, "skills-bundle", "video-production", "validar_motion.py");
 	return existsSync(candidate) ? candidate : null;
-}
-
-/* Python cambia de nombre segun plataforma e instalacion. */
-function resolvePython(): string | null {
-	const candidates = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
-	for (const cmd of candidates) {
-		const probe = spawnSync(cmd, ["--version"], { stdio: "ignore" });
-		if (!probe.error && probe.status === 0) return cmd;
-	}
-	return null;
 }
 
 /* Renderer de entrega: frames deterministas, no la ruta de chunks de
@@ -952,7 +963,8 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi video render [--project <dir>]      The only path that produces an MP4");
 	out("                                  Full renders enforce the style gate:");
 	out("                                  intent, lane, art-direction.md and approved e00");
-	out("                                  Full renders also enforce the audit gate");
+	out("                                  Full renders also enforce audit & audio gates");
+	out("  idu-pi video validate-audio [--project]    Validate voice STT vs guion.md + tail anomalies");
 	out("  idu-pi video audit [--project <dir>]       Independent artistic audit by another harness;");
 	out("                                  writes audit/visual-qa.json (spends one model call)");
 	out("                                  --width/--height/--gpu for the render profile");

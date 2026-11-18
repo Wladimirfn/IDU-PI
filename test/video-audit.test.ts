@@ -353,3 +353,26 @@ test("evaluateAudit blocks on a blocked scene and only warns on revise", () => {
 		assert.match(warnings.join("\n"), /a revisar e01/);
 	});
 });
+
+test("buildAuditPrompt includes audio-qa.json when hasAudioQa is enabled", () => {
+	const prompt = buildAuditPrompt({
+		intent: "presentation",
+		sceneIds: SCENES,
+		hasScript: true,
+		hasTimeline: true,
+		hasAudioQa: true,
+		contractPath: "/skills/visual-qa.md",
+	});
+	assert.match(prompt, /audit\/audio-qa\.json/);
+	assert.match(prompt, /hallucinates tail words/);
+});
+
+test("evaluateAudit refuses an audit whose audio-qa.json changed afterwards", () => {
+	withProject((dir) => {
+		mkdirSync(join(dir, "audit"), { recursive: true });
+		writeFileSync(join(dir, "audit", "audio-qa.json"), '{"version":1,"scenes":[]}', "utf8");
+		writeAudit(dir);
+		writeFileSync(join(dir, "audit", "audio-qa.json"), '{"version":1,"scenes":[{"id":"e01"}]}', "utf8");
+		assert.match(evaluateAudit(dir).errors.join("\n"), /audio-qa\.json cambió/);
+	});
+});

@@ -5,6 +5,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { collectAuditInputs } from "../src/video-audit.js";
+import { collectAudioQaInputs } from "../src/video-audio.js";
 
 // The style gate used to be prose: a full render could ship without a lane,
 // without an art-direction contract and without an approved e00. These cases
@@ -237,4 +239,51 @@ test("video render reads a markdown-formatted brief", () => {
 		}),
 		/falta art-direction\.md/,
 	);
+});
+
+test("video render refuses a piece whose audit/audio-qa.json blocks a voice scene", () => {
+	const dir = project({
+		...STYLE_OK,
+		"index.html":
+			'<div data-composition-id="t" data-width="640" data-height="360" data-duration="5"></div>\n' +
+			'<audio id="vo1" src="e01.wav" data-start="0.5" data-duration="2.0"></audio>',
+		"e01.wav": "dummy-wav-content",
+		"guion.md": "### e01 · Demo\nHola mundo.\n",
+	});
+	mkdirSync(join(dir, "audit"), { recursive: true });
+	writeFileSync(
+		join(dir, "audit", "audio-qa.json"),
+		JSON.stringify({
+			version: 1,
+			createdAt: "2026-11-17T00:00:00.000Z",
+			sttEngine: "whisper:openai/whisper-base",
+			inputs: collectAudioQaInputs(dir),
+			scenes: [
+				{
+					id: "e01",
+					clipId: "vo1",
+					src: "e01.wav",
+					verdict: "block",
+					errors: ['hallucinated tail words after script ended: "erecion delotigue"'],
+					warnings: [],
+				},
+			],
+		}),
+		"utf8",
+	);
+	writeFileSync(
+		join(dir, "audit", "visual-qa.json"),
+		JSON.stringify({
+			version: 1,
+			createdAt: "2026-11-17T00:00:00.000Z",
+			intent: "presentation",
+			author: "claude-code/fable",
+			auditor: { profile: "consult-gemini38", harness: "antigravity", model: "gemini", runId: "IDU-test" },
+			inputs: collectAuditInputs(dir, ["e01"]),
+			piece: { intent: "delivered", became: "", variety: "pass", rhythm: "", capabilityGaps: [] },
+			scenes: [{ id: "e01", verdict: "pass", failed: [], evidence: "real terminal", fix: "" }],
+		}),
+		"utf8",
+	);
+	assertRefused(dir, /audio gate: voz e01: hallucinated tail words/);
 });

@@ -326,18 +326,26 @@ Los modelos de video generativo renderizan mal el texto y la UI. Por eso:
 - **Export determinista**: receta de PDF (headless Chrome + `@media print`) y de MP4 (HyperFrames
   con `seek(t)` puro, sin `Math.random` ni `requestAnimationFrame` como reloj).
 
-### Puerta de validación de audio
+### Puerta de validación de audio y voz (STT)
 
-Los videos con narración tienen un validador ejecutable que **se niega a aprobar** lo que no
-cumple:
+Los videos con narración tienen un validador y sintetizador ejecutable que **se niega a aprobar**
+cualquier clip con fallos antes de renderizar:
 
 ```bash
-python skills-bundle/voice-narration/validar_video_audio.py --proyecto /ruta/al/video   # requiere numpy
+idu-pi video validate-audio --project /ruta/al/video [--require-stt]
+# o directamente:
+python skills-bundle/voice-narration/validar_video_audio.py --proyecto /ruta/al/video
 ```
 
-Comprueba, por clip: duración declarada vs real, solapes entre voces, chasquidos de cierre y
-colas audibles. Y sobre la música: que cubra el film y que exista la partitura que prueba la
-autoría IA. **Código de salida 1 = no renderizar.**
+- **Acústica y música**: comprueba por clip la duración declarada frente a la real, solapes entre
+  voces, chasquidos de cierre, estallidos/zumbidos en cola y que la pista musical cubra el film
+  con su partitura IA.
+- **Transcripción Whisper offline contra `guion.md`**: verifica WER, omisiones o alucinaciones de
+  cola, términos técnicos y deja el veredicto con hashes SHA-256 en `audit/audio-qa.json`. **Código
+  de salida 1 = `idu-pi video render` bloquea el render.**
+- **Síntesis española verificada (`tts_es.py`)**: divide guiones largos por oración, normaliza
+  siglas/marcas al español, recorta bordes ruidosos solo si Whisper confirma que no se perdió ninguna
+  palabra, y reintenta tomas fallidas antes de guardar.
 
 ### Demo
 
@@ -369,6 +377,9 @@ idupi                               # TUI interactiva con la flota por rol (--pl
 idupi optimize                      # Stage 1: descubrimiento + shortlist sin gasto
 idupi optimize --run-bench          # Stage 2: mini-benchmark aislado en shortlist
 idupi optimize --apply              # Stage 3: aplica mejoras aprobadas con backup
+idu-pi video validate-audio --project /ruta/al/video [--require-stt]  # gate de voz + STT + audio-qa.json
+idu-pi video audit --project /ruta/al/video                           # auditoría artística independiente
+idu-pi video render --project /ruta/al/video                          # style/audit/audio gates + MP4 + motion gate
 pnpm run cli status                 # CLIs detectados y salud
 pnpm run cli capabilities           # perfiles en JSON
 pnpm run cli capabilities --quota   # añade la cuota de cada cuenta
@@ -473,6 +484,7 @@ código vive en el tag `legacy-archive-pre-purge` y ya no ocupa el árbol de tra
 6. **Perfiles curados y calibrados**: flota de 25 agentes calibrada por benchmarks de rol reales (`bench/`) y sincronizada sin los 16 heredados.
 7. **Visor TUI `idupi`**: tablero interactivo de agentes configurados por rol (`--plain` / `--json` fuera de TTY).
 8. **Auto-Optimizador `idu-pi optimize` (3 etapas)**: descubrimiento seguro de CLIs/keys/cuotas + catálogo Artificial Analysis (`propose`), mini-benchmark aislado (`--run-bench`) con guarda anti-duplicados/cuotas y aplicación con backup (`--apply`).
+9. **Validador de voz y puerta STT (`idu-pi video validate-audio`)**: síntesis española por oración con normalización fonética y recorte de bordes verificado por Whisper (`tts_es.py`), detección acústica y STT contra `guion.md` (`voz_validator.py`) y registro trazable en `audit/audio-qa.json` conectado al gate de `idu-pi video render`.
 
 </details>
 

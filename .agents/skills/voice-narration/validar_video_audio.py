@@ -1,26 +1,36 @@
 """Puerta de validacion para un video con audio: se ejecuta ANTES de renderizar.
 
-Comprueba las cuatro cosas que se rompieron en el video de idu-pi:
+Comprueba todo lo que rompe un video narrado con musica:
   1. Cada clip de voz dura lo que declara el HTML.
   2. Ningun clip se solapa con el siguiente.
-  3. Ningun final de voz tiene chasquido ni cola ruidosa.
-  4. La musica existe, dura lo suficiente y NO es una variacion procedural.
-  5. La musica es una cama: gain medido y sin bateria bajo la voz por defecto.
+  3. Ningun final de voz tiene chasquido (<40ms), cola de alucinacion/ruido ni fade falso.
+  4. Con guion.md y STT local (Whisper): lo que el audio realmente dice coincide
+     con el guion, sin palabras inventadas en la cola ni terminos tecnicos rotos.
+  5. La musica existe, dura lo suficiente, NO es procedural y no tapa la voz.
 
-Uso (requiere numpy):
-    python validar_video_audio.py --proyecto "/ruta/al/proyecto"
+Uso (requiere numpy; STT usa transformers/whisper o Voicebox si estan disponibles):
+    python validar_video_audio.py --proyecto "/ruta/al/proyecto" [--require-stt] [--no-stt]
 
 Salida: codigo 0 si todo pasa, 1 si algo falla. Nunca renderices con codigo 1.
 """
+
+from __future__ import annotations
 
 import argparse
 import json
 import re
 import sys
 import wave
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import voz_validator as vv  # noqa: E402
 
 # A tail frame is a click when it exceeds its neighbours by this factor...
 CLICK_RATIO = 5.0
@@ -33,6 +43,8 @@ TAIL_AUDIBLE = 0.006
 # measured default is 0.10-0.14 with ducking. The old fixed 0.22 is an error.
 MUSIC_VOLUME_WARN = 0.14
 MUSIC_VOLUME_ERROR = 0.20
+
+AUDIO_QA_VERSION = 1
 
 
 def read_audio(path):
@@ -51,42 +63,7 @@ def duration(path):
         return f.getnframes() / f.getframerate()
 
 
-def find_tail_click(a, sr):
-    """Devuelve (hay_click, rms_cola). Detecta por firma temporal, no por voz."""
-    hop = int(0.010 * sr)
-    if len(a) < hop * 12:
-        return False, 0.0
-
-    env = np.array([
-        np.sqrt(np.mean(a[i:i + hop] ** 2))
-        for i in range(0, len(a) - hop, hop)
-    ])
-    seg = env[-40:] if len(env) > 40 else env
-    tail_rms = float(np.mean(seg[-2:])) if len(seg) >= 2 else 0.0
-
-    for i in range(2, len(seg) - 2):
-        peak = seg[i]
-        if peak < 0.05:
-            continue
-        left = seg[max(0, i - 6):max(0, i - 2)]
-        right = seg[i + 3:min(len(seg), i + 7)]
-        neigh = np.concatenate([left, right]) if len(left) + len(right) else np.array([1e-9])
-        base = float(np.median(neigh)) or 1e-9
-        if peak > base * CLICK_RATIO:
-            # Temporal signature: how long the burst takes to rise from and fall
-            # back to 1/CLICK_RATIO of its peak (10 ms frames). A click is over in
-            # under CLICK_MAX_MS; a final Spanish "s"/"ts" peaks as sharply but
-            # fades over ~50 ms (idupi-pizarra p5.wav), so the tail decides.
-            floor = peak / CLICK_RATIO
-            lo = hi = i
-            while lo > 0 and seg[lo - 1] >= floor:
-                lo -= 1
-            while hi < len(seg) - 1 and seg[hi + 1] >= floor:
-                hi += 1
-            if (hi - lo + 1) * 10 < CLICK_MAX_MS:
-                return True, tail_rms
-
-    return False, tail_rms
+find_tail_click = vv.find_tail_click
 
 
 TAG = re.compile(r"<[a-zA-Z][\w-]*\b([^>]*)>")
@@ -94,12 +71,8 @@ ATTR = re.compile(r"""([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
 NEEDED = ("src", "data-start", "data-duration")
 
 
-def tagged_clips(html, id_pattern, errors):
-    """Tags whose id matches id_pattern, as (src, start, duration), sorted by start.
-
-    Attributes are read by name, in any order and among any others: HyperFrames
-    writes <audio data-hf-id="..." id="vo1" class="clip" src="..." ...>.
-    """
+def _parse_audio_tags(html, id_pattern, errors):
+    """Tags whose id matches id_pattern, as dicts sorted by start."""
     found = []
     for m in TAG.finditer(html):
         attrs = {k: a if a or not b else b for k, a, b in ATTR.findall(m.group(1))}
@@ -114,8 +87,19 @@ def tagged_clips(html, id_pattern, errors):
         except ValueError:
             errors.append(f'id="{attrs["id"]}" has a non-numeric data-start or data-duration')
             continue
-        found.append((attrs["src"], start, dur))
-    return sorted(found, key=lambda c: c[1])
+        found.append({
+            "id": attrs["id"],
+            "src": attrs["src"],
+            "start": start,
+            "declared": dur,
+            "attrs": attrs,
+        })
+    return sorted(found, key=lambda c: c["start"])
+
+
+def tagged_clips(html, id_pattern, errors):
+    """Tags whose id matches id_pattern, as (src, start, duration), sorted by start."""
+    return [(c["src"], c["start"], c["declared"]) for c in _parse_audio_tags(html, id_pattern, errors)]
 
 
 def first_tag_attrs(html, id_pattern):
@@ -138,59 +122,209 @@ def drum_hits(bateria):
     ]
 
 
-def check_voices(project, errors, warnings):
-    html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
-    clips = tagged_clips(html, r"vo\d+", errors)
-    if not clips:
-        errors.append("no narration clips found in index.html")
-        return
+def _resolve_scene_script(clip, idx, guion_scenes, ordered_ids):
+    """Match a narration clip (`voN`, `eNN.wav`, or `data-script`) to its script text."""
+    attrs = clip.get("attrs") or {}
+    if attrs.get("data-script"):
+        return attrs["id"], attrs["data-script"].strip()
 
-    print(f"\n  voz: {len(clips)} clip(s)")
-    print(f"    {'archivo':<26} {'decl':>7} {'real':>7} {'delta':>7}  estado")
+    stem = Path(clip["src"]).stem.lower()
+    clip_id = clip["id"].lower()
+    if stem in guion_scenes:
+        return stem, guion_scenes[stem]["text"]
+    if clip_id in guion_scenes:
+        return clip_id, guion_scenes[clip_id]["text"]
+
+    m = re.match(r"vo(\d+)$", clip_id)
+    if m:
+        num = int(m.group(1))
+        for cand in (f"e{num:02d}", f"e{num}"):
+            if cand in guion_scenes:
+                return cand, guion_scenes[cand]["text"]
+
+    if idx < len(ordered_ids):
+        sid = ordered_ids[idx]
+        return sid, guion_scenes[sid]["text"]
+
+    return stem or clip_id, None
+
+
+def check_voices(
+    project,
+    errors,
+    warnings,
+    *,
+    guion_path=None,
+    stt_mode="auto",
+    stt_python=None,
+    require_stt=False,
+    write_qa=False,
+    transcribe_fn=None,
+):
+    html_path = project / "index.html"
+    html = html_path.read_text(encoding="utf-8", errors="replace")
+    parsed_clips = _parse_audio_tags(html, r"vo\d+", errors)
+    if not parsed_clips:
+        errors.append("no narration clips found in index.html")
+        return None
+
+    script_file = Path(guion_path) if guion_path else (project / "guion.md")
+    guion_scenes = vv.parse_guion_markdown(script_file) if script_file.exists() else {}
+    ordered_ids = list(guion_scenes.keys())
+
+    # Resolve WAV paths upfront so Whisper runs in one single batched model load.
+    clip_records = []
+    existing_paths = []
+    for idx, clip in enumerate(parsed_clips):
+        path = project / clip["src"]
+        scene_key, ref_text = _resolve_scene_script(clip, idx, guion_scenes, ordered_ids)
+        rec = {
+            **clip,
+            "path": path,
+            "name": Path(clip["src"]).name,
+            "scene_key": scene_key,
+            "expected": ref_text,
+        }
+        clip_records.append(rec)
+        if path.exists():
+            existing_paths.append(path)
+
+    has_any_script = any(bool(rec["expected"]) for rec in clip_records)
+    transcripts: dict[str, str] = {}
+    stt_engine = "disabled"
+
+    if stt_mode != "off" and existing_paths and (has_any_script or require_stt or stt_mode == "on"):
+        if transcribe_fn is not None:
+            transcripts = {str(p): str(transcribe_fn(p) or "").strip() for p in existing_paths}
+            stt_engine = "injected"
+        else:
+            try:
+                transcripts, stt_engine = vv.transcribe_clips(existing_paths, stt_python=stt_python)
+            except Exception as exc:
+                if require_stt or stt_mode == "on":
+                    errors.append(f"STT voice validation unavailable: {exc}")
+                else:
+                    warnings.append(f"STT voice validation skipped ({exc})")
+
+    print(f"\n  voz: {len(clip_records)} clip(s) [stt={stt_engine}]")
+    print(f"    {'archivo':<22} {'decl':>7} {'real':>7} {'delta':>7} {'wer':>6}  estado")
 
     prev_end = 0.0
     prev_name = ""
-    for src, start, declared in clips:
-        path = project / src
-        name = Path(src).name
+    qa_scenes = []
+    voice_hashes = {}
+
+    for rec in clip_records:
+        src = rec["src"]
+        start = rec["start"]
+        declared = rec["declared"]
+        path = rec["path"]
+        name = rec["name"]
 
         if not path.exists():
             errors.append(f"missing voice file: {src}")
             continue
 
+        voice_hashes[src] = vv.sha256_file(path)
         real = duration(path)
         delta = declared - real
         state = "ok"
+        clip_errors = []
+        clip_warnings = []
 
         # 1. declared duration must not exceed the real one
         if delta > 0.05:
-            errors.append(
-                f"{name}: declares {declared:.2f}s but file is {real:.2f}s "
-                f"(+{delta:.2f}s) — video will desync"
-            )
+            msg = f"declares {declared:.2f}s but file is {real:.2f}s (+{delta:.2f}s) — video will desync"
+            errors.append(f"{name}: {msg}")
+            clip_errors.append(msg)
             state = "DESYNC"
 
         # 2. no overlap with the previous clip
         if start < prev_end - 0.01:
-            errors.append(
-                f"{name}: starts {start:.2f}s before {prev_name} ends {prev_end:.2f}s — voices overlap"
-            )
+            msg = f"starts {start:.2f}s before {prev_name} ends {prev_end:.2f}s — voices overlap"
+            errors.append(f"{name}: {msg}")
+            clip_errors.append(msg)
             state = "OVERLAP"
 
-        # 3. no click / noisy tail
+        # 3. no <40ms click / noisy tail
         a, sr = read_audio(path)
         has_click, tail_rms = find_tail_click(a, sr)
         if has_click:
-            errors.append(f"{name}: closing click detected in the tail")
+            msg = "closing click detected in the tail"
+            errors.append(f"{name}: {msg}")
+            clip_errors.append(msg)
             state = "CLICK"
         elif tail_rms > TAIL_AUDIBLE:
-            warnings.append(f"{name}: tail RMS {tail_rms:.4f} is still audible")
+            msg = f"tail RMS {tail_rms:.4f} is still audible"
+            warnings.append(f"{name}: {msg}")
+            clip_warnings.append(msg)
+
+        # 4. longer trailing hallucination/noise islands & STT parity
+        tail_info = vv.find_tail_anomaly(a, sr)
+        hyp_text = transcripts.get(str(path))
+        speech_eval = vv.evaluate_clip_speech(rec["expected"], hyp_text, tail_info)
+
+        for e in speech_eval["errors"]:
+            errors.append(f"{name}: {e}")
+            clip_errors.append(e)
+            if state == "ok":
+                state = "HALLUCINATION" if "hallucinated" in e or "burst" in e else "VOICE_FAIL"
+        for w in speech_eval["warnings"]:
+            warnings.append(f"{name}: {w}")
+            clip_warnings.append(w)
+            if state == "ok":
+                state = "warn"
+
+        wer_str = (
+            f"{speech_eval['alignment']['wer']:.3f}"
+            if speech_eval.get("alignment")
+            else "  n/a"
+        )
+        print(f"    {name:<22} {declared:>7.2f} {real:>7.2f} {delta:>7.2f} {wer_str:>6}  {state}")
+
+        qa_scenes.append({
+            "id": rec["scene_key"],
+            "clipId": rec["id"],
+            "src": src,
+            "durationSec": round(real, 4),
+            "declaredDurationSec": round(declared, 4),
+            "expected": rec["expected"],
+            "transcript": hyp_text,
+            "wer": speech_eval["alignment"]["wer"] if speech_eval.get("alignment") else None,
+            "tailInsertions": speech_eval["alignment"]["tail_insertions"] if speech_eval.get("alignment") else [],
+            "missingAnchors": speech_eval["alignment"]["missing_anchors"] if speech_eval.get("alignment") else [],
+            "tailAnomaly": tail_info,
+            "verdict": "block" if clip_errors else ("revise" if clip_warnings else "pass"),
+            "errors": clip_errors,
+            "warnings": clip_warnings,
+        })
 
         prev_end = start + real
         prev_name = name
-        print(f"    {name:<26} {declared:>7.2f} {real:>7.2f} {delta:>7.2f}  {state}")
 
     print(f"    last voice ends at {prev_end:.2f}s")
+
+    qa_report = {
+        "version": AUDIO_QA_VERSION,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "sttEngine": stt_engine,
+        "inputs": {
+            "indexHtml": vv.sha256_file(html_path),
+            "guionMd": vv.sha256_file(script_file) if script_file.exists() else None,
+            "voices": voice_hashes,
+        },
+        "scenes": qa_scenes,
+    }
+
+    if write_qa:
+        audit_dir = project / "audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        (audit_dir / "audio-qa.json").write_text(
+            json.dumps(qa_report, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    return qa_report
 
 
 def check_music(project, errors, warnings):
@@ -273,6 +407,13 @@ def check_music(project, errors, warnings):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--proyecto", required=True)
+    ap.add_argument("--guion", help="Ruta a guion.md (por defecto <proyecto>/guion.md)")
+    ap.add_argument("--transcribir", action="store_true", help="Exige validacion STT con Whisper local")
+    ap.add_argument("--require-stt", action="store_true", help="Falla si no hay runtime Whisper/Voicebox disponible")
+    ap.add_argument("--no-stt", action="store_true", help="Omite transcripcion Whisper (solo fisicos + colas)")
+    ap.add_argument("--stt-python", help="Interprete Python con transformers/torch/librosa para STT")
+    ap.add_argument("--no-qa", action="store_true", help="No escribir audit/audio-qa.json")
+    ap.add_argument("--json", action="store_true", help="Imprimir reporte JSON final por stdout")
     args = ap.parse_args()
 
     project = Path(args.proyecto)
@@ -280,11 +421,46 @@ def main():
         print(f"ERROR: {project}/index.html not found")
         return 1
 
+    stt_mode = "off" if args.no_stt else ("on" if (args.transcribir or args.require_stt) else "auto")
     errors, warnings = [], []
     print(f"== validacion de audio: {project.name}")
 
-    check_voices(project, errors, warnings)
-    check_music(project, errors, warnings)
+    qa_report = check_voices(
+        project,
+        errors,
+        warnings,
+        guion_path=args.guion,
+        stt_mode=stt_mode,
+        stt_python=args.stt_python,
+        require_stt=bool(args.transcribir or args.require_stt),
+        write_qa=False,
+    )
+    music_errors, music_warnings = [], []
+    check_music(project, music_errors, music_warnings)
+    errors.extend(music_errors)
+    warnings.extend(music_warnings)
+
+    if qa_report is not None:
+        html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
+        bgm_attrs = first_tag_attrs(html, r"bgm")
+        bgm_src = bgm_attrs.get("src") if bgm_attrs else None
+        bgm_path = (project / bgm_src) if bgm_src else None
+        partitura_path = (bgm_path.parent / "partitura.json") if bgm_path else None
+        qa_report["inputs"]["music"] = (
+            {bgm_src: vv.sha256_file(bgm_path)} if (bgm_src and bgm_path and bgm_path.exists()) else {}
+        )
+        qa_report["inputs"]["partitura"] = (
+            vv.sha256_file(partitura_path) if (partitura_path and partitura_path.exists()) else None
+        )
+        qa_report["musicErrors"] = music_errors
+        qa_report["musicWarnings"] = music_warnings
+        if not args.no_qa:
+            audit_dir = project / "audit"
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            (audit_dir / "audio-qa.json").write_text(
+                json.dumps(qa_report, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
 
     print("\n" + "=" * 62)
     if warnings:
@@ -295,8 +471,12 @@ def main():
         print(f"\n{len(errors)} ERROR(es) — NO renderizar:")
         for e in errors:
             print(f"  - {e}")
+        if args.json and qa_report is not None:
+            print("\n" + json.dumps({"errors": errors, "warnings": warnings, "report": qa_report}, ensure_ascii=False))
         return 1
 
+    if args.json and qa_report is not None:
+        print(json.dumps({"errors": errors, "warnings": warnings, "report": qa_report}, ensure_ascii=False))
     print("todo correcto: se puede renderizar")
     return 0
 

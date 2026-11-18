@@ -74,7 +74,16 @@ Save the returned `id`. `GET /profiles` lists existing ones — reuse instead of
 - If you cannot upload a sample, call the model directly from Python. Do not
   retry `/generate` on a profile that has no samples.
 
-### 2. Generate one clip per scene
+### 2. Generate one clip per scene (sentence-chunked + phonetic + STT validated)
+
+Long multi-sentence paragraphs (>15 s) frequently cause Chatterbox to invent trailing gibberish loops, and uppercase acronyms (`JSON`) or English slugs (`GLM`, `gpt-oss`, `OpenAI`, `Claude`) break Spanish G2P pronunciation.
+
+Use [`tts_es.py`](tts_es.py) when synthesizing in Python/Voicebox:
+- `prepare_spanish_tts_text(text, glossary)` rewrites technical acronyms and model names into speakable Spanish phonetics (`JSON` → `jota son`, `GLM` → `ge ele eme`, `Claude` → `Clod`) without changing `guion.md`.
+- `split_sentences_for_tts(text, max_words=22)` splits long narration into short sentence chunks.
+- `synthesize_validated_clip(...)` synthesizes chunk by chunk, validates every take immediately against [`voz_validator.py`](voz_validator.py) (acoustic tail anomaly + local Whisper `openai/whisper-base`), and retries failed takes automatically before assembling the scene WAV.
+
+Or generate via Voicebox HTTP directly for short chunks:
 
 ```bash
 curl -X POST http://127.0.0.1:17493/generate \
@@ -121,22 +130,23 @@ Periodicity is not a valid criterion. A real click measured RMS **0.31** in the
 last 20 ms with periodicity **~0.37** — high enough to look like speech, which
 is why a periodicity threshold deleted real voice.
 
-## Validation gate (before mixing)
+## Validation gate (before mixing & delivery)
 
-Do not hand-check. Run the gate:
+Do not hand-check. Run the gate (directly or via `idu-pi video validate-audio`):
 
-`validar_video_audio.py` ships next to this SKILL.md and needs `numpy`. From the
-repo root:
+`validar_video_audio.py` and `voz_validator.py` ship next to this SKILL.md (requires `numpy`, plus local `transformers`/`torch`/`librosa` or `IDU_STT_PYTHON` / running Voicebox for Whisper STT). From the repo root:
 
 ```bash
+idu-pi video validate-audio --project "/path/to/video-project"
+# or directly in Python:
 python skills-bundle/voice-narration/validar_video_audio.py --proyecto "/path/to/video-project"
 ```
 
-Exit code 1 means **do not render**. It reads the project's `index.html`: each
+Exit code 1 means **do not render** (`idu-pi video render` enforces this audio gate automatically whenever `<audio>` clips exist, unless `--skip-audio-gate` is passed). It reads the project's `index.html`: each
 narration clip as a tag with `id="voN"`, `src`, `data-start` and `data-duration`
 (in any order, among any other attributes, as HyperFrames writes them) and the
 music as `id="bgm"` with the same three attributes. It checks, per clip: declared vs real duration, overlap with the next
-clip, closing clicks (temporal signature, not voicing), and tail audibility. It
+clip, closing clicks (temporal signature, not voicing), post-pause trailing hallucination/noise islands (`tail_gap_burst`), tail audibility, and offline Whisper STT parity (`openai/whisper-base`) against `guion.md`, writing `audit/audio-qa.json`. It
 also verifies the music lasts its `data-duration` and that a `partitura.json`
 beside it proves the AI composed it. It also checks the `bgm` gain against the
 measured default (error above `0.20`, warning above `0.14`) and warns when the
@@ -149,8 +159,9 @@ Every clip must pass every check:
 | ------------------ | ----------------------------------------------------------------------- | ---------- |
 | Duration preserved | `frames(processed) == frames(.orig.wav)`                                | the cleaning step, against its backup |
 | Speech preserved   | samples before click onset are identical to the backup                  | the cleaning step, against its backup |
-| Tail clean         | a burst ≥ 5× its neighbours that rises from and falls back to 1/5 of its peak in < 40 ms: 0 hits. A final "s" fades slower and passes | the gate (error) |
-| Tail RMS           | last 20 ms silent                                                       | the gate (warning) |
+| Tail clean         | 0 clicks (<40 ms ≥5× neighbours) AND 0 post-pause tail hallucination bursts (`tail_gap_burst`) | the gate (error) |
+| Tail RMS           | last 20 ms silent (never mask >1 s noise tails behind a 30 ms fade)     | the gate (warning + pre-fade check) |
+| Transcript parity  | 0 hallucinated tail words vs `guion.md`, critical technical anchors preserved, WER below threshold (writes `audit/audio-qa.json`) | the gate via `voz_validator.py` |
 | Declared ≤ real    | `data-duration ≤ frames / sample_rate` of the final file                | the gate (error) |
 | No overlap         | `data-start + real duration < next clip's data-start`                   | the gate (error) |
 
