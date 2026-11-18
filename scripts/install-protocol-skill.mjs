@@ -72,6 +72,16 @@ const skills = [
 			"references/attribution.md",
 		],
 	},
+	{
+		name: "voice-narration",
+		files: [
+			"SKILL.md",
+			"validar_video_audio.py",
+			"voz_validator.py",
+			"tts_es.py",
+			"test_validar_video_audio.py",
+		],
+	},
 ];
 
 /** In-repo mirrors that must stay byte-identical to the bundle. */

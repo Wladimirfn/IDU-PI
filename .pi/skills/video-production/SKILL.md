@@ -234,21 +234,22 @@ close-up, a full-bleed frame, type-only — not more cards.
    direction, and stop. No full render before approval.
 4. **Storyboard and audio gate (when voice or music is in the brief).**
    The shot sheet is the storyboard. Run
-   `python skills-bundle/voice-narration/validar_video_audio.py --proyecto <project>`
-   to check clip durations, overlaps, clicks, and music length/score.
+   `idu-pi video validate-audio --project <project>` (or
+   `python skills-bundle/voice-narration/validar_video_audio.py --proyecto <project>`)
+   to check clip durations, overlaps, clicks, post-pause tail hallucinations,
+   Whisper STT transcript parity against `guion.md`, music length/score, and
+   write `audit/audio-qa.json`.
 5. **Edit in the Studio.**
    `idu-pi video studio --project <project>` serves the live preview. The
    composition must expose `window.seek(t)` and, for the Studio timeline, a GSAP
    bridge that forwards updates to it.
 6. **Approve keyframes.**
    `keyframes/eNN.png` is the final, still state of each scene. Run the artistic
-   audit before accepting it; it is the contract the motion gate compares against.
+   audit before accepting it (`idu-pi video audit` also cross-checks
+   `audit/audio-qa.json` when present); it is the contract the motion gate compares against.
 7. **Render the delivery video.**
    `idu-pi video render --project <project>`
-   Run `idu-pi video audit --project <project>` first: a full render also
-   enforces the audit gate (a fresh, independent `audit/visual-qa.json` with no
-   blocked scene, no repeated skeleton, no drawn-instead-of-shown artifact and
-   the intent delivered).
+   Run `idu-pi video validate-audio --project <project>` and `idu-pi video audit --project <project>` first: a full render enforces the style gate, the audit gate (`audit/visual-qa.json`), and the audio gate (`audit/audio-qa.json` whenever `<audio>` tags are present).
    Enforces the style gate on full renders (valid intent, lane exists, `art-direction.md`
    present, `e00` approved and rendered), resolves the duration from
    `data-duration`/`timeline.json`, picks the approved `*-hq.mp4` audio, finds
@@ -278,7 +279,7 @@ close-up, a full-bleed frame, type-only — not more cards.
 | Lower-level renderer | `node skills-bundle/video-production/render_frames.mjs ...` |
 | Motion gate | `idu-pi video validate --project <dir> --video <mp4>` |
 | Motion gate + diffs | add `--debug <dir>` |
-| Audio gate | `python skills-bundle/voice-narration/validar_video_audio.py --proyecto <dir>` |
+| Audio gate | `idu-pi video validate-audio --project <dir>` (or `python skills-bundle/voice-narration/validar_video_audio.py --proyecto <dir>`) |
 
 ## Render profile
 

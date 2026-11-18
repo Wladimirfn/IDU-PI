@@ -50,6 +50,7 @@ export interface AuditReply {
 export interface AuditInputs {
 	keyframes: Record<string, string>;
 	artDirection: string | null;
+	audioQa?: string | null;
 }
 
 export interface AuditFile extends AuditReply {
@@ -97,7 +98,12 @@ export function collectAuditInputs(project: string, sceneIds: string[]): AuditIn
 		keyframes[id] = hashFile(join(project, "keyframes", files.get(id) ?? `${id}.png`));
 	}
 	const contract = join(project, "art-direction.md");
-	return { keyframes, artDirection: existsSync(contract) ? hashFile(contract) : null };
+	const audioQa = join(project, AUDIT_DIR, "audio-qa.json");
+	return {
+		keyframes,
+		artDirection: existsSync(contract) ? hashFile(contract) : null,
+		...(existsSync(audioQa) ? { audioQa: hashFile(audioQa) } : {}),
+	};
 }
 
 const HARNESSES: Record<string, string> = {
@@ -157,15 +163,17 @@ export function buildAuditPrompt(options: {
 	sceneIds: string[];
 	hasScript: boolean;
 	hasTimeline: boolean;
+	hasAudioQa?: boolean;
 	contractPath: string;
 }): string {
-	const { intent, sceneIds, hasScript, hasTimeline, contractPath } = options;
+	const { intent, sceneIds, hasScript, hasTimeline, hasAudioQa, contractPath } = options;
 	const frames = sceneIds.map((id) => `keyframes/${id}.png`).join(", ");
 	const reads = [
 		"`style-brief.md` (the decisions, including the declared intent)",
 		"`art-direction.md` (visual language, shot sheet, acceptance criteria)",
 		hasScript ? "`guion.md` (the narration, verbatim)" : null,
 		hasTimeline ? "`timeline.json` (beat timings)" : null,
+		hasAudioQa ? "`audit/audio-qa.json` (Whisper STT transcription, WER, and acoustic tail status)" : null,
 	].filter(Boolean);
 	return [
 		"READ-ONLY artistic audit of a video project. Do not edit, create or delete any file.",
@@ -186,6 +194,9 @@ export function buildAuditPrompt(options: {
 		"- A beat that asserts the behaviour of a real command, test run, UI or file fails check 10 if the frame shows a labelled box or an invented stand-in instead of the artifact or its real output.",
 		"- `block` is for a scene that misreads its beat, breaks the declared language, or duplicates a neighbour. Taste is never a reason.",
 		"- A scene with any failed check is `revise` or `block`, never `pass`.",
+		hasAudioQa
+			? "- Cross-check `audit/audio-qa.json` against `guion.md` and the visual beat: flag any scene where Whisper transcription diverges, hallucinates tail words, or mangles technical terms."
+			: null,
 		"- A failed check 4 (repeated skeleton) or check 10 (a real artifact drawn instead of shown) stops the render even on a `revise` scene, so list those check numbers in `failed` whenever they apply. Do not soften a verdict to avoid stopping the render.",
 		"",
 		"Reply with your reasoning in at most ten lines, then end with exactly one fenced JSON block in this shape and nothing after it:",
@@ -206,7 +217,9 @@ export function buildAuditPrompt(options: {
 		"```",
 		"",
 		`Include exactly one entry per scene, with these exact ids: ${sceneIds.join(", ")}. \`failed\` holds check numbers from the contract and is empty on \`pass\`.`,
-	].join("\n");
+	]
+		.filter((line): line is string => line !== null)
+		.join("\n");
 }
 
 function asText(value: unknown): string {
@@ -347,6 +360,9 @@ export function evaluateAudit(project: string): { errors: string[]; warnings: st
 	}
 	if (audit.inputs.artDirection !== current.artDirection) {
 		errors.push(`auditoría vencida: art-direction.md cambió después de auditar. ${rerun}`);
+	}
+	if (audit.inputs.audioQa !== undefined && audit.inputs.audioQa !== current.audioQa) {
+		errors.push(`auditoría vencida: audit/audio-qa.json cambió después de auditar. ${rerun}`);
 	}
 
 	/* El brief manda sobre lo que quedó anotado: si hoy declara otro intent, la
@@ -520,6 +536,7 @@ export async function runVideoAuditCore(
 				sceneIds,
 				hasScript: existsSync(join(project, "guion.md")),
 				hasTimeline: existsSync(join(project, "timeline.json")),
+				hasAudioQa: existsSync(join(project, AUDIT_DIR, "audio-qa.json")),
 				contractPath,
 			}),
 			profile: profileName,
