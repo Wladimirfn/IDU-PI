@@ -26,32 +26,51 @@ Crucial when **any** of these is true:
 Not crucial: internal tooling, dev-only code, a bounded refactor, a "is this safe?"
 question, or a review of a single file.
 
-## Step 2 — Choose the injection
+## Step 2 — Run deterministic pre-scan (before delegating)
+
+For `Crucial` and `Normal` audits, run the local deterministic pre-scan before
+spawning the hunter so the model does not burn context hunting regex-level leaks
+or obvious sinks:
+
+```bash
+idu-pi security-scan --diff --format prompt          # changed/untracked files
+idu-pi security-scan --full --format prompt          # whole repository or --target <dir>
+```
+
+The scanner always runs a built-in zero-dependency check (redacted secret patterns
+and high-signal SAST sinks) and automatically folds in `gitleaks`, `semgrep`, and
+`ast-grep` when present on `PATH`. Secrets are redacted before printing; never
+paste raw secret values into a delegation.
+
+## Step 3 — Choose the injection
 
 | Stakes | Hunt delegation | Verify delegation |
 | --- | --- | --- |
-| Crucial | `fragments/hunter.md` + one companion domain section | `fragments/verifier.md` |
-| Normal | `fragments/hunter.md` only | Plain task, no fragment |
+| Crucial | `fragments/hunter.md` + pre-scan leads + one companion domain section | `fragments/verifier.md` |
+| Normal | `fragments/hunter.md` + pre-scan leads | Plain task, no fragment |
 | Trivial / question | Nothing | Nothing |
 
 Do not inject `verifier.md` into the hunter's delegation. Exploration and refutation
 in one prompt is worse than either alone.
 
-## Step 3 — Inject
+## Step 4 — Inject
 
 1. Read the fragment file **in this skill directory**, extract only the block between
    `<!-- PASTE START -->` and `<!-- PASTE END -->`, and paste that text into the task.
 2. Never pass a path instead of the text. `buildWorkerArgs` only appends a path list
    (`src/cmdline.ts:153-156`) and `idu_delegate_parallel` does not accept
    `context_files` at all (`src/mcp-server.ts:255-275`).
-3. Add at most one companion domain section, `Core discipline` + `Validation rules`
+3. Paste the `--format prompt` output from Step 2 (already bounded to <= 20 leads)
+   right after the hunter fragment as unverified starting leads.
+4. Add at most one companion domain section, `Core discipline` + `Validation rules`
    only, from the upstream `security-audit` skill when it is installed. Never paste a
    whole companion file. If it is not installed, use the target's row in the router
    table inside `fragments/hunter.md` as the scope hint and continue.
-4. Budget: 45 lines of fragment + ~30 of companion. Past ~120 lines of method the
-   auditor stops tracing code and starts grading a checklist.
+5. Budget: ~47 lines of fragment + <= 25 lines of pre-scan leads + ~30 of companion.
+   Past ~120 lines of method the auditor stops tracing code and starts grading a
+   checklist.
 
-## Step 4 — Confirm it took
+## Step 5 — Confirm it took
 
 A hunter that received the fragment closes with:
 

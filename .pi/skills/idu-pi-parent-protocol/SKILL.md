@@ -28,6 +28,7 @@ idu-pi fleet test-model --model <m> [--role <r>] [--apply-to <slot>]          # 
 idu-pi optimize [--fleet <name>] [--roles a,b] [--json]       # zero-spend discovery + Artificial Analysis shortlist & cost estimate
 idu-pi optimize --run-bench [--fleet <name>] [--json]         # run bounded mini-benchmark only on approved shortlist
 idu-pi optimize --apply [--fleet <name>]                      # backup & apply approved updates to target fleet
+idu-pi security-scan [--diff|--full] [--cwd <dir>] [--format prompt|json]  # local secret/SAST pre-scan for security audits
 idu-pi delegate "<task>" --profile <slot> [--fleet <name>]    # spawn one worker (defaults to "fast" when --profile is omitted)
 idu-pi wait <runId> --timeout 540000                          # block until a delegated worker finishes
 ```
