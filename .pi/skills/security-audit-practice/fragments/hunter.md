@@ -58,6 +58,9 @@ Candidate gate:
   finding. A candidate disproved by source is not a needs_validation record.
 - If a required fact is not source-visible, mark it as needing validation and name the
   exact blocker. Do not give it severity.
+- If deterministic pre-scan leads are provided, verify or refute each lead in source
+  first (never copy a scanner hit as confirmed without a full trace), then spend your
+  depth budget on auth, isolation, trust boundaries, and business logic scanners miss.
 
 Domain rules for this target follow:
 

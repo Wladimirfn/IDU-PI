@@ -235,6 +235,58 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "security-scan": {
+			const { runSecurityScan, formatSecurityScanPrompt } = await import("./security-scan.js");
+			const cwdIdx = args.indexOf("--cwd");
+			const workingDirIdx = args.indexOf("--working-dir");
+			const dirIdx = cwdIdx !== -1 ? cwdIdx : workingDirIdx;
+			const cwd =
+				dirIdx !== -1 && args[dirIdx + 1] && !args[dirIdx + 1].startsWith("-")
+					? args[dirIdx + 1]
+					: process.cwd();
+			const targetIdx = args.indexOf("--target");
+			const target =
+				targetIdx !== -1 && args[targetIdx + 1] && !args[targetIdx + 1].startsWith("-")
+					? args[targetIdx + 1]
+					: undefined;
+			const baseIdx = args.indexOf("--base");
+			const baseRef =
+				baseIdx !== -1 && args[baseIdx + 1] && !args[baseIdx + 1].startsWith("-")
+					? args[baseIdx + 1]
+					: undefined;
+			const formatIdx = args.indexOf("--format");
+			const formatRaw = formatIdx !== -1 ? args[formatIdx + 1] : undefined;
+			const format = args.includes("--json")
+				? "json"
+				: formatRaw === "json" || formatRaw === "prompt"
+					? formatRaw
+					: "prompt";
+			const mode = args.includes("--full") ? "full" : "diff";
+			const externalTools = !args.includes("--no-external");
+			const includeTests = args.includes("--include-tests");
+			const failOnHigh = args.includes("--fail-on-high");
+
+			const report = runSecurityScan({
+				cwd,
+				mode,
+				baseRef,
+				target,
+				externalTools,
+				includeTests,
+			});
+
+			if (format === "json") {
+				console.log(JSON.stringify(report, null, 2));
+			} else {
+				console.log(formatSecurityScanPrompt(report));
+			}
+
+			if (failOnHigh && report.summary.high > 0) {
+				process.exit(2);
+			}
+			break;
+		}
+
 		case "preflight": {
 			let workingDirIndex = args.indexOf("--working-dir");
 			if (workingDirIndex === -1) workingDirIndex = args.indexOf("--cwd");
@@ -973,6 +1025,7 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi tui [--fleet <f>] [--plain] [--json] Interactive TUI & profile/model editor (`idupi`)");
 	out("  idu-pi fleet <list|create|use|bind|set-agent|test-model|migrate> Manage named fleets & test terminals");
 	out("  idu-pi optimize [--fleet <f>] [--run-bench] [--apply] Discover, bench & apply updates");
+	out("  idu-pi security-scan [--diff|--full] [--base <ref>] [--format prompt|json] Deterministic secret/SAST pre-scan");
 	out("  idu-pi quota [--fresh]                     Each CLI's own account quota (cached 10m; --fresh spends a live call)");
 	out("  idu-pi preflight <request> [--cwd <dir>]   Run preflight safety check");
 	out("  idu-pi preflight <r> --expected-files <a,b>  Declare expected blast radius");
