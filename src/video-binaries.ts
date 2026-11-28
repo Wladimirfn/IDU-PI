@@ -475,6 +475,78 @@ export function probeVideoToolchain(projectRoot: string): VideoToolchainProbe {
 	};
 }
 
+export interface WebToolchainProbe {
+	playwright: { entry: string | null };
+	chrome: { path: string | null };
+	packages: Record<string, { version: string | null; location: "project" | "cache" | "missing" }>;
+}
+
+export function resolveChromeBin(): string | null {
+	const explicit = process.env.CHROME_PATH?.trim();
+	if (explicit && existsSync(explicit)) return explicit;
+	const candidates =
+		process.platform === "win32"
+			? [
+					"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+					"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+					"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+					"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+				]
+			: process.platform === "darwin"
+				? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"]
+				: ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
+	return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+function readInstalledNpmPkgVersion(baseDir: string, pkgName: string): string | null {
+	const pkgPath = join(baseDir, "node_modules", ...pkgName.split("/"), "package.json");
+	if (!existsSync(pkgPath)) return null;
+	try {
+		return (JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string }).version ?? null;
+	} catch {
+		return null;
+	}
+}
+
+export function probeWebToolchain(projectRoot: string): WebToolchainProbe {
+	const cacheRoot = join(getIduHome(), "tools", "web");
+	const tracked = ["three", "gsap", "button-sounds", "lenis", "roughjs", "vite"];
+	const packages: WebToolchainProbe["packages"] = {};
+	for (const name of tracked) {
+		const projVer = readInstalledNpmPkgVersion(projectRoot, name);
+		if (projVer) {
+			packages[name] = { version: projVer, location: "project" };
+			continue;
+		}
+		const cacheVer = readInstalledNpmPkgVersion(cacheRoot, name);
+		if (cacheVer) {
+			packages[name] = { version: cacheVer, location: "cache" };
+			continue;
+		}
+		packages[name] = { version: null, location: "missing" };
+	}
+	return {
+		playwright: { entry: resolvePlaywrightEntry(projectRoot) },
+		chrome: { path: resolveChromeBin() },
+		packages,
+	};
+}
+
+export function formatWebToolchainProbe(probe: WebToolchainProbe): string {
+	const mark = (ok: boolean) => (ok ? "[OK]" : "[MISSING]");
+	const lines = [
+		"=== idu-pi web toolchain ===",
+		`  ${mark(Boolean(probe.playwright.entry))} playwright ${probe.playwright.entry ?? "not found"}`,
+		`  ${mark(Boolean(probe.chrome.path))} chrome     ${probe.chrome.path ?? "Playwright bundled Chromium"}`,
+	];
+	for (const [name, info] of Object.entries(probe.packages)) {
+		lines.push(
+			`  ${mark(info.location !== "missing")} ${name.padEnd(14)} ${info.version ?? "not installed"} (${info.location})`,
+		);
+	}
+	return lines.join("\n");
+}
+
 export function formatToolchainProbe(probe: VideoToolchainProbe): string {
 	const mark = (ok: boolean) => (ok ? "[OK]" : "[MISSING]");
 	return [

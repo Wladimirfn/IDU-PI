@@ -94,6 +94,19 @@ const skills = [
 		name: "python-manim",
 		files: ["SKILL.md"],
 	},
+	{
+		name: "web-craft",
+		files: [
+			"SKILL.md",
+			"capture_web.mjs",
+			"references/app-stack.md",
+			"references/web-visual-qa.md",
+		],
+	},
+	{
+		name: "kanagawa-html",
+		files: ["SKILL.md", "validate_palette.js"],
+	},
 ];
 
 /** In-repo mirrors that must stay byte-identical to the bundle. */

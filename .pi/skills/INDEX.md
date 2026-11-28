@@ -4,6 +4,7 @@ idu-pi-owned skills are listed first (managed by idu-pi; refresh via `idu-pi idu
 
 | Skill | Path |
 | --- | --- |
+| blender-cinematic | .pi/skills/blender-cinematic/SKILL.md |
 | bug-hunter | .pi/skills/bug-hunter/SKILL.md |
 | codebase-audit-pre-push | .pi/skills/codebase-audit-pre-push/SKILL.md |
 | higgsfield-scene | .pi/skills/higgsfield-scene/SKILL.md |
@@ -14,9 +15,15 @@ idu-pi-owned skills are listed first (managed by idu-pi; refresh via `idu-pi idu
 | music-composition | .pi/skills/music-composition/SKILL.md |
 | performance-optimizer | .pi/skills/performance-optimizer/SKILL.md |
 | project-understanding | .pi/skills/project-understanding/SKILL.md |
+| python-manim | .pi/skills/python-manim/SKILL.md |
+| remotion-engine | .pi/skills/remotion-engine/SKILL.md |
 | security-audit-practice | .pi/skills/security-audit-practice/SKILL.md |
+| shader-fx | .pi/skills/shader-fx/SKILL.md |
 | skill-check | .pi/skills/skill-check/SKILL.md |
 | soul-icons | .pi/skills/soul-icons/SKILL.md |
+| story-continuity | .pi/skills/story-continuity/SKILL.md |
 | technical-change-tracker | .pi/skills/technical-change-tracker/SKILL.md |
+| video-production | .pi/skills/video-production/SKILL.md |
 | voice-narration | .pi/skills/voice-narration/SKILL.md |
+| web-craft | .pi/skills/web-craft/SKILL.md |
 | user-pi-skill | .pi/skills/user-pi-skill |

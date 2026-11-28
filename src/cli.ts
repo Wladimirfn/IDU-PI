@@ -24,10 +24,19 @@ import { checkAudioGate, resolvePython, runAudioValidator } from "./video-audio.
 import {
 	buildVideoToolEnv,
 	formatToolchainProbe,
+	formatWebToolchainProbe,
 	probeVideoToolchain,
+	probeWebToolchain,
 	resolveIduframeEntry,
 	resolvePlaywrightEntry,
 } from "./video-binaries.js";
+import {
+	evaluateWebAudit,
+	resolveWebQaContract,
+	runWebAuditCore,
+	runWebCapture,
+	WEB_AUDIT_FILE,
+} from "./web-audit.js";
 import {
 	captureEngineKeyframes,
 	launchEngineStudio,
@@ -725,6 +734,79 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "web": {
+			const sub = args[1] || "probe";
+			const flag = (name: string) => {
+				const i = args.indexOf(`--${name}`);
+				const val = i >= 0 ? args[i + 1] : undefined;
+				return val && !val.startsWith("--") ? val : undefined;
+			};
+			if (sub !== "probe" && sub !== "capture" && sub !== "audit" && sub !== "check") {
+				console.error(
+					"Uso: idu-pi web probe [--project <dir>] [--json]\n" +
+						"     idu-pi web capture [--project <dir>] [--url <url>]\n" +
+						"     idu-pi web audit [--project <dir>] [--profile <perfil>] [--url <url>] [--no-capture] [--timeout <ms>]\n" +
+						"     idu-pi web check [--project <dir>]",
+				);
+				process.exit(1);
+			}
+			const projectRoot = resolve(flag("project") ?? process.cwd());
+
+			if (sub === "probe") {
+				const report = probeWebToolchain(projectRoot);
+				if (args.includes("--json")) {
+					console.log(JSON.stringify(report, null, 2));
+				} else {
+					console.log(formatWebToolchainProbe(report));
+				}
+				process.exit(0);
+			}
+
+			if (sub === "capture") {
+				process.exit(runWebCapture(projectRoot, flag("url")));
+			}
+
+			if (sub === "check") {
+				const { errors, warnings } = evaluateWebAudit(projectRoot);
+				for (const w of warnings) console.warn(`web gate (aviso): ${w}`);
+				if (errors.length > 0) {
+					for (const e of errors) console.error(`web gate: ${e}`);
+					process.exit(1);
+				}
+				console.log(`web gate: ok (${AUDIT_DIR}/${WEB_AUDIT_FILE}, ${warnings.length} aviso(s))`);
+				process.exit(0);
+			}
+
+			const timeoutFlag = flag("timeout");
+			const timeoutMs = timeoutFlag !== undefined ? Number(timeoutFlag) : undefined;
+			if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+				console.error(`web audit: --timeout inválido "${timeoutFlag}".`);
+				process.exit(1);
+			}
+			const lanes = resolveVideoLanes();
+			const { profiles } = loadProfilesConfig({ workingDir: projectRoot });
+			process.exit(
+				await runWebAuditCore(
+					projectRoot,
+					{
+						profile: flag("profile"),
+						url: flag("url"),
+						noCapture: args.includes("--no-capture"),
+						timeoutMs,
+					},
+					{
+						auditProfiles: lanes?.audit?.profiles ?? [],
+						profiles,
+						resolveContractPath: resolveWebQaContract,
+						captureViews: runWebCapture,
+						delegate: (request) => CrossCliProcessManager.getInstance().delegate(request),
+						evaluateGate: evaluateWebAudit,
+					},
+				),
+			);
+			break;
+		}
+
 		case "setup": {
 			const sub = args[1];
 			if (sub !== "mcp-init" && sub !== "mcp-print") {
@@ -1034,6 +1116,10 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi video audit [--project <dir>]       Independent artistic audit by another harness;");
 	out("                                  writes audit/visual-qa.json (spends one model call)");
 	out("                                  --width/--height/--gpu for the render profile");
+	out("  idu-pi web probe [--project <dir>]         Inspect web toolchain (Playwright, Chrome, Three, GSAP, button-sounds)");
+	out("  idu-pi web capture [--project <dir>]       Capture 6 desktop/mobile screenshots + runtime DOM metrics");
+	out("  idu-pi web audit [--project <dir>]         Independent cross-harness web visual QA -> audit/web-visual-qa.json");
+	out("  idu-pi web check [--project <dir>]         Verify deterministic web audit & runtime gate");
 }
 
 main().catch((err) => {
