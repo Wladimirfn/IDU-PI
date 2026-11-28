@@ -287,3 +287,14 @@ test("video render refuses a piece whose audit/audio-qa.json blocks a voice scen
 	);
 	assertRefused(dir, /audio gate: voz e01: hallucinated tail words/);
 });
+
+test("video render refuses an unknown Engine in style-brief.md", () => {
+	assertRefused(
+		project({
+			...STYLE_OK,
+			"style-brief.md":
+				"# Style Brief\n- Intent: presentation\n- Author: claude-code/fable\n- Lane: custom\n- Engine: aftereffects\n- Approved e00: yes\n",
+		}),
+		/engine desconocido "aftereffects"/,
+	);
+});

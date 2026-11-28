@@ -22,6 +22,8 @@ pedido en el mismo dashboard oscuro con acento dorado.
 | **Preset Gentleman Kanagawa** | tokens, fuentes serif, ambient blur, partículas, paleta de gráficos | solo si el brief declara esta estética |
 | **Craft** | springs deterministas, cámara, `seek(t)`, dataviz, export PDF/MP4 | con cualquier estética declarada |
 
+> Para elegir modo de entrega web (`single-file` vs `app-stack` con Vite, Three.js, GSAP, `button-sounds`, `lenis`, `roughjs`) y correr la auditoría visual Playwright (`idu-pi web probe|capture|audit|check`), cargá primero **`web-craft`**. Activá `kanagawa-html` encima solo cuando el proyecto elija explícitamente la estética Kanagawa o necesite su script de validación de paleta (`validate_palette.js`).
+
 ## 0. Contrato de estilo (leer antes de escribir CSS)
 
 1. El proyecto declara su lenguaje visual en `art-direction.md`

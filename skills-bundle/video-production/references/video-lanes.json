@@ -101,6 +101,9 @@
   },
   "skills": {
     "video-production": { "status": "available", "capability": "render", "source": "bundled" },
+    "blender-cinematic": { "status": "available", "capability": "motion-or-render", "source": "bundled", "mcp": "mcp-for-blender" },
+    "remotion-engine": { "status": "available", "capability": "motion-or-render", "source": "bundled", "notes": "aligned with remotion-dev/skills 4.x rules" },
+    "python-manim": { "status": "available", "capability": "motion-or-render", "source": "bundled", "notes": "manim 0.22.1 + rough 1.6 in Python 3.12 venv" },
     "kanagawa-html": { "status": "available", "capability": "visual-craft", "source": "bundled", "modes": ["preset", "craft-only"], "defaultMode": "craft-only" },
     "soul-icons": { "status": "available", "capability": "visual", "source": "bundled" },
     "higgsfield-scene": { "status": "available", "capability": "visual", "source": "bundled" },
@@ -111,7 +114,6 @@
     "shader-fx": { "status": "available", "capability": "effects", "source": "bundled" },
     "pixelfx": { "status": "planned", "capability": "effects", "source": "patch-gg/pixelfx", "license": "MIT" },
     "webgpu-claude-skill": { "status": "planned", "capability": "visual", "source": "dgreenheck/webgpu-claude-skill", "license": "verify" },
-    "remotion-engine": { "status": "planned", "capability": "motion-or-render", "source": "remotion-dev/skills", "license": "verify" },
     "comfyui-8gb": { "status": "planned", "capability": "visual", "source": "artokun/comfyui-mcp", "license": "MIT", "vramTargetGb": 8 },
     "elevenlabs-sfx-voice": { "status": "planned", "capability": "audio", "source": "elevenlabs/skills", "license": "MIT" },
     "music-mastering": { "status": "planned", "capability": "audio", "source": "bitwize-music-studio/claude-ai-music-skills", "license": "CC0" },
@@ -125,11 +127,27 @@
       "output": "mp4",
       "status": "available"
     },
+    "blender": {
+      "skill": "blender-cinematic",
+      "renderer": "blender -b + ffmpeg",
+      "mcp": "mcp-for-blender",
+      "deterministic": true,
+      "output": "mp4",
+      "status": "available"
+    },
     "remotion": {
       "skill": "remotion-engine",
       "renderer": "remotion render",
       "deterministic": true,
-      "status": "planned"
+      "output": "mp4",
+      "status": "available"
+    },
+    "manim": {
+      "skill": "python-manim",
+      "renderer": "manim render + ffmpeg",
+      "deterministic": true,
+      "output": "mp4",
+      "status": "available"
     },
     "comfyui": {
       "skill": "comfyui-8gb",
@@ -234,13 +252,40 @@
       "requires": ["one motion engine", "type system", "beat grid"],
       "candidateSkills": [
         { "skill": "director-craft", "role": "preproduction", "status": "planned" },
-        { "skill": "remotion-engine", "role": "motion-or-render", "status": "planned" },
+        { "skill": "remotion-engine", "role": "motion-or-render", "status": "available" },
         { "skill": "kanagawa-html", "role": "visual-craft", "defaultMode": "craft-only" },
         { "skill": "shader-fx", "role": "effects", "when": "the art direction names a deterministic effect" },
         { "skill": "soul-icons", "role": "visual", "when": "icons are part of the type system" }
       ],
       "defaults": { "aspect": "16:9", "motion": "beat-driven", "fps": 60 },
       "avoid": ["mixing HyperFrames and Remotion timelines", "heavy shader behind text", "Kanagawa preset by default"]
+    },
+    "blender-3d": {
+      "tags": ["blender", "cycles", "eevee", "pbr", "3d", "cinematic", "lighting"],
+      "capabilities": ["3d-render", "camera-3d", "depth-composite"],
+      "primaryEngine": "blender",
+      "requires": ["blender 5.x binary", "deterministic bpy render script or scene.blend", "camera plan per shot"],
+      "candidateSkills": [
+        { "skill": "blender-cinematic", "role": "motion-or-render", "status": "available" },
+        { "skill": "story-continuity", "role": "preproduction", "when": "a subject, set or prop recurs" },
+        { "skill": "voice-narration", "role": "audio", "when": "narration is declared" },
+        { "skill": "music-composition", "role": "audio", "when": "music is declared" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "camera-led", "fps": 30 },
+      "avoid": ["unpinned external models", "silent CPU fallback when --gpu is requested", "text baked in low-res 3D unless legibility verified"]
+    },
+    "manim-explainer": {
+      "tags": ["manim", "python", "math", "algorithm", "hand-drawn", "rough", "diagram"],
+      "capabilities": ["progressive-draw", "vector-diagram", "kinetic-type"],
+      "primaryEngine": "manim",
+      "requires": ["isolated python 3.12 manim venv", "one Scene class per timeline scene", "ffmpeg"],
+      "candidateSkills": [
+        { "skill": "python-manim", "role": "motion-or-render", "status": "available" },
+        { "skill": "voice-narration", "role": "audio", "when": "narration is declared" },
+        { "skill": "music-composition", "role": "audio", "when": "music is declared" }
+      ],
+      "defaults": { "aspect": "16:9", "motion": "progressive-draw", "fps": 30 },
+      "avoid": ["MathTex without LaTeX installed", "overlapping unmeasured coordinates", "mixing HTML and Manim timelines"]
     },
     "documentary": {
       "tags": ["documentary", "realistic", "interview", "b-roll", "stock"],
@@ -302,7 +347,7 @@
         "id": "lane",
         "question": "Which visual lane and format?",
         "default": "inferred from the request",
-        "options": ["vector-explainer", "whiteboard", "3d-cinematic", "pixel-retro", "horror-2d", "anime-short-drama", "motion-graphics", "documentary", "hybrid-ui-broll", "custom"]
+        "options": ["vector-explainer", "whiteboard", "3d-cinematic", "blender-3d", "manim-explainer", "pixel-retro", "horror-2d", "anime-short-drama", "motion-graphics", "documentary", "hybrid-ui-broll", "custom"]
       },
       {
         "id": "aesthetic",

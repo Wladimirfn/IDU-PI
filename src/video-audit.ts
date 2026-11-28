@@ -297,7 +297,10 @@ function validateVerdict(raw: unknown, sceneIds: string[]): ParseResult {
    bloques cercados del último al primero y, si ninguno sirve, cada objeto que
    empiece en una llave del texto. Vale el primero que parsea y valida: un
    ejemplo suelto o una llave en la prosa no tapan el veredicto. */
-export function parseAuditReply(text: string, sceneIds: string[]): ParseResult {
+export function parseJsonVerdictWith<T>(
+	text: string,
+	validate: (raw: unknown) => { ok: true; reply: T } | { ok: false; error: string },
+): { ok: true; reply: T } | { ok: false; error: string } {
 	const candidates = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((m) => m[1].trim()).reverse();
 	const lastBrace = text.lastIndexOf("}");
 	for (let start = text.indexOf("{"); start !== -1 && start < lastBrace; start = text.indexOf("{", start + 1)) {
@@ -311,11 +314,15 @@ export function parseAuditReply(text: string, sceneIds: string[]): ParseResult {
 		} catch {
 			continue;
 		}
-		const result = validateVerdict(raw, sceneIds);
+		const result = validate(raw);
 		if (result.ok) return result;
 		firstError ??= result.error;
 	}
 	return { ok: false, error: firstError ?? "la respuesta no trae un bloque JSON con el veredicto" };
+}
+
+export function parseAuditReply(text: string, sceneIds: string[]): ParseResult {
+	return parseJsonVerdictWith(text, (raw) => validateVerdict(raw, sceneIds));
 }
 
 /* Veredicto del gate sobre el archivo de auditoría. Errores bloquean el render

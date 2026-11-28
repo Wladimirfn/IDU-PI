@@ -21,8 +21,32 @@ import {
 	runVideoAuditCore,
 } from "./video-audit.js";
 import { checkAudioGate, resolvePython, runAudioValidator } from "./video-audio.js";
+import {
+	buildVideoToolEnv,
+	formatToolchainProbe,
+	formatWebToolchainProbe,
+	probeVideoToolchain,
+	probeWebToolchain,
+	resolveIduframeEntry,
+	resolvePlaywrightEntry,
+} from "./video-binaries.js";
+import {
+	evaluateWebAudit,
+	resolveWebQaContract,
+	runWebAuditCore,
+	runWebCapture,
+	WEB_AUDIT_FILE,
+} from "./web-audit.js";
+import {
+	captureEngineKeyframes,
+	launchEngineStudio,
+	printEngineStatus,
+	renderWithEngine,
+	resolveVideoEngine,
+	type VideoLanesDocument,
+} from "./video-engine.js";
 import { installPiMcpConfig, resolvePiAgentDir } from "./setup.js";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -517,10 +541,14 @@ async function main(): Promise<void> {
 				sub !== "measure" &&
 				sub !== "validate" &&
 				sub !== "validate-audio" &&
-				sub !== "audit"
+				sub !== "audit" &&
+				sub !== "probe" &&
+				sub !== "keyframes"
 			) {
 				console.error(
 					"Uso: idu-pi video studio [--project <dir>] [--port <n>]\n" +
+						"     idu-pi video probe [--project <dir>] [--json]\n" +
+						"     idu-pi video keyframes [--project <dir>] [--scene <eNN>]\n" +
 						"     idu-pi video status|measure [--project <dir>] [--url <url>]\n" +
 						"     idu-pi video audit [--project <dir>] [--profile <perfil>] [--timeout <ms>]\n" +
 						"     idu-pi video validate [--project <dir>] [--video <file>] [--debug [dir]]\n" +
@@ -531,6 +559,28 @@ async function main(): Promise<void> {
 				process.exit(1);
 			}
 			const projectRoot = resolve(flag("project") ?? process.cwd());
+
+			/* Probe de toolchain multi-motor (ffmpeg, ffprobe, Blender 5.3 + MCP,
+			   Remotion, Manim/rough, iduframe, Playwright). */
+			if (sub === "probe") {
+				const report = probeVideoToolchain(projectRoot);
+				if (args.includes("--json")) {
+					console.log(JSON.stringify(report, null, 2));
+				} else {
+					console.log(formatToolchainProbe(report));
+				}
+				process.exit(0);
+			}
+
+			/* Captura determinista de keyframes para motores no-HyperFrames. */
+			if (sub === "keyframes") {
+				const resolved = resolveVideoEngine(projectRoot, resolveVideoLanes());
+				if (!resolved.engine) {
+					console.error(`video keyframes: ${resolved.error ?? "engine inválido"}`);
+					process.exit(1);
+				}
+				process.exit(captureEngineKeyframes(resolved.engine, projectRoot, flag("scene")));
+			}
 
 			/* Auditoría artística independiente: un worker de otro harness mira
 			   los keyframes y deja su veredicto en audit/visual-qa.json. Gasta
@@ -571,11 +621,18 @@ async function main(): Promise<void> {
 				process.exit(runMotionValidator(projectRoot, flag("video"), debug));
 			}
 
-			/* Render de entrega: un solo camino. Resuelve duracion, audio y
-			   Playwright; despues corre el mismo gate que `video validate`. */
+			/* Render de entrega: enruta al motor declarado (hyperframes, blender,
+			   remotion, manim) despues de validar los gates de estilo, auditoria y audio. */
 			if (sub === "render") {
-				const renderer = resolveFrameRenderer();
-				if (!renderer) {
+				const lanes = resolveVideoLanes();
+				const resolved = resolveVideoEngine(projectRoot, lanes);
+				if (!resolved.engine) {
+					console.error(`style gate: ${resolved.error ?? "engine inválido"}`);
+					process.exit(1);
+				}
+				const engine = resolved.engine;
+				const renderer = engine === "hyperframes" ? resolveFrameRenderer() : null;
+				if (engine === "hyperframes" && !renderer) {
 					console.error(
 						"No encontré skills-bundle/video-production/render_frames.mjs en el paquete.",
 					);
@@ -611,33 +668,23 @@ async function main(): Promise<void> {
 				mkdirSync(dirname(out), { recursive: true });
 				const audioFlag = flag("audio");
 				const audio = audioFlag ? resolve(projectRoot, audioFlag) : findApprovedAudio(projectRoot, out);
-				const playwright = resolvePlaywrightEntry(projectRoot);
-				const renderArgs = [
-					renderer,
-					"--url",
-					pathToFileURL(join(projectRoot, "index.html")).href,
-					"--end",
-					String(end),
-					"--out",
-					out,
-				];
-				if (audio) renderArgs.push("--audio", audio);
-				if (playwright) renderArgs.push("--playwright", playwright);
-				for (const name of ["width", "height"]) {
-					const value = flag(name);
-					if (value) renderArgs.push(`--${name}`, value);
-				}
-				if (args.includes("--gpu")) renderArgs.push("--gpu");
-				if (flag("angle")) renderArgs.push("--angle", flag("angle") as string);
-				console.log(`render: ${projectRoot} -> ${out} (${end}s)`);
+				const playwright = engine === "hyperframes" ? resolvePlaywrightEntry(projectRoot) : null;
+				console.log(`render [${engine}/${resolved.source}]: ${projectRoot} -> ${out} (${end}s)`);
 				if (audio) console.log(`audio: ${audio}`);
 				else console.log("sin audio aprobado: el render sale mudo (pasá --audio)");
-				const render = spawnSync(process.execPath, renderArgs, {
-					stdio: "inherit",
-					env: { ...process.env },
-					cwd: projectRoot,
+				const renderStatus = renderWithEngine(engine, {
+					projectRoot,
+					out,
+					end,
+					audio,
+					width: flag("width"),
+					height: flag("height"),
+					gpu: args.includes("--gpu"),
+					angle: flag("angle"),
+					playwright,
+					frameRenderer: renderer,
 				});
-				if (render.status !== 0) process.exit(render.status ?? 1);
+				if (renderStatus !== 0) process.exit(renderStatus);
 				console.log(`render listo: ${out}`);
 				const partial = endFlag !== undefined && duration !== null && end < duration - 0.01;
 				if (partial || args.includes("--no-validate")) {
@@ -651,13 +698,25 @@ async function main(): Promise<void> {
 				process.exit(gate);
 			}
 
+			const resolved = resolveVideoEngine(projectRoot, resolveVideoLanes());
+			if (!resolved.engine) {
+				console.error(`video ${sub}: ${resolved.error ?? "engine inválido"}`);
+				process.exit(1);
+			}
+			if (resolved.engine !== "hyperframes") {
+				if (sub === "status") process.exit(printEngineStatus(resolved.engine, projectRoot));
+				if (sub === "studio") process.exit(launchEngineStudio(resolved.engine, projectRoot, { port: flag("port") }));
+				console.error(`idu-pi video measure aplica solo al motor hyperframes (motor actual: ${resolved.engine}).`);
+				process.exit(1);
+			}
+
 			const iduframeArgs = [sub === "studio" ? "preview" : sub, "--project", projectRoot];
 			if (flag("port")) iduframeArgs.push("--port", flag("port") as string);
 			if (flag("url")) iduframeArgs.push("--url", flag("url") as string);
 			/* En Windows spawnear `iduframe.cmd` sin shell falla: CreateProcess no
 			   ejecuta un .cmd. Se resuelve el entry .mjs real y se corre con node,
 			   que ademas evita cualquier quoting de shell sobre rutas de proyecto. */
-			const env = { ...process.env };
+			const env = buildVideoToolEnv(process.env, projectRoot);
 			const entry = resolveIduframeEntry(env.IDUFRAME_CLI);
 			if (!entry) {
 				console.error(
@@ -672,6 +731,79 @@ async function main(): Promise<void> {
 				cwd: projectRoot,
 			});
 			process.exit(run.status ?? 1);
+			break;
+		}
+
+		case "web": {
+			const sub = args[1] || "probe";
+			const flag = (name: string) => {
+				const i = args.indexOf(`--${name}`);
+				const val = i >= 0 ? args[i + 1] : undefined;
+				return val && !val.startsWith("--") ? val : undefined;
+			};
+			if (sub !== "probe" && sub !== "capture" && sub !== "audit" && sub !== "check") {
+				console.error(
+					"Uso: idu-pi web probe [--project <dir>] [--json]\n" +
+						"     idu-pi web capture [--project <dir>] [--url <url>]\n" +
+						"     idu-pi web audit [--project <dir>] [--profile <perfil>] [--url <url>] [--no-capture] [--timeout <ms>]\n" +
+						"     idu-pi web check [--project <dir>]",
+				);
+				process.exit(1);
+			}
+			const projectRoot = resolve(flag("project") ?? process.cwd());
+
+			if (sub === "probe") {
+				const report = probeWebToolchain(projectRoot);
+				if (args.includes("--json")) {
+					console.log(JSON.stringify(report, null, 2));
+				} else {
+					console.log(formatWebToolchainProbe(report));
+				}
+				process.exit(0);
+			}
+
+			if (sub === "capture") {
+				process.exit(runWebCapture(projectRoot, flag("url")));
+			}
+
+			if (sub === "check") {
+				const { errors, warnings } = evaluateWebAudit(projectRoot);
+				for (const w of warnings) console.warn(`web gate (aviso): ${w}`);
+				if (errors.length > 0) {
+					for (const e of errors) console.error(`web gate: ${e}`);
+					process.exit(1);
+				}
+				console.log(`web gate: ok (${AUDIT_DIR}/${WEB_AUDIT_FILE}, ${warnings.length} aviso(s))`);
+				process.exit(0);
+			}
+
+			const timeoutFlag = flag("timeout");
+			const timeoutMs = timeoutFlag !== undefined ? Number(timeoutFlag) : undefined;
+			if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+				console.error(`web audit: --timeout inválido "${timeoutFlag}".`);
+				process.exit(1);
+			}
+			const lanes = resolveVideoLanes();
+			const { profiles } = loadProfilesConfig({ workingDir: projectRoot });
+			process.exit(
+				await runWebAuditCore(
+					projectRoot,
+					{
+						profile: flag("profile"),
+						url: flag("url"),
+						noCapture: args.includes("--no-capture"),
+						timeoutMs,
+					},
+					{
+						auditProfiles: lanes?.audit?.profiles ?? [],
+						profiles,
+						resolveContractPath: resolveWebQaContract,
+						captureViews: runWebCapture,
+						delegate: (request) => CrossCliProcessManager.getInstance().delegate(request),
+						evaluateGate: evaluateWebAudit,
+					},
+				),
+			);
 			break;
 		}
 
@@ -711,59 +843,26 @@ async function main(): Promise<void> {
 	}
 }
 
-/* Resuelve el entry real de iduframe. En Windows un .cmd no es ejecutable por
-   CreateProcess sin shell, asi que se apunta al .mjs y se corre con node: cero
-   quoting de shell sobre rutas de proyecto con espacios. */
-function resolveIduframeEntry(explicit?: string): string | null {
-	if (explicit && existsSync(explicit)) return explicit;
-	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
-	const candidates = [
-		process.env.APPDATA ? join(process.env.APPDATA, "npm", "node_modules", "@wladimirfn", "iduframe", "src", "cli.mjs") : "",
-		"/usr/local/lib/node_modules/@wladimirfn/iduframe/src/cli.mjs",
-		"/usr/lib/node_modules/@wladimirfn/iduframe/src/cli.mjs",
-		home ? join(home, ".npm-global", "lib", "node_modules", "@wladimirfn", "iduframe", "src", "cli.mjs") : "",
-	].filter(Boolean);
-	for (const candidate of candidates) {
-		if (existsSync(candidate)) return candidate;
-	}
-	return null;
-}
-
-/* El validador de motion vive en el bundle de skills del paquete, no en el
-   proyecto: el proyecto solo aporta timeline.json y keyframes/. */
 function resolveMotionValidator(): string | null {
 	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 	const candidate = join(root, "skills-bundle", "video-production", "validar_motion.py");
 	return existsSync(candidate) ? candidate : null;
 }
 
-/* Renderer de entrega: frames deterministas, no la ruta de chunks de
-   HyperFrames. Ver skills-bundle/video-production/SKILL.md. */
 function resolveFrameRenderer(): string | null {
 	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 	const candidate = join(root, "skills-bundle", "video-production", "render_frames.mjs");
 	return existsSync(candidate) ? candidate : null;
 }
 
-/* Gate de estilo para un render completo. El brief y el e00 existían como
-   prosa; sin este chequeo un render de entrega podía salir sin lane válida,
-   sin contrato de dirección artística y sin aprobación. */
 function readStyleBrief(
 	project: string,
 ): { intent: string | null; lane: string | null; approvedE00: boolean } | null {
 	const file = join(project, "style-brief.md");
 	if (!existsSync(file)) return null;
-	/* El brief puede usar markdown (`- **Lane:** ...`); se normaliza antes de
-	   parsear para que el formato del documento no cambie el veredicto. */
-	/* Un bloque cercado es una plantilla o un ejemplo, no una decisión: se
-	   descarta antes de leer cualquier campo. */
 	const text = readFileSync(file, "utf8")
 		.replace(/```[\s\S]*?```/g, "")
 		.replace(/\*\*|`/g, "");
-	/* El intent es la primera palabra de su propia línea; lo que siga es la
-	   razón. `[ \t]` y no `\s`: un `Intent:` vacío no toma su valor de la línea
-	   siguiente. La palabra se devuelve entera para que el rechazo nombre lo
-	   que estaba escrito. */
 	const intentMatch = text.match(/^[ \t]*-[ \t]*Intent:[ \t]*(\S.*)$/im);
 	const intent = intentMatch
 		? intentMatch[1].trim().split(/[\s;:,.]+/)[0].toLowerCase() || null
@@ -774,18 +873,9 @@ function readStyleBrief(
 	return { intent, lane, approvedE00 };
 }
 
-/* Qué tipo de pieza es. La lane nombra una técnica; sin el intent toda pieza se
-   produce y se juzga como un explainer narrado. video-lanes.json es la fuente;
-   esta lista cubre un bundle anterior al bloque `intents`. */
 const DEFAULT_VIDEO_INTENTS = ["presentation", "story", "experience"];
 
-type VideoLanes = {
-	lanes?: Record<string, unknown>;
-	intents?: Record<string, unknown>;
-	audit?: { profiles?: string[] };
-};
-
-function resolveVideoLanes(): VideoLanes | null {
+function resolveVideoLanes(): VideoLanesDocument | null {
 	const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 	const candidate = join(
 		root,
@@ -796,13 +886,13 @@ function resolveVideoLanes(): VideoLanes | null {
 	);
 	if (!existsSync(candidate)) return null;
 	try {
-		return JSON.parse(readFileSync(candidate, "utf8")) as VideoLanes;
+		return JSON.parse(readFileSync(candidate, "utf8")) as VideoLanesDocument;
 	} catch {
 		return null;
 	}
 }
 
-function validIntentIds(lanes: VideoLanes | null): string[] {
+function validIntentIds(lanes: VideoLanesDocument | null): string[] {
 	const declared = lanes?.intents ? Object.keys(lanes.intents) : [];
 	return declared.length > 0 ? declared : DEFAULT_VIDEO_INTENTS;
 }
@@ -852,6 +942,17 @@ function checkStyleGate(project: string, skip: boolean): number {
 		);
 		return 1;
 	}
+	const resolvedEngine = resolveVideoEngine(project, lanes);
+	if (!resolvedEngine.engine) {
+		console.error(`style gate: ${resolvedEngine.error ?? "engine inválido"}`);
+		return 1;
+	}
+	if (lanes?.engines?.[resolvedEngine.engine]?.status === "planned") {
+		console.error(
+			`style gate: el motor "${resolvedEngine.engine}" está marcado como planned y no disponible.`,
+		);
+		return 1;
+	}
 	if (!existsSync(join(project, "keyframes", "e00-styleboard.png"))) {
 		console.error("style gate: falta keyframes/e00-styleboard.png.");
 		return 1;
@@ -862,7 +963,7 @@ function checkStyleGate(project: string, skip: boolean): number {
 		);
 		return 1;
 	}
-	console.log(`style gate: ok (intent ${brief.intent}, lane, art direction, e00)`);
+	console.log(`style gate: ok (intent ${brief.intent}, lane, engine ${resolvedEngine.engine}, art direction, e00)`);
 	return 0;
 }
 
@@ -957,41 +1058,6 @@ function findApprovedAudio(project: string, out: string): string | null {
 	return candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null;
 }
 
-/* Playwright puede estar instalado en el proyecto, user home (npm/pnpm), global o en cache de npx. */
-function resolvePlaywrightEntry(project: string): string | null {
-	const explicit = process.env.PLAYWRIGHT_PATH;
-	if (explicit && existsSync(explicit)) return explicit;
-	const local = join(project, "node_modules", "playwright", "index.mjs");
-	if (existsSync(local)) return local;
-	const homeDir = process.env.USERPROFILE ?? process.env.HOME ?? "";
-	if (homeDir) {
-		const homeDirect = join(homeDir, "node_modules", "playwright", "index.mjs");
-		if (existsSync(homeDirect)) return homeDirect;
-		const homePnpm = join(homeDir, "node_modules", ".pnpm");
-		if (existsSync(homePnpm)) {
-			for (const entry of readdirSync(homePnpm)) {
-				if (!entry.startsWith("playwright@")) continue;
-				const candidate = join(homePnpm, entry, "node_modules", "playwright", "index.mjs");
-				if (existsSync(candidate)) return candidate;
-			}
-		}
-	}
-	const npx = process.env.LOCALAPPDATA
-		? join(process.env.LOCALAPPDATA, "npm-cache", "_npx")
-		: join(process.env.HOME ?? "", ".npm", "_npx");
-	if (existsSync(npx)) {
-		for (const dir of readdirSync(npx)) {
-			const candidate = join(npx, dir, "node_modules", "playwright", "index.mjs");
-			if (existsSync(candidate)) return candidate;
-		}
-	}
-	const globalNpm = process.env.APPDATA
-		? join(process.env.APPDATA, "npm", "node_modules", "playwright", "index.mjs")
-		: "";
-	if (globalNpm && existsSync(globalNpm)) return globalNpm;
-	return null;
-}
-
 function runMotionValidator(project: string, video?: string, debug?: string): number {
 	const script = resolveMotionValidator();
 	if (!script) {
@@ -1009,7 +1075,11 @@ function runMotionValidator(project: string, video?: string, debug?: string): nu
 		args.push("--debug");
 		if (debug) args.push(debug);
 	}
-	const run = spawnSync(python, args, { stdio: "inherit", cwd: project });
+	const run = spawnSync(python, args, {
+		stdio: "inherit",
+		cwd: project,
+		env: buildVideoToolEnv(process.env, project),
+	});
 	return run.status ?? 1;
 }
 
@@ -1037,16 +1107,19 @@ function printUsage(out: (line: string) => void = console.log): void {
 	out("  idu-pi delegate <task> --session <id> --force Resume across harnesses (drops native continuity)");
 	out("  idu-pi delegate <task> --working-dir <dir> Set target working directory");
 	out("  idu-pi delegate <task> --timeout <ms>      Set timeout in milliseconds");
-	out("  idu-pi video studio [--project <dir>]      Open the hyperframes Studio (never renders)");
-	out("  idu-pi video status|measure                Lint state / Spanish coverage");
-	out("  idu-pi video render [--project <dir>]      The only path that produces an MP4");
-	out("                                  Full renders enforce the style gate:");
-	out("                                  intent, lane, art-direction.md and approved e00");
-	out("                                  Full renders also enforce audit & audio gates");
+	out("  idu-pi video studio [--project <dir>]      Open engine Studio (HyperFrames, Remotion, Blender)");
+	out("  idu-pi video probe [--project <dir>]       Inspect multi-engine toolchain (ffmpeg, blender, remotion, manim)");
+	out("  idu-pi video keyframes [--project <dir>]   Capture keyframes for Blender / Remotion / Manim");
+	out("  idu-pi video status|measure                Engine status / HyperFrames coverage");
+	out("  idu-pi video render [--project <dir>]      Route by engine + style/audit/audio/motion gates -> MP4");
 	out("  idu-pi video validate-audio [--project]    Validate voice STT vs guion.md + tail anomalies");
 	out("  idu-pi video audit [--project <dir>]       Independent artistic audit by another harness;");
 	out("                                  writes audit/visual-qa.json (spends one model call)");
 	out("                                  --width/--height/--gpu for the render profile");
+	out("  idu-pi web probe [--project <dir>]         Inspect web toolchain (Playwright, Chrome, Three, GSAP, button-sounds)");
+	out("  idu-pi web capture [--project <dir>]       Capture 6 desktop/mobile screenshots + runtime DOM metrics");
+	out("  idu-pi web audit [--project <dir>]         Independent cross-harness web visual QA -> audit/web-visual-qa.json");
+	out("  idu-pi web check [--project <dir>]         Verify deterministic web audit & runtime gate");
 }
 
 main().catch((err) => {

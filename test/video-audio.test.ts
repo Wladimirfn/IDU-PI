@@ -147,3 +147,24 @@ test("checkAudioGate runs the validator when audio-qa.json is missing or stale",
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("listDeclaredAudioTags reads audio-manifest.json when index.html is absent", () => {
+	const dir = mkdtempSync(join(tmpdir(), "idu-video-audio-manifest-"));
+	try {
+		writeFileSync(
+			join(dir, "audio-manifest.json"),
+			JSON.stringify({
+				voices: [{ id: "vo1", src: "voz/e01.wav", start: 0.5, duration: 2.0 }],
+				bgm: { src: "soundtrack.wav", start: 0, duration: 10, volume: 0.12 },
+			}),
+			"utf8",
+		);
+		assert.equal(hasDeclaredAudioClips(dir), true);
+		const parsed = listDeclaredAudioTags(dir);
+		assert.equal(parsed.hasBgm, true);
+		assert.equal(parsed.bgmSrc, "soundtrack.wav");
+		assert.deepEqual(parsed.voices, [{ id: "vo1", src: "voz/e01.wav" }]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});

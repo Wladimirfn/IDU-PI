@@ -35,12 +35,43 @@ No mide si el video "esta bueno". Mide si es el video que se aprobo, estable.
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+
+def find_media_bin(name, env_key):
+    explicit = os.environ.get(env_key, "").strip()
+    if explicit and Path(explicit).exists():
+        return explicit
+    found = shutil.which(name)
+    if found:
+        return found
+    if os.name == "nt":
+        exe = f"{name}.exe"
+        local_app = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        pkgs = local_app / "Microsoft" / "WinGet" / "Packages"
+        if pkgs.exists():
+            for pkg in sorted((p for p in pkgs.iterdir() if "ffmpeg" in p.name.lower()), reverse=True):
+                for cand in sorted(pkg.glob(f"*/bin/{exe}"), reverse=True):
+                    return str(cand)
+        for cand in (
+            Path.home() / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / exe,
+            Path("C:/ffmpeg/bin") / exe,
+            Path("C:/ProgramData/chocolatey/bin") / exe,
+        ):
+            if cand.exists():
+                return str(cand)
+    return name
+
+
+FFMPEG_BIN = find_media_bin("ffmpeg", "IDU_FFMPEG")
+FFPROBE_BIN = find_media_bin("ffprobe", "IDU_FFPROBE")
 
 # --- umbrales ---------------------------------------------------------------
 # Calibrados contra idupi-explainer-v2. Ajustar solo con evidencia: si un video
@@ -67,7 +98,7 @@ DEBUG_DIR = None
 def gstream(video, fps=ANALYSIS_FPS, w=ANALYSIS_W, h=ANALYSIS_H):
     """Decodifica el video a un array (n, h, w) uint8 en gris, en un solo pase."""
     cmd = [
-        "ffmpeg", "-v", "error", "-i", str(video),
+        FFMPEG_BIN, "-v", "error", "-i", str(video),
         "-vf", f"fps={fps},scale={w}:{h}",
         "-f", "rawvideo", "-pix_fmt", "gray", "-",
     ]
@@ -127,16 +158,18 @@ def ink_mask(a):
 
 def scene_windows(timeline, scene):
     """(t_fin_quieto, inicio_ventana_quieta) de una escena."""
-    fin = float(scene.get("fin_voz", 0.0))
-    prev_end = fin
+    fin = float(scene.get("reviewAt", scene.get("fin_voz", scene.get("end", 0.0))))
+    qw = scene.get("quietWindow")
+    if isinstance(qw, (list, tuple)) and len(qw) == 2:
+        return float(qw[1]), max(float(scene.get("start", 0.0)), float(qw[0]))
     for f in reversed(scene.get("frases", [])):
-        prev_end = float(f.get("end", fin))
+        _ = float(f.get("end", fin))
         break
     # Ventana corta a proposito: 0,25 s, no 0,7. Con una ventana larga entra el
     # ultimo beat todavia asentandose -el halo de e09 en idupi-explainer-v2
     # termina cerca del final de voz- y el gate reporta animacion intencional
     # como parpadeo. Un parpadeo de codec es continuo: se ve igual en 0,25 s.
-    return fin, max(float(scene["start"]), fin - 0.25)
+    return fin, max(float(scene.get("start", 0.0)), fin - 0.25)
 
 
 def flicker_native(video, t0, duration, label="", fps=ANALYSIS_FPS):
@@ -148,7 +181,7 @@ def flicker_native(video, t0, duration, label="", fps=ANALYSIS_FPS):
     Devuelve (p99 del diff por pixel, maximo, pixeles que cambian > 8).
     """
     cmd = [
-        "ffmpeg", "-v", "error",
+        FFMPEG_BIN, "-v", "error",
         "-ss", f"{max(0.0, t0):.3f}", "-t", f"{duration:.3f}",
         "-i", str(video),
         "-vf", f"fps={fps}",
@@ -156,7 +189,7 @@ def flicker_native(video, t0, duration, label="", fps=ANALYSIS_FPS):
     ]
     raw = subprocess.run(cmd, capture_output=True, check=False).stdout
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+        [FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height", "-of", "csv=p=0", str(video)],
         capture_output=True, text=True, check=False,
     ).stdout.strip()
@@ -312,7 +345,7 @@ def check_encoding(video, errors, warnings):
     texto cada pocos frames. Medir el parpadeo sobre el MP4 mide el codec.
     """
     probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+        [FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=codec_name,width,height,bit_rate",
          "-of", "default=nw=1", str(video)],
         capture_output=True, text=True, check=False,
