@@ -126,9 +126,37 @@ function findChrome() {
 	return candidates.find(existsSync);
 }
 
+function findFfmpeg() {
+	const explicit = arg("ffmpeg") || process.env.IDU_FFMPEG;
+	if (explicit && existsSync(explicit)) return explicit;
+	if (process.platform === "win32") {
+		const localApp = process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
+		const wingetDir = join(localApp, "Microsoft", "WinGet", "Packages");
+		if (existsSync(wingetDir)) {
+			for (const pkg of readdirSync(wingetDir).filter((d) => /ffmpeg/i.test(d)).sort().reverse()) {
+				const pkgRoot = join(wingetDir, pkg);
+				for (const sub of readdirSync(pkgRoot).sort().reverse()) {
+					const cand = join(pkgRoot, sub, "bin", "ffmpeg.exe");
+					if (existsSync(cand)) return cand;
+				}
+			}
+		}
+		for (const cand of [
+			join(homedir(), "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
+			"C:\\ffmpeg\\bin\\ffmpeg.exe",
+			"C:\\ProgramData\\chocolatey\\bin\\ffmpeg.exe",
+		]) {
+			if (existsSync(cand)) return cand;
+		}
+	}
+	return "ffmpeg";
+}
+
+const FFMPEG_BIN = findFfmpeg();
+
 function runFfmpeg(args, label) {
 	return new Promise((resolve, reject) => {
-		const ff = spawn("ffmpeg", args, { stdio: ["ignore", "inherit", "inherit"] });
+		const ff = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "inherit", "inherit"] });
 		ff.on("error", reject);
 		ff.on("close", (code) => {
 			if (code === 0) resolve();
@@ -195,7 +223,7 @@ if (!hasSeek) {
 /* Video mudo a un temporal; si hay --audio, se muxea al final. */
 const silent = audio ? join(dirname(out), `.${Date.now()}-silent.mp4`) : out;
 const ff = spawn(
-	"ffmpeg",
+	FFMPEG_BIN,
 	[
 		"-y",
 		"-v",

@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AUDIT_DIR } from "./video-audit.js";
+import { buildVideoToolEnv, resolveSystemPython } from "./video-binaries.js";
 
 /* Gate técnico + STT para audio de video narrado.
 
@@ -72,12 +73,7 @@ export function audioQaFilePath(project: string): string {
 /* Python cambia de nombre según plataforma e instalación. Se comparte entre el
    validador de motion y el validador de voz/audio. */
 export function resolvePython(): string | null {
-	const candidates = process.platform === "win32" ? ["python", "py"] : ["python3", "python"];
-	for (const cmd of candidates) {
-		const probe = spawnSync(cmd, ["--version"], { stdio: "ignore" });
-		if (!probe.error && probe.status === 0) return cmd;
-	}
-	return null;
+	return resolveSystemPython("numpy") ?? resolveSystemPython();
 }
 
 export function resolveVoiceValidator(): string | null {
@@ -98,28 +94,48 @@ function parseTagAttrs(tagAttrs: string): Record<string, string> {
 	return out;
 }
 
+export interface AudioManifestJson {
+	voices?: Array<{ id?: string; src?: string; start?: number; duration?: number }>;
+	bgm?: { src?: string; start?: number; duration?: number; volume?: number } | null;
+}
+
 export function listDeclaredAudioTags(project: string): {
 	voices: Array<{ id: string; src: string }>;
 	bgmSrc: string | null;
 	hasBgm: boolean;
 } {
 	const htmlPath = join(project, "index.html");
-	if (!existsSync(htmlPath)) return { voices: [], bgmSrc: null, hasBgm: false };
-	const html = readFileSync(htmlPath, "utf8");
-	const voices: Array<{ id: string; src: string }> = [];
-	let bgmSrc: string | null = null;
-	let hasBgm = false;
-	for (const match of html.matchAll(AUDIO_TAG_RE)) {
-		const attrs = parseTagAttrs(match[1]);
-		const id = attrs.id ?? "";
-		if (/^vo\d+$/i.test(id)) {
-			if (attrs.src) voices.push({ id, src: attrs.src });
-		} else if (/^bgm$/i.test(id)) {
-			hasBgm = true;
-			if (!bgmSrc && attrs.src) bgmSrc = attrs.src;
+	if (existsSync(htmlPath)) {
+		const html = readFileSync(htmlPath, "utf8");
+		const voices: Array<{ id: string; src: string }> = [];
+		let bgmSrc: string | null = null;
+		let hasBgm = false;
+		for (const match of html.matchAll(AUDIO_TAG_RE)) {
+			const attrs = parseTagAttrs(match[1]);
+			const id = attrs.id ?? "";
+			if (/^vo\d+$/i.test(id)) {
+				if (attrs.src) voices.push({ id, src: attrs.src });
+			} else if (/^bgm$/i.test(id)) {
+				hasBgm = true;
+				if (!bgmSrc && attrs.src) bgmSrc = attrs.src;
+			}
+		}
+		if (voices.length > 0 || hasBgm) {
+			return { voices, bgmSrc, hasBgm };
 		}
 	}
-	return { voices, bgmSrc, hasBgm };
+	const manifestPath = join(project, "audio-manifest.json");
+	if (!existsSync(manifestPath)) return { voices: [], bgmSrc: null, hasBgm: false };
+	try {
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as AudioManifestJson;
+		const voices = (manifest.voices ?? [])
+			.filter((v): v is { id: string; src: string } => Boolean(v?.src))
+			.map((v, idx) => ({ id: v.id || `vo${idx + 1}`, src: v.src }));
+		const bgmSrc = manifest.bgm?.src ?? null;
+		return { voices, bgmSrc, hasBgm: Boolean(manifest.bgm) };
+	} catch {
+		return { voices: [], bgmSrc: null, hasBgm: false };
+	}
 }
 
 export function hasDeclaredAudioClips(project: string): boolean {
@@ -129,6 +145,7 @@ export function hasDeclaredAudioClips(project: string): boolean {
 
 export function collectAudioQaInputs(project: string): AudioQaInputs {
 	const indexPath = join(project, "index.html");
+	const manifestPath = join(project, "audio-manifest.json");
 	const guionPath = join(project, "guion.md");
 	const { voices: voiceTags, bgmSrc } = listDeclaredAudioTags(project);
 	const voices: Record<string, string> = {};
@@ -144,8 +161,9 @@ export function collectAudioQaInputs(project: string): AudioQaInputs {
 		const partPath = join(dirname(bgmPath), "partitura.json");
 		if (existsSync(partPath)) partitura = hashFile(partPath);
 	}
+	const sourcePath = existsSync(indexPath) ? indexPath : existsSync(manifestPath) ? manifestPath : null;
 	return {
-		indexHtml: existsSync(indexPath) ? hashFile(indexPath) : null,
+		indexHtml: sourcePath ? hashFile(sourcePath) : null,
 		guionMd: existsSync(guionPath) ? hashFile(guionPath) : null,
 		voices,
 		music,
@@ -250,7 +268,11 @@ export function runAudioValidator(project: string, opts: AudioValidatorOptions =
 	if (opts.sttPython) args.push("--stt-python", opts.sttPython);
 	if (opts.noQa) args.push("--no-qa");
 	if (opts.json) args.push("--json");
-	const run = spawnSync(python, args, { stdio: "inherit", cwd: project });
+	const run = spawnSync(python, args, {
+		stdio: "inherit",
+		cwd: project,
+		env: buildVideoToolEnv(process.env, project),
+	});
 	return run.status ?? 1;
 }
 

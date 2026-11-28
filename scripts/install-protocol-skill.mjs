@@ -82,6 +82,18 @@ const skills = [
 			"test_validar_video_audio.py",
 		],
 	},
+	{
+		name: "blender-cinematic",
+		files: ["SKILL.md"],
+	},
+	{
+		name: "remotion-engine",
+		files: ["SKILL.md"],
+	},
+	{
+		name: "python-manim",
+		files: ["SKILL.md"],
+	},
 ];
 
 /** In-repo mirrors that must stay byte-identical to the bundle. */
