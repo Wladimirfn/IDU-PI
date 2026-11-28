@@ -149,6 +149,35 @@ def _resolve_scene_script(clip, idx, guion_scenes, ordered_ids):
     return stem or clip_id, None
 
 
+def _load_audio_manifest(project):
+    manifest_path = project / "audio-manifest.json"
+    if not manifest_path.exists():
+        return None, None
+    return manifest_path, json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _manifest_voice_clips(manifest, errors):
+    clips = []
+    for idx, item in enumerate(manifest.get("voices") or []):
+        if not isinstance(item, dict) or not item.get("src"):
+            errors.append(f"audio-manifest.json voices[{idx}] is missing src")
+            continue
+        try:
+            start = float(item.get("start", 0.0))
+            declared = float(item["duration"])
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"audio-manifest.json voices[{idx}] has invalid start/duration")
+            continue
+        clips.append({
+            "id": str(item.get("id") or f"vo{idx + 1}"),
+            "src": str(item["src"]),
+            "start": start,
+            "declared": declared,
+            "attrs": {k: str(v) for k, v in item.items() if v is not None},
+        })
+    return sorted(clips, key=lambda c: c["start"])
+
+
 def check_voices(
     project,
     errors,
@@ -162,10 +191,20 @@ def check_voices(
     transcribe_fn=None,
 ):
     html_path = project / "index.html"
-    html = html_path.read_text(encoding="utf-8", errors="replace")
-    parsed_clips = _parse_audio_tags(html, r"vo\d+", errors)
+    manifest_path = project / "audio-manifest.json"
+    source_path = None
+    parsed_clips = []
+    if html_path.exists():
+        html = html_path.read_text(encoding="utf-8", errors="replace")
+        parsed_clips = _parse_audio_tags(html, r"vo\d+", errors)
+        if parsed_clips:
+            source_path = html_path
+    if not parsed_clips and manifest_path.exists():
+        _, manifest = _load_audio_manifest(project)
+        parsed_clips = _manifest_voice_clips(manifest or {}, errors)
+        source_path = manifest_path
     if not parsed_clips:
-        errors.append("no narration clips found in index.html")
+        errors.append("no narration clips found in index.html or audio-manifest.json")
         return None
 
     script_file = Path(guion_path) if guion_path else (project / "guion.md")
@@ -309,7 +348,7 @@ def check_voices(
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "sttEngine": stt_engine,
         "inputs": {
-            "indexHtml": vv.sha256_file(html_path),
+            "indexHtml": vv.sha256_file(source_path) if source_path else None,
             "guionMd": vv.sha256_file(script_file) if script_file.exists() else None,
             "voices": voice_hashes,
         },
@@ -328,17 +367,28 @@ def check_voices(
 
 
 def check_music(project, errors, warnings):
-    html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
-    tracks = tagged_clips(html, r"bgm", errors)
+    html_path = project / "index.html"
+    tracks = []
+    attrs = {}
+    if html_path.exists():
+        html = html_path.read_text(encoding="utf-8", errors="replace")
+        tracks = tagged_clips(html, r"bgm", errors)
+        attrs = first_tag_attrs(html, r"bgm") or {}
     if not tracks:
-        warnings.append("no bgm track found in index.html")
+        _, manifest = _load_audio_manifest(project)
+        bgm = (manifest or {}).get("bgm") if isinstance(manifest, dict) else None
+        if isinstance(bgm, dict) and bgm.get("src"):
+            tracks = [(str(bgm["src"]), float(bgm.get("start", 0.0)), float(bgm.get("duration", 0.0)))]
+            if bgm.get("volume") is not None:
+                attrs = {"data-volume": str(bgm["volume"])}
+    if not tracks:
+        warnings.append("no bgm track found in index.html or audio-manifest.json")
         return
 
     src, _start, dur_s = tracks[0]
     path = project / src
     print(f"\n  musica: {src}")
 
-    attrs = first_tag_attrs(html, r"bgm") or {}
     raw_volume = attrs.get("data-volume")
     if raw_volume is not None:
         try:
@@ -417,8 +467,8 @@ def main():
     args = ap.parse_args()
 
     project = Path(args.proyecto)
-    if not (project / "index.html").exists():
-        print(f"ERROR: {project}/index.html not found")
+    if not (project / "index.html").exists() and not (project / "audio-manifest.json").exists():
+        print(f"ERROR: {project}/index.html and {project}/audio-manifest.json not found")
         return 1
 
     stt_mode = "off" if args.no_stt else ("on" if (args.transcribir or args.require_stt) else "auto")
@@ -441,9 +491,16 @@ def main():
     warnings.extend(music_warnings)
 
     if qa_report is not None:
-        html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
-        bgm_attrs = first_tag_attrs(html, r"bgm")
-        bgm_src = bgm_attrs.get("src") if bgm_attrs else None
+        bgm_src = None
+        if (project / "index.html").exists():
+            html = (project / "index.html").read_text(encoding="utf-8", errors="replace")
+            bgm_attrs = first_tag_attrs(html, r"bgm")
+            bgm_src = bgm_attrs.get("src") if bgm_attrs else None
+        if not bgm_src:
+            _, manifest = _load_audio_manifest(project)
+            bgm = (manifest or {}).get("bgm") if isinstance(manifest, dict) else None
+            if isinstance(bgm, dict) and bgm.get("src"):
+                bgm_src = str(bgm["src"])
         bgm_path = (project / bgm_src) if bgm_src else None
         partitura_path = (bgm_path.parent / "partitura.json") if bgm_path else None
         qa_report["inputs"]["music"] = (

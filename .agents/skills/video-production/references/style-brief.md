@@ -95,6 +95,7 @@ Create `style-brief.md` in the project root. Keep it short and machine-readable:
 - Intent: <presentation | story | experience>; <one line: why this and not the others>
 - Author: <harness>/<model that builds the composition, e.g. claude-code/fable>
 - Lane: <lane id from video-lanes.json>
+- Engine: <hyperframes | blender | remotion | manim> (optional if inferred from Lane)
 - Capabilities: <the lane capabilities this project actually uses>
 - Art direction: art-direction.md (approved: no)
 - References: <URLs, files, or "none">

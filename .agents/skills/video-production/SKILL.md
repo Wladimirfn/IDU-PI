@@ -11,18 +11,19 @@ metadata:
 
 # Video production
 
-Pipeline for code-rendered videos built as a single HTML composition, with the
-Studio as the live editing surface and a deterministic frame renderer for
-delivery. The capability router, art-direction contract and style brief keep the
-pipeline style-agnostic: the lane selects what the harness must be able to
-produce, never a house aesthetic.
+Pipeline for deterministic code-rendered, 3D, and programmatic videos with
+capability-first engine routing (`hyperframes`, `blender`, `remotion`, `manim`),
+live preview where supported, and shared artistic, audio, and motion gates.
+The capability router, art-direction contract and style brief keep the
+pipeline style-agnostic: the lane selects the production engine and capability
+set, never a house aesthetic.
 
 ## Golden rules
 
-- The Studio stays up. Editing is the default; an MP4 is an explicit request.
-- A delivery MP4 is produced by `render_frames.mjs`, not by `hyperframes render`.
+- The Studio stays up (HyperFrames/Remotion/Blender GUI). Editing is the default; an MP4 is an explicit request.
+- Every delivery MP4 enters through `idu-pi video render --project <dir>` (which routes by `Engine:` / `Lane:` to `render_frames.mjs`, Blender `-b`, `remotion render`, or `manim` + `ffmpeg`, and enforces style, audit, audio, and motion gates).
 - Never publish a video when the motion or audio gate exits 1.
-- `keyframes/eNN.png` are the approved oracle. The renderer never regenerates them.
+- `keyframes/eNN.png` are the approved oracle. Renderers never silently regenerate them.
 - Intent precedes lane: decide whether the piece is a presentation, a story or
   an experience before choosing a technique. A piece with no declared intent
   becomes a narrated slide deck by default.
@@ -103,13 +104,9 @@ must be able to produce**; the lane is only the label for that capability set.
 - Start with the minimum useful set: one preproduction, one or two visual, one
   audio, and the render/QA skill. Add another skill only when the task requires
   it; `video-lanes.json` holds the conditional lane-to-skill map.
-- One primary engine per project. HyperFrames owns HTML/2D and 3D scenes;
-  Remotion owns React motion graphics; ComfyUI supplies raster or video assets.
-  Do not run two composition timelines in one piece. This skill owns the
-  HyperFrames engine only: for a Remotion-primary lane load `remotion-engine`,
-  and for ComfyUI assets load `comfyui-8gb`.
-- Do not promise a lane whose primary engine is `planned`. Load only `available`
-  companion skills; omit `planned` ones and note them as follow-ups.
+- One primary engine per project: `hyperframes` (HTML/CSS/GSAP/Canvas/Three.js via `render_frames.mjs`), `blender` (`blender-cinematic`: Blender 5.x headless + `mcp-for-blender`), `remotion` (`remotion-engine`: React/TS `@remotion/cli`), or `manim` (`python-manim`: Python 3.12 `manim` + `rough`). Do not mix two composition timelines in one piece; declare `- Engine: <id>` in `style-brief.md` when overriding the lane default.
+- Run `idu-pi video probe --project <dir>` to verify installed engines (`ffmpeg`, `blender`, `remotion`, `manim`) before promising a lane.
+- Do not promise a lane whose primary engine is `planned`. Load only `available` companion skills; omit `planned` ones and note them as follow-ups.
 - Effects are opt-in. No shader, pixel or 3D layer is added unless the art
   direction names it and it survives legibility and the delivery renderer.
 
@@ -265,8 +262,10 @@ close-up, a full-bleed frame, type-only — not more cards.
 
 | Step | Command |
 | --- | --- |
+| Toolchain probe | `idu-pi video probe [--project <dir>] [--json]` |
 | Studio | `idu-pi video studio --project <dir>` |
-| Status | `idu-pi video status` |
+| Keyframes (non-HTML) | `idu-pi video keyframes --project <dir> [--scene e00]` |
+| Status | `idu-pi video status --project <dir>` |
 | HyperFrames status | `idu-pi video measure --project <dir>` |
 | Independent audit | `idu-pi video audit --project <dir>` (one model call) |
 | Audit with a chosen profile | add `--profile <idu-pi profile>` (must not be the author's harness) |
